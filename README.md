@@ -203,6 +203,15 @@ struct Cat: Animal {
 }
 ```
 
+#### Disallowed up-casting
+
+To prevent historical OOP design flaws, Sapphire **strictly disallows up-casting** for statically inherited structures (e.g., a `Cat` reference cannot be cast or passed as an `Animal`).
+
+This design choice provides several key benefits:
+* **Eliminates object slicing**: Because a child struct cannot be assigned to a parent struct type, the compiler prevents object slicing (where child fields are silently discarded during assignment).
+* **Eliminates method-override ambiguity**: In traditional languages without vtables, calling an overridden method through an up-cast reference statically dispatches to the parent's method. Disallowing up-casting makes this class of logical bugs impossible.
+* **Separates concerns**: Static inheritance behaves strictly as a *code and layout reuse utility*. Behavioral polymorphism is offloaded entirely to **traits** (using monomorphization), ensuring that memory layout composition and dynamic typing are never conflated.
+
 #### Syntactic delegation (transparent forwarding)
 
 To retain a simple and familiar structural inheritance syntax without introducing rigid physical memory layouts, Sapphire treats the colon syntax as compiler-driven **syntactic delegation**. Under the hood, the compiler converts this inheritance into composition (field nesting) and automatically generates forwarding methods.
@@ -282,6 +291,7 @@ When an instance is bound using `let` (e.g., `let elite_goblin = clone base_gobl
 
 To prevent the unpredictability of JavaScript-style dynamic prototypes and keep performance consistent, Sapphire enforces the following constraints:
 * **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
+  * Additionally, shadowing of nested reference types is **shallow**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) mutates the shared instance on the prototype (assuming it is non-constant), rather than recursively creating a local copy of the nested object.
 * **Data-only delegation**: Prototypal inheritance only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
 * **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
