@@ -140,7 +140,7 @@ sword.use()
 
 ## 7. Prototypal inheritance
 
-Sapphire implements clean, type-safe prototypal inheritance divided into a compile-time mechanism and a runtime mechanism. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+Sapphire implements clean, type-safe prototypal inheritance divided into a compile-time mechanism and a runtime mechanism. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns; instead, the compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype.
 
 ### A. Static (compile-time) inheritance
 
@@ -182,3 +182,13 @@ print(elite_goblin.damage)  // Outputs 15 (Reflected live from prototype)
 #### Structural safety constraints
 
 To prevent the chaotic unpredictability of JavaScript-style dynamic prototypes and to keep object memory shapes optimized, Sapphire enforces **value-shadowing only** during dynamic delegation. Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint. This maintains layout predictability and allows the engine to optimize dynamic property lookups using fixed byte offsets and uniform bitmasks rather than expensive string-keyed hash table lookups.
+
+#### The `__proto__` property
+
+Every struct instance automatically exposes a built-in, compiler-generated `__proto__` property to inspect its prototype chain:
+* **Read-Only / Immutability:** The `__proto__` property is read-only. It cannot be reassigned at runtime, preventing prototype-pollution vulnerabilities and allowing the compiler to perform layout optimizations.
+* **Type Safety:** For any struct `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
+* **Prototype Assignment:** 
+  * For instances created via a standard constructor (e.g., `Enemy()`), `__proto__` evaluates to `none`.
+  * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
+  * Since static (compile-time) inheritance is resolved as flat composition, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
