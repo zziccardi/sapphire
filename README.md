@@ -13,15 +13,18 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
 
 ## 1. Style & formatting standards
 
-* **Indentation:** The bodies of blocks should be indented two spaces. When
-continuing a function definition's parameter list or function call site on a
-subsequent line, params should be indented to align with the opening parenthesis.
-* **Naming conventions:** All variable names should use `snake_case`. Built-in
+* **Indentation**:
+  * The bodies of blocks should generally be indented two spaces.
+  * When continuing a statement on a subsequent line, indent with four spaces.
+  * When continuing a function definition's parameter list or function call site
+  on a subsequent line, params should be indented to align with the opening
+  parenthesis.
+* **Naming conventions**: All variable names should use `snake_case`. Built-in
 functions will use `snake_case` as well; user-defined functions/methods can use
 either `snake_case` or `PascalCase` but should be consistent.
-* **Primitive types:** Lowercase naming (e.g., `int`, `float`, `bool`).
-* **Non-primitive types:** `PascalCase` naming (e.g., `String`, `Player`,
-`Vector2`) for both built-in and user-defined types.
+* **Compile-time constants**: Global or compile-time constant expressions should use `SCREAMING_SNAKE_CASE` (e.g., `MAX_SPEED`).
+* **Primitive types**: Lowercase naming (e.g., `int`, `float`, `bool`).
+* **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`, `Vector2`) for both built-in and user-defined types.
 
 ## 2. Variable declaration & memory semantics
 
@@ -97,6 +100,7 @@ Anonymous functions use an arrow-based block syntax. The arrow (`->`) is mandato
 
 * **Single-parameter inference**: If an anonymous function takes a single parameter that can be contextually inferred, both the parentheses and the type annotation can be omitted.
 * **Multi-parameter syntax**: Parentheses are required when declaring multiple parameters.
+* **Single-expression shorthand**: If a lambda body consists of a single expression, the curly braces and the `return` keyword can be omitted. The result of the expression is implicitly returned.
 
 ```
 let numbers = [1, 2, 3, 4]
@@ -106,10 +110,19 @@ let doubled = numbers.map((x: int) -> int {
   return x * 2
 })
 
-// Single parameter with return type fully inferred
+// Fully inferred single parameter and return type
 let squared = numbers.map(x -> {
   return x * x
 })
+
+// Single-expression shorthand
+let tripled = numbers.map(x -> x * 3)
+
+// Chaining map, filter, and reduce using single-expression lambdas
+let sum_of_even_squares = numbers
+    .map(x -> x * x)
+    .filter(x -> x % 2 == 0)
+    .reduce(initial = 0, (acc, x) -> acc + x)
 ```
 
 ## 6. Structs & the implementation block
