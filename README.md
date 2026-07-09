@@ -105,10 +105,9 @@ let squared = numbers.map(x -> {
 
 ## 6. Structs & the implementation block
 
-The primary data layout tool is the `struct` keyword. To separate data structures from behavior, methods can be defined inside a Rust-style implementation (`impl`) block as opposed to within the `struct` block, but this is not required.
+The primary data layout tool is the `struct` keyword. To strictly separate data structures from behavior, all methods (including constructors) **must** be defined inside a Rust-style implementation (`impl`) block; defining method signatures or bodies inside the `struct` block itself is strictly forbidden.
 
-Sapphire provides a Python-style `__init__` initializer syntax. The compiler
-enforces that all non-optional fields be initialized within this function.
+Sapphire provides a Python-style `__init__` initializer syntax defined inside the `impl` block. The compiler enforces that all non-optional fields declared in the `struct` be initialized within this function.
 
 * **Implicit self**: For all non-static member functions, the `self` token is implicitly available within the body of the function.
 * **Static methods**: Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
@@ -227,7 +226,7 @@ The compiler automatically generates a built-in `__proto__` property on every st
 To avoid implicit constructor resolution bugs, true runtime prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
 ```
-let base_goblin = Enemy()
+var base_goblin = Enemy()
 base_goblin.damage = 10
 
 let elite_goblin = clone base_goblin {
@@ -240,9 +239,16 @@ base_goblin.damage = 15
 print(elite_goblin.damage)  // Outputs 15 (Reflected live from prototype)
 ```
 
-#### Structural safety constraints
+#### Immutability and live updates
 
-To prevent the chaotic unpredictability of JavaScript-style dynamic prototypes and to keep object memory shapes optimized, Sapphire enforces **value-shadowing only** during dynamic delegation. Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint. This maintains layout predictability and allows the engine to optimize dynamic property lookups using fixed byte offsets and uniform bitmasks rather than expensive string-keyed hash table lookups.
+When an instance is bound using `let` (e.g., `let elite_goblin = clone base_goblin`), the variable binding and its local shadow table are immutable (meaning you cannot reassign the variable or mutate its properties directly). However, live modifications to its prototype (`base_goblin`) will still propagate through the delegation chain.
+
+#### Structural safety & method dispatch constraints
+
+To prevent the chaotic unpredictability of JavaScript-style dynamic prototypes and keep performance predictable, Sapphire enforces the following constraints:
+* **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
+* **Data-only delegation**: Runtime prototype delegation only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
+* **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, runtime prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
 #### The `__proto__` property
 
@@ -260,9 +266,9 @@ This section outlines the architectural decisions and design trade-offs made in 
 
 ### Avoiding virtual method tables (vtables)
 
-Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely by:
-* Resolving dynamic behavior explicitly via runtime prototypal delegation (`clone`).
-* Resolving static polymorphism via compile-time monomorphized traits.
+Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely:
+* Static polymorphism is resolved entirely at compile-time via monomorphized traits, generating direct function calls.
+* Dynamic behavior resolved via runtime prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic dispatch overhead.
 
 ### Avoiding physical inheritance layouts
 
