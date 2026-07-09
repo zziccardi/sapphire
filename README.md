@@ -44,7 +44,8 @@ Named functions must fully declare the types of all parameters and the explicit 
 
 * **Primitive types:** Passed by value.
 * **Non-primitive types:** Assumed to be passed by **constant reference** by default.
-* **Mutable references:** Indicated by prefixing the parameter with `var`, causing it to be passed by mutable reference.
+* **Mutable references:** Indicated by prefixing the parameter with `var`, causing it to be passed by mutable reference. Callers may not pass variables declared with
+`let` to these parameters.
 * **Named parameters:** Call-site arguments can be named explicitly using the `=` operator, mirroring assignment semantics and preserving the colon for types.
 
 ```
@@ -90,7 +91,10 @@ let squared = numbers.map(x -> {
 
 ## 6. Structs & the implementation block
 
-The primary data layout tool is the `struct` keyword. To separate clean data structures from behavior, methods can be defined inside a Rust-style implementation (`impl`) block.
+The primary data layout tool is the `struct` keyword. To separate data structures from behavior, methods can be defined inside a Rust-style implementation (`impl`) block as opposed to within the `struct` block, but this is not required.
+
+Sapphire provides a Python-style `__init__` initializer syntax. The compiler
+enforces that all non-optional fields be initialized within this function.
 
 * **Implicit self:** For all non-static member functions, the `self` token is implicitly available within the body of the function.
 * **Static methods:** Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
