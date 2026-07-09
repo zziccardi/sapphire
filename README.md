@@ -269,10 +269,10 @@ When an instance is bound using `let` (e.g., `let elite_goblin = clone base_gobl
 
 #### Structural safety & method dispatch constraints
 
-To prevent the chaotic unpredictability of JavaScript-style dynamic prototypes and keep performance predictable, Sapphire enforces the following constraints:
+To prevent the unpredictability of JavaScript-style dynamic prototypes and keep performance consistent, Sapphire enforces the following constraints:
 * **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
-* **Data-only delegation**: Runtime prototype delegation only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
-* **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, runtime prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
+* **Data-only delegation**: Prototypal inheritance only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
+* **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
 #### The `__proto__` property
 
@@ -292,13 +292,13 @@ This section outlines the architectural decisions and design trade-offs made in 
 
 Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely:
 * Static polymorphism is resolved entirely at compile-time via monomorphized traits, generating direct function calls.
-* Dynamic behavior resolved via runtime prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic dispatch overhead.
+* Dynamic behavior resolved via prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic-dispatch overhead.
 
 ### Avoiding physical inheritance layouts
 
 While single, flat physical inheritance avoids vtable overhead by organizing memory contiguously, it introduces severe bottlenecks for performance-critical systems like game engines:
 * **Cache-line pollution**: Grouping parent and child fields together in a single contiguous block forces unrelated fields into CPU cache lines. In data-oriented design (like ECS), updates only needing a small subset of fields (e.g., `position` and `velocity`) are slowed down by reading unrelated fields.
 * **Layout rigidity**: A rigid inheritance hierarchy prevents the compiler from reordering fields across the entire structure to minimize padding bytes and reduce memory footprint.
-* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascade recompilations.
+* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
 
-Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
