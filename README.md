@@ -323,3 +323,37 @@ While single, flat physical inheritance avoids vtable overhead by organizing mem
 * **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
 
 Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+
+## 9. Compiler & runtime implementation
+
+This section outlines how the Sapphire compiler and runtime optimize code execution and manage memory without sacrificing performance or safety.
+
+### A. Clone-tracking & monomorphization
+
+To preserve the zero-overhead promise of standard structures, the compiler avoids uniform wrapper structures or runtime flags for field lookups by default. Instead, it performs **clone-tracking** combined with **monomorphization**:
+
+1. **Whole-program analysis (WPA)**: During compilation, the compiler tracks if a struct type `T` is ever cloned via the `clone` keyword in the codebase.
+   - **Non-cloned structs**: If `T` is never cloned, it is treated as a standard flat structure. Every field access (`t.field`) compiles to a direct memory offset read (e.g., a single CPU instruction).
+   - **Cloned structs**: If `T` is cloned anywhere in the codebase, the compiler marks `T` as "clonable/delegated".
+2. **Implicit monomorphization**: For functions taking clonable structs, the compiler generates two distinct binary implementations:
+   - A **flat path** optimized with direct, zero-overhead offset loads.
+   - A **delegated path** equipped with loop-lookup instructions to resolve dynamically shadowed fields and traverse the prototype chain.
+3. **Monomorphic call-site optimization**: If a call site is determined to only ever receive flat instances of a clonable struct, the compiler devirtualizes the call and statically dispatches to the flat path, ensuring no runtime lookup penalty.
+
+### B. Hybrid lifetime & memory management
+
+To guarantee memory safety and eliminate the overhead of tracing garbage collectors or reference-counting metadata, Sapphire implements a **hybrid lifetime system** combining compile-time RAII scoping and implicit arena allocation:
+
+#### 1. Stack allocation (RAII-style lexical scoping)
+For variables declared on the stack, the compiler strictly enforces lexically scoped lifetimes:
+- **LIFO lifetime guarantee**: A stack-allocated clone must be declared in the same scope or an inner nested scope of its stack-allocated prototype. Since stack frames are popped in strict LIFO order, the clone is guaranteed to be destroyed before its prototype.
+- **Escape analysis**: The compiler performs escape analysis to ensure that stack-allocated prototypes or their clones never escape the stack frame (e.g., they cannot be returned from the function where they are declared).
+
+#### 2. Heap/arena allocation
+For long-lived dynamically allocated objects, Sapphire uses **implicit arena allocation** to free the programmer from manual memory management:
+- **Implicit co-location**: When a heap-allocated prototype is cloned, the runtime automatically inspects the prototype's allocation header and routes the clone's allocation to the **same arena** as its prototype. The developer does not need to manually pass or track arena references.
+- **Deallocation**: When the arena is torn down, all prototypes and their clones allocated within it are deallocated *en masse* with zero runtime fragmentation or cycle-checking overhead.
+
+#### 3. Cross-boundary safety constraints
+To prevent dangling pointers, the compiler strictly enforces boundary rules between memory regions:
+- **No stack-to-heap leakage**: An arena-allocated (heap) clone is **forbidden** from referencing a stack-allocated prototype. If a developer attempts to call `clone` on a stack-allocated prototype to allocate on the heap/arena, the compiler rejects it statically at compile time. This prevents heap clones from pointing to invalid stack frames that have been popped.
