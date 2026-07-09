@@ -173,7 +173,14 @@ struct Cat: Animal {
 
 #### Syntactic delegation (transparent forwarding)
 
-To retain a simple and familiar structural inheritance syntax without introducing rigid physical memory layouts, Sapphire treats the colon syntax as compiler-driven **syntactic delegation**. Under the hood, the compiler converts this inheritance into composition (field nesting) and automatically generates forwarding methods. This provides the ergonomic benefits of traditional inheritance while giving the compiler full freedom to optimize, reorder, or pack fields under the hood.
+To retain a simple and familiar structural inheritance syntax without introducing rigid physical memory layouts, Sapphire treats the colon syntax as compiler-driven **syntactic delegation**. Under the hood, the compiler converts this inheritance into composition (field nesting) and automatically generates forwarding methods.
+
+This approach incurs **zero runtime performance penalty** and avoids the overhead typical of traditional dynamic/virtual method dispatch because resolution is done entirely at compile-time:
+* **Direct static calls (no indirection)**: Unlike virtual method tables (vtables) that require pointer chasing and dynamic lookups, the compiler resolves target functions statically and outputs direct branch/jump instructions.
+* **Inlining opportunities**: Since the forwarded calls are resolved statically, they are prime candidates for compiler inlining. When inlined, the forwarding layer is completely optimized away, resulting in absolute zero runtime instruction overhead.
+* **Compile-time offset calculation**: Any adjustment to the `self` reference pointer (from the wrapper struct to the nested composition struct) is calculated at compile-time and folded directly into CPU instructions.
+
+This provides the ergonomic benefits of traditional inheritance while giving the compiler full freedom to optimize, reorder, or pack fields under the hood.
 
 #### Alternatives for static code reuse
 
