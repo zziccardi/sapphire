@@ -93,12 +93,15 @@ let squared = numbers.map(x -> {
 The primary data layout tool is the `struct` keyword. To separate clean data structures from behavior, methods can be defined inside a Rust-style implementation (`impl`) block.
 
 * **Implicit self:** For all non-static member functions, the `self` token is implicitly available within the body of the function.
-* **Static Methods:** Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
+* **Static methods:** Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
+* **Constant methods**: Non-static methods may be marked `const`, which
+indicates that `self` cannot be modified.
 
 ```
 struct Weapon {
   var damage: int
   var durability: int
+  let name: String
 }
 
 impl Weapon {
@@ -114,7 +117,21 @@ impl Weapon {
   static func create_legendary(): Weapon {
     return Weapon(dmg = 250)
   }
+
+  const func get_name(): String {
+    return self.name
+  }
 }
+```
+
+The following code will not compile because `sword` is a constant:
+
+```
+let sword = Weapon(...)
+
+// This method attempts to mutate `self`, which is not allowed since `sword` is
+// declared as a constant.
+sword.use()
 ```
 
 ## 7. Prototypal inheritance
