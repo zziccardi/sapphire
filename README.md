@@ -47,12 +47,12 @@ if let active_target = target {
 
 Named functions must fully declare the types of all parameters and the explicit return value using colon syntax.
 
-* **Primitive types:** Passed by value.
-* **Non-primitive types:** Assumed to be passed by **constant reference** by default.
-* **Mutable references:** Indicated by prefixing the parameter with `var`, causing it to be passed by mutable reference. Callers may not pass variables declared with
+* **Primitive types**: Passed by value.
+* **Non-primitive types**: Assumed to be passed by **constant reference** by default.
+* **Mutable references**: Indicated by prefixing the parameter with `var`, causing it to be passed by mutable reference. Callers may not pass variables declared with
 `let` to these parameters.
-* **Named parameters:** Call-site arguments can be named explicitly using the `=` operator, mirroring assignment semantics and preserving the colon for types.
-* **Default parameters:** Parameters can define default values using the `=` operator in the function signature. If omitted at the call site, the default value is evaluated and used instead.
+* **Named parameters**: Call-site arguments can be named explicitly using the `=` operator, mirroring assignment semantics and preserving the colon for types.
+* **Default parameters**: Parameters can define default values using the `=` operator in the function signature. If omitted at the call site, the default value is evaluated and used instead.
 
 ```
 func calculate_damage(attacker: Player, var defender: Enemy,
@@ -86,8 +86,8 @@ var math_op: (int, int) -> int
 
 Anonymous functions use an arrow-based block syntax. The arrow (`->`) is mandatory even when the return type is omitted. Type inference rules apply heavily inside function closures:
 
-* **Single-parameter inference:** If an anonymous function takes a single parameter that can be contextually inferred, both the parentheses and the type annotation can be omitted.
-* **Multi-parameter syntax:** Parentheses are required when declaring multiple parameters.
+* **Single-parameter inference**: If an anonymous function takes a single parameter that can be contextually inferred, both the parentheses and the type annotation can be omitted.
+* **Multi-parameter syntax**: Parentheses are required when declaring multiple parameters.
 
 ```
 let numbers = [1, 2, 3, 4]
@@ -110,8 +110,8 @@ The primary data layout tool is the `struct` keyword. To separate data structure
 Sapphire provides a Python-style `__init__` initializer syntax. The compiler
 enforces that all non-optional fields be initialized within this function.
 
-* **Implicit self:** For all non-static member functions, the `self` token is implicitly available within the body of the function.
-* **Static methods:** Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
+* **Implicit self**: For all non-static member functions, the `self` token is implicitly available within the body of the function.
+* **Static methods**: Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
 * **Constant methods**: Non-static methods may be marked `const`, which
 indicates that `self` cannot be modified.
 
@@ -152,9 +152,9 @@ let sword = Weapon(...)
 sword.use()
 ```
 
-## 7. Prototypal inheritance
+## 7. Inheritance & polymorphism
 
-Sapphire implements clean, type-safe prototypal inheritance divided into a compile-time mechanism and a runtime mechanism. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns; instead, the compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype.
+Sapphire implements clean, type-safe inheritance divided into a compile-time mechanism and a runtime mechanism.
 
 ### A. Static (compile-time) inheritance
 
@@ -171,11 +171,51 @@ struct Cat: Animal {
 }
 ```
 
-#### Performance guarantees (zero-overhead flattening)
+#### Syntactic delegation (transparent forwarding)
 
-To eliminate the historical runtime inefficiencies associated with traditional class-based inheritance—specifically virtual method table (vtable) pointer chasing—Sapphire treats static inheritance as **flat compile-time composition**. Statically inherited structures are optimized down to a single contiguous memory layout, calculating byte offsets entirely at compile time. This allows the execution engine to support direct, zero-overhead execution and efficient stack allocation for static layouts.
+To retain a simple and familiar structural inheritance syntax without introducing rigid physical memory layouts, Sapphire treats the colon syntax as compiler-driven **syntactic delegation**. Under the hood, the compiler converts this inheritance into composition (field nesting) and automatically generates forwarding methods. This provides the ergonomic benefits of traditional inheritance while giving the compiler full freedom to optimize, reorder, or pack fields under the hood.
+
+#### Alternatives for static code reuse
+
+To support data-oriented design and decouple behaviors from layout, Sapphire supports two primary alternatives:
+
+##### 1. Traits (compile-time monomorphization)
+Traits define behavioral contracts (methods) without prescribing any physical memory layout. They are resolved entirely at compile time through monomorphization, ensuring zero runtime overhead.
+
+```
+trait Actor {
+  func update()
+}
+
+struct Cat {
+  var lives: int
+}
+
+impl Actor for Cat {
+  func update() {
+    // Concrete implementation
+  }
+}
+```
+
+##### 2. Explicit composition (data-oriented design)
+Instead of physical inheritance, structs can explicitly compose other structures. This allows clear separation of data components, which is ideal for Entity-Component-System (ECS) architectures where systems process arrays of single components to maximize cache locality.
+
+```
+struct PhysicsComponent {
+  var velocity: Vector2
+  var mass: float
+}
+
+struct Player {
+  var physics: PhysicsComponent
+  var health: int
+}
+```
 
 ### B. Dynamic (run-time) prototypal inheritance via `clone`
+
+The compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
 
 To avoid implicit constructor resolution bugs, true runtime prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
@@ -200,9 +240,28 @@ To prevent the chaotic unpredictability of JavaScript-style dynamic prototypes a
 #### The `__proto__` property
 
 Every struct instance automatically exposes a built-in, compiler-generated `__proto__` property to inspect its prototype chain:
-* **Read-Only / Immutability:** The `__proto__` property is read-only. It cannot be reassigned at runtime, preventing prototype-pollution vulnerabilities and allowing the compiler to perform layout optimizations.
-* **Type Safety:** For any struct `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
-* **Prototype Assignment:**
+* **Immutability**: The `__proto__` property is read-only. It cannot be reassigned at runtime, preventing prototype-pollution vulnerabilities and allowing the compiler to perform layout optimizations.
+* **Type safety**: For any struct `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
+* **Prototype assignment**:
   * For instances created via a standard constructor (e.g., `Enemy()`), `__proto__` evaluates to `none`.
   * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
-  * Since static (compile-time) inheritance is resolved as flat composition, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
+  * Since static inheritance is resolved at compile time via delegation, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
+
+## 8. Design decisions
+
+This section outlines the architectural decisions and design trade-offs made in Sapphire.
+
+### Avoiding virtual method tables (vtables)
+
+Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely by:
+* Resolving dynamic behavior explicitly via runtime prototypal delegation (`clone`).
+* Resolving static polymorphism via compile-time monomorphized traits.
+
+### Avoiding physical inheritance layouts
+
+While single, flat physical inheritance avoids vtable overhead by organizing memory contiguously, it introduces severe bottlenecks for performance-critical systems like game engines:
+* **Cache-line pollution**: Grouping parent and child fields together in a single contiguous block forces unrelated fields into CPU cache lines. In data-oriented design (like ECS), updates only needing a small subset of fields (e.g., `position` and `velocity`) are slowed down by reading unrelated fields.
+* **Layout rigidity**: A rigid inheritance hierarchy prevents the compiler from reordering fields across the entire structure to minimize padding bytes and reduce memory footprint.
+* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascade recompilations.
+
+Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
