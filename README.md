@@ -177,7 +177,7 @@ sword.use()
 
 Sapphire implements clean, type-safe inheritance divided into a compile-time mechanism and a runtime mechanism.
 
-### A. Static (compile-time) inheritance
+### A. Static inheritance
 
 Structures can inherit the field layout, methods, and default values of another structure at compile time using a colon syntax similar to that in C++.
 
@@ -241,11 +241,13 @@ struct Player {
 }
 ```
 
-### B. Dynamic (run-time) prototypal inheritance via `clone`
+### B. Dynamic prototypal inheritance
 
-The compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+Prototypal inheritance allows objects to delegate state to other objects at runtime. Instead of defining a rigid class hierarchy or instantiating duplicate structures, one object can serve as an active prototype for another. The clone dynamically delegates field lookups to its prototype: changes made to the prototype propagate live to the cloned instance, while the clone can selectively shadow (override) specific values. This is highly valuable for rapid prototyping, template-based object creation (such as defining variations of a base enemy archetype in a game), and  zero-boilerplate data sharing.
 
-To avoid implicit constructor resolution bugs, true runtime prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
+In Sapphire, the compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+
+Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
 ```
 var base_goblin = Enemy()
