@@ -2,6 +2,15 @@
 
 This document establishes the foundational design, syntax rules, and architectural specifications for **Sapphire**, a new general-purpose programming language. Sapphire prioritizes predictability, type safety, explicit function signatures, and highly ergonomic prototypal inheritance without traditional class-based OOP boilerplate or virtual method table (vtable) performance penalties.
 
+## Design philosophy & value proposition
+
+Sapphire occupies a unique niche in the language ecosystem: it combines the **safety and bare-metal performance of a systems language** (like Rust or C++) with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript or Lua) and the **expressive API clarity** of modern languages (like Swift).
+
+Unlike other performance-oriented languages, Sapphire distinguishes itself through three key pillars:
+* **Dual-paradigm code reuse**: Combines compile-time monomorphized traits and zero-overhead syntactic delegation with opt-in runtime prototypal delegation (`clone`). This allows developers to use clean object-oriented syntax and construct runtime archetypes without physical memory layout rigidity or manual composition boilerplate.
+* **Reference semantics**: Non-primitive types are passed by constant reference by default. This eliminates the visual clutter of lifetime annotations and borrow operators while maintaining memory safety.
+* **Modern API ergonomics**: Native support for named and default parameters reduces constructor boilerplate and makes interfaces self-documenting.
+
 ## 1. Style & formatting standards
 
 * **Indentation:** The bodies of blocks should be indented two spaces. When
