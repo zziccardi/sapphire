@@ -13,6 +13,7 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
 
 ## 1. Style & formatting standards
 
+* **Line length**: Lines should be kept to a maximum of 80 characters.
 * **Indentation**:
   * The bodies of blocks should generally be indented two spaces.
   * When continuing a statement on a subsequent line, indent with four spaces.
@@ -22,6 +23,8 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
 * **Naming conventions**: All variable names should use `snake_case`. Built-in
 functions will use `snake_case` as well; user-defined functions/methods can use
 either `snake_case` or `PascalCase` but should be consistent.
+  * Note that variables, functions, and structs all share the same identifier
+  namespace; i.e. you cannot have a function and a struct with the same name.
 * **Compile-time constants**: Global or compile-time constant expressions should use `SCREAMING_SNAKE_CASE` (e.g., `MAX_SPEED`).
 * **Primitive types**: Lowercase naming (e.g., `int`, `float`, `bool`).
 * **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`, `Vector2`) for both built-in and user-defined types.
@@ -57,14 +60,21 @@ if let active_target = target {
 
 ## 4. Functions & parameter modes
 
-Named functions must fully declare the types of all parameters and the explicit return value using colon syntax.
+Named functions must fully declare the types of all parameters and the explicit
+return value using colon syntax.
 
-* **Primitive types**: Passed by value.
-* **Non-primitive types**: Assumed to be passed by **constant reference** by default.
-* **Mutable references**: Indicated by prefixing the parameter with `var`, causing it to be passed by mutable reference. Callers may not pass variables declared with
-`let` to these parameters.
-* **Named parameters**: Call-site arguments can be named explicitly using the `=` operator, mirroring assignment semantics and preserving the colon for types.
-* **Default parameters**: Parameters can define default values using the `=` operator in the function signature. If omitted at the call site, the default value is evaluated and used instead.
+* **Primitive types**: Assumed to be passed by **value** by default.
+* **Non-primitive types**: Assumed to be passed by **constant reference** by
+default.
+* **Mutable references**: Indicated by prefixing the parameter with `var`,
+causing it to be passed by mutable reference. Callers may not pass variables
+declared with `let` to these parameters. This applies to both primitive and
+non-primitive types.
+* **Named parameters**: Call-site arguments can be named explicitly using the
+`=` operator, mirroring assignment semantics and preserving the colon for types.
+* **Default parameters**: Parameters can define default values using the `=`
+operator in the function signature. If omitted at the call site, the default
+value is evaluated and used instead.
 
 ```
 func calculate_damage(attacker: Player, var defender: Enemy,
@@ -144,9 +154,10 @@ struct Weapon {
 }
 
 impl Weapon {
-  func __init__(dmg: int) {
+  func __init__(dmg: int, name: String = "Cool Sword") {
     self.damage = dmg
     self.durability = 100
+    self.name = name
   }
 
   func use() {
