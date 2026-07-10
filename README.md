@@ -13,6 +13,7 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
 
 ## 1. Style & formatting standards
 
+* **Line length**: Lines should be kept to a maximum of 80 characters.
 * **Indentation**:
   * The bodies of blocks should generally be indented two spaces.
   * When continuing a statement on a subsequent line, indent with four spaces.
@@ -22,6 +23,8 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
 * **Naming conventions**: All variable names should use `snake_case`. Built-in
 functions will use `snake_case` as well; user-defined functions/methods can use
 either `snake_case` or `PascalCase` but should be consistent.
+  * Note that variables, functions, and structs all share the same identifier
+  namespace; i.e. you cannot have a function and a struct with the same name.
 * **Compile-time constants**: Global or compile-time constant expressions should use `SCREAMING_SNAKE_CASE` (e.g., `MAX_SPEED`).
 * **Primitive types**: Lowercase naming (e.g., `int`, `float`, `bool`).
 * **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`, `Vector2`) for both built-in and user-defined types.
@@ -57,14 +60,21 @@ if let active_target = target {
 
 ## 4. Functions & parameter modes
 
-Named functions must fully declare the types of all parameters and the explicit return value using colon syntax.
+Named functions must fully declare the types of all parameters and the explicit
+return value using colon syntax.
 
-* **Primitive types**: Passed by value.
-* **Non-primitive types**: Assumed to be passed by **constant reference** by default.
-* **Mutable references**: Indicated by prefixing the parameter with `var`, causing it to be passed by mutable reference. Callers may not pass variables declared with
-`let` to these parameters.
-* **Named parameters**: Call-site arguments can be named explicitly using the `=` operator, mirroring assignment semantics and preserving the colon for types.
-* **Default parameters**: Parameters can define default values using the `=` operator in the function signature. If omitted at the call site, the default value is evaluated and used instead.
+* **Primitive types**: Assumed to be passed by **value** by default.
+* **Non-primitive types**: Assumed to be passed by **constant reference** by
+default.
+* **Mutable references**: Indicated by prefixing the parameter with `var`,
+causing it to be passed by mutable reference. Callers may not pass variables
+declared with `let` to these parameters. This applies to both primitive and
+non-primitive types.
+* **Named parameters**: Call-site arguments can be named explicitly using the
+`=` operator, mirroring assignment semantics and preserving the colon for types.
+* **Default parameters**: Parameters can define default values using the `=`
+operator in the function signature. If omitted at the call site, the default
+value is evaluated and used instead.
 
 ```
 func calculate_damage(attacker: Player, var defender: Enemy,
@@ -144,9 +154,10 @@ struct Weapon {
 }
 
 impl Weapon {
-  func __init__(dmg: int) {
+  func __init__(dmg: int, name: String = "Cool Sword") {
     self.damage = dmg
     self.durability = 100
+    self.name = name
   }
 
   func use() {
@@ -177,7 +188,7 @@ sword.use()
 
 Sapphire implements clean, type-safe inheritance divided into a compile-time mechanism and a runtime mechanism.
 
-### A. Static (compile-time) inheritance
+### A. Static inheritance
 
 Structures can inherit the field layout, methods, and default values of another structure at compile time using a colon syntax similar to that in C++.
 
@@ -191,6 +202,15 @@ struct Cat: Animal {
   var lives: int
 }
 ```
+
+#### Disallowed up-casting
+
+To prevent historical OOP design flaws, Sapphire **strictly disallows up-casting** for statically inherited structures (e.g., a `Cat` reference cannot be cast or passed as an `Animal`).
+
+This design choice provides several key benefits:
+* **Eliminates object slicing**: Because a child struct cannot be assigned to a parent struct type, the compiler prevents object slicing (where child fields are silently discarded during assignment).
+* **Eliminates method-override ambiguity**: In traditional languages without vtables, calling an overridden method through an up-cast reference statically dispatches to the parent's method. Disallowing up-casting makes this class of logical bugs impossible.
+* **Separates concerns**: Static inheritance behaves strictly as a *code and layout reuse utility*. Behavioral polymorphism is offloaded entirely to **traits** (using monomorphization), ensuring that memory layout composition and dynamic typing are never conflated.
 
 #### Syntactic delegation (transparent forwarding)
 
@@ -241,11 +261,13 @@ struct Player {
 }
 ```
 
-### B. Dynamic (run-time) prototypal inheritance via `clone`
+### B. Dynamic prototypal inheritance
 
-The compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+Prototypal inheritance allows objects to delegate state to other objects at runtime. Instead of defining a rigid class hierarchy or instantiating duplicate structures, one object can serve as an active prototype for another. The clone dynamically delegates field lookups to its prototype: changes made to the prototype propagate live to the cloned instance, while the clone can selectively shadow (override) specific values. This is highly valuable for rapid prototyping, template-based object creation (such as defining variations of a base enemy archetype in a game), and  zero-boilerplate data sharing.
 
-To avoid implicit constructor resolution bugs, true runtime prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
+In Sapphire, the compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+
+Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
 ```
 var base_goblin = Enemy()
@@ -267,10 +289,11 @@ When an instance is bound using `let` (e.g., `let elite_goblin = clone base_gobl
 
 #### Structural safety & method dispatch constraints
 
-To prevent the chaotic unpredictability of JavaScript-style dynamic prototypes and keep performance predictable, Sapphire enforces the following constraints:
+To prevent the unpredictability of JavaScript-style dynamic prototypes and keep performance consistent, Sapphire enforces the following constraints:
 * **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
-* **Data-only delegation**: Runtime prototype delegation only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
-* **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, runtime prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
+  * Additionally, shadowing of nested reference types is **shallow**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) mutates the shared instance on the prototype (assuming it is non-constant), rather than recursively creating a local copy of the nested object.
+* **Data-only delegation**: Prototypal inheritance only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
+* **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
 #### The `__proto__` property
 
@@ -290,13 +313,47 @@ This section outlines the architectural decisions and design trade-offs made in 
 
 Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely:
 * Static polymorphism is resolved entirely at compile-time via monomorphized traits, generating direct function calls.
-* Dynamic behavior resolved via runtime prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic dispatch overhead.
+* Dynamic behavior resolved via prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic-dispatch overhead.
 
 ### Avoiding physical inheritance layouts
 
 While single, flat physical inheritance avoids vtable overhead by organizing memory contiguously, it introduces severe bottlenecks for performance-critical systems like game engines:
 * **Cache-line pollution**: Grouping parent and child fields together in a single contiguous block forces unrelated fields into CPU cache lines. In data-oriented design (like ECS), updates only needing a small subset of fields (e.g., `position` and `velocity`) are slowed down by reading unrelated fields.
 * **Layout rigidity**: A rigid inheritance hierarchy prevents the compiler from reordering fields across the entire structure to minimize padding bytes and reduce memory footprint.
-* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascade recompilations.
+* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
 
-Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+
+## 9. Compiler & runtime implementation
+
+This section outlines how the Sapphire compiler and runtime optimize code execution and manage memory without sacrificing performance or safety.
+
+### A. Clone-tracking & monomorphization
+
+To preserve the zero-overhead promise of standard structures, the compiler avoids uniform wrapper structures or runtime flags for field lookups by default. Instead, it performs **clone-tracking** combined with **monomorphization**:
+
+1. **Whole-program analysis (WPA)**: During compilation, the compiler tracks if a struct type `T` is ever cloned via the `clone` keyword in the codebase.
+   - **Non-cloned structs**: If `T` is never cloned, it is treated as a standard flat structure. Every field access (`t.field`) compiles to a direct memory offset read (e.g., a single CPU instruction).
+   - **Cloned structs**: If `T` is cloned anywhere in the codebase, the compiler marks `T` as "clonable/delegated".
+2. **Implicit monomorphization**: For functions taking clonable structs, the compiler generates two distinct binary implementations:
+   - A **flat path** optimized with direct, zero-overhead offset loads.
+   - A **delegated path** equipped with loop-lookup instructions to resolve dynamically shadowed fields and traverse the prototype chain.
+3. **Monomorphic call-site optimization**: If a call site is determined to only ever receive flat instances of a clonable struct, the compiler devirtualizes the call and statically dispatches to the flat path, ensuring no runtime lookup penalty.
+
+### B. Hybrid lifetime & memory management
+
+To guarantee memory safety and eliminate the overhead of tracing garbage collectors or reference-counting metadata, Sapphire implements a **hybrid lifetime system** combining compile-time RAII scoping and implicit arena allocation:
+
+#### 1. Stack allocation (RAII-style lexical scoping)
+For variables declared on the stack, the compiler strictly enforces lexically scoped lifetimes:
+- **LIFO lifetime guarantee**: A stack-allocated clone must be declared in the same scope or an inner nested scope of its stack-allocated prototype. Since stack frames are popped in strict LIFO order, the clone is guaranteed to be destroyed before its prototype.
+- **Escape analysis**: The compiler performs escape analysis to ensure that stack-allocated prototypes or their clones never escape the stack frame (e.g., they cannot be returned from the function where they are declared).
+
+#### 2. Heap/arena allocation
+For long-lived dynamically allocated objects, Sapphire uses **implicit arena allocation** to free the programmer from manual memory management:
+- **Implicit co-location**: When a heap-allocated prototype is cloned, the runtime automatically inspects the prototype's allocation header and routes the clone's allocation to the **same arena** as its prototype. The developer does not need to manually pass or track arena references.
+- **Deallocation**: When the arena is torn down, all prototypes and their clones allocated within it are deallocated *en masse* with zero runtime fragmentation or cycle-checking overhead.
+
+#### 3. Cross-boundary safety constraints
+To prevent dangling pointers, the compiler strictly enforces boundary rules between memory regions:
+- **No stack-to-heap leakage**: An arena-allocated (heap) clone is **forbidden** from referencing a stack-allocated prototype. If a developer attempts to call `clone` on a stack-allocated prototype to allocate on the heap/arena, the compiler rejects it statically at compile time. This prevents heap clones from pointing to invalid stack frames that have been popped.
