@@ -387,9 +387,9 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
 
 ### C. Expressions & collection access
 
-* **Array literals**: Arrays are defined as comma-separated values inside square brackets:
+* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed:
   ```
-  let numbers = [10, 20, 30];
+  let numbers = [10, 20, 30,];
   ```
 * **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
   ```

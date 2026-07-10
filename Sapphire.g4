@@ -179,7 +179,7 @@ literal
     ;
 
 arrayLiteral
-    : LBRACKET (expression (COMMA expression)*)? RBRACKET
+    : LBRACKET (expression (COMMA expression)* COMMA?)? RBRACKET
     ;
 
 
