@@ -115,7 +115,7 @@ whileStatement
     ;
 
 forStatement
-    : FOR IDENTIFIER IN expression block
+    : FOR VAR? IDENTIFIER IN expression block
     ;
 
 expression

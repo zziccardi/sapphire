@@ -418,11 +418,22 @@ while count > 0 {
 
 #### 2. `for-in` loop
 
-Iterates over elements in a collection:
+Iterates over elements in a collection.
+
+* **Scoping & Mutability**: By default, the loop variable (e.g., `name`) is implicitly declared as an immutable constant (`let`) scoped strictly to the loop body block.
+* **Mutable Loop Variables**: To allow mutation of the loop variable within the block, it can be explicitly declared using the `var` keyword (`for var name in names`):
 
 ```
 let names = ["Alice", "Bob", "Charlie"];
+
+// Default: 'name' is an implicit constant scoped to the loop
 for name in names {
+  print(name);
+}
+
+// Mutable: 'var name' allows mutation of the loop variable
+for var name in names {
+  name = name.to_lowercase();
   print(name);
 }
 ```
