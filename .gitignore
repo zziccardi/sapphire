@@ -1,0 +1,7 @@
+# Ignore ANTLR-generated files, but keep __init__.py so the package can be
+# imported correctly.
+src/parser/gen/*
+!src/parser/gen/__init__.py
+
+.antlr/
+.vscode/
