@@ -2,3 +2,6 @@
 # imported correctly.
 src/parser/gen/*
 !src/parser/gen/__init__.py
+
+# Ignore IDE settings
+.vscode/
