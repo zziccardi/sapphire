@@ -3,5 +3,5 @@
 src/parser/gen/*
 !src/parser/gen/__init__.py
 
-# Ignore IDE settings
+.antlr/
 .vscode/
