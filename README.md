@@ -20,6 +20,7 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
   * When continuing a function definition's parameter list or function call site
   on a subsequent line, params should be indented to align with the opening
   parenthesis.
+* **Statement termination**: All statements must be explicitly terminated with a semicolon (`;`). This prevents syntax parsing ambiguities with multi-line statements and expressions.
 * **Naming conventions**: All variable names should use `snake_case`. Built-in
 functions will use `snake_case` as well; user-defined functions/methods can use
 either `snake_case` or `PascalCase` but should be consistent.
@@ -38,11 +39,11 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
 
 ```
-let speed: int = 60
-let name = "Hero"    // Type inferred as String
+let speed: int = 60;
+let name = "Hero";    // Type inferred as String
 
-var health = 100
-health = 90          // Valid mutation
+var health = 100;
+health = 90;          // Valid mutation
 ```
 
 ## 3. Optionals (null safety)
@@ -50,8 +51,8 @@ health = 90          // Valid mutation
 The language completely forbids null pointers. Instead, it supports type-safe optionals utilizing a Swift-style syntax with an explicit `?` modifier and a `none` keyword representing the empty state.
 
 ```
-var target: Enemy? = none
-let damage: int? = 15
+var target: Enemy? = none;
+let damage: int? = 15;
 
 if let active_target = target {
   // active_target is guaranteed to be non-optional within this block
@@ -79,20 +80,20 @@ value is evaluated and used instead.
 ```
 func calculate_damage(attacker: Player, var defender: Enemy,
                       is_critical: bool = false): int {
-  var base_damage = attacker.attack_power
+  var base_damage = attacker.attack_power;
   if is_critical {
-    base_damage *= 2
+    base_damage *= 2;
   }
-  defender.health -= base_damage
-  return base_damage
+  defender.health -= base_damage;
+  return base_damage;
 }
 
 // Invocation using named parameters via assignment syntax (is_critical defaults
 // to false)
-calculate_damage(defender = target_enemy, attacker = current_player)
+calculate_damage(defender = target_enemy, attacker = current_player);
 
 // Invocation overriding the default parameter value
-calculate_damage(current_player, target_enemy, is_critical = true)
+calculate_damage(current_player, target_enemy, is_critical = true);
 ```
 
 ## 5. First-class & anonymous functions
@@ -101,7 +102,7 @@ Functions are first-class citizens. To avoid double-colon confusion, function ty
 
 ```
 // Function type declaration
-var math_op: (int, int) -> int
+var math_op: (int, int) -> int;
 ```
 
 ### Anonymous functions (lambdas)
@@ -113,26 +114,26 @@ Anonymous functions use an arrow-based block syntax. The arrow (`->`) is mandato
 * **Single-expression shorthand**: If a lambda body consists of a single expression, the curly braces and the `return` keyword can be omitted. The result of the expression is implicitly returned.
 
 ```
-let numbers = [1, 2, 3, 4]
+let numbers = [1, 2, 3, 4];
 
 // Explicitly typed parameter and return type
 let doubled = numbers.map((x: int) -> int {
-  return x * 2
-})
+  return x * 2;
+});
 
 // Fully inferred single parameter and return type
 let squared = numbers.map(x -> {
-  return x * x
-})
+  return x * x;
+});
 
 // Single-expression shorthand
-let tripled = numbers.map(x -> x * 3)
+let tripled = numbers.map(x -> x * 3);
 
 // Chaining map, filter, and reduce using single-expression lambdas
 let sum_of_even_squares = numbers
     .map(x -> x * x)
     .filter(x -> x % 2 == 0)
-    .reduce(initial = 0, (acc, x) -> acc + x)
+    .reduce(initial = 0, (acc, x) -> acc + x);
 ```
 
 ## 6. Structs & the implementation block
@@ -148,28 +149,28 @@ indicates that `self` cannot be modified.
 
 ```
 struct Weapon {
-  var damage: int
-  var durability: int
-  let name: String
+  var damage: int;
+  var durability: int;
+  let name: String;
 }
 
 impl Weapon {
   func __init__(dmg: int, name: String = "Cool Sword") {
-    self.damage = dmg
-    self.durability = 100
-    self.name = name
+    self.damage = dmg;
+    self.durability = 100;
+    self.name = name;
   }
 
   func use() {
-    self.durability -= 1
+    self.durability -= 1;
   }
 
   static func create_legendary(): Weapon {
-    return Weapon(dmg = 250)
+    return Weapon(dmg = 250);
   }
 
   const func get_name(): String {
-    return self.name
+    return self.name;
   }
 }
 ```
@@ -177,11 +178,11 @@ impl Weapon {
 The following code will not compile because `sword` is a constant:
 
 ```
-let sword = Weapon(...)
+let sword = Weapon(...);
 
 // This method attempts to mutate `self`, which is not allowed since `sword` is
 // declared as a constant.
-sword.use()
+sword.use();
 ```
 
 ## 7. Inheritance & polymorphism
@@ -194,12 +195,12 @@ Structures can inherit the field layout, methods, and default values of another 
 
 ```
 struct Animal {
-  var name: String
-  var age: int
+  var name: String;
+  var age: int;
 }
 
 struct Cat: Animal {
-  var lives: int
+  var lives: int;
 }
 ```
 
@@ -232,11 +233,11 @@ Traits define behavioral contracts (methods) without prescribing any physical me
 
 ```
 trait Actor {
-  func update()
+  func update();
 }
 
 struct Cat {
-  var lives: int
+  var lives: int;
 }
 
 impl Actor for Cat {
@@ -251,13 +252,13 @@ Instead of physical inheritance, structs can explicitly compose other structures
 
 ```
 struct PhysicsComponent {
-  var velocity: Vector2
-  var mass: float
+  var velocity: Vector2;
+  var mass: float;
 }
 
 struct Player {
-  var physics: PhysicsComponent
-  var health: int
+  var physics: PhysicsComponent;
+  var health: int;
 }
 ```
 
@@ -270,17 +271,17 @@ In Sapphire, the compiler automatically generates a built-in `__proto__` propert
 Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
 ```
-var base_goblin = Enemy()
-base_goblin.damage = 10
+var base_goblin = Enemy();
+base_goblin.damage = 10;
 
 let elite_goblin = clone base_goblin {
-  self.health = 200  // Shadowed locally
-}
+  self.health = 200;  // Shadowed locally
+};
 
-print(elite_goblin.damage)  // Outputs 10 (Delegated to base_goblin)
+print(elite_goblin.damage);  // Outputs 10 (Delegated to base_goblin)
 
-base_goblin.damage = 15
-print(elite_goblin.damage)  // Outputs 15 (Reflected live from prototype)
+base_goblin.damage = 15;
+print(elite_goblin.damage);  // Outputs 15 (Reflected live from prototype)
 ```
 
 #### Immutability and live updates
