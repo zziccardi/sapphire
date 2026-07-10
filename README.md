@@ -358,3 +358,71 @@ For long-lived dynamically allocated objects, Sapphire uses **implicit arena all
 #### 3. Cross-boundary safety constraints
 To prevent dangling pointers, the compiler strictly enforces boundary rules between memory regions:
 - **No stack-to-heap leakage**: An arena-allocated (heap) clone is **forbidden** from referencing a stack-allocated prototype. If a developer attempts to call `clone` on a stack-allocated prototype to allocate on the heap/arena, the compiler rejects it statically at compile time. This prevents heap clones from pointing to invalid stack frames that have been popped.
+
+## 10. Core operators, expressions & control-flow loops
+
+This section outlines the basic syntax of Sapphire's expressions, operators, and control-flow loop constructs which are fully supported by the compiler and language grammar.
+
+### A. Comments
+
+Sapphire supports both single-line and multi-line block comments:
+
+```
+// This is a single-line comment
+
+/*
+ * This is a multi-line
+ * block comment.
+ */
+```
+
+### B. Core operators
+
+Sapphire supports standard operator families with well-defined precedence (e.g., multiplicative operators bind tighter than additive operators):
+
+* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo).
+* **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
+* **Logical**: `&&` (logical AND), `||` (logical OR), `!` (logical NOT).
+* **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
+
+### C. Expressions & collection access
+
+* **Array literals**: Arrays are defined as comma-separated values inside square brackets:
+  ```
+  let numbers = [10, 20, 30];
+  ```
+* **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
+  ```
+  let first = numbers[0];
+  ```
+* **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
+  ```
+  let name = target?.get_name();
+  ```
+
+### D. Control-flow loops
+
+Sapphire supports conditional iteration and collection traversal:
+
+#### 1. `while` loop
+
+Executes a block of code as long as the condition evaluates to `true`. No parentheses are required around the condition:
+
+```
+var count = 5;
+while count > 0 {
+  print(count);
+  count -= 1;
+}
+```
+
+#### 2. `for-in` loop
+
+Iterates over elements in a collection:
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+for name in names {
+  print(name);
+}
+```
