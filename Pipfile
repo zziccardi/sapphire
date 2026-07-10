@@ -1,15 +1,10 @@
 [[source]]
-url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/simple/"
+url = "https://pypi.org/simple"
 verify_ssl = true
 name = "pip_conf_index_global"
 
-[[source]]
-url = "https://pypi.org/simple"
-verify_ssl = true
-name = "pypi"
-
 [packages]
-antlr4-python3-runtime = {version = "*", index = "pypi"}
+antlr4-python3-runtime = "*"
 
 [dev-packages]
 
