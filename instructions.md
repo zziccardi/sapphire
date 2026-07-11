@@ -1,5 +1,7 @@
 # Instructions
 
+## ANTLR
+
 To use ANTLR to generate Python parser files for the grammar, run the following
 from the project root:
 
@@ -18,4 +20,20 @@ For a script called e.g. `run_parser.py`:
 
 ```
 pipenv run python src/run_parser.py
+```
+
+## Test coverage
+
+Run the following to execute all unit tests under `src/` & track code coverage:
+
+```
+pipenv run coverage run -m unittest discover -s src -p "*_test.py"
+```
+
+Note that this requires each directory to include an `__init__.py` file.
+
+Then generate a coverage report with the following:
+
+```
+pipenv run coverage html
 ```
