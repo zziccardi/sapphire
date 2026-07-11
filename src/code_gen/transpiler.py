@@ -18,35 +18,35 @@ except ModuleNotFoundError:
 
 RUNTIME_PREAMBLE = """# Sapphire Runtime Header
 class SapphireObject:
-    def __init__(self, proto=None):
-        super().__setattr__('__proto__', proto)
-        super().__setattr__('__shadow__', {})
+  def __init__(self, proto=None):
+    super().__setattr__('__proto__', proto)
+    super().__setattr__('__shadow__', {})
 
-    def clone(self):
-        return self.__class__(proto=self)
+  def clone(self):
+    return self.__class__(proto=self)
 
-    def __getattr__(self, name):
-        if name == '__proto__':
-            return self.__proto__
-        if name in self.__shadow__:
-            return self.__shadow__[name]
-        if self.__proto__ is not None:
-            return getattr(self.__proto__, name)
-        raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
+  def __getattr__(self, name):
+    if name == '__proto__':
+      return self.__proto__
+    if name in self.__shadow__:
+      return self.__shadow__[name]
+    if self.__proto__ is not None:
+      return getattr(self.__proto__, name)
+    raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
 
-    def __setattr__(self, name, value):
-        if name in ('__proto__', '__shadow__'):
-            super().__setattr__(name, value)
-        elif self.__proto__ is not None:
-            self.__shadow__[name] = value
-        else:
-            super().__setattr__(name, value)
+  def __setattr__(self, name, value):
+    if name in ('__proto__', '__shadow__'):
+      super().__setattr__(name, value)
+    elif self.__proto__ is not None:
+      self.__shadow__[name] = value
+    else:
+      super().__setattr__(name, value)
 
 def _clone_helper(obj, init_fn=None):
-    clone_obj = obj.clone()
-    if init_fn:
-        init_fn(clone_obj)
-    return clone_obj
+  clone_obj = obj.clone()
+  if init_fn:
+    init_fn(clone_obj)
+  return clone_obj
 """
 
 
@@ -179,7 +179,7 @@ class Transpiler:
 
     # Rename __init__ constructor to _init_sapphire to separate from boilerplate __init__
     func_name = "_init_sapphire" if func.name == "__init__" else func.name
-    
+
     # Python parameter formatting
     params = []
     if node.modifier != "static":
@@ -353,11 +353,11 @@ class Transpiler:
     # _clone_helper(expr, init_fn)
     self.emit("_clone_helper(")
     self.visit(node.expr)
-    
+
     if node.initializer_block:
       # Generate an inline lambda that updates self properties
       self.emit(", lambda self: [")
-      # In Python lambda, we can execute assignments using helper calls or list comprehensions, 
+      # In Python lambda, we can execute assignments using helper calls or list comprehensions,
       # but a simpler way is to generate a helper function!
       # However, since this clone expression is inside an expression context, let's output
       # a statement-block to lambda helper. Or we can just use inline setattr:
@@ -369,7 +369,7 @@ class Transpiler:
           # self.prop = val -> setattr(self, 'prop', val)
           if isinstance(stmt.target.receiver, IdentifierNode) and stmt.target.receiver.name == "self":
             assignments.append(stmt)
-      
+
       for idx, assign in enumerate(assignments):
         if idx > 0:
           self.emit(", ")
@@ -397,7 +397,7 @@ class Transpiler:
       # If it has a block, let's write a pass-through or raise exception if not supported,
       # but let's implement inline function definition mapping if possible.
       # Since we are currently in an expression context, we cannot define a nested 'def'
-      # without interrupting the line. 
+      # without interrupting the line.
       # For a basic compiler, mapping block lambdas to a standard Python local function is best
       # but requires hoisting. To keep this simple and elegant, we can transpile to a lambda:
       # if we have statements, raise not implemented or output a dummy, but let's support
