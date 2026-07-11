@@ -394,6 +394,7 @@ class TestTypeChecker(unittest.TestCase):
     self._check("""
     func test() {
       let f: (int) -> int = x -> x * 2;
+      let f2: (int) -> int = x -> x + 5;
     }
     """)
 

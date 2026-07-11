@@ -187,7 +187,7 @@ class TestTranspiler(unittest.TestCase):
     """Verifies that lambda functions can be transpiled and executed."""
     code = """
     func run_lambda(): int {
-      var f = x -> (x + 5);
+      var f = x -> x + 5;
       return f(10);
     }
     """

@@ -134,7 +134,8 @@ expression
     ;
 
 lambdaExpression
-    : lambdaParameters ARROW type? (block | expression)
+    : lambdaParameters ARROW type block
+    | lambdaParameters ARROW (block | expression)
     ;
 
 lambdaParameters
