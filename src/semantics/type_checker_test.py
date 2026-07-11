@@ -77,7 +77,6 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     """
-    # Should succeed without errors
     self._check(code)
 
   def test_if_let_non_optional(self):
@@ -139,6 +138,209 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as context:
       self._check(code)
     self.assertIn("Cannot assign expression of type 'Cat' to variable 'pet' of type 'Animal'", str(context.exception))
+
+  def test_variable_redefinition(self):
+    """Enforces that re-declaring an identifier in the same scope level fails."""
+    code = """
+    func test() {
+      let x = 10;
+      let x = 20;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Identifier 'x' is already defined in this scope", str(context.exception))
+
+  def test_inconsistent_array_literal(self):
+    """Enforces that array literals have consistent element types."""
+    code = """
+    func test() {
+      let arr = [1, "hello"];
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Inconsistent element types in array literal", str(context.exception))
+
+  def test_index_non_array(self):
+    """Enforces that indexing is only allowed on array types."""
+    code = """
+    func test() {
+      let x = 10;
+      let y = x[0];
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot index non-array type", str(context.exception))
+
+  def test_index_non_integer(self):
+    """Enforces that array index must resolve to an int."""
+    code = """
+    func test() {
+      let arr = [10, 20];
+      let y = arr[1.5];
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Array index must be an 'int'", str(context.exception))
+
+  def test_assign_index_const_array(self):
+    """Enforces that indexing assignment requires a mutable array variable."""
+    code = """
+    func test() {
+      let arr = [10, 20];
+      arr[0] = 30;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot assign to index of constant array 'arr'", str(context.exception))
+
+  def test_call_non_callable(self):
+    """Enforces that you cannot call a non-callable expression."""
+    code = """
+    func test() {
+      let x = 10;
+      x();
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Target is not callable", str(context.exception))
+
+  def test_mutate_field_const_method(self):
+    """Enforces that you cannot mutate fields inside a constant method."""
+    code = """
+    struct Point {
+      var x: int;
+    }
+    impl Point {
+      func __init__() {
+        self.x = 0;
+      }
+      const func change() {
+        self.x = 10;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot mutate field 'x' within a constant method", str(context.exception))
+
+  def test_mutate_const_field(self):
+    """Enforces that constant let fields of structs cannot be mutated outside __init__."""
+    code = """
+    struct Point {
+      let x: int;
+    }
+    impl Point {
+      func __init__() {
+        self.x = 0;
+      }
+      func change() {
+        self.x = 10;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot assign to constant field 'x'", str(context.exception))
+
+  def test_trait_missing_method(self):
+    """Enforces that impl of a trait must implement all methods of the trait."""
+    code = """
+    trait Target {
+      func resolve(): int;
+    }
+    struct Runner {}
+    impl Target for Runner {
+      // Missing resolve method
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("does not implement trait method 'resolve'", str(context.exception))
+
+  def test_trait_signature_mismatch(self):
+    """Enforces that impl methods of a trait must match trait signatures exactly."""
+    code = """
+    trait Target {
+      func resolve(x: int): int;
+    }
+    struct Runner {}
+    impl Target for Runner {
+      func resolve(x: float): int {
+        return 10;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("signature", str(context.exception))
+
+  def test_direct_access_on_optional(self):
+    """Enforces that optional receivers require optional chaining (?.) for property accesses."""
+    code = """
+    struct Person {
+      var name: String;
+    }
+    func test() {
+      var p: Person? = none;
+      let name = p.name;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Must use optional chaining '?.'", str(context.exception))
+
+  def test_optional_chaining_on_non_optional(self):
+    """Enforces that optional chaining (?.) is only allowed on optional receivers."""
+    code = """
+    struct Person {
+      var name: String;
+    }
+    impl Person {
+      func __init__(n: String) {
+        self.name = n;
+      }
+    }
+    func test() {
+      let p = Person(n = "Alice");
+      let name = p?.name;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Optional chaining '?.' requires an optional receiver", str(context.exception))
+
+  def test_while_condition_not_bool(self):
+    """Enforces that while loop conditions must resolve to bool."""
+    code = """
+    func test() {
+      while 10 {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("While condition must resolve to 'bool'", str(context.exception))
+
+  def test_for_target_not_array(self):
+    """Enforces that for loop iterables must be arrays."""
+    code = """
+    func test() {
+      let x = 10;
+      for item in x {
+        let y = item;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("For-in loop source must be an array type", str(context.exception))
 
 
 if __name__ == "__main__":

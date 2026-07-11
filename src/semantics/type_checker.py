@@ -103,6 +103,12 @@ class TypeChecker:
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         trait_type = TraitType(decl.name)
+        # Populate trait method signatures
+        for member in decl.members:
+          p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
+          ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
+          trait_type.methods[member.name] = FunctionType(p_types, ret_t)
+
         self.symbol_table.define_type(decl.name, trait_type)
         self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
 
@@ -198,7 +204,7 @@ class TypeChecker:
 
           # Register on trait if needed
           if trait_type:
-            trait_type.methods[func_decl.name] = signature
+            pass
 
   def _resolve_type_node(self, node: Optional[TypeNode]) -> Type:
     """Helper to map an AST TypeNode into a semantic Type object."""

@@ -97,6 +97,91 @@ class TestTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "test_delegation()")
     self.assertEqual(result, [80, 10, 5])
 
+  def test_control_flow_loops(self):
+    """Verifies while loops, for loops, and boolean logic transpile correctly."""
+    code = """
+    func run_loops() {
+      var sum = 0;
+      var count = 3;
+      while count > 0 {
+        sum += count;
+        count -= 1;
+      }
+      
+      let scores = [10, 20, 30];
+      var loop_sum = 0;
+      for score in scores {
+        loop_sum += score;
+      }
+      
+      return [sum, loop_sum];
+    }
+    """
+    result = self._transpile_and_run(code, "run_loops()")
+    self.assertEqual(result, [6, 60])
+
+  def test_static_methods(self):
+    """Verifies static method decorators and const struct methods compile and run."""
+    code = """
+    struct Counter {
+      var val: int;
+    }
+    impl Counter {
+      func __init__(v: int) {
+        self.val = v;
+      }
+      const func get_val(): int {
+        return self.val;
+      }
+      static func create_default(): Counter {
+        return Counter(v = 100);
+      }
+    }
+    func test_static() {
+      let c = Counter.create_default();
+      return c.get_val();
+    }
+    """
+    result = self._transpile_and_run(code, "test_static()")
+    self.assertEqual(result, 100)
+
+  def test_optional_chaining(self):
+    """Verifies optional chaining (?.) expressions return correctly."""
+    code = """
+    struct Node {
+      var score: int;
+    }
+    impl Node {
+      func __init__(s: int) {
+        self.score = s;
+      }
+    }
+    func test_chain() {
+      var n1: Node? = none;
+      var n2: Node? = Node(s = 99);
+      
+      let val1 = n1?.score;
+      let val2 = n2?.score;
+      return [val1, val2];
+    }
+    """
+    result = self._transpile_and_run(code, "test_chain()")
+    self.assertEqual(result, [None, 99])
+
+  def test_unary_operators(self):
+    """Verifies logical NOT (!) and arithmetic negation (-) transpile correctly."""
+    code = """
+    func test_unary() {
+      let is_true = true;
+      let is_false = !is_true;
+      let num = 5;
+      let neg_num = -num;
+      return [is_false, neg_num];
+    }
+    """
+    result = self._transpile_and_run(code, "test_unary()")
+    self.assertEqual(result, [False, -5])
+
 
 if __name__ == "__main__":
   unittest.main()
