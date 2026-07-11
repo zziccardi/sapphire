@@ -4,7 +4,8 @@ To use ANTLR to generate Python parser files for the grammar, run the following
 from the project root:
 
 ```
-antlr -Dlanguage=Python3 -o src/parser/gen grammar/Sapphire.g4
+antlr -Dlanguage=Python3 -o src/parser/gen -Xexact-output-dir \
+    grammar/Sapphire.g4
 ```
 
 This will create SapphireLexer.py, SapphireParser.py, and SapphireListener.py in
