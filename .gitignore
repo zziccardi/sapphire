@@ -5,4 +5,5 @@ src/parser/gen/*
 
 .DS_Store
 .antlr/
+.coverage
 .vscode/
