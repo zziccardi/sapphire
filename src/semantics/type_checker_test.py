@@ -343,5 +343,79 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("For-in loop source must be an array type", str(context.exception))
 
 
+  def test_binary_and_unary_ops(self):
+    """Verifies that all binary and unary operators are semantically type checked."""
+    self._check("""
+    func test() {
+      let a = true;
+      let b = !a;
+      let c = a && b || true;
+      let x = 10;
+      let y = -x;
+      let cmp = x == y;
+      let add = x + y * 2;
+    }
+    """)
+
+  def test_calls_and_member_access(self):
+    """Verifies that static calls, instance calls, and properties resolve correctly."""
+    self._check("""
+    struct Point {
+      var x: int;
+    }
+    impl Point {
+      func __init__(val: int) {
+        self.x = val;
+      }
+      const func get_x(): int {
+        return self.x;
+      }
+      static func create(): Point {
+        return Point(val = 5);
+      }
+    }
+    func run() {
+      let p = Point.create();
+      let val = p.get_x();
+    }
+    """)
+
+  def test_arrays_and_indexing(self):
+    """Verifies that array literal types and indexing resolve successfully."""
+    self._check("""
+    func test() {
+      let arr = [10, 20];
+      let first = arr[0];
+    }
+    """)
+
+  def test_lambda_expressions(self):
+    """Verifies that lambda parameter inference and execution type checking succeed."""
+    self._check("""
+    func test() {
+      let f: (int) -> int = x -> x * 2;
+    }
+    """)
+
+  def test_cloning(self):
+    """Verifies that clone constructs are type checked successfully."""
+    self._check("""
+    struct Entity {
+      var score: int;
+    }
+    impl Entity {
+      func __init__(s: int) {
+        self.score = s;
+      }
+    }
+    func test() {
+      var e1 = Entity(s = 10);
+      var e2 = clone e1 {
+        self.score = 20;
+      };
+    }
+    """)
+
+
 if __name__ == "__main__":
   unittest.main()

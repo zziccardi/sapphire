@@ -183,5 +183,28 @@ class TestTranspiler(unittest.TestCase):
     self.assertEqual(result, [False, -5])
 
 
+  def test_lambda_expression(self):
+    """Verifies that lambda functions can be transpiled and executed."""
+    code = """
+    func run_lambda(): int {
+      var f = x -> (x + 5);
+      return f(10);
+    }
+    """
+    result = self._transpile_and_run(code, "run_lambda()")
+    self.assertEqual(result, 15)
+
+  def test_array_indexing(self):
+    """Verifies that array indexing transpiles and executes correctly."""
+    code = """
+    func run_index(): int {
+      let arr = [100, 200];
+      return arr[1];
+    }
+    """
+    result = self._transpile_and_run(code, "run_index()")
+    self.assertEqual(result, 200)
+
+
 if __name__ == "__main__":
   unittest.main()
