@@ -5,11 +5,9 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation.
 """
 
-from typing import Any, List, Optional, Dict
-try:
-  from parser.ast import *
-except ModuleNotFoundError:
-  from src.parser.ast import *
+from typing import Any, List, Dict
+
+from parser.ast import *
 
 
 # ==========================================
