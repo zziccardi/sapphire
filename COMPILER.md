@@ -124,13 +124,12 @@ pipenv run python -c "import sample; sample.run_demo()"
 ```
 
 ### 3. Running Unit Tests
-To run all 21 unit tests across all stages:
+To run unit tests across all stages:
 ```bash
-pipenv run python -m unittest discover -s src -p "*_test.py"
+pipenv run test
 ```
 
 To run tests with code coverage:
 ```bash
-pipenv run coverage run -m unittest discover -s src -p "*_test.py"
-pipenv run coverage report
+pipenv run coverage
 ```
