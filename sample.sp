@@ -1,3 +1,9 @@
+/*
+ * Sample Sapphire program illustrating the core features
+ * of the language, including traits, structs, initializers,
+ * optional safety, lambdas, and control flow.
+ */
+
 // Global compile-time constant
 let MAX_PLAYERS: int = 100;
 
@@ -62,6 +68,10 @@ impl Damageable for Character {
     self.health -= amount;
     if self.health < 0 {
       self.health = 0;
+    } else if self.health > self.max_health {
+      self.health = self.max_health;
+    } else {
+      // Health is within bounds
     }
   }
 }
@@ -99,6 +109,8 @@ func run_demo() {
     let damage_dealt = execute_attack(attacker = player_one,
                                       defender = active_target,
                                       is_critical = true);
+  } else {
+    // Optional was none -- standard `else` fallback branch
   }
 
   // Dynamic prototypal inheritance via 'clone'
@@ -116,6 +128,17 @@ func run_demo() {
 
   // First-class functions and closures
   var damage_multiplier: (int) -> int = x -> x * 2;
+
+  // Single-expression lambda with multiple arguments
+  var sum_func: (int, int) -> int = (x, y) -> x + y;
+
+  // Unary operators (arithmetic negation and prefix positive)
+  let base_score = -50;
+  let positive_adjustment = +10;
+
+  // Implicit type-widening: assigning int to float and mixing in arithmetic
+  var coord_x: float = 10;
+  let mixed_result = coord_x + positive_adjustment;
 
   // Array literals with optional trailing commas & collection functions
   let scores = [10, 20, 30,];
