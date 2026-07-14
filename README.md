@@ -37,6 +37,7 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **`let`**: Declares a constant variable (immutable).
 * **`var`**: Declares a mutable variable.
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
+* **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
 
 ```
 let speed: int = 60;
@@ -56,6 +57,8 @@ let damage: int? = 15;
 
 if let active_target = target {
   // active_target is guaranteed to be non-optional within this block
+} else {
+  // Optionals also support standard fallback blocks via `else` or `else if`
 }
 ```
 
@@ -359,9 +362,9 @@ For long-lived dynamically allocated objects, Sapphire uses **implicit arena all
 To prevent dangling pointers, the compiler strictly enforces boundary rules between memory regions:
 - **No stack-to-heap leakage**: An arena-allocated (heap) clone is **forbidden** from referencing a stack-allocated prototype. If a developer attempts to call `clone` on a stack-allocated prototype to allocate on the heap/arena, the compiler rejects it statically at compile time. This prevents heap clones from pointing to invalid stack frames that have been popped.
 
-## 10. Core operators, expressions & control-flow loops
+## 10. Core operators, expressions, & control flow
 
-This section outlines the basic syntax of Sapphire's expressions, operators, and control-flow loop constructs which are fully supported by the compiler and language grammar.
+This section outlines the basic syntax of Sapphire's expressions, operators, conditionals, and control-flow loop constructs which are fully supported by the compiler and language grammar.
 
 ### A. Comments
 
@@ -381,13 +384,14 @@ Sapphire supports both single-line and multi-line block comments:
 Sapphire supports standard operator families with well-defined precedence (e.g., multiplicative operators bind tighter than additive operators):
 
 * **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo).
+* **Unary**: `-` (negation/additive inverse), `+` (prefix positive), `!` (logical NOT).
 * **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
-* **Logical**: `&&` (logical AND), `||` (logical OR), `!` (logical NOT).
+* **Logical**: `&&` (logical AND), `||` (logical OR).
 * **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
 
 ### C. Expressions & collection access
 
-* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed:
+* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed. Arrays are strongly typed and homogeneous; all elements must have compatible types:
   ```
   let numbers = [10, 20, 30,];
   ```
@@ -400,7 +404,22 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
   let name = target?.get_name();
   ```
 
-### D. Control-flow loops
+### D. Conditionals (if/else)
+
+Sapphire supports standard conditional execution via `if`, `else if`, and `else` blocks. Parentheses around the condition are optional:
+
+```
+let score = 85;
+if score >= 90 {
+  print("Grade: A");
+} else if score >= 80 {
+  print("Grade: B");
+} else {
+  print("Grade: C");
+}
+```
+
+### E. Control-flow loops
 
 Sapphire supports conditional iteration and collection traversal:
 
