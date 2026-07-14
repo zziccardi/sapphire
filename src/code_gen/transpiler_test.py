@@ -206,5 +206,96 @@ class TestTranspiler(unittest.TestCase):
     self.assertEqual(result, 200)
 
 
+  def test_additional_transpiler_features(self):
+    """Verifies standard conditionals, unary ops, strings, default params, empty constructors/methods, and clones."""
+    code = """
+    struct Empty {}
+    struct Base {
+      var x: int;
+      var y: int;
+    }
+    impl Base {
+      func __init__() {
+        self.x = 1;
+        self.y = 2;
+      }
+    }
+    func multiply(a: int, b: int = 2): int {
+      if a > 10 {
+        return a * b;
+      } else if a > 5 {
+        return a * b + 1;
+      } else {
+        return a * b + 2;
+      }
+    }
+    func test_features(): int {
+      let b1 = Base();
+      let b2 = clone b1 {
+        self.x = 10;
+        self.y = 20;
+      };
+      var target: Base? = b2;
+      var out = 0;
+      if let active = target {
+        out = active.x;
+      } else {
+        out = -1;
+      }
+      
+      let s = "hello";
+      let neg = -out;
+      let pos = +out;
+      
+      return multiply(10, 3) + multiply(3, 3) + b2.y;
+    }
+    """
+    result = self._transpile_and_run(code, "test_features()")
+    # multiply(10, 3) -> 10 * 3 + 1 = 31
+    # multiply(3, 3) -> 3 * 3 + 2 = 11
+    # b2.y -> 20
+    # total -> 62
+    self.assertEqual(result, 62)
+
+  def test_empty_statements_and_returns(self):
+    """Verifies transpilation of empty block, empty returns, and expression statements."""
+    code = """
+    func dummy() {}
+    func empty_fn() {
+      dummy();
+      return;
+    }
+    """
+    result = self._transpile_and_run(code, "empty_fn()")
+    self.assertIsNone(result)
+
+  def test_direct_transpiler_visitors(self):
+    """Directly tests transpiler visitors that are not invoked during standard program traversal."""
+    try:
+      from parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
+    except ModuleNotFoundError:
+      from src.parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
+
+    transpiler = Transpiler()
+    
+    # 1. StructFieldNode
+    field_node = StructFieldNode(False, "x", BasicTypeNode("int"))
+    transpiler.visit(field_node)
+
+    # 2. TraitDeclNode
+    trait_node = TraitDeclNode("Actor", [])
+    transpiler.visit(trait_node)
+
+    # 3. Block lambda
+    lnode = LambdaNode([LambdaParamNode("x", None)], None, BlockNode([]))
+    transpiler.visit(lnode)
+
+    # 4. generic_visit NotImplementedError
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit(ASTNode())
+    
+    self.assertTrue(len(transpiler.get_output()) > 0)
+
+
 if __name__ == "__main__":
   unittest.main()

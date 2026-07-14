@@ -128,6 +128,24 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(field2.name, "y")
     self.assertEqual(field2.field_type.name, "float")
 
+  def test_additional_syntax(self):
+    """Verifies parsing of standard if/else, multi-parameter lambdas, and other literals/expressions."""
+    ast = self._get_ast("""
+    func demo() {
+      if true {
+        let x = 1;
+      } else if false {
+        let y = 2;
+      } else {
+        let z = (3);
+      }
+    }
+    """)
+    self.assertEqual(len(ast.declarations), 1)
+
+    ast_lambda = self._get_ast("let f = (a: int, b: float) -> int { return a; };")
+    self.assertEqual(len(ast_lambda.declarations), 1)
+
 
 if __name__ == "__main__":
   unittest.main()
