@@ -81,6 +81,20 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node_dict["left"]["name"], "a")
     self.assertEqual(node_dict["right"]["value"], 5)
 
+  def test_list_serialization_and_repr(self):
+    """Verifies that lists containing AST nodes and non-AST elements serialize, and repr works."""
+    try:
+      from parser.ast import ProgramNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ProgramNode
+
+    node = ProgramNode(declarations=[BasicTypeNode("int"), "not-an-ast-node"])
+    node_dict = node.to_dict()
+    self.assertEqual(node_dict["node_type"], "ProgramNode")
+    self.assertEqual(node_dict["declarations"][0]["name"], "int")
+    self.assertEqual(node_dict["declarations"][1], "not-an-ast-node")
+    self.assertTrue(len(repr(node)) > 0)
+
 
 if __name__ == "__main__":
   unittest.main()

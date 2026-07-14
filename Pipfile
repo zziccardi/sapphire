@@ -11,3 +11,7 @@ coverage = "*"
 
 [requires]
 python_version = "3.14"
+
+[scripts]
+test = "python -m unittest discover -s src -p '*_test.py'"
+coverage = "sh -c 'coverage run -m unittest discover -s src -p \"*_test.py\" && coverage report && coverage html'"

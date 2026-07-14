@@ -418,5 +418,414 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
 
+  def test_more_semantic_errors(self):
+    """Verifies various semantic validation failures and edge cases."""
+    # 1. Global redefinition (struct/struct)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Point {}
+      struct Point {}
+      """)
+
+    # 1b. Global redefinition (struct/trait)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct T {}
+      trait T {}
+      """)
+
+    # 2. Global redefinition (func/func)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func foo() {}
+      func foo() {}
+      """)
+
+    # 3. Inheritance: missing parent
+    with self.assertRaises(SemanticError):
+      self._check("struct Child: Parent {}")
+
+    # 4. Inheritance: parent is not a struct
+    with self.assertRaises(SemanticError):
+      self._check("""
+      trait Parent {}
+      struct Child: Parent {}
+      """)
+
+    # 5. Field shadowing parent field
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Parent { var x: int; }
+      struct Child: Parent { var x: float; }
+      """)
+
+    # 6. Impl undefined struct
+    with self.assertRaises(SemanticError):
+      self._check("impl UndefinedStruct {}")
+
+    # 7. Impl undefined trait
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Point {}
+      impl UndefinedTrait for Point {}
+      """)
+
+    # 7b. Impl trait not actual trait
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Point {}
+      struct NonTrait {}
+      impl NonTrait for Point {}
+      """)
+
+    # 7c. Duplicate method in impl
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Point {}
+      impl Point {
+        func f() {}
+        func f() {}
+      }
+      """)
+
+    # 8. Standard if condition not bool
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        if 10 {}
+      }
+      """)
+
+    # 9. Binary operators on wrong types
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let x = true && 5;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let x = 10 + true;
+      }
+      """)
+
+    # 10. Unary operators on wrong types
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let x = !5;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let x = -true;
+      }
+      """)
+
+    # 11. Member access on non-struct
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let x = 10;
+        let y = x.value;
+      }
+      """)
+
+    # 12. Non-existent field
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Point {}
+      func test() {
+        let p = Point();
+        let y = p.z;
+      }
+      """)
+
+    # 13. Clone target not struct
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let x = 10;
+        let y = clone x;
+      }
+      """)
+
+    # 14. Calling parameter count issues (too many arguments)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test(a: int) {}
+      func run() {
+        test(a = 1, b = 2);
+      }
+      """)
+
+    # 15. Argument type mismatch
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test(a: int) {}
+      func run() {
+        test(a = true);
+      }
+      """)
+
+    # 16. Lambda without type context
+    self._check("""
+    func test() {
+      let f = x -> x;
+    }
+    """)
+
+    # 17. Undefined type referenced
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f(x: UndefinedType) {}
+      """)
+
+    # 18. Variable initialized with none alone
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let x = none;
+      }
+      """)
+
+    # 19. Incompatible reassignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        var x = 1;
+        x = true;
+      }
+      """)
+
+    # 20. Undefined identifier assignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        undefined_var = 1;
+      }
+      """)
+
+    # 21. Non-variable assignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        f = 1;
+      }
+      """)
+
+    # 22. Property access target not struct in assignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let x = 10;
+        x.field = 5;
+      }
+      """)
+
+    # 23. Struct has no field in assignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Point {}
+      func f() {
+        var p = Point();
+        p.z = 5;
+      }
+      """)
+
+    # 24. Indexing non-array in assignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let x = 10;
+        x[0] = 5;
+      }
+      """)
+
+    # 25. Array index not int in assignment
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        var arr = [10];
+        arr[true] = 5;
+      }
+      """)
+
+    # 26. Invalid assignment target
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        10 = 20;
+      }
+      """)
+
+    # 27. Return mismatch and return outside function context
+    try:
+      from parser.ast import ReturnNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ReturnNode
+    checker = TypeChecker()
+    checker.visit(ReturnNode(None))
+    self.assertTrue(len(checker.errors) > 0)
+
+    # 28. Valid for loop on array
+    self._check("""
+    func test() {
+      let arr = [10, 20];
+      for x in arr {
+        let y = x;
+      }
+    }
+    """)
+
+    # 29. Undefined identifier in expr
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let x = y;
+      }
+      """)
+
+    # 30. Incompatible comparison
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let x = true == 5;
+      }
+      """)
+
+    # 31. Float promotion in binary op
+    self._check("""
+    func f() {
+      let x = 10.5 + 5;
+    }
+    """)
+
+    # 32. Valid optional chaining
+    self._check("""
+    struct Person { var name: String; }
+    func test() {
+      var p: Person? = none;
+      let name = p?.name;
+    }
+    """)
+
+    # 33. NotImplementedError in generic visit
+    try:
+      from parser.ast import ASTNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ASTNode
+    with self.assertRaises(NotImplementedError):
+      checker = TypeChecker()
+      checker.visit(ASTNode())
+
+    # 34. Double declaration (trait/struct) to trigger struct layout lookup type mismatch
+    with self.assertRaises(SemanticError):
+      self._check("""
+      trait T {}
+      struct T {}
+      """)
+
+    # 35. Direct _resolve_type_node calls
+    try:
+      from semantics.symbol_table import PrimitiveType, FunctionType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import PrimitiveType, FunctionType
+    try:
+      from parser.ast import TypeNode
+    except ModuleNotFoundError:
+      from src.parser.ast import TypeNode
+    checker = TypeChecker()
+    self.assertEqual(checker._resolve_type_node(None), PrimitiveType("none"))
+    self.assertEqual(checker._resolve_type_node(TypeNode()), PrimitiveType("none"))
+
+    # 36. Optional property assignment
+    self._check("""
+    struct Person { var name: String; }
+    func test() {
+      var p: Person? = none;
+      p?.name = "Bob";
+    }
+    """)
+
+    # 37. Expected return type mismatch
+    checker = TypeChecker()
+    checker.current_function = FunctionType([], PrimitiveType("int"))
+    checker.visit(ReturnNode(None))
+    self.assertTrue(len(checker.errors) > 0)
+
+    # 38. Standard if/else statement type check
+    self._check("""
+    func test() {
+      if true {
+        let x = 1;
+      } else {
+        let y = 2;
+      }
+    }
+    """)
+
+    # 39. visit_BinaryOpNode with invalid operator
+    try:
+      from parser.ast import BinaryOpNode, LiteralNode
+    except ModuleNotFoundError:
+      from src.parser.ast import BinaryOpNode, LiteralNode
+    bnode = BinaryOpNode(LiteralNode(1, "int"), "invalid-op", LiteralNode(2, "int"))
+    checker = TypeChecker()
+    self.assertEqual(checker.visit(bnode), PrimitiveType("none"))
+
+    # 40. visit_UnaryOpNode with invalid operator
+    try:
+      from parser.ast import UnaryOpNode
+    except ModuleNotFoundError:
+      from src.parser.ast import UnaryOpNode
+    unode = UnaryOpNode("invalid-op", LiteralNode(1, "int"))
+    checker = TypeChecker()
+    self.assertEqual(checker.visit(unode), PrimitiveType("none"))
+
+    # 41. Lambda with explicit parameter type
+    self._check("""
+    func test() {
+      let f = (x: int) -> x * 2;
+    }
+    """)
+
+    # 42. Lambda with explicit return type and block body
+    try:
+      from parser.ast import LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode
+    except ModuleNotFoundError:
+      from src.parser.ast import LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode
+    lnode = LambdaNode(
+        parameters=[LambdaParamNode("x", None)],
+        return_type=BasicTypeNode("int"),
+        body=BlockNode(statements=[])
+    )
+    checker = TypeChecker()
+    self.assertEqual(checker.visit(lnode).return_type, PrimitiveType("int"))
+
+    # 43. Empty array literal
+    self._check("""
+    func test() {
+      let arr = [];
+    }
+    """)
+
+    # 44. __proto__ property access
+    self._check("""
+    struct Person {}
+    impl Person {
+      func __init__() {}
+    }
+    func test() {
+      let p = Person();
+      let parent = p.__proto__;
+    }
+    """)
+
+
 if __name__ == "__main__":
   unittest.main()

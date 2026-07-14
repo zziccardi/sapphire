@@ -13,13 +13,21 @@ antlr -Dlanguage=Python3 -visitor -o src/parser/gen -Xexact-output-dir \
 This will create SapphireLexer.py, SapphireParser.py, SapphireListener.py, and
 SapphireVisitor.py in the workspace.
 
-From there, create a Python runner script that loads the Sapphire source code,
-hooks up custom error listeners, and parses the program.
+## Compilation & execution
 
-For a script called e.g. `run_parser.py`:
-
+To compile a Sapphire source file to Python (e.g. `sample.sp` to `sample.py`):
+```bash
+pipenv run python src/run_transpiler.py sample.sp
 ```
-pipenv run python src/run_parser.py
+
+To execute the transpiled Python file:
+```bash
+pipenv run python sample.py
+```
+
+To run the full semantics demo of the transpiled file:
+```bash
+pipenv run python -c "import sample; sample.run_demo()"
 ```
 
 ## Test coverage
@@ -27,13 +35,9 @@ pipenv run python src/run_parser.py
 Run the following to execute all unit tests under `src/` & track code coverage:
 
 ```
-pipenv run coverage run -m unittest discover -s src -p "*_test.py"
+pipenv run coverage
 ```
 
 Note that this requires each directory to include an `__init__.py` file.
 
-Then generate a coverage report with the following:
-
-```
-pipenv run coverage html
-```
+This will also create an HTML version of the coverage report.

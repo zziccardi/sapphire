@@ -14,6 +14,10 @@ try:
       ArrayType,
       NoneType,
       VariableSymbol,
+      FunctionType,
+      StructType,
+      TraitType,
+      Type,
   )
 except ModuleNotFoundError:
   from src.semantics.symbol_table import (
@@ -23,6 +27,10 @@ except ModuleNotFoundError:
       ArrayType,
       NoneType,
       VariableSymbol,
+      FunctionType,
+      StructType,
+      TraitType,
+      Type,
   )
 
 
@@ -103,6 +111,51 @@ class TestSymbolTable(unittest.TestCase):
     """Verifies that exiting the global scope raises a RuntimeError."""
     with self.assertRaises(RuntimeError):
       self.sym_tab.exit_scope()
+
+  def test_type_formatting_and_non_comparisons(self):
+    """Verifies repr strings and comparing types/symbols with incompatible classes or objects."""
+    # Lookup non-existent
+    self.assertIsNone(self.sym_tab.lookup("non-existent-symbol"))
+    self.assertIsNone(self.sym_tab.lookup_type("NonExistentType"))
+
+    # PrimitiveType non-equality with other classes
+    self.assertFalse(self.int_type == 42)
+    self.assertFalse(self.int_type == PrimitiveType("float"))
+
+    # Type __eq__ fallback
+    self.assertFalse(Type() == "not-a-type")
+
+    # OptionalType repr and non-equality
+    opt_int = OptionalType(self.int_type)
+    self.assertEqual(repr(opt_int), "int?")
+    self.assertFalse(opt_int == self.int_type)
+    self.assertTrue(opt_int == OptionalType(self.int_type))
+
+    # FunctionType non-equality
+    func_type = FunctionType([self.int_type], self.float_type)
+    self.assertFalse(func_type == self.int_type)
+
+    # StructType __eq__ and __repr__
+    st1 = StructType("A")
+    st2 = StructType("B")
+    self.assertFalse(st1 == st2)
+    self.assertFalse(st1 == self.int_type)
+    self.assertEqual(repr(st1), "A")
+
+    # TraitType __eq__ and __repr__
+    tr1 = TraitType("T1")
+    tr2 = TraitType("T2")
+    self.assertFalse(tr1 == tr2)
+    self.assertFalse(tr1 == self.int_type)
+    self.assertEqual(repr(tr1), "trait T1")
+
+    # NoneType repr
+    self.assertEqual(repr(NoneType()), "none")
+
+    # ArrayType repr and non-equality
+    arr = ArrayType(self.int_type)
+    self.assertEqual(repr(arr), "[int]")
+    self.assertFalse(arr == self.int_type)
 
 
 if __name__ == "__main__":

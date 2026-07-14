@@ -1,52 +1,31 @@
 """Semantic analyzer and type checker implementation for Sapphire.
 
-This module walks the Sapphire AST, constructs symbol tables, performs type checking
-and type inference, and validates all semantic constraints of the Sapphire language.
+This module walks the Sapphire AST, constructs symbol tables, performs type
+checking and type inference, and validates all semantic constraints of the
+Sapphire language.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-try:
-  from parser.ast import *
-except ModuleNotFoundError:
-  from src.parser.ast import *
+from parser.ast import *
 
-try:
-  from semantics.symbol_table import (
-      SymbolTable,
-      Type,
-      PrimitiveType,
-      OptionalType,
-      FunctionType,
-      StructField,
-      StructMethod,
-      StructType,
-      TraitType,
-      NoneType,
-      ArrayType,
-      VariableSymbol,
-      FunctionSymbol,
-      StructSymbol,
-      TraitSymbol,
-  )
-except ModuleNotFoundError:
-  from src.semantics.symbol_table import (
-      SymbolTable,
-      Type,
-      PrimitiveType,
-      OptionalType,
-      FunctionType,
-      StructField,
-      StructMethod,
-      StructType,
-      TraitType,
-      NoneType,
-      ArrayType,
-      VariableSymbol,
-      FunctionSymbol,
-      StructSymbol,
-      TraitSymbol,
-  )
+from semantics.symbol_table import (
+    SymbolTable,
+    Type,
+    PrimitiveType,
+    OptionalType,
+    FunctionType,
+    StructField,
+    StructMethod,
+    StructType,
+    TraitType,
+    NoneType,
+    ArrayType,
+    VariableSymbol,
+    FunctionSymbol,
+    StructSymbol,
+    TraitSymbol,
+)
 
 
 class SemanticError(Exception):
@@ -135,7 +114,7 @@ class TypeChecker:
     def process_struct(node: StructDeclNode):
       if node.name in processed:
         return
-      
+
       struct_type = self.symbol_table.lookup_type(node.name)
       if not isinstance(struct_type, StructType):
         return
@@ -196,7 +175,7 @@ class TypeChecker:
           signature = FunctionType(param_types, ret_type)
 
           method = StructMethod(func_decl.name, signature, member.modifier)
-          
+
           # Check for duplicate definitions
           if func_decl.name in struct_type.methods:
             self.error(f"Method '{func_decl.name}' redefined in struct '{decl.struct_name}'.")
@@ -285,7 +264,7 @@ class TypeChecker:
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func_decl = node.func_decl
     struct_type = self.current_struct
-    
+
     # Enter scope of method
     self.symbol_table.enter_scope()
 
@@ -325,7 +304,7 @@ class TypeChecker:
     self.is_in_init = old_in_init
     self.initialized_fields = old_fields
     self.current_function = None
-    
+
     self.symbol_table.exit_scope()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
@@ -449,7 +428,7 @@ class TypeChecker:
       if not isinstance(array_type, ArrayType):
         self.error("Cannot index non-array type.")
         return PrimitiveType("none")
-      
+
       # Enforce that array target is a mutable variable
       if isinstance(node.array, IdentifierNode):
         sym = self.symbol_table.lookup(node.array.name)
@@ -619,7 +598,7 @@ class TypeChecker:
     # Map arguments (positional vs named)
     mapped_args: Dict[int, ArgumentNode] = {}
     named_map: Dict[str, int] = {}
-    
+
     # Normally we need parameter names to resolve named parameters. But wait, how do we know the param names?
     # For now, let's assume we map named arguments by resolving their names if we have the signature context.
     # To properly support named parameters, we'd need to store the parameter names in the FunctionType or StructMethod.
@@ -637,10 +616,10 @@ class TypeChecker:
         self.expected_type = signature.param_types[idx]
       else:
         self.expected_type = None
-      
+
       arg_type = self.visit(arg.expr)
       self.expected_type = old_expected
-      
+
       # Check positional constraints (since this is basic subset)
       if idx < len(signature.param_types):
         param_type = signature.param_types[idx]
@@ -727,7 +706,7 @@ class TypeChecker:
 
   def visit_LambdaNode(self, node: LambdaNode) -> Type:
     self.symbol_table.enter_scope()
-    
+
     param_types = []
     for idx, p in enumerate(node.parameters):
       if p.param_type:
@@ -744,7 +723,7 @@ class TypeChecker:
       param_types.append(ptype)
 
     body_type = self.visit(node.body)
-    
+
     # Lambda expression implicit return
     ret_type = body_type if not isinstance(node.body, BlockNode) else PrimitiveType("none")
     if node.return_type:
@@ -762,7 +741,7 @@ class TypeChecker:
     if not node.elements:
       # Empty array defaults to [none] or [any] (we use NoneType)
       return ArrayType(NoneType())
-    
+
     elem_types = [self.visit(e) for e in node.elements]
     first_type = elem_types[0]
     for etype in elem_types[1:]:
