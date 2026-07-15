@@ -98,11 +98,13 @@ class TypeChecker:
         # We will fully resolve parameter/return types of global functions in Pass 4,
         # but we register their name and placeholder signature here for mutual recursion.
         param_types = []
+        param_mutabilities = []
         for p in decl.parameters:
           ptype = self._resolve_type_node(p.param_type)
           param_types.append(ptype)
+          param_mutabilities.append(p.is_mutable)
         ret_type = self._resolve_type_node(decl.return_type) if decl.return_type else PrimitiveType("none")
-        signature = FunctionType(param_types, ret_type)
+        signature = FunctionType(param_types, ret_type, param_mutabilities)
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
@@ -168,11 +170,13 @@ class TypeChecker:
           func_decl = member.func_decl
           # Resolve parameters
           param_types = []
+          param_mutabilities = []
           for p in func_decl.parameters:
             ptype = self._resolve_type_node(p.param_type)
             param_types.append(ptype)
+            param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
-          signature = FunctionType(param_types, ret_type)
+          signature = FunctionType(param_types, ret_type, param_mutabilities)
 
           method = StructMethod(func_decl.name, signature, member.modifier)
 
@@ -288,8 +292,9 @@ class TypeChecker:
 
     # Save function signature context
     resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
+    param_mutabilities = [p.is_mutable for p in func_decl.parameters]
     ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
-    self.current_function = FunctionType(resolved_params, ret_type)
+    self.current_function = FunctionType(resolved_params, ret_type, param_mutabilities)
 
     # Visit body
     self.visit(func_decl.body)
@@ -319,8 +324,9 @@ class TypeChecker:
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
 
     resolved_params = [self._resolve_type_node(p.param_type) for p in node.parameters]
+    param_mutabilities = [p.is_mutable for p in node.parameters]
     ret_type = self._resolve_type_node(node.return_type) if node.return_type else PrimitiveType("none")
-    self.current_function = FunctionType(resolved_params, ret_type)
+    self.current_function = FunctionType(resolved_params, ret_type, param_mutabilities)
 
     self.visit(node.body)
 
@@ -569,29 +575,115 @@ class TypeChecker:
       return expr_type
     return PrimitiveType("none")
 
+  def _get_lvalue_path(self, node: ASTNode) -> Optional[tuple[str, List[str]]]:
+    """Resolves an AST node to its root variable name and field path if it is an lvalue."""
+    if isinstance(node, IdentifierNode):
+      sym = self.symbol_table.lookup(node.name)
+      if isinstance(sym, VariableSymbol):
+        return (node.name, [])
+    elif isinstance(node, MemberAccessNode):
+      res = self._get_lvalue_path(node.receiver)
+      if res is not None:
+        root, path = res
+        return (root, path + [node.member])
+    elif isinstance(node, IndexExprNode):
+      res = self._get_lvalue_path(node.array)
+      if res is not None:
+        root, path = res
+        return (root, path + ["[]"])
+    return None
+
+  def _is_reference_type(self, type_obj: Type) -> bool:
+    """Returns True if the type is passed by reference (non-primitive)."""
+    if isinstance(type_obj, OptionalType):
+      return self._is_reference_type(type_obj.base_type)
+    if isinstance(type_obj, PrimitiveType):
+      return type_obj.name not in ("int", "float", "bool")
+    if isinstance(type_obj, NoneType):
+      return False
+    return True
+
+  def _check_aliasing(self, node: CallNode, signature: FunctionType, is_constructor: bool) -> None:
+    """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
+    borrows = []  # List of (root, path, is_mutable)
+
+    # 1. Check implicit self receiver for non-static method calls
+    if not is_constructor and isinstance(node.callee, MemberAccessNode):
+      receiver_node = node.callee.receiver
+      receiver_type = self.visit(receiver_node)
+      if isinstance(receiver_type, OptionalType):
+        receiver_type = receiver_type.base_type
+      if isinstance(receiver_type, StructType):
+        method = receiver_type.methods.get(node.callee.member)
+        if method and method.modifier != "static":
+          # Receiver is implicitly passed.
+          # It is mutably borrowed if method is not const.
+          is_mutable = (method.modifier != "const")
+          res = self._get_lvalue_path(receiver_node)
+          if res:
+            root, path = res
+            borrows.append((root, path, is_mutable))
+
+    # 2. Check explicit arguments
+    for idx, arg in enumerate(node.arguments):
+      if idx < len(signature.param_types):
+        param_type = signature.param_types[idx]
+        is_mutable = signature.param_mutabilities[idx]
+        if self._is_reference_type(param_type):
+          res = self._get_lvalue_path(arg.expr)
+          if res:
+            root, path = res
+            borrows.append((root, path, is_mutable))
+
+    # 3. Check for conflicts among all borrows
+    for i in range(len(borrows)):
+      for j in range(i + 1, len(borrows)):
+        r1, p1, m1 = borrows[i]
+        r2, p2, m2 = borrows[j]
+        if r1 == r2:
+          # Check if paths overlap (one is prefix of another)
+          overlap = p1[:len(p2)] == p2 or p2[:len(p1)] == p1
+          if overlap:
+            # Conflict if at least one is mutable
+            if m1 or m2:
+              self.error(
+                  f"Aliasing conflict: variable '{r1}' (or a sub-field) "
+                  f"is mutably borrowed and cannot be borrowed again in the same call."
+              )
+
   def visit_CallNode(self, node: CallNode) -> Type:
     # 1. Resolve callee
     callee_type = self.visit(node.callee)
 
+    signature = None
+    is_constructor = False
+
     # Constructor resolution
     if isinstance(callee_type, StructType):
+      is_constructor = True
       # Look up constructor
       init_method = callee_type.methods.get("__init__")
       if not init_method:
         self.error(f"Struct '{callee_type.name}' has no '__init__' constructor defined.")
         return callee_type
-
+      signature = init_method.method_type
       # Match arguments
-      self._check_arguments(node.arguments, init_method.method_type, is_constructor=True)
+      self._check_arguments(node.arguments, signature, is_constructor=True)
+    else:
+      # Standard function/method resolution
+      if not isinstance(callee_type, FunctionType):
+        self.error("Target is not callable.")
+        return PrimitiveType("none")
+      signature = callee_type
+      self._check_arguments(node.arguments, signature)
+
+    # Perform borrow checking / aliasing rules
+    if signature:
+      self._check_aliasing(node, signature, is_constructor)
+
+    if is_constructor:
       return callee_type
-
-    # Standard function/method resolution
-    if not isinstance(callee_type, FunctionType):
-      self.error("Target is not callable.")
-      return PrimitiveType("none")
-
-    self._check_arguments(node.arguments, callee_type)
-    return callee_type.return_type
+    return signature.return_type
 
   def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False) -> None:
     """Helper to match argument lists against signatures (including parameter modes)."""
