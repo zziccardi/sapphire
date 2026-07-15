@@ -134,6 +134,10 @@ class TestSymbolTable(unittest.TestCase):
     # FunctionType non-equality
     func_type = FunctionType([self.int_type], self.float_type)
     self.assertFalse(func_type == self.int_type)
+    
+    # FunctionType repr with var parameter
+    func_type_var = FunctionType([self.int_type], self.float_type, [True])
+    self.assertEqual(repr(func_type_var), "(var int) -> float")
 
     # StructType __eq__ and __repr__
     st1 = StructType("A")

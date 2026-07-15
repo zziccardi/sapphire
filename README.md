@@ -29,6 +29,8 @@ either `snake_case` or `PascalCase` but should be consistent.
 * **Compile-time constants**: Global or compile-time constant expressions should use `SCREAMING_SNAKE_CASE` (e.g., `MAX_SPEED`).
 * **Primitive types**: Lowercase naming (e.g., `int`, `float`, `bool`).
 * **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`, `Vector2`) for both built-in and user-defined types.
+* Comments on the same line as code should have two spaces before the `//`.
+* Constant params should precede mutable params in function definitions.
 
 ## 2. Variable declaration & memory semantics
 
@@ -97,6 +99,23 @@ calculate_damage(defender = target_enemy, attacker = current_player);
 
 // Invocation overriding the default parameter value
 calculate_damage(current_player, target_enemy, is_critical = true);
+```
+
+### Scope-bound aliasing rules (borrow-checking)
+
+To guarantee reference safety and eliminate runtime aliasing logic bugs without introducing the visual overhead of Rust-style lifetime annotations, Sapphire's compiler enforces compile-time **scope-bound aliasing rules** at call sites:
+* **Reference types only**: Primitive types (`int`, `float`, `bool`) and `none` are value-copied and ignored by this check. User-defined `struct` types and `String` are reference-passed and validated.
+* **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be mutably borrowed (`var` parameter) if it is already borrowed (either mutably or immutably) within the same call.
+* **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (borrowed mutably for mutable methods, or immutably for `const` methods).
+
+```
+// Rejected: 'player' is borrowed mutably as 'target' and immutably as
+// 'observer'.
+execute_interaction(target = player, observer = player);
+
+// Rejected: 'player' (receiver) is mutably borrowed, conflicting with its use
+// as 'other'.
+player.mutate(other = player);
 ```
 
 ## 5. First-class & anonymous functions

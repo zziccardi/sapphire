@@ -139,7 +139,7 @@ class Transpiler:
     self.emit("def __init__(self, *args, proto=None, **kwargs):")
     self.indent()
     self.newline()
-    self.emit("super().__init__(proto)")
+    self.emit("super().__init__(proto=proto)")
     self.newline()
     self.emit("if proto is None:")
     self.indent()

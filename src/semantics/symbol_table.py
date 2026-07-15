@@ -69,9 +69,15 @@ class OptionalType(Type):
 class FunctionType(Type):
   """Represents a function type signature (e.g., '(int, int) -> float')."""
 
-  def __init__(self, param_types: List[Type], return_type: Type):
+  def __init__(
+      self,
+      param_types: List[Type],
+      return_type: Type,
+      param_mutabilities: Optional[List[bool]] = None,
+  ):
     self.param_types = param_types
     self.return_type = return_type
+    self.param_mutabilities = param_mutabilities or [False] * len(param_types)
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, FunctionType):
@@ -79,10 +85,17 @@ class FunctionType(Type):
     return (
         self.param_types == other.param_types
         and self.return_type == other.return_type
+        and self.param_mutabilities == other.param_mutabilities
     )
 
   def __repr__(self) -> str:
-    params_str = ", ".join(repr(t) for t in self.param_types)
+    params_reprs = []
+    for idx, t in enumerate(self.param_types):
+      if idx < len(self.param_mutabilities) and self.param_mutabilities[idx]:
+        params_reprs.append(f"var {repr(t)}")
+      else:
+        params_reprs.append(repr(t))
+    params_str = ", ".join(params_reprs)
     return f"({params_str}) -> {self.return_type}"
 
 

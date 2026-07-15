@@ -1,7 +1,7 @@
 /*
- * Sample Sapphire program illustrating the core features
- * of the language, including traits, structs, initializers,
- * optional safety, lambdas, and control flow.
+ * Sample Sapphire program illustrating the core features of the language,
+ * including traits, structs, initializers, optional safety, lambdas, and
+ * control flow.
  */
 
 // Global compile-time constant
@@ -42,7 +42,7 @@ impl Character {
   // Python-style initializer syntax
   func __init__(id: int, name: String, max_hp: int = 100) {
     self.id = id;
-    self.pos = Position(x = 0.0, y = 0.0); // Named parameter call
+    self.pos = Position(x = 0.0, y = 0.0);  // Named parameter call
     self.health = max_hp;
     self.max_health = max_hp;
     self.name = name;
@@ -118,7 +118,7 @@ func run_demo() {
 
   // Clone creates a live reference delegation back to prototype_enemy
   var active_clone = clone prototype_enemy {
-    self.health = 25; // Shadowed locally
+    self.health = 25;  // Shadowed locally
   };
 
   // Inspecting prototype chain (__proto__ is read-only and type T?)

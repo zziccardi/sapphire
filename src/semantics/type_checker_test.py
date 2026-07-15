@@ -826,6 +826,172 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_aliasing_rules(self):
+    """Verifies that Scope-Bound Aliasing constraints are correctly checked."""
+    # 1. Reject overlapping mutable-immutable borrows
+    code_mut_imm = """
+    struct Character {
+      var name: String;
+    }
+    impl Character {
+      func __init__(n: String) { self.name = n; }
+    }
+    func execute(var target: Character, observer: Character) {}
+    func test() {
+      var player = Character(n = "A");
+      execute(target = player, observer = player);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_mut_imm)
+    self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 2. Reject overlapping double mutable borrows
+    code_double_mut = """
+    struct Character {
+      var name: String;
+    }
+    impl Character {
+      func __init__(n: String) { self.name = n; }
+    }
+    func execute(var target: Character, var other: Character) {}
+    func test() {
+      var player = Character(n = "A");
+      execute(target = player, other = player);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_double_mut)
+    self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 3. Reject hierarchical overlaps
+    code_hierarchical = """
+    struct Position { var x: float; }
+    impl Position { func __init__() { self.x = 0.0; } }
+    struct Entity { var pos: Position; }
+    impl Entity { func __init__() { self.pos = Position(); } }
+    func execute(var parent: Entity, child: Position) {}
+    func test() {
+      var player = Entity();
+      execute(parent = player, child = player.pos);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_hierarchical)
+    self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 4. Allow multiple immutable borrows
+    code_multi_imm = """
+    struct Character {}
+    impl Character { func __init__() {} }
+    func execute(first: Character, second: Character) {}
+    func test() {
+      let player = Character();
+      execute(first = player, second = player);
+    }
+    """
+    self._check(code_multi_imm)  # Should compile successfully
+
+    # 5. Ignore primitive value types in aliasing check
+    code_primitive = """
+    func execute(var a: int, b: int) {}
+    func test() {
+      var num = 10;
+      execute(a = num, b = num);
+    }
+    """
+    self._check(code_primitive)  # Should compile successfully
+
+    # 6. Reject implicit mutable receiver aliasing
+    code_recv_mut = """
+    struct Character { var val: int; }
+    impl Character {
+      func __init__() { self.val = 0; }
+      func mutate(other: Character) { self.val = other.val; }
+    }
+    func test() {
+      var player = Character();
+      player.mutate(other = player);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_recv_mut)
+    self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 7. Allow implicit const receiver aliasing
+    code_recv_const = """
+    struct Character { var val: int; }
+    impl Character {
+      func __init__() { self.val = 0; }
+      const func query(other: Character): int { return self.val; }
+    }
+    func test() {
+      var player = Character();
+      let res = player.query(other = player);
+    }
+    """
+    self._check(code_recv_const)  # Should compile successfully
+
+    # 8. Index expression aliasing conflict (resolves index paths)
+    code_index_aliasing = """
+    struct Item {}
+    impl Item { func __init__() {} }
+    func execute(var first: Item, var second: Item) {}
+    func test() {
+      var arr = [Item()];
+      execute(first = arr[0], second = arr[0]);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_index_aliasing)
+    self.assertIn("Aliasing conflict: variable 'arr' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 9. Optional reference type aliasing
+    code_opt_ref_aliasing = """
+    struct Character {}
+    impl Character { func __init__() {} }
+    func execute(var first: Character?, observer: Character?) {}
+    func test() {
+      var player: Character? = Character();
+      execute(first = player, observer = player);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_opt_ref_aliasing)
+    self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 10. NoneType passed as argument (does not trigger aliasing conflict)
+    code_none_arg = """
+    struct Character {}
+    impl Character { func __init__() {} }
+    func execute(first: Character?, second: Character?) {}
+    func test() {
+      execute(first = none, second = none);
+    }
+    """
+    self._check(code_none_arg)  # Should compile successfully
+
+    # 11. Optional chained receiver mutable method aliasing
+    code_opt_chained_recv = """
+    struct Character { var val: int; }
+    impl Character {
+      func __init__() { self.val = 0; }
+      func mutate(other: Character) { self.val = other.val; }
+    }
+    func test() {
+      var player: Character? = Character();
+      player?.mutate(other = player);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_opt_chained_recv)
+    self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
+
+    # 12. Direct test for _is_reference_type with NoneType (edge case coverage)
+    from semantics.symbol_table import NoneType
+    checker = TypeChecker()
+    self.assertFalse(checker._is_reference_type(NoneType()))
+
 
 if __name__ == "__main__":
   unittest.main()
