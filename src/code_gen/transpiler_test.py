@@ -296,6 +296,39 @@ class TestTranspiler(unittest.TestCase):
     
     self.assertTrue(len(transpiler.get_output()) > 0)
 
+  def test_prototypal_inheritance_with_static_inheritance(self):
+    """Verifies that inherited struct constructors propagate proto correctly for cloning."""
+    code = """
+    struct GameObject {
+      var id: int;
+    }
+    struct Character: GameObject {
+      var health: int;
+    }
+    impl Character {
+      func __init__(id_val: int, hp: int) {
+        self.id = id_val;
+        self.health = hp;
+      }
+    }
+    func test_inherited_cloning() {
+      var base = Character(id_val = 1, hp = 100);
+      var derived_clone = clone base {
+        self.health = 80;
+      };
+      
+      let initial_clone_health = derived_clone.health; // Shadowed (80)
+      let initial_clone_id = derived_clone.id;         // Delegated (1)
+      
+      base.id = 10; // Mutating prototype's inherited field should reflect on clone
+      let final_clone_id = derived_clone.id;
+      
+      return [initial_clone_health, initial_clone_id, final_clone_id];
+    }
+    """
+    result = self._transpile_and_run(code, "test_inherited_cloning()")
+    self.assertEqual(result, [80, 1, 10])
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -36,7 +36,7 @@ MAX_PLAYERS = 100
 
 class Position(SapphireObject):
   def __init__(self, *args, proto=None, **kwargs):
-    super().__init__(proto)
+    super().__init__(proto=proto)
     if proto is None:
       self._init_sapphire(*args, **kwargs)
   def _init_sapphire(self, x, y):
@@ -46,7 +46,7 @@ class Position(SapphireObject):
 
 class Entity(SapphireObject):
   def __init__(self, *args, proto=None, **kwargs):
-    super().__init__(proto)
+    super().__init__(proto=proto)
     if proto is None:
       pass
   pass
@@ -54,7 +54,7 @@ class Entity(SapphireObject):
 
 class Character(Entity):
   def __init__(self, *args, proto=None, **kwargs):
-    super().__init__(proto)
+    super().__init__(proto=proto)
     if proto is None:
       self._init_sapphire(*args, **kwargs)
   def _init_sapphire(self, id, name, max_hp=100):
