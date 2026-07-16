@@ -17,10 +17,7 @@ code (`.sp`) into clean, executable Python (`.py`).
 * **Static inheritance**: Structures can inherit layouts statically
   (`struct Character: Entity`) without runtime overhead or traditional OOP
   boilerplate.
-* **Prototypal delegation**: Create runtime objects by cloning existing
-prototypes using the `clone` keyword (similar to JavaScript or Lua). Mutating a
-base archetype propagates changes down to active clones unless they shadow those
-fields locally.
+* **Prototypal delegation**: Create runtime objects by cloning existing prototypes using the `clone` keyword. Prototypal delegation is opt-in and uses the `proto` keyword (e.g. `proto Character`). Nested reference fields on cloned objects support **Copy-on-Write (CoW)** to isolate mutations from the shared prototype. All `proto` instances and their clones are automatically managed in arenas.
 
 ### 2. Optional safety
 * Null-pointer errors are prevented at compile time.

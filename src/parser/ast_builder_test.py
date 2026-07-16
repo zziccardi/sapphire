@@ -19,6 +19,7 @@ try:
       BinaryOpNode,
       IfNode,
       StructDeclNode,
+      StructInitializerNode,
   )
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -32,6 +33,7 @@ except ModuleNotFoundError:
       BinaryOpNode,
       IfNode,
       StructDeclNode,
+      StructInitializerNode,
   )
 
 
@@ -145,6 +147,35 @@ class TestASTBuilder(unittest.TestCase):
 
     ast_lambda = self._get_ast("let f = (a: int, b: float) -> int { return a; };")
     self.assertEqual(len(ast_lambda.declarations), 1)
+
+  def test_proto_declaration(self):
+    """Verifies that proto declarations are parsed correctly."""
+    ast = self._get_ast("""
+    proto Enemy {
+      var health: int;
+    }
+    """)
+    self.assertEqual(len(ast.declarations), 1)
+    struct_decl = ast.declarations[0]
+    self.assertIsInstance(struct_decl, StructDeclNode)
+    self.assertEqual(struct_decl.name, "Enemy")
+    self.assertTrue(struct_decl.is_prototype)
+
+  def test_struct_initializer(self):
+    """Verifies parsing of curly-brace struct initializers."""
+    ast = self._get_ast("let sword = Weapon { damage = 45, durability = 100, };")
+    self.assertEqual(len(ast.declarations), 1)
+    decl = ast.declarations[0]
+    self.assertIsInstance(decl, VarDeclNode)
+    
+    struct_init = decl.expr
+    self.assertIsInstance(struct_init, StructInitializerNode)
+    self.assertEqual(struct_init.struct_name, "Weapon")
+    self.assertEqual(len(struct_init.fields), 2)
+    self.assertEqual(struct_init.fields[0].name, "damage")
+    self.assertEqual(struct_init.fields[0].expr.value, 45)
+    self.assertEqual(struct_init.fields[1].name, "durability")
+    self.assertEqual(struct_init.fields[1].expr.value, 100)
 
 
 if __name__ == "__main__":

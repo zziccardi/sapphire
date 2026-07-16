@@ -102,10 +102,11 @@ class FunctionType(Type):
 class StructField:
   """Represents a field in a struct."""
 
-  def __init__(self, name: str, field_type: Type, is_mutable: bool):
+  def __init__(self, name: str, field_type: Type, is_mutable: bool, has_default: bool = False):
     self.name = name
     self.field_type = field_type
     self.is_mutable = is_mutable
+    self.has_default = has_default
 
 
 class StructMethod:
@@ -120,12 +121,13 @@ class StructMethod:
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_name: Optional[str] = None):
+  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False):
     self.name = name
     self.parent_name = parent_name
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.is_cloned = False  # Set during clone-tracking analysis
+    self.is_prototype = is_prototype
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):

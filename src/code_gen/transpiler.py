@@ -15,6 +15,8 @@ from parser.ast import *
 # ==========================================
 
 RUNTIME_PREAMBLE = """# Sapphire Runtime Header
+import copy
+
 class SapphireObject:
   def __init__(self, proto=None):
     super().__setattr__('__proto__', proto)
@@ -29,7 +31,15 @@ class SapphireObject:
     if name in self.__shadow__:
       return self.__shadow__[name]
     if self.__proto__ is not None:
-      return getattr(self.__proto__, name)
+      val = getattr(self.__proto__, name)
+      if not isinstance(val, (int, float, bool, str, type(None))):
+        if hasattr(val, 'clone'):
+          cow_val = val.clone()
+        else:
+          cow_val = copy.deepcopy(val)
+        self.__shadow__[name] = cow_val
+        return cow_val
+      return val
     raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
 
   def __setattr__(self, name, value):
@@ -126,7 +136,8 @@ class Transpiler:
   # ==========================================
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
-    parent_class = node.parent_name if node.parent_name else "SapphireObject"
+    is_proto = node.is_prototype
+    parent_class = node.parent_name if node.parent_name else ("SapphireObject" if is_proto else "object")
     self.newline()
     self.emit(f"class {node.name}({parent_class}):")
     self.indent()
@@ -134,23 +145,51 @@ class Transpiler:
     methods = self.struct_methods.get(node.name, [])
     has_init = any(m.func_decl.name == "__init__" for m in methods)
 
-    # Output standard constructor to handle prototyping and delegate parameters
     self.newline()
-    self.emit("def __init__(self, *args, proto=None, **kwargs):")
-    self.indent()
-    self.newline()
-    self.emit("super().__init__(proto=proto)")
-    self.newline()
-    self.emit("if proto is None:")
-    self.indent()
-    if has_init:
+    if is_proto:
+      self.emit("def __init__(self, *args, proto=None, **kwargs):")
+      self.indent()
       self.newline()
-      self.emit("self._init_sapphire(*args, **kwargs)")
+      self.emit("super().__init__(proto=proto)")
+      self.newline()
+      self.emit("if proto is None:")
+      self.indent()
+      for f in node.fields:
+        if f.default_expr:
+          self.newline()
+          temp = Transpiler()
+          temp.visit(f.default_expr)
+          self.emit(f"self.{f.name} = {temp.get_output()}")
+      self.newline()
+      self.emit("for k, v in kwargs.items():")
+      self.indent()
+      self.newline()
+      self.emit("setattr(self, k, v)")
+      self.dedent()
+      if has_init:
+        self.newline()
+        self.emit("self._init_sapphire(*args, **kwargs)")
+      self.dedent()
+      self.dedent()
     else:
+      self.emit("def __init__(self, *args, **kwargs):")
+      self.indent()
+      for f in node.fields:
+        if f.default_expr:
+          self.newline()
+          temp = Transpiler()
+          temp.visit(f.default_expr)
+          self.emit(f"self.{f.name} = {temp.get_output()}")
       self.newline()
-      self.emit("pass")
-    self.dedent()
-    self.dedent()
+      self.emit("for k, v in kwargs.items():")
+      self.indent()
+      self.newline()
+      self.emit("setattr(self, k, v)")
+      self.dedent()
+      if has_init:
+        self.newline()
+        self.emit("self._init_sapphire(*args, **kwargs)")
+      self.dedent()
 
     # Output impl methods
     if not methods:
@@ -419,3 +458,12 @@ class Transpiler:
     self.emit("[")
     self.visit(node.index)
     self.emit("]")
+
+  def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
+    self.emit(f"{node.struct_name}(")
+    for idx, arg in enumerate(node.fields):
+      if idx > 0:
+        self.emit(", ")
+      self.emit(f"{arg.name}=")
+      self.visit(arg.expr)
+    self.emit(")")

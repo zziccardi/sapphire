@@ -401,7 +401,7 @@ class TestTypeChecker(unittest.TestCase):
   def test_cloning(self):
     """Verifies that clone constructs are type checked successfully."""
     self._check("""
-    struct Entity {
+    proto Entity {
       var score: int;
     }
     impl Entity {
@@ -991,6 +991,62 @@ class TestTypeChecker(unittest.TestCase):
     from semantics.symbol_table import NoneType
     checker = TypeChecker()
     self.assertFalse(checker._is_reference_type(NoneType()))
+
+  def test_struct_initialization_checking(self):
+    """Verifies semantic checking of struct initializers."""
+    # 1. Missing required field
+    code_missing = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test() {
+      let p = Point { x = 10 }; // Missing required field y
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_missing)
+    self.assertIn("Struct initializer for 'Point' is missing required field 'y'", str(context.exception))
+
+    # 2. Type mismatch
+    code_mismatch = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test() {
+      let p = Point { x = 10, y = "not_int" };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_mismatch)
+    self.assertIn("Field 'y' in struct 'Point' initializer has type 'string', but expected 'int'", str(context.exception))
+
+    # 3. Valid with default values
+    code_valid_defaults = """
+    struct Point {
+      var x: int;
+      var y: int = 42;
+    }
+    func test() {
+      let p = Point { x = 10 }; // Valid because y has default value
+    }
+    """
+    self._check(code_valid_defaults)
+
+  def test_clone_non_proto_error(self):
+    """Verifies that cloning a non-proto struct triggers a semantic error."""
+    code = """
+    struct Item {
+      var x: int;
+    }
+    func test(it: Item) {
+      let c = clone it;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot clone instance of non-proto struct 'Item'", str(context.exception))
 
 
 if __name__ == "__main__":

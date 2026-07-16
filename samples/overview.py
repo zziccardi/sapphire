@@ -1,4 +1,6 @@
 # Sapphire Runtime Header
+import copy
+
 class SapphireObject:
   def __init__(self, proto=None):
     super().__setattr__('__proto__', proto)
@@ -13,7 +15,15 @@ class SapphireObject:
     if name in self.__shadow__:
       return self.__shadow__[name]
     if self.__proto__ is not None:
-      return getattr(self.__proto__, name)
+      val = getattr(self.__proto__, name)
+      if not isinstance(val, (int, float, bool, str, type(None))):
+        if hasattr(val, 'clone'):
+          cow_val = val.clone()
+        else:
+          cow_val = copy.deepcopy(val)
+        self.__shadow__[name] = cow_val
+        return cow_val
+      return val
     raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
 
   def __setattr__(self, name, value):
@@ -34,11 +44,11 @@ def _clone_helper(obj, init_fn=None):
 MAX_PLAYERS = 100
 
 
-class Position(SapphireObject):
-  def __init__(self, *args, proto=None, **kwargs):
-    super().__init__(proto=proto)
-    if proto is None:
-      self._init_sapphire(*args, **kwargs)
+class Position(object):
+  def __init__(self, *args, **kwargs):
+    for k, v in kwargs.items():
+      setattr(self, k, v)
+    self._init_sapphire(*args, **kwargs)
   def _init_sapphire(self, x, y):
     self.x = x
     self.y = y
@@ -48,7 +58,8 @@ class Entity(SapphireObject):
   def __init__(self, *args, proto=None, **kwargs):
     super().__init__(proto=proto)
     if proto is None:
-      pass
+      for k, v in kwargs.items():
+        setattr(self, k, v)
   pass
 
 
@@ -56,6 +67,8 @@ class Character(Entity):
   def __init__(self, *args, proto=None, **kwargs):
     super().__init__(proto=proto)
     if proto is None:
+      for k, v in kwargs.items():
+        setattr(self, k, v)
       self._init_sapphire(*args, **kwargs)
   def _init_sapphire(self, id, name, max_hp=100):
     self.id = id

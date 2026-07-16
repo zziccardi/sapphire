@@ -17,7 +17,7 @@ declaration
     ;
 
 structDeclaration
-    : STRUCT IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
+    : (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
     ;
 
 structField
@@ -168,6 +168,19 @@ primaryExpression
     | SELF
     | arrayLiteral
     | LPAREN expression RPAREN
+    | structInitializer
+    ;
+
+structInitializer
+    : IDENTIFIER LBRACE structInitFieldList? RBRACE
+    ;
+
+structInitFieldList
+    : structInitField (COMMA structInitField)* COMMA?
+    ;
+
+structInitField
+    : IDENTIFIER ASSIGN expression
     ;
 
 literal
@@ -189,6 +202,7 @@ arrayLiteral
 // ==========================================
 
 // Keywords
+PROTO_KEYWORD : 'proto';
 LET : 'let';
 VAR : 'var';
 FUNC : 'func';

@@ -73,7 +73,7 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        struct_type = StructType(decl.name, decl.parent_name)
+        struct_type = StructType(decl.name, decl.parent_name, decl.is_prototype)
         self.symbol_table.define_type(decl.name, struct_type)
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
 
@@ -142,7 +142,7 @@ class TypeChecker:
         ftype = self._resolve_type_node(f.field_type)
         if f.name in struct_type.fields:
           self.error(f"Field '{f.name}' in struct '{node.name}' shadows inherited parent field.")
-        struct_type.fields[f.name] = StructField(f.name, ftype, f.is_mutable)
+        struct_type.fields[f.name] = StructField(f.name, ftype, f.is_mutable, f.default_expr is not None)
 
       processed.add(node.name)
 
@@ -302,7 +302,9 @@ class TypeChecker:
     # Verify constructor initializes all non-optional fields
     if func_decl.name == "__init__" and struct_type:
       for f_name, f_obj in struct_type.fields.items():
-        if f_name not in self.initialized_fields and not isinstance(f_obj.field_type, OptionalType):
+        if (f_name not in self.initialized_fields 
+            and not isinstance(f_obj.field_type, OptionalType)
+            and not f_obj.has_default):
           self.error(f"Constructor '__init__' failed to initialize non-optional field '{f_name}'.")
 
     # Restore constructor contexts
@@ -782,7 +784,26 @@ class TypeChecker:
       self.error("Clone expression target must be a struct instance.")
       return PrimitiveType("none")
 
-    # Mark the struct type as cloned (for clone-tracking optimization)
+    # Verify struct is a prototype struct (or inherits from one)
+    is_proto = False
+    curr = expr_type
+    while curr:
+      if curr.is_prototype:
+        is_proto = True
+        break
+      if curr.parent_name:
+        parent = self.symbol_table.lookup_type(curr.parent_name)
+        if isinstance(parent, StructType):
+          curr = parent
+        else:
+          break
+      else:
+        break
+
+    if not is_proto:
+      self.error(f"Cannot clone instance of non-proto struct '{expr_type.name}'. Struct must be declared using the 'proto' keyword.")
+
+    # Mark the struct type as cloned
     expr_type.is_cloned = True
 
     # If immediate shadow block is defined, check statements
@@ -854,3 +875,43 @@ class TypeChecker:
       self.error("Array index must be an 'int'.")
 
     return arr_type.element_type
+
+  def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:
+    struct_type = self.symbol_table.lookup_type(node.struct_name)
+    if not struct_type or not isinstance(struct_type, StructType):
+      self.error(f"Cannot instantiate undefined struct '{node.struct_name}'.")
+      return PrimitiveType("none")
+
+    initialized = set()
+    for field_arg in node.fields:
+      field_name = field_arg.name
+      if not field_name:
+        self.error(f"Positional arguments are not allowed in struct initializer of '{node.struct_name}'. Use named initializers instead.")
+        continue
+
+      if field_name not in struct_type.fields:
+        self.error(f"Struct '{node.struct_name}' has no field '{field_name}'.")
+        continue
+
+      if field_name in initialized:
+        self.error(f"Field '{field_name}' is initialized multiple times in struct initializer.")
+        continue
+
+      expr_type = self.visit(field_arg.expr)
+      expected_type = struct_type.fields[field_name].field_type
+      if not expr_type.is_compatible(expected_type):
+        self.error(
+            f"Field '{field_name}' in struct '{node.struct_name}' initializer "
+            f"has type '{expr_type}', but expected '{expected_type}'."
+        )
+
+      initialized.add(field_name)
+
+    # Verify all non-optional and non-default fields are initialized
+    for f_name, f_obj in struct_type.fields.items():
+      if (f_name not in initialized 
+          and not isinstance(f_obj.field_type, OptionalType)
+          and not f_obj.has_default):
+        self.error(f"Struct initializer for '{node.struct_name}' is missing required field '{f_name}'.")
+
+    return struct_type

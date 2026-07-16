@@ -26,7 +26,8 @@ class ASTBuilder(SapphireVisitor):
     name = ctx.IDENTIFIER(0).getText()
     parent_name = ctx.IDENTIFIER(1).getText() if len(ctx.IDENTIFIER()) > 1 else None
     fields = [self.visit(field) for field in ctx.structField()]
-    return StructDeclNode(name, parent_name, fields)
+    is_prototype = ctx.PROTO_KEYWORD() is not None
+    return StructDeclNode(name, parent_name, fields, is_prototype)
 
   def visitStructField(self, ctx: SapphireParser.StructFieldContext) -> StructFieldNode:
     is_mutable = ctx.VAR() is not None
@@ -258,6 +259,8 @@ class ASTBuilder(SapphireVisitor):
       return IdentifierNode("self")
     elif ctx.arrayLiteral():
       return self.visit(ctx.arrayLiteral())
+    elif ctx.structInitializer():
+      return self.visit(ctx.structInitializer())
     else:
       return self.visit(ctx.expression())
 
@@ -279,3 +282,18 @@ class ASTBuilder(SapphireVisitor):
   def visitArrayLiteral(self, ctx: SapphireParser.ArrayLiteralContext) -> ArrayLiteralNode:
     elements = [self.visit(expr) for expr in ctx.expression()]
     return ArrayLiteralNode(elements)
+
+  def visitStructInitializer(self, ctx: SapphireParser.StructInitializerContext) -> StructInitializerNode:
+    struct_name = ctx.IDENTIFIER().getText()
+    fields = []
+    if ctx.structInitFieldList():
+      fields = self.visit(ctx.structInitFieldList())
+    return StructInitializerNode(struct_name, fields)
+
+  def visitStructInitFieldList(self, ctx: SapphireParser.StructInitFieldListContext) -> List[ArgumentNode]:
+    return [self.visit(field) for field in ctx.structInitField()]
+
+  def visitStructInitField(self, ctx: SapphireParser.StructInitFieldContext) -> ArgumentNode:
+    name = ctx.IDENTIFIER().getText()
+    expr = self.visit(ctx.expression())
+    return ArgumentNode(name, expr)

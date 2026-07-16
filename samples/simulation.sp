@@ -39,14 +39,14 @@ trait Combatant {
 }
 
 // 3. Game entity base layout
-struct GameObject {
+proto GameObject {
   var id: int;
   var position: Vector2D;
   var active: bool;
 }
 
-// 4. Statically inherited struct: reuse GameObject layout via delegation
-struct Character: GameObject {
+// 4. Dynamically inherited struct: reuse GameObject layout via delegation
+proto Character: GameObject {
   var health: int;
   var max_health: int;
   var speed: float;

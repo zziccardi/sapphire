@@ -197,6 +197,20 @@ impl Weapon {
 }
 ```
 
+### Struct initializers (curly-brace syntax)
+
+For direct instantiation of structs, Sapphire supports a curly-brace initializer syntax. This is the preferred way to instantiate structs (unless complex constructor setup is needed). The syntax matches named parameters, using the `=` operator, and allows trailing commas:
+
+```
+let sword = Weapon {
+  damage = 45,
+  durability = 100,
+  name = "Broadsword",
+};
+```
+
+The compiler statically verifies that all non-optional fields of the struct are initialized and that their types are compatible.
+
 The following code will not compile because `sword` is a constant:
 
 ```
@@ -286,15 +300,16 @@ struct Player {
 
 ### B. Dynamic prototypal inheritance
 
-Prototypal inheritance allows objects to delegate state to other objects at runtime. Instead of defining a rigid class hierarchy or instantiating duplicate structures, one object can serve as an active prototype for another. The clone dynamically delegates field lookups to its prototype: changes made to the prototype propagate live to the cloned instance, while the clone can selectively shadow (override) specific values. This is highly valuable for rapid prototyping, template-based object creation (such as defining variations of a base enemy archetype in a game), and  zero-boilerplate data sharing.
+Prototypal inheritance allows objects to delegate state to other objects at runtime. Instead of defining a rigid class hierarchy or instantiating duplicate structures, one object can serve as an active prototype for another. The clone dynamically delegates field lookups to its prototype: changes made to the prototype propagate live to the cloned instance, while the clone can selectively shadow (override) specific values. This is highly valuable for rapid prototyping, template-based object creation (such as defining variations of a base enemy archetype in a game), and zero-boilerplate data sharing.
 
-In Sapphire, the compiler automatically generates a built-in `__proto__` property on every struct instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+In Sapphire, prototypal inheritance is opt-in and is declared using the `proto` syntax (e.g., `proto Enemy`). Standard structures (`struct`) do not support `clone` and are compiled to flat, fast layout structures with no runtime prototype lookup overhead.
+
+For prototype structures (`proto`), the compiler automatically generates a built-in `__proto__` property on every instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
 
 Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
 ```
-var base_goblin = Enemy();
-base_goblin.damage = 10;
+var base_goblin = Enemy { damage = 10 };
 
 let elite_goblin = clone base_goblin {
   self.health = 200;  // Shadowed locally
@@ -314,9 +329,9 @@ When an instance is bound using `let` (e.g., `let elite_goblin = clone base_gobl
 
 To prevent the unpredictability of JavaScript-style dynamic prototypes and keep performance consistent, Sapphire enforces the following constraints:
 * **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
-  * Additionally, shadowing of nested reference types is **shallow**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) mutates the shared instance on the prototype (assuming it is non-constant), rather than recursively creating a local copy of the nested object.
+  * Additionally, shadowing of nested reference types implements **copy-on-write (CoW)**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) will automatically intercept the write, deep-copy the nested reference locally on the clone (shadowing it), and then apply the mutation. This guarantees that mutations on the clone do not propagate back to the prototype.
 * **Data-only delegation**: Prototypal inheritance only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
-* **Opt-in pointer wrapper**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is an opt-in feature. Only instances that are cloned or explicitly used as prototypes are wrapped in a delegated container behind the scenes. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
+* **Opt-in proto declarations**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is restricted to structures declared with the `proto` keyword. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
 #### The `__proto__` property
 
@@ -351,35 +366,19 @@ Instead of binding developers to rigid memory layouts, Sapphire decouples the er
 
 This section outlines how the Sapphire compiler and runtime optimize code execution and manage memory without sacrificing performance or safety.
 
-### A. Clone-tracking & monomorphization
+### A. Proto compilation
 
-To preserve the zero-overhead promise of standard structures, the compiler avoids uniform wrapper structures or runtime flags for field lookups by default. Instead, it performs **clone-tracking** combined with **monomorphization**:
+To preserve the zero-overhead promise of standard structures, the compiler does not generate any prototype lookup wrappers or metadata for standard `struct` declarations.
+1. **Standard Structs**: Standard structs compile directly to flat layouts. Field lookups (e.g. `t.field`) compile to direct offset/index accesses.
+2. **Proto structures**: Structures declared with the `proto` keyword compile to instances wrapping their properties in a lookup system containing `__proto__` and `__shadow__` tables.
+3. **Copy-on-Write (CoW) Wrapper**: Field writes targeting a nested reference field inside a cloned object trigger a copy-on-write intercept. The runtime duplicates the nested reference locally to isolate the cloned instance's mutations.
 
-1. **Whole-program analysis (WPA)**: During compilation, the compiler tracks if a struct type `T` is ever cloned via the `clone` keyword in the codebase.
-   - **Non-cloned structs**: If `T` is never cloned, it is treated as a standard flat structure. Every field access (`t.field`) compiles to a direct memory offset read (e.g., a single CPU instruction).
-   - **Cloned structs**: If `T` is cloned anywhere in the codebase, the compiler marks `T` as "clonable/delegated".
-2. **Implicit monomorphization**: For functions taking clonable structs, the compiler generates two distinct binary implementations:
-   - A **flat path** optimized with direct, zero-overhead offset loads.
-   - A **delegated path** equipped with loop-lookup instructions to resolve dynamically shadowed fields and traverse the prototype chain.
-3. **Monomorphic call-site optimization**: If a call site is determined to only ever receive flat instances of a clonable struct, the compiler devirtualizes the call and statically dispatches to the flat path, ensuring no runtime lookup penalty.
+### B. Arena-based memory management
 
-### B. Hybrid lifetime & memory management
-
-To guarantee memory safety and eliminate the overhead of tracing garbage collectors or reference-counting metadata, Sapphire implements a **hybrid lifetime system** combining compile-time RAII scoping and implicit arena allocation:
-
-#### 1. Stack allocation (RAII-style lexical scoping)
-For variables declared on the stack, the compiler strictly enforces lexically scoped lifetimes:
-- **LIFO lifetime guarantee**: A stack-allocated clone must be declared in the same scope or an inner nested scope of its stack-allocated prototype. Since stack frames are popped in strict LIFO order, the clone is guaranteed to be destroyed before its prototype.
-- **Escape analysis**: The compiler performs escape analysis to ensure that stack-allocated prototypes or their clones never escape the stack frame (e.g., they cannot be returned from the function where they are declared).
-
-#### 2. Heap/arena allocation
-For long-lived dynamically allocated objects, Sapphire uses **implicit arena allocation** to free the programmer from manual memory management:
-- **Implicit co-location**: When a heap-allocated prototype is cloned, the runtime automatically inspects the prototype's allocation header and routes the clone's allocation to the **same arena** as its prototype. The developer does not need to manually pass or track arena references.
-- **Deallocation**: When the arena is torn down, all prototypes and their clones allocated within it are deallocated *en masse* with zero runtime fragmentation or cycle-checking overhead.
-
-#### 3. Cross-boundary safety constraints
-To prevent dangling pointers, the compiler strictly enforces boundary rules between memory regions:
-- **No stack-to-heap leakage**: An arena-allocated (heap) clone is **forbidden** from referencing a stack-allocated prototype. If a developer attempts to call `clone` on a stack-allocated prototype to allocate on the heap/arena, the compiler rejects it statically at compile time. This prevents heap clones from pointing to invalid stack frames that have been popped.
+All `proto` instances and their clones are automatically allocated on a managed arena. Sapphire prohibits allocating `proto` instances or their clones on the call stack, eliminating LIFO stack escape issues.
+1. **Implicit co-location**: When a prototype is cloned, the runtime automatically routes the clone's allocation to the same arena as its prototype.
+2. **Deallocation**: When the arena is torn down, all prototypes and their clones allocated within it are deallocated *en masse* with zero runtime fragmentation.
+3. **Lexical Arena Scope**: Arenas are managed using an `arena` block scope (e.g., `arena GameSession { ... }`). The compiler enforces that no prototype or clone escapes the lexical lifetime of its arena block.
 
 ## 10. Core operators, expressions, & control flow
 
