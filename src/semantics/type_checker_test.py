@@ -1048,6 +1048,117 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Cannot clone instance of non-proto struct 'Item'", str(context.exception))
 
+  def test_clone_struct_non_struct_parent(self):
+    """Verifies that cloning a struct inheriting from a non-struct type triggers a semantic error."""
+    code = """
+    struct Child: UndefinedParent {
+      var x: int;
+    }
+    func test(c: Child) {
+      let x = clone c;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Parent struct 'UndefinedParent' not found for 'Child'.", str(context.exception))
+    self.assertIn("Cannot clone instance of non-proto struct 'Child'", str(context.exception))
+
+  def test_struct_init_undefined_or_non_struct(self):
+    """Verifies that instantiating an undefined struct name or non-struct type raises a semantic error."""
+    code = """
+    trait SomeTrait {
+      func foo();
+    }
+    func test() {
+      let p1 = UndefinedStruct {};
+      let p2 = SomeTrait {};
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot instantiate undefined struct 'UndefinedStruct'", str(context.exception))
+    self.assertIn("Cannot instantiate undefined struct 'SomeTrait'", str(context.exception))
+
+  def test_struct_initializer_positional_arg_error(self):
+    """Verifies that positional arguments in struct initializers (constructed programmatically) trigger a semantic error."""
+    try:
+      from parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
+      from semantics.symbol_table import StructType
+    except ModuleNotFoundError:
+      from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
+      from src.semantics.symbol_table import StructType
+    
+    checker = TypeChecker()
+    struct_type = StructType("Point")
+    checker.symbol_table.define_type("Point", struct_type)
+    
+    arg = ArgumentNode(None, LiteralNode(10, "int"))
+    node = StructInitializerNode("Point", [arg])
+    
+    with self.assertRaises(SemanticError) as context:
+      checker.visit(node)
+      if checker.errors:
+        raise SemanticError("\n".join(checker.errors))
+    self.assertIn("Positional arguments are not allowed in struct initializer of 'Point'", str(context.exception))
+
+  def test_struct_init_undefined_field(self):
+    """Verifies that initializing a non-existent field in a struct initializer triggers a semantic error."""
+    code = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let p = Point { x = 10, y = 20 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Struct 'Point' has no field 'y'", str(context.exception))
+
+  def test_struct_init_duplicate_field(self):
+    """Verifies that initializing a field multiple times in a struct initializer triggers a semantic error."""
+    code = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test() {
+      let p = Point { x = 10, y = 20, x = 30 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Field 'x' is initialized multiple times in struct initializer", str(context.exception))
+
+  def test_clone_struct_inherits_from_proto(self):
+    """Verifies that cloning a struct that inherits from a proto struct is valid and succeeds semantic analysis."""
+    code = """
+    proto Base {
+      var x: int;
+    }
+    struct SubBase: Base {
+      var y: int;
+    }
+    impl Base {
+      func __init__(x: int) {
+        self.x = x;
+      }
+    }
+    impl SubBase {
+      func __init__(x: int, y: int) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    func test() {
+      let sb = SubBase(x = 10, y = 20);
+      let cloned = clone sb;
+    }
+    """
+    self._check(code)
+
 
 if __name__ == "__main__":
   unittest.main()
+
+

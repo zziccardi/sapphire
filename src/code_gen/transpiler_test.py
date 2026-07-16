@@ -375,6 +375,22 @@ class TestTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "test_init()")
     self.assertEqual(result, [5, 10])
 
+  def test_proto_struct_defaults_and_multi_field_init(self):
+    """Verifies prototype structs with default fields and multiple fields in struct initializers transpile correctly."""
+    code = """
+    proto Item {
+      var price: int = 100;
+      var stock: int = 5;
+    }
+    func test_defaults() {
+      let it = Item { price = 50, stock = 2 };
+      return [it.price, it.stock];
+    }
+    """
+    result = self._transpile_and_run(code, "test_defaults()")
+    self.assertEqual(result, [50, 2])
+
 
 if __name__ == "__main__":
   unittest.main()
+
