@@ -60,4 +60,4 @@ fields locally.
   * [SPEC.md](docs/SPEC.md): Deep dive language-design specification.
   * [compiler.md](docs/compiler.md): Comprehensive compiler pipeline and architectural documentation.
   * [development.md](docs/development.md): Instructions for parsing, testing, and developing Sapphire.
-* `sample.sp` & `simulation.sp`: Extensive code examples demonstrating all core language features in action.
+* `samples/`: Extensive code examples demonstrating all core language features in action.
