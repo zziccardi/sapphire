@@ -1172,7 +1172,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code_valid)
 
-    # 2. Invalid arena type expression
+    # 2. Invalid arena type expression in struct init
     code_invalid_type = """
     struct Point {
       var x: int;
@@ -1185,6 +1185,19 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code_invalid_type)
     self.assertIn("Explicit arena target must be an instance of Arena", str(context.exception))
 
+    # 2b. Invalid arena type expression in clone
+    code_invalid_clone = """
+    proto Enemy {
+      var hp: int;
+    }
+    func test(e: Enemy) {
+      let c = clone e in 5;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_invalid_clone)
+    self.assertIn("Explicit arena target must be an instance of Arena", str(context.exception))
+
     # 3. Escape check: return reference to local arena
     code_escape_return = """
     proto Enemy {
@@ -1193,6 +1206,9 @@ class TestTypeChecker(unittest.TestCase):
     func escape(): Enemy {
       let local_arena = Arena();
       let e = Enemy { hp = 100 } in local_arena;
+      let c = clone e in local_arena;
+      var arr = [c];
+      arr[0] = c;
       return e; // Error: e is allocated in local_arena
     }
     """
@@ -1217,6 +1233,78 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as context:
       self._check(code_escape_assign)
     self.assertIn("Variable 'outer' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
+
+    # 5. Type mismatch error using ArenaType.__repr__
+    code_type_repr = """
+    func need_arena(a: Arena) {}
+    func test() {
+      need_arena(a = 10);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_type_repr)
+    self.assertIn("Expected 'Arena'", str(context.exception))
+
+    # 6. Safe allocation in parent scope's arena inside nested scope (triggers _is_descendant_scope returning False)
+    code_parent_arena = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let my_arena = Arena();
+      {
+        let p = Point { x = 10 } in my_arena; // Safe!
+      }
+    }
+    """
+    self._check(code_parent_arena)
+
+    # 7. Escape check: assign local arena reference to member of outer variable
+    code_member_escape = """
+    struct Point {
+      var x: int;
+    }
+    struct Outer {
+      var pt: Point;
+    }
+    func escape(out: Outer) {
+      {
+        let local_arena = Arena();
+        let p = Point { x = 10 } in local_arena;
+        out.pt = p; // Error: local_arena is nested compared to out
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_member_escape)
+    self.assertIn("Variable 'out' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
+
+    # 8. Programmatic test for VarDeclNode arena escape (covers type_checker.py line 418)
+    from parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
+    from semantics.symbol_table import VariableSymbol, StructType, ArenaType
+    
+    checker = TypeChecker()
+    # Define parent and nested scopes
+    parent_scope = checker.symbol_table.current_scope
+    checker.symbol_table.enter_scope()
+    nested_scope = checker.symbol_table.current_scope
+    # Go back to parent scope
+    checker.symbol_table.current_scope = parent_scope
+    
+    # Define local_arena in parent scope so lookup succeeds, but mock its scope_defined to nested_scope!
+    arena_sym = VariableSymbol("local_arena", ArenaType(), is_mutable=False)
+    checker.symbol_table.define("local_arena", arena_sym)
+    arena_sym.scope_defined = nested_scope
+    
+    # Try to declare a variable in parent scope pointing to local_arena
+    init_expr = StructInitializerNode("Point", [], arena_expr=IdentifierNode("local_arena"))
+    node = VarDeclNode(is_mutable=False, name="escaped_var", val_type=None, expr=init_expr)
+    
+    # We must define Point type so it doesn't fail on Point lookup
+    checker.symbol_table.define_type("Point", StructType("Point"))
+    
+    checker.visit(node)
+    self.assertTrue(any("in outer scope cannot hold a reference to an object allocated in nested arena" in err for err in checker.errors))
 
 
 if __name__ == "__main__":

@@ -406,11 +406,15 @@ class TestTranspiler(unittest.TestCase):
     
     func run_scope() {
       let my_arena = Arena();
+      let other_arena = Arena();
       
       let base = Enemy { hp = 100 } in my_arena;
       
       // Implicit clone arena propagation
       let cloned = clone base;
+      
+      // Explicit clone arena override
+      let cloned_override = clone base in other_arena;
       
       // Explicit struct allocation in arena
       let pt = Point { x = 42 } in my_arena;
@@ -418,16 +422,16 @@ class TestTranspiler(unittest.TestCase):
       leaked_enemy = cloned;
       leaked_point = pt;
       
-      return [cloned.hp, pt.x];
+      return [cloned.hp, pt.x, cloned_override.hp];
     }
     
     func test_arena_raii() {
       let vals = run_scope();
-      return [vals[0], vals[1]];
+      return [vals[0], vals[1], vals[2]];
     }
     """
     result = self._transpile_and_run(code, "test_arena_raii()")
-    self.assertEqual(result, [100, 42])
+    self.assertEqual(result, [100, 42, 100])
 
 
 if __name__ == "__main__":

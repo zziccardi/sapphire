@@ -76,7 +76,7 @@ class TypeChecker:
       if isinstance(sym, VariableSymbol):
         return sym
     elif isinstance(target, MemberAccessNode):
-      return self._get_target_symbol(target.expr)
+      return self._get_target_symbol(target.receiver)
     return None
 
   def error(self, message: str) -> None:
