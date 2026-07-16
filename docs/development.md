@@ -1,11 +1,20 @@
 # Development
 
+## Prerequisites
+
+Make sure you have [Pipenv](https://pipenv.pypa.io/) installed. Install
+dependencies by running:
+
+```bash
+pipenv install
+```
+
 ## ANTLR
 
 To use ANTLR to generate Python parser files for the grammar, run the following
 from the project root:
 
-```
+```bash
 antlr -Dlanguage=Python3 -visitor -o src/parser/gen -Xexact-output-dir \
     grammar/Sapphire.g4
 ```
@@ -37,7 +46,7 @@ pipenv run python -c "import sample; sample.run_demo()"
 
 Run the following to execute all unit tests under `src/` & track code coverage:
 
-```
+```bash
 pipenv run coverage
 ```
 
