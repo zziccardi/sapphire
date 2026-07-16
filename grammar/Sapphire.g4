@@ -123,7 +123,7 @@ expression
     | expression LPAREN argumentList? RPAREN                      # CallExpr
     | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
     | (SUB | ADD | NOT) expression                                # UnaryExpr
-    | CLONE expression (LBRACE statement* RBRACE)?                 # CloneExpr
+    | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
     | expression (MUL | DIV | MOD) expression                     # MultiplicativeExpr
     | expression (ADD | SUB) expression                           # AdditiveExpr
     | expression (EQ | NEQ | LT | LE | GT | GE) expression        # CompareExpr
@@ -172,7 +172,7 @@ primaryExpression
     ;
 
 structInitializer
-    : IDENTIFIER LBRACE structInitFieldList? RBRACE
+    : IDENTIFIER LBRACE structInitFieldList? RBRACE (IN expression)?
     ;
 
 structInitFieldList

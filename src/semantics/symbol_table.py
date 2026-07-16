@@ -155,6 +155,13 @@ class TraitType(Type):
     return f"trait {self.name}"
 
 
+class ArenaType(Type):
+  """Represents the built-in Arena type."""
+
+  def __repr__(self) -> str:
+    return "Arena"
+
+
 class NoneType(Type):
   """Represents the special type of the 'none' literal."""
 
@@ -187,6 +194,7 @@ class Symbol:
   def __init__(self, name: str, symbol_type: Type):
     self.name = name
     self.symbol_type = symbol_type
+    self.scope_defined: Optional["Scope"] = None
 
 
 class VariableSymbol(Symbol):
@@ -198,6 +206,7 @@ class VariableSymbol(Symbol):
     super().__init__(name, symbol_type)
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
+    self.arena_dependency: Optional[str] = None
 
 
 class FunctionSymbol(Symbol):
@@ -235,6 +244,7 @@ class Scope:
 
   def define(self, name: str, symbol: Symbol) -> None:
     """Defines a symbol in the current scope."""
+    symbol.scope_defined = self
     self.symbols[name] = symbol
 
   def define_type(self, name: str, type_obj: Type) -> None:
@@ -273,6 +283,9 @@ class SymbolTable:
     self.current_scope.define_type("bool", PrimitiveType("bool"))
     self.current_scope.define_type("String", PrimitiveType("string"))
     self.current_scope.define_type("none", NoneType())
+    arena_t = ArenaType()
+    self.current_scope.define_type("Arena", arena_t)
+    self.current_scope.define("Arena", FunctionSymbol("Arena", FunctionType([], arena_t)))
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

@@ -1158,6 +1158,67 @@ class TestTypeChecker(unittest.TestCase):
     self._check(code)
 
 
+  def test_arena_type_checking(self):
+    """Verifies semantic type checking of explicit arenas and escape analysis."""
+    # 1. Valid allocation inside explicit arena
+    code_valid = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let my_arena = Arena();
+      let p = Point { x = 10 } in my_arena;
+    }
+    """
+    self._check(code_valid)
+
+    # 2. Invalid arena type expression
+    code_invalid_type = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let p = Point { x = 10 } in 5; // 5 is not an Arena
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_invalid_type)
+    self.assertIn("Explicit arena target must be an instance of Arena", str(context.exception))
+
+    # 3. Escape check: return reference to local arena
+    code_escape_return = """
+    proto Enemy {
+      var hp: int;
+    }
+    func escape(): Enemy {
+      let local_arena = Arena();
+      let e = Enemy { hp = 100 } in local_arena;
+      return e; // Error: e is allocated in local_arena
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_escape_return)
+    self.assertIn("Cannot return a reference to an object allocated in local arena 'local_arena'", str(context.exception))
+
+    # 4. Escape check: assign local arena reference to outer variable
+    code_escape_assign = """
+    struct Point {
+      var x: int;
+    }
+    func escape() {
+      var outer: Point? = none;
+      {
+        let local_arena = Arena();
+        let p = Point { x = 10 } in local_arena;
+        outer = p; // Error: local_arena has nested scope compared to outer
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_escape_assign)
+    self.assertIn("Variable 'outer' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
+
+
 if __name__ == "__main__":
   unittest.main()
 

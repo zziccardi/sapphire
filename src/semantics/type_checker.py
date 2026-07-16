@@ -21,6 +21,7 @@ from semantics.symbol_table import (
     TraitType,
     NoneType,
     ArrayType,
+    ArenaType,
     VariableSymbol,
     FunctionSymbol,
     StructSymbol,
@@ -44,6 +45,39 @@ class TypeChecker:
     self.is_in_init: bool = False
     self.initialized_fields: set = set()
     self.expected_type: Optional[Type] = None
+    self.current_function_scope = None
+
+  def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
+    if isinstance(node, IdentifierNode):
+      symbol = self.symbol_table.lookup(node.name)
+      if isinstance(symbol, VariableSymbol):
+        return symbol.arena_dependency
+    elif isinstance(node, StructInitializerNode):
+      if node.arena_expr and isinstance(node.arena_expr, IdentifierNode):
+        return node.arena_expr.name
+    elif isinstance(node, CloneNode):
+      if node.arena_expr and isinstance(node.arena_expr, IdentifierNode):
+        return node.arena_expr.name
+      else:
+        return self._get_arena_dependency(node.expr)
+    return None
+
+  def _is_descendant_scope(self, child: Optional[object], parent: Optional[object]) -> bool:
+    curr = child
+    while curr:
+      if curr == parent:
+        return True
+      curr = curr.parent
+    return False
+
+  def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
+    if isinstance(target, IdentifierNode):
+      sym = self.symbol_table.lookup(target.name)
+      if isinstance(sym, VariableSymbol):
+        return sym
+    elif isinstance(target, MemberAccessNode):
+      return self._get_target_symbol(target.expr)
+    return None
 
   def error(self, message: str) -> None:
     """Logs a semantic error."""
@@ -320,6 +354,8 @@ class TypeChecker:
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
     # Register parameters and check body
     self.symbol_table.enter_scope()
+    old_function_scope = self.current_function_scope
+    self.current_function_scope = self.symbol_table.current_scope
 
     for p in node.parameters:
       ptype = self._resolve_type_node(p.param_type)
@@ -333,6 +369,7 @@ class TypeChecker:
     self.visit(node.body)
 
     self.current_function = None
+    self.current_function_scope = old_function_scope
     self.symbol_table.exit_scope()
 
   def visit_BlockNode(self, node: BlockNode) -> None:
@@ -368,7 +405,17 @@ class TypeChecker:
         var_type = expr_type
 
     # Define symbol
-    self.symbol_table.define(node.name, VariableSymbol(node.name, var_type, node.is_mutable))
+    sym = VariableSymbol(node.name, var_type, node.is_mutable)
+    self.symbol_table.define(node.name, sym)
+
+    # Check arena escape
+    arena_name = self._get_arena_dependency(node.expr)
+    if arena_name:
+      sym.arena_dependency = arena_name
+      arena_sym = self.symbol_table.lookup(arena_name)
+      if arena_sym and arena_sym.scope_defined and sym.scope_defined:
+        if self._is_descendant_scope(arena_sym.scope_defined, sym.scope_defined) and arena_sym.scope_defined != sym.scope_defined:
+          self.error(f"Variable '{node.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     # 1. Target validation
@@ -380,6 +427,17 @@ class TypeChecker:
 
     if not expr_type.is_compatible(target_type):
       self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.")
+
+    # Check arena escape
+    arena_name = self._get_arena_dependency(node.expr)
+    if arena_name:
+      target_sym = self._get_target_symbol(node.target)
+      if target_sym:
+        target_sym.arena_dependency = arena_name
+        arena_sym = self.symbol_table.lookup(arena_name)
+        if arena_sym and arena_sym.scope_defined and target_sym.scope_defined:
+          if self._is_descendant_scope(arena_sym.scope_defined, target_sym.scope_defined) and arena_sym.scope_defined != target_sym.scope_defined:
+            self.error(f"Variable '{target_sym.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
 
     # If assigning to self field in constructor, track it
     if self.is_in_init and isinstance(node.target, MemberAccessNode):
@@ -464,6 +522,15 @@ class TypeChecker:
     expected_type = self.current_function.return_type
     if not ret_type.is_compatible(expected_type):
       self.error(f"Return type mismatch. Expected '{expected_type}', got '{ret_type}'.")
+
+    # Check return escaping arena reference
+    if node.expr:
+      arena_name = self._get_arena_dependency(node.expr)
+      if arena_name:
+        arena_sym = self.symbol_table.lookup(arena_name)
+        if arena_sym and arena_sym.scope_defined and self.current_function_scope:
+          if self._is_descendant_scope(arena_sym.scope_defined, self.current_function_scope):
+            self.error(f"Cannot return a reference to an object allocated in local arena '{arena_name}'.")
 
   def visit_IfNode(self, node: IfNode) -> None:
     if node.is_if_let:
@@ -803,6 +870,12 @@ class TypeChecker:
     if not is_proto:
       self.error(f"Cannot clone instance of non-proto struct '{expr_type.name}'. Struct must be declared using the 'proto' keyword.")
 
+    # Validate explicit arena target
+    if node.arena_expr:
+      arena_type = self.visit(node.arena_expr)
+      if not isinstance(arena_type, ArenaType):
+        self.error("Explicit arena target must be an instance of Arena.")
+
     # Mark the struct type as cloned
     expr_type.is_cloned = True
 
@@ -881,6 +954,12 @@ class TypeChecker:
     if not struct_type or not isinstance(struct_type, StructType):
       self.error(f"Cannot instantiate undefined struct '{node.struct_name}'.")
       return PrimitiveType("none")
+
+    # Validate explicit arena target
+    if node.arena_expr:
+      arena_type = self.visit(node.arena_expr)
+      if not isinstance(arena_type, ArenaType):
+        self.error("Explicit arena target must be an instance of Arena.")
 
     initialized = set()
     for field_arg in node.fields:

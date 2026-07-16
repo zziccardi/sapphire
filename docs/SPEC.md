@@ -375,10 +375,12 @@ To preserve the zero-overhead promise of standard structures, the compiler does 
 
 ### B. Arena-based memory management
 
-All `proto` instances and their clones are automatically allocated on a managed arena. Sapphire prohibits allocating `proto` instances or their clones on the call stack, eliminating LIFO stack escape issues.
-1. **Implicit co-location**: When a prototype is cloned, the runtime automatically routes the clone's allocation to the same arena as its prototype.
-2. **Deallocation**: When the arena is torn down, all prototypes and their clones allocated within it are deallocated *en masse* with zero runtime fragmentation.
-3. **Lexical Arena Scope**: Arenas are managed using an `arena` block scope (e.g., `arena GameSession { ... }`). The compiler enforces that no prototype or clone escapes the lexical lifetime of its arena block.
+All `proto` instances and their clones are automatically allocated on a managed arena. Additionally, standard `struct` instances can opt into arena allocation using the `in` suffix. Sapphire prohibits allocating `proto` instances or their clones on the call stack, eliminating LIFO stack escape issues.
+
+1. **Implicit default arena**: If no arena is explicitly specified, `proto` instances are allocated in an implicit, thread-local or global reference-counted arena.
+2. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
+3. **Explicit Arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix (e.g., `Point { x = 10 } in my_arena`).
+4. **Lexical scope destruction (RAII)**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. The compiler enforces that references to arena-allocated objects do not escape the scope of the `Arena` variable.
 
 ## 10. Core operators, expressions, & control flow
 

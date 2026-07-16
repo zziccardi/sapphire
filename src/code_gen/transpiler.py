@@ -17,17 +17,54 @@ from parser.ast import *
 RUNTIME_PREAMBLE = """# Sapphire Runtime Header
 import copy
 
+class Arena:
+  def __init__(self):
+    self.objects = []
+  def register(self, obj):
+    if hasattr(obj, '__arena__') and obj.__arena__ is not None:
+      if obj.__arena__ is not self:
+        try:
+          obj.__arena__.objects.remove(obj)
+        except ValueError:
+          pass
+    if obj not in self.objects:
+      self.objects.append(obj)
+    if hasattr(obj, '__setattr__'):
+      try:
+        object.__setattr__(obj, '__arena__', self)
+      except AttributeError:
+        pass
+    return obj
+  def destroy(self):
+    for obj in self.objects:
+      if hasattr(obj, '__shadow__'):
+        obj.__shadow__.clear()
+    self.objects.clear()
+  def __enter__(self):
+    return self
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.destroy()
+
+_DEFAULT_ARENA = Arena()
+
 class SapphireObject:
   def __init__(self, proto=None):
     super().__setattr__('__proto__', proto)
     super().__setattr__('__shadow__', {})
+    if proto is None:
+      _DEFAULT_ARENA.register(self)
 
   def clone(self):
-    return self.__class__(proto=self)
+    clone_obj = self.__class__(proto=self)
+    if hasattr(self, '__arena__') and self.__arena__ is not None:
+      self.__arena__.register(clone_obj)
+    return clone_obj
 
   def __getattr__(self, name):
-    if name == '__proto__':
-      return self.__proto__
+    if name.startswith('__') and name.endswith('__'):
+      if name == '__proto__':
+        return self.__proto__
+      raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
     if name in self.__shadow__:
       return self.__shadow__[name]
     if self.__proto__ is not None:
@@ -50,8 +87,12 @@ class SapphireObject:
     else:
       super().__setattr__(name, value)
 
-def _clone_helper(obj, init_fn=None):
+def _clone_helper(obj, init_fn=None, arena=None):
+  if arena is None and hasattr(obj, '__arena__'):
+    arena = getattr(obj, '__arena__', None)
   clone_obj = obj.clone()
+  if arena is not None:
+    arena.register(clone_obj)
   if init_fn:
     init_fn(clone_obj)
   return clone_obj
@@ -241,13 +282,41 @@ class Transpiler:
     self.visit(node.body)
     self.dedent()
 
+  def _visit_statements(self, statements: List[StmtNode]) -> None:
+    if not statements:
+      return
+
+    stmt = statements[0]
+    is_arena = (
+        isinstance(stmt, VarDeclNode)
+        and isinstance(stmt.expr, CallNode)
+        and isinstance(stmt.expr.callee, IdentifierNode)
+        and stmt.expr.callee.name == "Arena"
+    )
+
+    if is_arena:
+      self.visit(stmt)
+      self.newline()
+      self.emit("try:")
+      self.indent()
+      self._visit_statements(statements[1:])
+      self.dedent()
+      self.newline()
+      self.emit("finally:")
+      self.indent()
+      self.newline()
+      self.emit(f"{stmt.name}.destroy()")
+      self.dedent()
+    else:
+      self.visit(stmt)
+      self._visit_statements(statements[1:])
+
   def visit_BlockNode(self, node: BlockNode) -> None:
     if not node.statements:
       self.newline()
       self.emit("pass")
     else:
-      for stmt in node.statements:
-        self.visit(stmt)
+      self._visit_statements(node.statements)
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
     self.newline()
@@ -387,23 +456,16 @@ class Transpiler:
       self.emit(f".{node.member}")
 
   def visit_CloneNode(self, node: CloneNode) -> None:
-    # _clone_helper(expr, init_fn)
+    # _clone_helper(expr, init_fn, arena)
     self.emit("_clone_helper(")
     self.visit(node.expr)
 
     if node.initializer_block:
       # Generate an inline lambda that updates self properties
       self.emit(", lambda self: [")
-      # In Python lambda, we can execute assignments using helper calls or list comprehensions,
-      # but a simpler way is to generate a helper function!
-      # However, since this clone expression is inside an expression context, let's output
-      # a statement-block to lambda helper. Or we can just use inline setattr:
-      # lambda self: (setattr(self, 'prop', val), setattr(self, 'prop2', val2))
-      # Let's map block assignments to a list of setattr or method calls:
       assignments = []
       for stmt in node.initializer_block:
         if isinstance(stmt, AssignmentNode) and isinstance(stmt.target, MemberAccessNode):
-          # self.prop = val -> setattr(self, 'prop', val)
           if isinstance(stmt.target.receiver, IdentifierNode) and stmt.target.receiver.name == "self":
             assignments.append(stmt)
 
@@ -414,6 +476,14 @@ class Transpiler:
         self.visit(assign.expr)
         self.emit(")")
       self.emit("]")
+    else:
+      if node.arena_expr:
+        self.emit(", None")
+
+    if node.arena_expr:
+      self.emit(", arena=")
+      self.visit(node.arena_expr)
+
     self.emit(")")
 
   def visit_LambdaNode(self, node: LambdaNode) -> None:
@@ -460,6 +530,9 @@ class Transpiler:
     self.emit("]")
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
+    if node.arena_expr:
+      self.visit(node.arena_expr)
+      self.emit(".register(")
     self.emit(f"{node.struct_name}(")
     for idx, arg in enumerate(node.fields):
       if idx > 0:
@@ -467,3 +540,5 @@ class Transpiler:
       self.emit(f"{arg.name}=")
       self.visit(arg.expr)
     self.emit(")")
+    if node.arena_expr:
+      self.emit(")")

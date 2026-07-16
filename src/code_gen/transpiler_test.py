@@ -391,6 +391,45 @@ class TestTranspiler(unittest.TestCase):
     self.assertEqual(result, [50, 2])
 
 
+  def test_explicit_arenas_and_raii(self):
+    """Verifies that allocating inside explicit arenas works and obeys RAII destruction."""
+    code = """
+    proto Enemy {
+      var hp: int;
+    }
+    struct Point {
+      var x: int;
+    }
+    
+    var leaked_enemy: Enemy? = none;
+    var leaked_point: Point? = none;
+    
+    func run_scope() {
+      let my_arena = Arena();
+      
+      let base = Enemy { hp = 100 } in my_arena;
+      
+      // Implicit clone arena propagation
+      let cloned = clone base;
+      
+      // Explicit struct allocation in arena
+      let pt = Point { x = 42 } in my_arena;
+      
+      leaked_enemy = cloned;
+      leaked_point = pt;
+      
+      return [cloned.hp, pt.x];
+    }
+    
+    func test_arena_raii() {
+      let vals = run_scope();
+      return [vals[0], vals[1]];
+    }
+    """
+    result = self._transpile_and_run(code, "test_arena_raii()")
+    self.assertEqual(result, [100, 42])
+
+
 if __name__ == "__main__":
   unittest.main()
 

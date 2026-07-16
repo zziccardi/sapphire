@@ -1,17 +1,54 @@
 # Sapphire Runtime Header
 import copy
 
+class Arena:
+  def __init__(self):
+    self.objects = []
+  def register(self, obj):
+    if hasattr(obj, '__arena__') and obj.__arena__ is not None:
+      if obj.__arena__ is not self:
+        try:
+          obj.__arena__.objects.remove(obj)
+        except ValueError:
+          pass
+    if obj not in self.objects:
+      self.objects.append(obj)
+    if hasattr(obj, '__setattr__'):
+      try:
+        object.__setattr__(obj, '__arena__', self)
+      except AttributeError:
+        pass
+    return obj
+  def destroy(self):
+    for obj in self.objects:
+      if hasattr(obj, '__shadow__'):
+        obj.__shadow__.clear()
+    self.objects.clear()
+  def __enter__(self):
+    return self
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.destroy()
+
+_DEFAULT_ARENA = Arena()
+
 class SapphireObject:
   def __init__(self, proto=None):
     super().__setattr__('__proto__', proto)
     super().__setattr__('__shadow__', {})
+    if proto is None:
+      _DEFAULT_ARENA.register(self)
 
   def clone(self):
-    return self.__class__(proto=self)
+    clone_obj = self.__class__(proto=self)
+    if hasattr(self, '__arena__') and self.__arena__ is not None:
+      self.__arena__.register(clone_obj)
+    return clone_obj
 
   def __getattr__(self, name):
-    if name == '__proto__':
-      return self.__proto__
+    if name.startswith('__') and name.endswith('__'):
+      if name == '__proto__':
+        return self.__proto__
+      raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
     if name in self.__shadow__:
       return self.__shadow__[name]
     if self.__proto__ is not None:
@@ -34,8 +71,12 @@ class SapphireObject:
     else:
       super().__setattr__(name, value)
 
-def _clone_helper(obj, init_fn=None):
+def _clone_helper(obj, init_fn=None, arena=None):
+  if arena is None and hasattr(obj, '__arena__'):
+    arena = getattr(obj, '__arena__', None)
   clone_obj = obj.clone()
+  if arena is not None:
+    arena.register(clone_obj)
   if init_fn:
     init_fn(clone_obj)
   return clone_obj

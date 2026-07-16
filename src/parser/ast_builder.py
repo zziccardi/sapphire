@@ -192,11 +192,14 @@ class ASTBuilder(SapphireVisitor):
     return UnaryOpNode(op, expr)
 
   def visitCloneExpr(self, ctx: SapphireParser.CloneExprContext) -> CloneNode:
-    expr = self.visit(ctx.expression())
+    expr = self.visit(ctx.expression(0))
     initializer_block = None
     if ctx.statement():
       initializer_block = [self.visit(s) for s in ctx.statement()]
-    return CloneNode(expr, initializer_block)
+    arena_expr = None
+    if ctx.IN() is not None:
+      arena_expr = self.visit(ctx.expression(1))
+    return CloneNode(expr, initializer_block, arena_expr)
 
   def visitIndexExpr(self, ctx: SapphireParser.IndexExprContext) -> IndexExprNode:
     array = self.visit(ctx.expression(0))
@@ -288,7 +291,10 @@ class ASTBuilder(SapphireVisitor):
     fields = []
     if ctx.structInitFieldList():
       fields = self.visit(ctx.structInitFieldList())
-    return StructInitializerNode(struct_name, fields)
+    arena_expr = None
+    if ctx.IN() is not None:
+      arena_expr = self.visit(ctx.expression())
+    return StructInitializerNode(struct_name, fields, arena_expr)
 
   def visitStructInitFieldList(self, ctx: SapphireParser.StructInitFieldListContext) -> List[ArgumentNode]:
     return [self.visit(field) for field in ctx.structInitField()]

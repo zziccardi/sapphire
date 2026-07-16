@@ -20,6 +20,7 @@ try:
       IfNode,
       StructDeclNode,
       StructInitializerNode,
+      CloneNode,
   )
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -34,6 +35,7 @@ except ModuleNotFoundError:
       IfNode,
       StructDeclNode,
       StructInitializerNode,
+      CloneNode,
   )
 
 
@@ -176,6 +178,23 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(struct_init.fields[0].expr.value, 45)
     self.assertEqual(struct_init.fields[1].name, "durability")
     self.assertEqual(struct_init.fields[1].expr.value, 100)
+
+
+  def test_arena_parsing(self):
+    """Verifies parsing of struct initializer and clone expressions with explicit arenas."""
+    ast = self._get_ast("""
+    let x = Point { x = 10 } in my_arena;
+    let y = clone base in other_arena;
+    """)
+    self.assertEqual(len(ast.declarations), 2)
+    
+    decl1 = ast.declarations[0]
+    self.assertIsInstance(decl1.expr, StructInitializerNode)
+    self.assertEqual(decl1.expr.arena_expr.name, "my_arena")
+    
+    decl2 = ast.declarations[1]
+    self.assertIsInstance(decl2.expr, CloneNode)
+    self.assertEqual(decl2.expr.arena_expr.name, "other_arena")
 
 
 if __name__ == "__main__":
