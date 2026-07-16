@@ -69,7 +69,7 @@ class TestTranspiler(unittest.TestCase):
   def test_prototypal_inheritance_live_updates(self):
     """Verifies that cloned objects delegate live property lookups and allow shadowing."""
     code = """
-    struct Item {
+    proto Item {
       var price: int;
       var stock: int;
     }
@@ -210,7 +210,7 @@ class TestTranspiler(unittest.TestCase):
     """Verifies standard conditionals, unary ops, strings, default params, empty constructors/methods, and clones."""
     code = """
     struct Empty {}
-    struct Base {
+    proto Base {
       var x: int;
       var y: int;
     }
@@ -299,10 +299,10 @@ class TestTranspiler(unittest.TestCase):
   def test_prototypal_inheritance_with_static_inheritance(self):
     """Verifies that inherited struct constructors propagate proto correctly for cloning."""
     code = """
-    struct GameObject {
+    proto GameObject {
       var id: int;
     }
-    struct Character: GameObject {
+    proto Character: GameObject {
       var health: int;
     }
     impl Character {
@@ -329,6 +329,111 @@ class TestTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "test_inherited_cloning()")
     self.assertEqual(result, [80, 1, 10])
 
+  def test_cow_nested_references(self):
+    """Verifies that nested reference modifications on cloned objects copy-on-write correctly."""
+    code = """
+    proto Weapon {
+      var damage: int;
+    }
+    proto Player {
+      var weapon: Weapon;
+    }
+    impl Player {
+      func __init__(w: Weapon) {
+        self.weapon = w;
+      }
+    }
+    func run_cow_test() {
+      var original_weapon = Weapon { damage = 10 };
+      var base_player = Player(w = original_weapon);
+      var clone_player = clone base_player;
+      
+      // Mutating clone player's weapon damage
+      clone_player.weapon.damage = 15;
+      
+      let base_dmg = base_player.weapon.damage; // Should remain 10 (CoW)
+      let clone_dmg = clone_player.weapon.damage; // Should be 15
+      
+      return [base_dmg, clone_dmg];
+    }
+    """
+    result = self._transpile_and_run(code, "run_cow_test()")
+    self.assertEqual(result, [10, 15])
+
+  def test_struct_initializer_transpilation(self):
+    """Verifies that struct initializers compile and evaluate defaults/assigned values correctly."""
+    code = """
+    struct Point {
+      var x: int;
+      var y: int = 10;
+    }
+    func test_init() {
+      let p = Point { x = 5 };
+      return [p.x, p.y];
+    }
+    """
+    result = self._transpile_and_run(code, "test_init()")
+    self.assertEqual(result, [5, 10])
+
+  def test_proto_struct_defaults_and_multi_field_init(self):
+    """Verifies prototype structs with default fields and multiple fields in struct initializers transpile correctly."""
+    code = """
+    proto Item {
+      var price: int = 100;
+      var stock: int = 5;
+    }
+    func test_defaults() {
+      let it = Item { price = 50, stock = 2 };
+      return [it.price, it.stock];
+    }
+    """
+    result = self._transpile_and_run(code, "test_defaults()")
+    self.assertEqual(result, [50, 2])
+
+
+  def test_explicit_arenas_and_raii(self):
+    """Verifies that allocating inside explicit arenas works and obeys RAII destruction."""
+    code = """
+    proto Enemy {
+      var hp: int;
+    }
+    struct Point {
+      var x: int;
+    }
+    
+    var leaked_enemy: Enemy? = none;
+    var leaked_point: Point? = none;
+    
+    func run_scope() {
+      let my_arena = Arena();
+      let other_arena = Arena();
+      
+      let base = Enemy { hp = 100 } in my_arena;
+      
+      // Implicit clone arena propagation
+      let cloned = clone base;
+      
+      // Explicit clone arena override
+      let cloned_override = clone base in other_arena;
+      
+      // Explicit struct allocation in arena
+      let pt = Point { x = 42 } in my_arena;
+      
+      leaked_enemy = cloned;
+      leaked_point = pt;
+      
+      return [cloned.hp, pt.x, cloned_override.hp];
+    }
+    
+    func test_arena_raii() {
+      let vals = run_scope();
+      return [vals[0], vals[1], vals[2]];
+    }
+    """
+    result = self._transpile_and_run(code, "test_arena_raii()")
+    self.assertEqual(result, [100, 42, 100])
+
 
 if __name__ == "__main__":
   unittest.main()
+

@@ -401,7 +401,7 @@ class TestTypeChecker(unittest.TestCase):
   def test_cloning(self):
     """Verifies that clone constructs are type checked successfully."""
     self._check("""
-    struct Entity {
+    proto Entity {
       var score: int;
     }
     impl Entity {
@@ -992,6 +992,322 @@ class TestTypeChecker(unittest.TestCase):
     checker = TypeChecker()
     self.assertFalse(checker._is_reference_type(NoneType()))
 
+  def test_struct_initialization_checking(self):
+    """Verifies semantic checking of struct initializers."""
+    # 1. Missing required field
+    code_missing = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test() {
+      let p = Point { x = 10 }; // Missing required field y
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_missing)
+    self.assertIn("Struct initializer for 'Point' is missing required field 'y'", str(context.exception))
+
+    # 2. Type mismatch
+    code_mismatch = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test() {
+      let p = Point { x = 10, y = "not_int" };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_mismatch)
+    self.assertIn("Field 'y' in struct 'Point' initializer has type 'string', but expected 'int'", str(context.exception))
+
+    # 3. Valid with default values
+    code_valid_defaults = """
+    struct Point {
+      var x: int;
+      var y: int = 42;
+    }
+    func test() {
+      let p = Point { x = 10 }; // Valid because y has default value
+    }
+    """
+    self._check(code_valid_defaults)
+
+  def test_clone_non_proto_error(self):
+    """Verifies that cloning a non-proto struct triggers a semantic error."""
+    code = """
+    struct Item {
+      var x: int;
+    }
+    func test(it: Item) {
+      let c = clone it;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot clone instance of non-proto struct 'Item'", str(context.exception))
+
+  def test_clone_struct_non_struct_parent(self):
+    """Verifies that cloning a struct inheriting from a non-struct type triggers a semantic error."""
+    code = """
+    struct Child: UndefinedParent {
+      var x: int;
+    }
+    func test(c: Child) {
+      let x = clone c;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Parent struct 'UndefinedParent' not found for 'Child'.", str(context.exception))
+    self.assertIn("Cannot clone instance of non-proto struct 'Child'", str(context.exception))
+
+  def test_struct_init_undefined_or_non_struct(self):
+    """Verifies that instantiating an undefined struct name or non-struct type raises a semantic error."""
+    code = """
+    trait SomeTrait {
+      func foo();
+    }
+    func test() {
+      let p1 = UndefinedStruct {};
+      let p2 = SomeTrait {};
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot instantiate undefined struct 'UndefinedStruct'", str(context.exception))
+    self.assertIn("Cannot instantiate undefined struct 'SomeTrait'", str(context.exception))
+
+  def test_struct_initializer_positional_arg_error(self):
+    """Verifies that positional arguments in struct initializers (constructed programmatically) trigger a semantic error."""
+    try:
+      from parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
+      from semantics.symbol_table import StructType
+    except ModuleNotFoundError:
+      from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
+      from src.semantics.symbol_table import StructType
+    
+    checker = TypeChecker()
+    struct_type = StructType("Point")
+    checker.symbol_table.define_type("Point", struct_type)
+    
+    arg = ArgumentNode(None, LiteralNode(10, "int"))
+    node = StructInitializerNode("Point", [arg])
+    
+    with self.assertRaises(SemanticError) as context:
+      checker.visit(node)
+      if checker.errors:
+        raise SemanticError("\n".join(checker.errors))
+    self.assertIn("Positional arguments are not allowed in struct initializer of 'Point'", str(context.exception))
+
+  def test_struct_init_undefined_field(self):
+    """Verifies that initializing a non-existent field in a struct initializer triggers a semantic error."""
+    code = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let p = Point { x = 10, y = 20 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Struct 'Point' has no field 'y'", str(context.exception))
+
+  def test_struct_init_duplicate_field(self):
+    """Verifies that initializing a field multiple times in a struct initializer triggers a semantic error."""
+    code = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test() {
+      let p = Point { x = 10, y = 20, x = 30 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Field 'x' is initialized multiple times in struct initializer", str(context.exception))
+
+  def test_clone_struct_inherits_from_proto(self):
+    """Verifies that cloning a struct that inherits from a proto struct is valid and succeeds semantic analysis."""
+    code = """
+    proto Base {
+      var x: int;
+    }
+    struct SubBase: Base {
+      var y: int;
+    }
+    impl Base {
+      func __init__(x: int) {
+        self.x = x;
+      }
+    }
+    impl SubBase {
+      func __init__(x: int, y: int) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    func test() {
+      let sb = SubBase(x = 10, y = 20);
+      let cloned = clone sb;
+    }
+    """
+    self._check(code)
+
+
+  def test_arena_type_checking(self):
+    """Verifies semantic type checking of explicit arenas and escape analysis."""
+    # 1. Valid allocation inside explicit arena
+    code_valid = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let my_arena = Arena();
+      let p = Point { x = 10 } in my_arena;
+    }
+    """
+    self._check(code_valid)
+
+    # 2. Invalid arena type expression in struct init
+    code_invalid_type = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let p = Point { x = 10 } in 5; // 5 is not an Arena
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_invalid_type)
+    self.assertIn("Explicit arena target must be an instance of Arena", str(context.exception))
+
+    # 2b. Invalid arena type expression in clone
+    code_invalid_clone = """
+    proto Enemy {
+      var hp: int;
+    }
+    func test(e: Enemy) {
+      let c = clone e in 5;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_invalid_clone)
+    self.assertIn("Explicit arena target must be an instance of Arena", str(context.exception))
+
+    # 3. Escape check: return reference to local arena
+    code_escape_return = """
+    proto Enemy {
+      var hp: int;
+    }
+    func escape(): Enemy {
+      let local_arena = Arena();
+      let e = Enemy { hp = 100 } in local_arena;
+      let c = clone e in local_arena;
+      var arr = [c];
+      arr[0] = c;
+      return e; // Error: e is allocated in local_arena
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_escape_return)
+    self.assertIn("Cannot return a reference to an object allocated in local arena 'local_arena'", str(context.exception))
+
+    # 4. Escape check: assign local arena reference to outer variable
+    code_escape_assign = """
+    struct Point {
+      var x: int;
+    }
+    func escape() {
+      var outer: Point? = none;
+      {
+        let local_arena = Arena();
+        let p = Point { x = 10 } in local_arena;
+        outer = p; // Error: local_arena has nested scope compared to outer
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_escape_assign)
+    self.assertIn("Variable 'outer' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
+
+    # 5. Type mismatch error using ArenaType.__repr__
+    code_type_repr = """
+    func need_arena(a: Arena) {}
+    func test() {
+      need_arena(a = 10);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_type_repr)
+    self.assertIn("Expected 'Arena'", str(context.exception))
+
+    # 6. Safe allocation in parent scope's arena inside nested scope (triggers _is_descendant_scope returning False)
+    code_parent_arena = """
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let my_arena = Arena();
+      {
+        let p = Point { x = 10 } in my_arena; // Safe!
+      }
+    }
+    """
+    self._check(code_parent_arena)
+
+    # 7. Escape check: assign local arena reference to member of outer variable
+    code_member_escape = """
+    struct Point {
+      var x: int;
+    }
+    struct Outer {
+      var pt: Point;
+    }
+    func escape(out: Outer) {
+      {
+        let local_arena = Arena();
+        let p = Point { x = 10 } in local_arena;
+        out.pt = p; // Error: local_arena is nested compared to out
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_member_escape)
+    self.assertIn("Variable 'out' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
+
+    # 8. Programmatic test for VarDeclNode arena escape (covers type_checker.py line 418)
+    from parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
+    from semantics.symbol_table import VariableSymbol, StructType, ArenaType
+    
+    checker = TypeChecker()
+    # Define parent and nested scopes
+    parent_scope = checker.symbol_table.current_scope
+    checker.symbol_table.enter_scope()
+    nested_scope = checker.symbol_table.current_scope
+    # Go back to parent scope
+    checker.symbol_table.current_scope = parent_scope
+    
+    # Define local_arena in parent scope so lookup succeeds, but mock its scope_defined to nested_scope!
+    arena_sym = VariableSymbol("local_arena", ArenaType(), is_mutable=False)
+    checker.symbol_table.define("local_arena", arena_sym)
+    arena_sym.scope_defined = nested_scope
+    
+    # Try to declare a variable in parent scope pointing to local_arena
+    init_expr = StructInitializerNode("Point", [], arena_expr=IdentifierNode("local_arena"))
+    node = VarDeclNode(is_mutable=False, name="escaped_var", val_type=None, expr=init_expr)
+    
+    # We must define Point type so it doesn't fail on Point lookup
+    checker.symbol_table.define_type("Point", StructType("Point"))
+    
+    checker.visit(node)
+    self.assertTrue(any("in outer scope cannot hold a reference to an object allocated in nested arena" in err for err in checker.errors))
+
 
 if __name__ == "__main__":
   unittest.main()
+
+

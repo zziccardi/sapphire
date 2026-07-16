@@ -90,10 +90,11 @@ class StructFieldNode(ASTNode):
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
-  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode]):
+  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False):
     self.name = name
     self.parent_name = parent_name
     self.fields = fields
+    self.is_prototype = is_prototype
 
 
 class ParameterNode(ASTNode):
@@ -297,9 +298,10 @@ class MemberAccessNode(ExprNode):
 class CloneNode(ExprNode):
   """Represents a clone expression (e.g. 'clone prototype_enemy { self.health = 25; }')."""
 
-  def __init__(self, expr: ASTNode, initializer_block: Optional[List[StmtNode]] = None):
+  def __init__(self, expr: ASTNode, initializer_block: Optional[List[StmtNode]] = None, arena_expr: Optional[ASTNode] = None):
     self.expr = expr
     self.initializer_block = initializer_block
+    self.arena_expr = arena_expr
 
 
 class LambdaParamNode(ASTNode):
@@ -332,3 +334,12 @@ class IndexExprNode(ExprNode):
   def __init__(self, array: ASTNode, index: ASTNode):
     self.array = array
     self.index = index
+
+
+class StructInitializerNode(ExprNode):
+  """Represents a curly-brace struct initializer expression (e.g. 'Weapon { damage = 10 }')."""
+
+  def __init__(self, struct_name: str, fields: List[ArgumentNode], arena_expr: Optional[ASTNode] = None):
+    self.struct_name = struct_name
+    self.fields = fields
+    self.arena_expr = arena_expr

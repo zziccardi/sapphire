@@ -25,13 +25,13 @@ impl Position {
   }
 }
 
-struct Entity {
+proto Entity {
   var pos: Position;
   let id: int;
 }
 
 // Inherits Entity physical layout at compile-time
-struct Character: Entity {
+proto Character: Entity {
   var health: int;
   var max_health: int;
   let name: String;

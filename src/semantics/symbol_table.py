@@ -102,10 +102,11 @@ class FunctionType(Type):
 class StructField:
   """Represents a field in a struct."""
 
-  def __init__(self, name: str, field_type: Type, is_mutable: bool):
+  def __init__(self, name: str, field_type: Type, is_mutable: bool, has_default: bool = False):
     self.name = name
     self.field_type = field_type
     self.is_mutable = is_mutable
+    self.has_default = has_default
 
 
 class StructMethod:
@@ -120,12 +121,13 @@ class StructMethod:
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_name: Optional[str] = None):
+  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False):
     self.name = name
     self.parent_name = parent_name
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.is_cloned = False  # Set during clone-tracking analysis
+    self.is_prototype = is_prototype
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):
@@ -151,6 +153,13 @@ class TraitType(Type):
 
   def __repr__(self) -> str:
     return f"trait {self.name}"
+
+
+class ArenaType(Type):
+  """Represents the built-in Arena type."""
+
+  def __repr__(self) -> str:
+    return "Arena"
 
 
 class NoneType(Type):
@@ -185,6 +194,7 @@ class Symbol:
   def __init__(self, name: str, symbol_type: Type):
     self.name = name
     self.symbol_type = symbol_type
+    self.scope_defined: Optional["Scope"] = None
 
 
 class VariableSymbol(Symbol):
@@ -196,6 +206,7 @@ class VariableSymbol(Symbol):
     super().__init__(name, symbol_type)
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
+    self.arena_dependency: Optional[str] = None
 
 
 class FunctionSymbol(Symbol):
@@ -233,6 +244,7 @@ class Scope:
 
   def define(self, name: str, symbol: Symbol) -> None:
     """Defines a symbol in the current scope."""
+    symbol.scope_defined = self
     self.symbols[name] = symbol
 
   def define_type(self, name: str, type_obj: Type) -> None:
@@ -271,6 +283,9 @@ class SymbolTable:
     self.current_scope.define_type("bool", PrimitiveType("bool"))
     self.current_scope.define_type("String", PrimitiveType("string"))
     self.current_scope.define_type("none", NoneType())
+    arena_t = ArenaType()
+    self.current_scope.define_type("Arena", arena_t)
+    self.current_scope.define("Arena", FunctionSymbol("Arena", FunctionType([], arena_t)))
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

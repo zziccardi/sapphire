@@ -17,7 +17,7 @@ declaration
     ;
 
 structDeclaration
-    : STRUCT IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
+    : (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
     ;
 
 structField
@@ -123,7 +123,7 @@ expression
     | expression LPAREN argumentList? RPAREN                      # CallExpr
     | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
     | (SUB | ADD | NOT) expression                                # UnaryExpr
-    | CLONE expression (LBRACE statement* RBRACE)?                 # CloneExpr
+    | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
     | expression (MUL | DIV | MOD) expression                     # MultiplicativeExpr
     | expression (ADD | SUB) expression                           # AdditiveExpr
     | expression (EQ | NEQ | LT | LE | GT | GE) expression        # CompareExpr
@@ -168,6 +168,19 @@ primaryExpression
     | SELF
     | arrayLiteral
     | LPAREN expression RPAREN
+    | structInitializer
+    ;
+
+structInitializer
+    : IDENTIFIER LBRACE structInitFieldList? RBRACE (IN expression)?
+    ;
+
+structInitFieldList
+    : structInitField (COMMA structInitField)* COMMA?
+    ;
+
+structInitField
+    : IDENTIFIER ASSIGN expression
     ;
 
 literal
@@ -189,6 +202,7 @@ arrayLiteral
 // ==========================================
 
 // Keywords
+PROTO_KEYWORD : 'proto';
 LET : 'let';
 VAR : 'var';
 FUNC : 'func';
