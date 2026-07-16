@@ -1,4 +1,4 @@
-# Instructions
+# Development
 
 ## ANTLR
 
@@ -16,16 +16,19 @@ SapphireVisitor.py in the workspace.
 ## Compilation & execution
 
 To compile a Sapphire source file to Python (e.g. `sample.sp` to `sample.py`):
+
 ```bash
 pipenv run python src/run_transpiler.py sample.sp
 ```
 
 To execute the transpiled Python file:
+
 ```bash
 pipenv run python sample.py
 ```
 
 To run the full semantics demo of the transpiled file:
+
 ```bash
 pipenv run python -c "import sample; sample.run_demo()"
 ```
