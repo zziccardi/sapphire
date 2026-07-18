@@ -160,5 +160,5 @@ def main():
   print(f"TextMate grammar successfully written to: {OUTPUT_FILE}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
   main()

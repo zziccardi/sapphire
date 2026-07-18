@@ -3,6 +3,7 @@
 src/parser/gen/*
 !src/parser/gen/__init__.py
 
+tools/vscode-extension/coverage/
 tools/vscode-extension/node_modules/
 tools/vscode-extension/sapphire-*.vsix
 
