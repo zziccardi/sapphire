@@ -24,6 +24,16 @@ from lsprotocol.types import (
     TEXT_DOCUMENT_DID_OPEN,
     TEXT_DOCUMENT_DID_SAVE,
     TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
+    Hover,
+    HoverParams,
+    CompletionList,
+    CompletionItem,
+    CompletionParams,
+    CompletionOptions,
+    MarkupContent,
+    MarkupKind,
+    TEXT_DOCUMENT_HOVER,
+    TEXT_DOCUMENT_COMPLETION,
 )
 from pygls.lsp.server import LanguageServer
 
@@ -37,6 +47,7 @@ try:
       encode_semantic_tokens,
       TOKEN_TYPES,
       TOKEN_MODIFIERS,
+      find_node_at_position,
   )
 except ImportError:  # pragma: no cover
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -47,6 +58,7 @@ except ImportError:  # pragma: no cover
       encode_semantic_tokens,
       TOKEN_TYPES,
       TOKEN_MODIFIERS,
+      find_node_at_position,
   )
 
 
@@ -57,6 +69,9 @@ class SapphireLanguageServer(LanguageServer):
     super().__init__(*args, **kwargs)
     # Cache of delta-encoded semantic tokens: uri -> list of integers
     self.tokens_cache = {}
+    self.ast_cache = {}
+    self.node_types_cache = {}
+    self.symbol_table_cache = {}
 
 
 server = SapphireLanguageServer("sapphire-lsp", "v0.1.0")
@@ -107,6 +122,9 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
   # If syntax errors are present, report them immediately and clear semantic cache
   if listener.diagnostics:
     ls.publish_diagnostics(doc_uri, listener.diagnostics)
+    ls.ast_cache.pop(doc_uri, None)
+    ls.node_types_cache.pop(doc_uri, None)
+    ls.symbol_table_cache.pop(doc_uri, None)
     return
 
   # 3. AST Building
@@ -128,6 +146,9 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
             )
         ],
     )
+    ls.ast_cache.pop(doc_uri, None)
+    ls.node_types_cache.pop(doc_uri, None)
+    ls.symbol_table_cache.pop(doc_uri, None)
     return
 
   # 4. Semantic Validation & Token Extraction
@@ -164,6 +185,9 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
   # Cache successfully compiled semantic tokens
   encoded = encode_semantic_tokens(checker.raw_tokens)
   ls.tokens_cache[doc_uri] = encoded
+  ls.ast_cache[doc_uri] = ast
+  ls.node_types_cache[doc_uri] = checker.node_types
+  ls.symbol_table_cache[doc_uri] = checker.symbol_table
 
 
 @server.feature(TEXT_DOCUMENT_DID_OPEN)
@@ -201,6 +225,149 @@ def semantic_tokens_full(ls: SapphireLanguageServer, params: SemanticTokensParam
 
   tokens_data = ls.tokens_cache.get(uri, [])
   return SemanticTokens(data=tokens_data)
+
+
+@server.feature(TEXT_DOCUMENT_HOVER)
+def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
+  """Triggered when user hovers over an identifier."""
+  uri = params.text_document.uri
+  if uri not in ls.ast_cache or uri not in ls.node_types_cache:
+    return None
+
+  ast = ls.ast_cache[uri]
+  node_types = ls.node_types_cache[uri]
+
+  # LSP is 0-based, parser/type checker is 1-based
+  line = params.position.line + 1
+  col = params.position.character
+
+  node = find_node_at_position(ast, line, col)
+  if not node:
+    return None
+
+  node_type = node_types.get(node)
+  if not node_type:
+    from parser.ast import IdentifierNode
+    if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
+      sym = ls.symbol_table_cache[uri].lookup(node.name)
+      if sym:
+        node_type = getattr(sym, "symbol_type", None)
+
+  if not node_type:
+    return None
+
+  from parser.ast import (
+      IdentifierNode,
+      MemberAccessNode,
+      FuncDeclNode,
+      VarDeclNode,
+      ParameterNode,
+      StructFieldNode,
+  )
+
+  node_name = ""
+  if isinstance(node, IdentifierNode):
+    node_name = node.name
+  elif isinstance(node, MemberAccessNode):
+    node_name = node.member
+
+  category = "symbol"
+  if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
+    sym = ls.symbol_table_cache[uri].lookup(node.name)
+    if sym:
+      from semantics.symbol_table import (
+          VariableSymbol,
+          FunctionSymbol,
+          StructSymbol,
+          TraitSymbol,
+      )
+      if isinstance(sym, VariableSymbol):
+        category = "parameter" if sym.is_parameter else "variable"
+      elif isinstance(sym, FunctionSymbol):
+        category = "function"
+      elif isinstance(sym, StructSymbol):
+        category = "struct"
+      elif isinstance(sym, TraitSymbol):
+        category = "trait"
+
+  if isinstance(node, ParameterNode):
+    category = "parameter"
+    node_name = node.name
+  elif isinstance(node, StructFieldNode):
+    category = "property"
+    node_name = node.name
+  elif isinstance(node, VarDeclNode):
+    category = "variable"
+    node_name = node.name
+  elif isinstance(node, FuncDeclNode):
+    category = "function"
+    node_name = node.name
+
+  type_desc = str(node_type)
+  markdown_text = f"**({category})** `{node_name}`: `{type_desc}`" if node_name else f"`{type_desc}`"
+
+  return Hover(
+      contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text)
+  )
+
+
+@server.feature(
+    TEXT_DOCUMENT_COMPLETION, CompletionOptions(trigger_characters=["."])
+)
+def completion(ls: SapphireLanguageServer, params: CompletionParams) -> CompletionList:
+  """Triggered when user types a dot for member suggestion."""
+  uri = params.text_document.uri
+  if uri not in ls.ast_cache or uri not in ls.node_types_cache:
+    return CompletionList(is_incomplete=False, items=[])
+
+  ast = ls.ast_cache[uri]
+  node_types = ls.node_types_cache[uri]
+
+  # Line coordinates
+  line = params.position.line + 1
+  col = params.position.character
+
+  # Search receiver at col - 1 (the dot)
+  receiver = find_node_at_position(ast, line, col - 1)
+  if not receiver:
+    return CompletionList(is_incomplete=False, items=[])
+
+  receiver_type = node_types.get(receiver)
+  if not receiver_type:
+    from parser.ast import IdentifierNode
+    if isinstance(receiver, IdentifierNode) and uri in ls.symbol_table_cache:
+      sym = ls.symbol_table_cache[uri].lookup(receiver.name)
+      if sym:
+        receiver_type = getattr(sym, "symbol_type", None)
+
+  if not receiver_type:
+    return CompletionList(is_incomplete=False, items=[])
+
+  items = []
+  from semantics.symbol_table import StructType
+  if isinstance(receiver_type, StructType):
+    # Suggest fields
+    for field_name, field in receiver_type.fields.items():
+      items.append(
+          CompletionItem(
+              label=field_name,
+              kind=10,  # Field
+              detail=f"(property) {field_name}: {str(field.field_type)}",
+          )
+      )
+    # Suggest methods
+    for method_name, method in receiver_type.methods.items():
+      if method_name == "__init__":
+        continue
+      items.append(
+          CompletionItem(
+              label=method_name,
+              kind=2,  # Method
+              detail=f"(method) {method_name}{str(method.method_type)}",
+          )
+      )
+
+  return CompletionList(is_incomplete=False, items=items)
 
 
 def main():

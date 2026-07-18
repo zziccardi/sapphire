@@ -20,9 +20,11 @@ The Sapphire LSP server is built on top of the `pygls` library and runs as a bac
                                      +-------------------------+
 ```
 
-It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document changes in real time, serving two primary features:
+It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document changes in real time, serving the following primary features:
 1. **Diagnostics**: Real-time syntax and semantic validation. Whenever a file is opened, edited, or saved, the compiler frontend checks the source code. Errors are mapped to editor locations and pushed back to the client as diagnostics.
-2. **Semantic Tokens**: Rich syntax highlighting. An AST-walking semantic subclass of `TypeChecker` maps identifiers and definitions to semantic types (e.g. `struct`, `interface`, `parameter`, `variable`, `function`, `method`, `property`) and modifier states (e.g. `declaration`, `static`, `readonly`), delta-encoding them for the editor.
+2. **Semantic tokens**: Rich syntax highlighting. An AST-walking semantic subclass of `TypeChecker` maps identifiers and definitions to semantic types (e.g. `struct`, `interface`, `parameter`, `variable`, `function`, `method`, `property`) and modifier states (e.g. `declaration`, `static`, `readonly`), delta-encoding them for the editor.
+3. **Hover**: Displays type signatures, parameter scopes, and declaration kind metadata when hovering over variables, functions, structs, fields, parameters, or traits.
+4. **Member auto-completion**: Auto-suggests fields and methods of a struct when the user types a dot `.` on a variable or inside `self` methods.
 
 ## Requirements
 
