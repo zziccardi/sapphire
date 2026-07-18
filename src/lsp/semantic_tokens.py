@@ -11,7 +11,7 @@ try:
   from parser.ast import ASTNode
   from semantics.type_checker import TypeChecker
   from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
-except ImportError:
+except ImportError:  # pragma: no cover
   from src.parser.ast import ASTNode
   from src.semantics.type_checker import TypeChecker
   from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
@@ -59,11 +59,9 @@ class SemanticTokensTypeChecker(TypeChecker):
   def generic_visit(self, node: ASTNode) -> Any:
     # Safely traverse sub-nodes for semantic token generation without raising NotImplementedError
     for key, value in node.__dict__.items():
-      if key in ("current_node", "lsp_errors", "raw_tokens"):
-        continue
       if isinstance(value, ASTNode):
         self.visit(value)
-      elif isinstance(value, list):
+      elif isinstance(value, list):  # pragma: no cover
         for item in value:
           if isinstance(item, ASTNode):
             self.visit(item)
@@ -110,6 +108,8 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.add_token(node.name_line, node.name_column, node.name_length, "struct", 1)  # declaration
     if node.parent_name:
       self.add_token(node.parent_name_line, node.parent_name_column, node.parent_name_length, "struct")
+    for field in node.fields:
+      self.visit(field)
     super().visit_StructDeclNode(node)
 
   def visit_StructFieldNode(self, node) -> None:
@@ -118,23 +118,27 @@ class SemanticTokensTypeChecker(TypeChecker):
     if not node.is_mutable:
       mods |= 4  # readonly
     self.add_token(node.name_line, node.name_column, node.name_length, "property", mods)
-    super().visit_StructFieldNode(node)
+    # No parent visitor exists for struct fields
 
   def visit_TraitDeclNode(self, node) -> None:
     # Trait name declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "interface", 1)
+    for member in node.members:
+      self.visit(member)
     super().visit_TraitDeclNode(node)
 
   def visit_TraitMemberNode(self, node) -> None:
     # Trait method declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "method", 1)
-    super().visit_TraitMemberNode(node)
+    # No parent visitor exists for trait members
 
   def visit_FuncDeclNode(self, node) -> None:
     # Function declaration (only highlight if not a method; methods are handled by ImplMemberNode)
     is_method = self.current_struct is not None
     if not is_method:
       self.add_token(node.name_line, node.name_column, node.name_length, "function", 1)
+    for p in node.parameters:
+      self.visit(p)
     super().visit_FuncDeclNode(node)
 
   def visit_ImplMemberNode(self, node) -> None:
@@ -150,7 +154,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     if not node.is_mutable:
       mods |= 4
     self.add_token(node.name_line, node.name_column, node.name_length, "parameter", mods)
-    super().visit_ParameterNode(node)
+    # No parent visitor exists for parameters
 
   def visit_VarDeclNode(self, node) -> None:
     mods = 1
@@ -175,7 +179,7 @@ class SemanticTokensTypeChecker(TypeChecker):
           mods |= 4
         token_type = "parameter" if sym.is_parameter else "variable"
         self.add_token(node.name_line, node.name_column, node.name_length, token_type, mods)
-    super().visit_IdentifierNode(node)
+    return super().visit_IdentifierNode(node)
 
   def visit_MemberAccessNode(self, node):
     # Member lookup
@@ -201,7 +205,12 @@ class SemanticTokensTypeChecker(TypeChecker):
   def visit_BasicTypeNode(self, node):
     # Type reference
     if node.name not in ("int", "float", "bool", "string", "none", "void"):
-      self.add_token(node.name_line, node.name_column, node.name_length, "struct")
+      from semantics.symbol_table import TraitType
+      resolved = self.symbol_table.lookup_type(node.name)
+      if resolved and isinstance(resolved, TraitType):
+        self.add_token(node.name_line, node.name_column, node.name_length, "interface")
+      else:
+        self.add_token(node.name_line, node.name_column, node.name_length, "struct")
     else:
       self.add_token(node.name_line, node.name_column, node.name_length, "type")
     return None

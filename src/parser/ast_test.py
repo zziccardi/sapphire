@@ -95,6 +95,15 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node_dict["declarations"][1], "not-an-ast-node")
     self.assertTrue(len(repr(node)) > 0)
 
+  def test_positioning_keys_skipped(self):
+    """Verifies that positioning attributes are skipped in to_dict serialization."""
+    node = BasicTypeNode("int")
+    node.start_line = 12
+    node.start_column = 34
+    node_dict = node.to_dict()
+    self.assertNotIn("start_line", node_dict)
+    self.assertNotIn("start_column", node_dict)
+
 
 if __name__ == "__main__":
   unittest.main()
