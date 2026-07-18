@@ -31,8 +31,8 @@ class TestLSPServer(unittest.TestCase):
 
   def setUp(self):
     self.ls = SapphireLanguageServer("test-lsp", "0.1.0")
-    # Mock publish_diagnostics
-    self.ls.publish_diagnostics = MagicMock()
+    # Mock text_document_publish_diagnostics
+    self.ls.text_document_publish_diagnostics = MagicMock()
     # Mock workspace lookup method by setting protocol._workspace
     self.ls.protocol._workspace = MagicMock()
 
@@ -42,7 +42,10 @@ class TestLSPServer(unittest.TestCase):
     validate_source(self.ls, doc_uri, doc_text)
 
     # Check diagnostics published (should be empty list)
-    self.ls.publish_diagnostics.assert_called_once_with(doc_uri, [])
+    self.ls.text_document_publish_diagnostics.assert_called_once()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertEqual(call_arg.diagnostics, [])
     # Check cache contains encoded tokens
     self.assertIn(doc_uri, self.ls.tokens_cache)
     self.assertTrue(len(self.ls.tokens_cache[doc_uri]) > 0)
@@ -53,11 +56,11 @@ class TestLSPServer(unittest.TestCase):
     validate_source(self.ls, doc_uri, doc_text)
 
     # Check diagnostics published
-    self.ls.publish_diagnostics.assert_called_once()
-    args = self.ls.publish_diagnostics.call_args[0]
-    self.assertEqual(args[0], doc_uri)
-    self.assertTrue(len(args[1]) > 0)
-    self.assertEqual(args[1][0].source, "sapphire-parser")
+    self.ls.text_document_publish_diagnostics.assert_called_once()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertTrue(len(call_arg.diagnostics) > 0)
+    self.assertEqual(call_arg.diagnostics[0].source, "sapphire-parser")
 
   def test_validate_source_ast_builder_failure(self):
     doc_uri = "file:///test.sp"
@@ -74,11 +77,11 @@ class TestLSPServer(unittest.TestCase):
       with patch(patch_path, side_effect=ValueError("Mock AST generation error")):
         validate_source(self.ls, doc_uri, doc_text)
 
-    self.ls.publish_diagnostics.assert_called_once()
-    args = self.ls.publish_diagnostics.call_args[0]
-    self.assertEqual(args[0], doc_uri)
-    self.assertEqual(args[1][0].source, "sapphire-compiler")
-    self.assertIn("Internal AST generation failure", args[1][0].message)
+    self.ls.text_document_publish_diagnostics.assert_called_once()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertEqual(call_arg.diagnostics[0].source, "sapphire-compiler")
+    self.assertIn("Internal AST generation failure", call_arg.diagnostics[0].message)
 
   def test_validate_source_semantic_error(self):
     doc_uri = "file:///test.sp"
@@ -86,11 +89,11 @@ class TestLSPServer(unittest.TestCase):
     validate_source(self.ls, doc_uri, doc_text)
 
     # Check diagnostics published
-    self.ls.publish_diagnostics.assert_called_once()
-    args = self.ls.publish_diagnostics.call_args[0]
-    self.assertEqual(args[0], doc_uri)
-    self.assertTrue(len(args[1]) > 0)
-    self.assertEqual(args[1][0].source, "sapphire-semantics")
+    self.ls.text_document_publish_diagnostics.assert_called_once()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertTrue(len(call_arg.diagnostics) > 0)
+    self.assertEqual(call_arg.diagnostics[0].source, "sapphire-semantics")
 
   def test_did_open_change_save(self):
     doc_uri = "file:///test.sp"
@@ -107,17 +110,23 @@ class TestLSPServer(unittest.TestCase):
 
     # 1. did_open
     did_open(self.ls, params)
-    self.ls.publish_diagnostics.assert_called_with(doc_uri, [])
-    self.ls.publish_diagnostics.reset_mock()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertEqual(call_arg.diagnostics, [])
+    self.ls.text_document_publish_diagnostics.reset_mock()
 
     # 2. did_change
     did_change(self.ls, params)
-    self.ls.publish_diagnostics.assert_called_with(doc_uri, [])
-    self.ls.publish_diagnostics.reset_mock()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertEqual(call_arg.diagnostics, [])
+    self.ls.text_document_publish_diagnostics.reset_mock()
 
     # 3. did_save
     did_save(self.ls, params)
-    self.ls.publish_diagnostics.assert_called_with(doc_uri, [])
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_arg.uri, doc_uri)
+    self.assertEqual(call_arg.diagnostics, [])
 
   def test_semantic_tokens_full(self):
     doc_uri = "file:///test.sp"
@@ -139,7 +148,7 @@ class TestLSPServer(unittest.TestCase):
     self.assertEqual(self.ls.tokens_cache[doc_uri], tokens.data)
 
     # 2. Subsequent retrieval from cache
-    self.ls.publish_diagnostics.reset_mock()
+    self.ls.text_document_publish_diagnostics.reset_mock()
     self.ls.workspace.get_text_document.reset_mock()
     tokens2 = semantic_tokens_full(self.ls, params)
     self.assertEqual(tokens2.data, tokens.data)

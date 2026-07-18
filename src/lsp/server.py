@@ -34,6 +34,7 @@ from lsprotocol.types import (
     MarkupKind,
     TEXT_DOCUMENT_HOVER,
     TEXT_DOCUMENT_COMPLETION,
+    PublishDiagnosticsParams,
 )
 from pygls.lsp.server import LanguageServer
 
@@ -121,7 +122,9 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
 
   # If syntax errors are present, report them immediately and clear semantic cache
   if listener.diagnostics:
-    ls.publish_diagnostics(doc_uri, listener.diagnostics)
+    ls.text_document_publish_diagnostics(
+        PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
+    )
     ls.ast_cache.pop(doc_uri, None)
     ls.node_types_cache.pop(doc_uri, None)
     ls.symbol_table_cache.pop(doc_uri, None)
@@ -132,19 +135,21 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
     builder = ASTBuilder()
     ast = builder.visit(tree)
   except Exception as e:
-    ls.publish_diagnostics(
-        doc_uri,
-        [
-            Diagnostic(
-                range=Range(
-                    start=Position(line=0, character=0),
-                    end=Position(line=0, character=1),
-                ),
-                message=f"Internal AST generation failure: {str(e)}",
-                severity=DiagnosticSeverity.Error,
-                source="sapphire-compiler",
-            )
-        ],
+    ls.text_document_publish_diagnostics(
+        PublishDiagnosticsParams(
+            uri=doc_uri,
+            diagnostics=[
+                Diagnostic(
+                    range=Range(
+                        start=Position(line=0, character=0),
+                        end=Position(line=0, character=1),
+                    ),
+                    message=f"Internal AST generation failure: {str(e)}",
+                    severity=DiagnosticSeverity.Error,
+                    source="sapphire-compiler",
+                )
+            ],
+        )
     )
     ls.ast_cache.pop(doc_uri, None)
     ls.node_types_cache.pop(doc_uri, None)
@@ -180,7 +185,9 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
         )
     )
 
-  ls.publish_diagnostics(doc_uri, diagnostics)
+  ls.text_document_publish_diagnostics(
+      PublishDiagnosticsParams(uri=doc_uri, diagnostics=diagnostics)
+  )
 
   # Cache successfully compiled semantic tokens
   encoded = encode_semantic_tokens(checker.raw_tokens)
