@@ -3,6 +3,8 @@
 src/parser/gen/*
 !src/parser/gen/__init__.py
 
+tools/vscode-extension/node_modules/
+
 .DS_Store
 .antlr/
 .coverage
