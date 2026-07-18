@@ -1,17 +1,17 @@
-# Sapphire Language Server (LSP)
+# Sapphire language server
 
 This directory contains the Python-based Language Server Protocol (LSP) server implementation for the Sapphire programming language.
 
 ## Architecture
 
-The Sapphire LSP server is built on top of the `pygls` library and runs as a background process communicating with the editor extension over standard input/output (`stdio`).
+The Sapphire LSP server is built on top of the `pygls` library and runs as a background process communicating with the VS Code extension over standard input/output (`stdio`).
 
 ```
- +------------------+                +-------------------------+
- |                  |     stdio      |                         |
- |  VS Code Client  | <============> |  Sapphire LSP Server    |
- |                  |     (LSP)      |  (pygls background process)
- +------------------+                +-------------------------+
+ +------------------+                +------------------------------+
+ |                  |     stdio      |                              |
+ |  VS Code Client  | <============> |  Sapphire LSP Server         |
+ |                  |     (LSP)      |  (pygls background process)  |
+ +------------------+                +------------------------------+
                                                   |
                                                   v
                                      +-------------------------+
@@ -31,11 +31,11 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 
 ## Files
 
-- [server.py](file:///Users/zziccardi/Desktop/sapphire/src/lsp/server.py): The main LSP server entrypoint that runs the server on `stdio` and manages the event hooks.
-- [semantic_tokens.py](file:///Users/zziccardi/Desktop/sapphire/src/lsp/semantic_tokens.py): Implements position tracking and LSP relative delta-encoding for Sapphire symbols.
-- [semantic_tokens_test.py](file:///Users/zziccardi/Desktop/sapphire/src/lsp/semantic_tokens_test.py): Unit tests for token generation and relative offset calculations.
+- [server.py](src/lsp/server.py): The main LSP server entrypoint that runs the server on `stdio` and manages the event hooks.
+- [semantic_tokens.py](src/lsp/semantic_tokens.py): Implements position tracking and LSP relative delta-encoding for Sapphire symbols.
+- [semantic_tokens_test.py](src/lsp/semantic_tokens_test.py): Unit tests for token generation and relative offset calculations.
 
-## Diagnostics Details
+## Diagnostics
 
 To ensure a smooth editor experience, when a syntax error is introduced temporarily during active typing:
 - The server will report the syntax error diagnostics immediately.
