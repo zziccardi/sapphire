@@ -12,13 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from antlr4 import InputStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
-from pygls.lsp.methods import (
-    TEXT_DOCUMENT_DID_CHANGE,
-    TEXT_DOCUMENT_DID_OPEN,
-    TEXT_DOCUMENT_DID_SAVE,
-    TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
-)
-from pygls.lsp.types import (
+from lsprotocol.types import (
     Diagnostic,
     DiagnosticSeverity,
     Position,
@@ -26,8 +20,12 @@ from pygls.lsp.types import (
     SemanticTokens,
     SemanticTokensLegend,
     SemanticTokensParams,
+    TEXT_DOCUMENT_DID_CHANGE,
+    TEXT_DOCUMENT_DID_OPEN,
+    TEXT_DOCUMENT_DID_SAVE,
+    TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
 )
-from pygls.server import LanguageServer
+from pygls.lsp.server import LanguageServer
 
 # Imports from compiler codebase
 try:
@@ -40,7 +38,7 @@ try:
       TOKEN_TYPES,
       TOKEN_MODIFIERS,
   )
-except ImportError:
+except ImportError:  # pragma: no cover
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
@@ -210,5 +208,5 @@ def main():
   server.start_io()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
   main()
