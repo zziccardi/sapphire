@@ -1,0 +1,72 @@
+{
+  "name": "sapphire",
+  "displayName": "Sapphire",
+  "description": "Language support and semantic highlighting for the Sapphire programming language",
+  "version": "0.1.0",
+  "publisher": "zziccardi",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:sapphire"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "sapphire",
+        "aliases": [
+          "Sapphire",
+          "sapphire"
+        ],
+        "extensions": [
+          ".sp"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sapphire",
+        "scopeName": "source.sp",
+        "path": "./syntaxes/sapphire.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Sapphire",
+      "properties": {
+        "sapphire.lsp.pythonPath": {
+          "type": "string",
+          "default": "pipenv",
+          "description": "Path to the python executable or virtualenv manager (e.g. 'pipenv' or 'python3') to run the language server."
+        },
+        "sapphire.lsp.serverPath": {
+          "type": "string",
+          "default": "src/lsp/server.py",
+          "description": "Path to the Python LSP server file relative to the workspace root."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.34",
+    "@types/vscode": "^1.75.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "typescript": "^5.1.3",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}

@@ -11,10 +11,21 @@ from typing import Any, Dict, List, Optional, Union
 class ASTNode:
   """Base class for all AST nodes."""
 
+  # The following position attributes are only needed for editor integrations
+  # (Language Server Protocol) and are not used by the compiler transpiler.
+  start_line: Optional[int] = None
+  start_column: Optional[int] = None
+  end_line: Optional[int] = None
+  end_column: Optional[int] = None
+  length: Optional[int] = None
+
   def to_dict(self) -> Dict[str, Any]:
     """Returns a dictionary representation of the AST node for serialization/debugging."""
     result = {"node_type": self.__class__.__name__}
     for key, value in self.__dict__.items():
+      # Skip language-server specific positioning keys during standard AST serialization
+      if key in ("start_line", "start_column", "end_line", "end_column", "length"):
+        continue
       if isinstance(value, ASTNode):
         result[key] = value.to_dict()
       elif isinstance(value, list):
