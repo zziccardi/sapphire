@@ -5,6 +5,8 @@ This directory contains the Visual Studio Code extension client for the **Sapphi
 ## Features
 
 - **Semantic highlighting**: High-accuracy semantic coloring provided by the compiler frontend (resolving struct definitions, trait names, function calls, methods, parameters, and variable mutability/scopes).
+- **Hover support**: Hovering over variables, fields, methods, or parameters displays their declared type signature and category in a detailed Markdown format.
+- **Member auto-completion (dot trigger)**: Auto-suggests available fields and methods of a struct when typing a dot `.` on a struct instance.
 - **Syntax highlighting**: Fast regex-based fallback coloring for structural keywords, types, strings, comments, and numbers.
 - **Diagnostics**: Real-time syntax and type-checking error reporting.
 - **Structural configuration**: Bracket matching and auto-closing pairs for parentheses, braces, brackets, and quotes.

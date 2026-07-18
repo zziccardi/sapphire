@@ -56,8 +56,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "vitest run",
-    "coverage": "vitest run --coverage"
+    "test": "vitest run src/",
+    "coverage": "vitest run --coverage src/"
   },
   "devDependencies": {
     "@types/node": "^16.18.34",

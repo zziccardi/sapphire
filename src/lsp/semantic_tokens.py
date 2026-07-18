@@ -47,12 +47,16 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
     self.current_node: Optional[ASTNode] = None
     self.lsp_errors: List[dict] = []
+    self.node_types: Dict[ASTNode, Any] = {}
 
   def visit(self, node: ASTNode) -> Any:
     old_node = self.current_node
     self.current_node = node
     try:
-      return super().visit(node)
+      res = super().visit(node)
+      if res is not None:
+        self.node_types[node] = res
+      return res
     finally:
       self.current_node = old_node
 
@@ -255,3 +259,39 @@ def encode_semantic_tokens(raw_tokens: List[Tuple[int, int, int, str, int]]) -> 
     last_col = col
 
   return delta_tokens
+
+
+def find_node_at_position(node: ASTNode, line: int, col: int) -> Optional[ASTNode]:
+  """Recursively finds the most specific AST node containing (line, col).
+
+  Line is 1-based, col is 0-based.
+  """
+  if getattr(node, "start_line", None) is None or getattr(node, "end_line", None) is None:
+    return None
+
+  # Check if line is within the node's line boundaries
+  if node.start_line <= line <= node.end_line:
+    # Check column boundary on start line
+    if line == node.start_line and col < node.start_column:
+      return None
+    # Check column boundary on end line
+    if line == node.end_line and col > node.end_column:
+      return None
+
+    # Recursively check children for a tighter match
+    for key, value in node.__dict__.items():
+      if key in ("current_node", "lsp_errors", "raw_tokens", "node_types"):
+        continue
+      if isinstance(value, ASTNode):
+        found = find_node_at_position(value, line, col)
+        if found:
+          return found
+      elif isinstance(value, list):
+        for item in value:
+          if isinstance(item, ASTNode):
+            found = find_node_at_position(item, line, col)
+            if found:
+              return found
+
+    return node
+  return None
