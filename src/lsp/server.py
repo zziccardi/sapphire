@@ -6,9 +6,11 @@ accurate syntax highlighting in Visual Studio Code.
 
 import sys
 import os
+from typing import Optional
 
 # Add parent directories to Python path to allow imports from parser and semantics
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")))
 
 from antlr4 import InputStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
@@ -35,6 +37,7 @@ from lsprotocol.types import (
     TEXT_DOCUMENT_HOVER,
     TEXT_DOCUMENT_COMPLETION,
     PublishDiagnosticsParams,
+    WORKSPACE_DID_CHANGE_WATCHED_FILES,
 )
 from pygls.lsp.server import LanguageServer
 
@@ -87,7 +90,8 @@ class ANTLRDiagnosticListener(ErrorListener):
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     length = 1
-    if offendingSymbol and hasattr(offendingSymbol, "text") and offendingSymbol.text:
+    if (offendingSymbol and hasattr(offendingSymbol, "text") and
+        offendingSymbol.text):
       length = len(offendingSymbol.text)
 
     # LSP Diagnostic structure
@@ -103,7 +107,8 @@ class ANTLRDiagnosticListener(ErrorListener):
     self.diagnostics.append(diag)
 
 
-def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> None:
+def validate_source(ls: SapphireLanguageServer, doc_uri: str,
+                    doc_text: str) -> None:
   """Run lexical, syntactic, and semantic validation on the source text."""
   input_stream = InputStream(doc_text)
   listener = ANTLRDiagnosticListener()
@@ -120,7 +125,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str, doc_text: str) -> 
   parser.addErrorListener(listener)
   tree = parser.program()
 
-  # If syntax errors are present, report them immediately and clear semantic cache
+  # If syntax errors are present, report them immediately & clear semantic cache
   if listener.diagnostics:
     ls.text_document_publish_diagnostics(
         PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
@@ -218,14 +223,22 @@ def did_save(ls: SapphireLanguageServer, params):
   validate_source(ls, doc.uri, doc.source)
 
 
+@server.feature(WORKSPACE_DID_CHANGE_WATCHED_FILES)
+def did_change_watched_files(ls: SapphireLanguageServer, params):
+  """No-op handler to silent log warnings from workspace/didChangeWatchedFiles."""
+  pass
+
+
 @server.feature(
     TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
-    SemanticTokensLegend(token_types=TOKEN_TYPES, token_modifiers=TOKEN_MODIFIERS),
-)
-def semantic_tokens_full(ls: SapphireLanguageServer, params: SemanticTokensParams) -> SemanticTokens:
+    SemanticTokensLegend(token_types=TOKEN_TYPES,
+                         token_modifiers=TOKEN_MODIFIERS))
+def semantic_tokens_full(ls: SapphireLanguageServer,
+                         params: SemanticTokensParams) -> SemanticTokens:
   """Returns the cached semantic tokens for the document."""
   uri = params.text_document.uri
-  # Re-validate if document is not in cache (e.g. freshly opened or not validated yet)
+  # Re-validate if document is not in cache (e.g. freshly opened or not
+  # validated yet)
   if uri not in ls.tokens_cache:
     doc = ls.workspace.get_text_document(uri)
     validate_source(ls, uri, doc.source)
@@ -311,17 +324,17 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     node_name = node.name
 
   type_desc = str(node_type)
-  markdown_text = f"**({category})** `{node_name}`: `{type_desc}`" if node_name else f"`{type_desc}`"
+  markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"
+                   if node_name else f"`{type_desc}`")
 
-  return Hover(
-      contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text)
-  )
+  return Hover(contents=MarkupContent(kind=MarkupKind.Markdown,
+                                      value=markdown_text))
 
 
-@server.feature(
-    TEXT_DOCUMENT_COMPLETION, CompletionOptions(trigger_characters=["."])
-)
-def completion(ls: SapphireLanguageServer, params: CompletionParams) -> CompletionList:
+@server.feature(TEXT_DOCUMENT_COMPLETION,
+                CompletionOptions(trigger_characters=["."]))
+def completion(ls: SapphireLanguageServer,
+               params: CompletionParams) -> CompletionList:
   """Triggered when user types a dot for member suggestion."""
   uri = params.text_document.uri
   if uri not in ls.ast_cache or uri not in ls.node_types_cache:

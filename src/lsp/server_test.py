@@ -128,6 +128,13 @@ class TestLSPServer(unittest.TestCase):
     self.assertEqual(call_arg.uri, doc_uri)
     self.assertEqual(call_arg.diagnostics, [])
 
+    # 4. did_change_watched_files
+    try:
+      from lsp.server import did_change_watched_files
+    except ImportError:  # pragma: no cover
+      from src.lsp.server import did_change_watched_files
+    did_change_watched_files(self.ls, params)
+
   def test_semantic_tokens_full(self):
     doc_uri = "file:///test.sp"
     doc_text = "let x: int = 42;"
