@@ -329,19 +329,22 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   if isinstance(node_type, FunctionType):
     params_lines = []
     for idx, p_type in enumerate(node_type.param_types):
-      p_name = node_type.param_names[idx] if idx < len(node_type.param_names) else f"p{idx}"
-      is_mut = node_type.param_mutabilities[idx] if idx < len(node_type.param_mutabilities) else False
+      p_name = (node_type.param_names[idx]
+                if idx < len(node_type.param_names)
+                else f"p{idx}")
+      is_mut = (node_type.param_mutabilities[idx]
+                if idx < len(node_type.param_mutabilities) else False)
       mut_str = "var " if is_mut else ""
-      mut_label = " (mutable)" if is_mut else ""
-      params_lines.append(f"- `{mut_str}{p_name}: {str(p_type)}`{mut_label}")
+      # Show bulleted list of params & their types.
+      params_lines.append(f"- `{mut_str}{p_name}: {str(p_type)}`")
 
     params_section = "\n".join(params_lines)
     markdown_text = f"**({category})** `{node_name}`\n"
     if params_lines:
-      markdown_text += f"Parameters:\n{params_section}\n"
+      markdown_text += f"\nParameters:\n{params_section}\n"
     else:
-      markdown_text += "Parameters: none\n"
-    markdown_text += f"Returns: `{str(node_type.return_type)}`"
+      markdown_text += "\nParameters: none\n"
+    markdown_text += f"\nReturns: `{str(node_type.return_type)}`"
   else:
     type_desc = str(node_type)
     markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"

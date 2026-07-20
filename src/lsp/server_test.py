@@ -179,12 +179,12 @@ class TestLSPServer(unittest.TestCase):
     func test_func(char: Character) {
       let score: int = 100;
       char.health = char.health - 10;
-      
+
       let opt_char: Character? = char;
       if let active = opt_char {
         let h: int = active.health;
       }
-      
+
       let items = [1, 2, 3];
       for x in items {
         let val: int = x;
@@ -304,7 +304,6 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNotNone(res_hover_method)
     self.assertIn("take_damage", res_hover_method.contents.value)
     self.assertIn("var amount: int", res_hover_method.contents.value)
-    self.assertIn("(mutable)", res_hover_method.contents.value)
 
     # Test Hover on an invalid position
     params_hover_invalid = HoverParams(
