@@ -156,7 +156,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
     return
 
   # 4. Semantic Validation & Token Extraction
-  checker = SemanticTokensTypeChecker()
+  checker = SemanticTokensTypeChecker(doc_text)
   try:
     checker.check(ast)
   except Exception:
@@ -345,6 +345,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     else:
       markdown_text += "\nParameters: none\n"
     markdown_text += f"\nReturns: `{str(node_type.return_type)}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
   else:
     type_desc = str(node_type)
     markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"

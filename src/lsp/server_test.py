@@ -172,10 +172,16 @@ class TestLSPServer(unittest.TestCase):
       var health: int;
     }
     impl Character {
+      /*
+       * Damages the character by amount.
+       * Decreases self.health.
+       */
       func take_damage(var amount: int) {
         self.health = self.health - amount;
       }
     }
+    // Tests function functionality.
+    // Also does some other tests.
     func test_func(char: Character) {
       let score: int = 100;
       char.health = char.health - 10;
@@ -190,9 +196,12 @@ class TestLSPServer(unittest.TestCase):
         let val: int = x;
       }
     }
+    // Another test function
     func another_func(char: Character) {
       test_func(char);
     }
+    // This comment is separated by an empty line
+    
     func no_param_func() {
     }
     """
@@ -203,10 +212,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn(doc_uri, self.ls.node_types_cache)
 
     # 2. Test Hover on variable 'char' in `char.health = ...` (LHS of assignment)
-    # We test hover at line=11, character=7 (0-based)
+    # We test hover at line=17, character=7 (0-based)
     params_hover = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=11, character=7)
+        position=Position(line=17, character=7)
     )
 
     from src.lsp.server import hover
@@ -216,10 +225,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Character", res_hover.contents.value)
 
     # Test Hover on field access 'health' in LHS of assignment `char.health = ...`
-    # LSP line is 11, character is 13 (in LHS `char.health`)
+    # LSP line is 17, character is 13 (in LHS `char.health`)
     params_hover_lhs_field = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=11, character=13)
+        position=Position(line=17, character=13)
     )
     res_hover_lhs_field = hover(self.ls, params_hover_lhs_field)
     self.assertIsNotNone(res_hover_lhs_field)
@@ -227,10 +236,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_lhs_field.contents.value)
 
     # Test Hover on variable declaration 'score' (LHS name of declaration)
-    # LSP line is 10, character is 11 (in `score` inside `let score: int = ...`)
+    # LSP line is 16, character is 11 (in `score` inside `let score: int = ...`)
     params_hover_decl = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=10, character=11)
+        position=Position(line=16, character=11)
     )
     res_hover_decl = hover(self.ls, params_hover_decl)
     self.assertIsNotNone(res_hover_decl)
@@ -238,10 +247,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_decl.contents.value)
 
     # Test Hover on field access 'health' in RHS `char.health`
-    # LSP line is 11, character is 26 (in right-hand `char.health`)
+    # LSP line is 17, character is 26 (in right-hand `char.health`)
     params_hover_field = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=11, character=26)
+        position=Position(line=17, character=26)
     )
     res_hover_field = hover(self.ls, params_hover_field)
     self.assertIsNotNone(res_hover_field)
@@ -249,10 +258,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_field.contents.value)
 
     # Test Hover on 'if let' variable 'active'
-    # LSP line is 14, character is 14 (inside `if let active = ...`)
+    # LSP line is 20, character is 14 (inside `if let active = ...`)
     params_hover_if_let = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=14, character=14)
+        position=Position(line=20, character=14)
     )
     res_hover_if_let = hover(self.ls, params_hover_if_let)
     self.assertIsNotNone(res_hover_if_let)
@@ -260,10 +269,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Character", res_hover_if_let.contents.value)
 
     # Test Hover on 'for' loop variable 'x'
-    # LSP line is 19, character is 10 (inside `for x in ...`)
+    # LSP line is 25, character is 10 (inside `for x in ...`)
     params_hover_for = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=19, character=10)
+        position=Position(line=25, character=10)
     )
     res_hover_for = hover(self.ls, params_hover_for)
     self.assertIsNotNone(res_hover_for)
@@ -271,10 +280,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_for.contents.value)
 
     # Test Hover on function name 'test_func' at call site
-    # LSP line is 24, character is 7 (inside `test_func(char);`)
+    # LSP line is 31, character is 7 (inside `test_func(char);`)
     params_hover_call = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=24, character=7)
+        position=Position(line=31, character=7)
     )
     res_hover_call = hover(self.ls, params_hover_call)
     self.assertIsNotNone(res_hover_call)
@@ -282,33 +291,38 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Parameters:", res_hover_call.contents.value)
     self.assertIn("char: Character", res_hover_call.contents.value)
     self.assertIn("Returns: `none`", res_hover_call.contents.value)
+    self.assertIn("Tests function functionality.", res_hover_call.contents.value)
+    self.assertIn("Also does some other tests.", res_hover_call.contents.value)
 
     # Test Hover on function with no parameters
-    # LSP line is 26, character is 10 (inside `no_param_func`)
+    # LSP line is 35, character is 10 (inside `no_param_func`)
     params_hover_no_param = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=26, character=10)
+        position=Position(line=35, character=10)
     )
     res_hover_no_param = hover(self.ls, params_hover_no_param)
     self.assertIsNotNone(res_hover_no_param)
     self.assertIn("no_param_func", res_hover_no_param.contents.value)
     self.assertIn("Parameters: none", res_hover_no_param.contents.value)
+    self.assertNotIn("separated by an empty line", res_hover_no_param.contents.value)
 
     # Test Hover on method 'take_damage' declaration in impl block
-    # LSP line is 5, character is 16 (inside `func take_damage`)
+    # LSP line is 9, character is 16 (inside `func take_damage`)
     params_hover_method = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=16)
+        position=Position(line=9, character=16)
     )
     res_hover_method = hover(self.ls, params_hover_method)
     self.assertIsNotNone(res_hover_method)
     self.assertIn("take_damage", res_hover_method.contents.value)
     self.assertIn("var amount: int", res_hover_method.contents.value)
+    self.assertIn("Damages the character by amount.", res_hover_method.contents.value)
+    self.assertIn("Decreases self.health.", res_hover_method.contents.value)
 
     # Test Hover on an invalid position
     params_hover_invalid = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=35, character=0)
+        position=Position(line=40, character=0)
     )
     res_hover_invalid = hover(self.ls, params_hover_invalid)
     self.assertIsNone(res_hover_invalid)
@@ -321,10 +335,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNone(hover(self.ls, params_hover_uncached))
 
     # 3. Test Completion on 'char.'
-    # The dot in `char.` on line 7 (LSP line 6, character 25)
+    # The dot in `char.` on line 18 (LSP line 17, character 25)
     params_completion = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=6, character=25) # Position after the dot
+        position=Position(line=17, character=25) # Position after the dot
     )
 
     from src.lsp.server import completion
@@ -604,6 +618,16 @@ class TestLSPServer(unittest.TestCase):
         self.ls.workspace.get_text_document.side_effect = Exception("Test get_text_document exception")
         self.assertEqual(len(completion(self.ls, params_comp).items), 0)
         self.ls.workspace.get_text_document.side_effect = None
+
+  def test_extract_comments_above(self):
+    from src.lsp.semantic_tokens import extract_comments_above
+    # Test line is None
+    self.assertEqual(extract_comments_above("any text", None), "")
+    # Test idx <= 0
+    self.assertEqual(extract_comments_above("func foo()", 1), "")
+    # Test single-line block comment
+    doc = "/* Single-line block */\nfunc foo()"
+    self.assertEqual(extract_comments_above(doc, 2), "Single-line block")
 
   def test_main(self):
     try:

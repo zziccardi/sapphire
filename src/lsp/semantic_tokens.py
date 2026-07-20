@@ -38,16 +38,78 @@ TOKEN_MODIFIERS = [
 ]
 
 
+def extract_comments_above(doc_text: str, start_line: Optional[int]) -> str:
+  """Extracts comments directly above start_line (1-based)."""
+  if start_line is None:
+    return ""
+  lines = doc_text.splitlines()
+  idx = start_line - 1
+  if idx <= 0:
+    return ""
+
+  comments = []
+  idx -= 1
+
+  in_block_comment = False
+  block_comment_lines = []
+
+  while idx >= 0:
+    line = lines[idx].strip()
+
+    if not line and not in_block_comment:
+      break
+
+    if line.endswith("*/"):
+      in_block_comment = True
+      block_comment_lines.insert(0, lines[idx])
+      if line.startswith("/*"):
+        in_block_comment = False
+      idx -= 1
+      continue
+
+    if in_block_comment:
+      block_comment_lines.insert(0, lines[idx])
+      if line.startswith("/*"):
+        in_block_comment = False
+      idx -= 1
+      continue
+
+    if line.startswith("//"):
+      comment_content = line[2:].strip()
+      comments.insert(0, comment_content)
+      idx -= 1
+    else:
+      break
+
+  if block_comment_lines:
+    block_text = "\n".join(block_comment_lines).strip()
+    if block_text.startswith("/*") and block_text.endswith("*/"):
+      block_content = block_text[2:-2].strip()
+      cleaned_lines = []
+      for line in block_content.splitlines():
+        line = line.strip()
+        if line.startswith("*"):
+          line = line[1:].strip()
+        cleaned_lines.append(line)
+      return "\n".join(cleaned_lines)
+
+  if comments:
+    return "\n".join(comments)
+
+  return ""
+
+
 class SemanticTokensTypeChecker(TypeChecker):
   """Subclass of TypeChecker that extracts semantic tokens during analysis."""
 
-  def __init__(self):
+  def __init__(self, doc_text: Optional[str] = None):
     super().__init__()
+    self.doc_text = doc_text
     # List of raw tokens: (line, column, length, token_type, modifier_bitmask)
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
     self.current_node: Optional[ASTNode] = None
     self.lsp_errors: List[dict] = []
-    self.node_types: Dict[ASTNode, Any] = {}
+    self.node_types: dict = {}
 
   def visit(self, node: ASTNode) -> Any:
     old_node = self.current_node
@@ -147,6 +209,12 @@ class SemanticTokensTypeChecker(TypeChecker):
     if not is_method:
       sym = self.symbol_table.lookup(node.name)
       if sym:
+        try:
+          from semantics.symbol_table import FunctionType
+        except ImportError:  # pragma: no cover
+          from src.semantics.symbol_table import FunctionType
+        if isinstance(sym.symbol_type, FunctionType) and self.doc_text:
+          sym.symbol_type.comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
         self.node_types[node] = sym.symbol_type
 
   def visit_ImplMemberNode(self, node) -> None:
@@ -159,7 +227,14 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.visit(p)
     super().visit_ImplMemberNode(node)
     if self.current_struct and node.func_decl.name in self.current_struct.methods:
-      self.node_types[node.func_decl] = self.current_struct.methods[node.func_decl.name].method_type
+      method_type = self.current_struct.methods[node.func_decl.name].method_type
+      try:
+        from semantics.symbol_table import FunctionType
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import FunctionType
+      if isinstance(method_type, FunctionType) and self.doc_text:
+        method_type.comments = extract_comments_above(self.doc_text, getattr(node.func_decl, "start_line", None))
+      self.node_types[node.func_decl] = method_type
 
   def visit_ParameterNode(self, node) -> None:
     mods = 1
