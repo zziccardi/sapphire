@@ -168,11 +168,62 @@ class TestLSPServer(unittest.TestCase):
     # 1. Setup a valid document that has fields, methods, parameters, etc.
     doc_uri = "file:///test.sp"
     doc_text = """
+    // A player character in the game.
     struct Character {
+      // The current health of the character.
       var health: int;
     }
+    // A base game entity.
+    proto Entity {
+      let id: int;
+    }
+    // A contract for damageable entities.
+    trait Damageable {
+      /*
+       * Inflicts damage on the entity.
+       */
+      func take_damage(var amount: int);
+    }
+    impl Character {
+      /*
+       * Damages the character by amount.
+       * Decreases self.health.
+       */
+      func take_damage(var amount: int) {
+        self.health = self.health - amount;
+      }
+    }
+    // Implements Damageable for Character
+    impl Damageable for Character {
+      func take_damage(var amount: int) {
+        self.health = self.health - amount;
+      }
+    }
+    // Tests function functionality.
+    // Also does some other tests.
     func test_func(char: Character) {
+      let score: int = 100;
       char.health = char.health - 10;
+      
+      let opt_char: Character? = char;
+      if let active = opt_char {
+        let h: int = active.health;
+      }
+      
+      let items = [1, 2, 3];
+      for x in items {
+        let val: int = x;
+      }
+      let c = Character(health=100);
+      let d: Damageable = char;
+    }
+    // Another test function
+    func another_func(char: Character) {
+      test_func(char);
+    }
+    // This comment is separated by an empty line
+    
+    func no_param_func() {
     }
     """
 
@@ -181,11 +232,11 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn(doc_uri, self.ls.ast_cache)
     self.assertIn(doc_uri, self.ls.node_types_cache)
 
-    # 2. Test Hover on variable 'char' in `char.health = ...`
-    # We test hover at line=5, character=7 (0-based)
+    # 2. Test Hover on variable 'char' in `char.health = ...` (LHS of assignment)
+    # We test hover at line=36, character=7 (0-based)
     params_hover = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=7)
+        position=Position(line=36, character=7)
     )
 
     from src.lsp.server import hover
@@ -194,21 +245,216 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("char", res_hover.contents.value)
     self.assertIn("Character", res_hover.contents.value)
 
-    # Test Hover on field access 'health' in `char.health`
-    # LSP line is 5, character is 26 (in right-hand `char.health`)
+    # Test Hover on field access 'health' in LHS of assignment `char.health = ...`
+    # LSP line is 36, character is 13 (in LHS `char.health`)
+    params_hover_lhs_field = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=36, character=13)
+    )
+    res_hover_lhs_field = hover(self.ls, params_hover_lhs_field)
+    self.assertIsNotNone(res_hover_lhs_field)
+    self.assertIn("health", res_hover_lhs_field.contents.value)
+    self.assertIn("int", res_hover_lhs_field.contents.value)
+    self.assertIn("The current health of the character.", res_hover_lhs_field.contents.value)
+
+    # Test Hover on variable declaration 'score' (LHS name of declaration)
+    # LSP line is 35, character is 11 (in `score` inside `let score: int = ...`)
+    params_hover_decl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=35, character=11)
+    )
+    res_hover_decl = hover(self.ls, params_hover_decl)
+    self.assertIsNotNone(res_hover_decl)
+    self.assertIn("score", res_hover_decl.contents.value)
+    self.assertIn("int", res_hover_decl.contents.value)
+
+    # Test Hover on field access 'health' in RHS `char.health`
+    # LSP line is 36, character is 26 (in right-hand `char.health`)
     params_hover_field = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=26)
+        position=Position(line=36, character=26)
     )
     res_hover_field = hover(self.ls, params_hover_field)
     self.assertIsNotNone(res_hover_field)
     self.assertIn("health", res_hover_field.contents.value)
     self.assertIn("int", res_hover_field.contents.value)
+    self.assertIn("The current health of the character.", res_hover_field.contents.value)
+
+    # Test Hover on 'if let' variable 'active'
+    # LSP line is 39, character is 14 (inside `if let active = ...`)
+    params_hover_if_let = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=39, character=14)
+    )
+    res_hover_if_let = hover(self.ls, params_hover_if_let)
+    self.assertIsNotNone(res_hover_if_let)
+    self.assertIn("active", res_hover_if_let.contents.value)
+    self.assertIn("Character", res_hover_if_let.contents.value)
+
+    # Test Hover on 'for' loop variable 'x'
+    # LSP line is 44, character is 10 (inside `for x in ...`)
+    params_hover_for = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=44, character=10)
+    )
+    res_hover_for = hover(self.ls, params_hover_for)
+    self.assertIsNotNone(res_hover_for)
+    self.assertIn("x", res_hover_for.contents.value)
+    self.assertIn("int", res_hover_for.contents.value)
+
+    # Test Hover on function name 'test_func' at call site
+    # LSP line is 52, character is 7 (inside `test_func(char);`)
+    params_hover_call = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=52, character=7)
+    )
+    res_hover_call = hover(self.ls, params_hover_call)
+    self.assertIsNotNone(res_hover_call)
+    self.assertIn("test_func", res_hover_call.contents.value)
+    self.assertIn("Parameters:", res_hover_call.contents.value)
+    self.assertIn("char: Character", res_hover_call.contents.value)
+    self.assertIn("Returns: `none`", res_hover_call.contents.value)
+    self.assertIn("Tests function functionality.", res_hover_call.contents.value)
+    self.assertIn("Also does some other tests.", res_hover_call.contents.value)
+
+    # Test Hover on function with no parameters
+    # LSP line is 56, character is 10 (inside `no_param_func`)
+    params_hover_no_param = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=56, character=10)
+    )
+    res_hover_no_param = hover(self.ls, params_hover_no_param)
+    self.assertIsNotNone(res_hover_no_param)
+    self.assertIn("no_param_func", res_hover_no_param.contents.value)
+    self.assertIn("Parameters: none", res_hover_no_param.contents.value)
+    self.assertNotIn("separated by an empty line", res_hover_no_param.contents.value)
+
+    # Test Hover on method 'take_damage' declaration in impl block
+    # LSP line is 22, character is 16 (inside `func take_damage`)
+    params_hover_method = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=22, character=16)
+    )
+    res_hover_method = hover(self.ls, params_hover_method)
+    self.assertIsNotNone(res_hover_method)
+    self.assertIn("take_damage", res_hover_method.contents.value)
+    self.assertIn("var amount: int", res_hover_method.contents.value)
+    self.assertIn("Damages the character by amount.", res_hover_method.contents.value)
+    self.assertIn("Decreases self.health.", res_hover_method.contents.value)
+
+    # Test Hover on struct name declaration
+    params_hover_struct = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=11)
+    )
+    res_hover_struct = hover(self.ls, params_hover_struct)
+    self.assertIsNotNone(res_hover_struct)
+    self.assertIn("struct", res_hover_struct.contents.value)
+    self.assertIn("Character", res_hover_struct.contents.value)
+    self.assertIn("A player character in the game.", res_hover_struct.contents.value)
+
+    # Test Hover on proto name declaration
+    params_hover_proto = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=10)
+    )
+    res_hover_proto = hover(self.ls, params_hover_proto)
+    self.assertIsNotNone(res_hover_proto)
+    self.assertIn("proto", res_hover_proto.contents.value)
+    self.assertIn("Entity", res_hover_proto.contents.value)
+    self.assertIn("A base game entity.", res_hover_proto.contents.value)
+
+    # Test Hover on trait name declaration
+    params_hover_trait = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=11, character=10)
+    )
+    res_hover_trait = hover(self.ls, params_hover_trait)
+    self.assertIsNotNone(res_hover_trait)
+    self.assertIn("trait", res_hover_trait.contents.value)
+    self.assertIn("Damageable", res_hover_trait.contents.value)
+    self.assertIn("A contract for damageable entities.", res_hover_trait.contents.value)
+
+    # Test Hover on struct name in impl block
+    params_hover_impl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=17, character=9)
+    )
+    res_hover_impl = hover(self.ls, params_hover_impl)
+    self.assertIsNotNone(res_hover_impl)
+    self.assertIn("struct", res_hover_impl.contents.value)
+    self.assertIn("Character", res_hover_impl.contents.value)
+    self.assertIn("A player character in the game.", res_hover_impl.contents.value)
+
+    # Test Hover on trait name in impl block (impl Damageable for Character)
+    params_hover_impl_trait = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=27, character=9)
+    )
+    res_hover_impl_trait = hover(self.ls, params_hover_impl_trait)
+    self.assertIsNotNone(res_hover_impl_trait)
+    self.assertIn("trait", res_hover_impl_trait.contents.value)
+    self.assertIn("Damageable", res_hover_impl_trait.contents.value)
+    self.assertIn("A contract for damageable entities.", res_hover_impl_trait.contents.value)
+
+    # Test Hover on type identifier reference in signature
+    params_hover_ref = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=34, character=25)
+    )
+    res_hover_ref = hover(self.ls, params_hover_ref)
+    self.assertIsNotNone(res_hover_ref)
+    self.assertIn("struct", res_hover_ref.contents.value)
+    self.assertIn("Character", res_hover_ref.contents.value)
+    self.assertIn("A player character in the game.", res_hover_ref.contents.value)
+
+    # Test Hover on instantiation call fallback lookup
+    params_hover_instantiation = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=47, character=14)
+    )
+    res_hover_instantiation = hover(self.ls, params_hover_instantiation)
+    self.assertIsNotNone(res_hover_instantiation)
+    self.assertIn("struct", res_hover_instantiation.contents.value)
+    self.assertIn("Character", res_hover_instantiation.contents.value)
+
+    # Test Hover on trait type reference in variable declaration
+    params_hover_trait_ref = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=48, character=13)
+    )
+    res_hover_trait_ref = hover(self.ls, params_hover_trait_ref)
+    self.assertIsNotNone(res_hover_trait_ref)
+    self.assertIn("trait", res_hover_trait_ref.contents.value)
+    self.assertIn("Damageable", res_hover_trait_ref.contents.value)
+
+    # Test Hover on struct field identifier declaration site (health)
+    params_hover_field_decl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=4, character=10)
+    )
+    res_hover_field_decl = hover(self.ls, params_hover_field_decl)
+    self.assertIsNotNone(res_hover_field_decl)
+    self.assertIn("property", res_hover_field_decl.contents.value)
+    self.assertIn("health", res_hover_field_decl.contents.value)
+    self.assertIn("int", res_hover_field_decl.contents.value)
+    self.assertIn("The current health of the character.", res_hover_field_decl.contents.value)
+
+    # Test Hover on trait method identifier declaration site (take_damage)
+    params_hover_trait_method_decl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=15, character=11)
+    )
+    res_hover_trait_method_decl = hover(self.ls, params_hover_trait_method_decl)
+    self.assertIsNotNone(res_hover_trait_method_decl)
+    self.assertIn("method", res_hover_trait_method_decl.contents.value)
+    self.assertIn("take_damage", res_hover_trait_method_decl.contents.value)
+    self.assertIn("Inflicts damage on the entity.", res_hover_trait_method_decl.contents.value)
 
     # Test Hover on an invalid position
     params_hover_invalid = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=10, character=0)
+        position=Position(line=60, character=0)
     )
     res_hover_invalid = hover(self.ls, params_hover_invalid)
     self.assertIsNone(res_hover_invalid)
@@ -221,10 +467,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNone(hover(self.ls, params_hover_uncached))
 
     # 3. Test Completion on 'char.'
-    # The dot in `char.` on line 6 (LSP line 5, character 24)
+    # The dot in `char.` on line 37 (LSP line 36, character 25)
     params_completion = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=25) # Position after the dot
+        position=Position(line=36, character=25) # Position after the dot
     )
 
     from src.lsp.server import completion
@@ -251,6 +497,34 @@ class TestLSPServer(unittest.TestCase):
         position=Position(line=0, character=0)
     )
     self.assertEqual(len(completion(self.ls, params_completion_uncached).items), 0)
+
+    # 4. Test Completion fallback when document has syntax errors (incomplete receiver at current line)
+    doc_text_err = """
+    struct Character {
+      var health: int;
+    }
+    func test_func(char: Character) {
+      char.health = char.health - 10;
+    }
+    char.
+    """
+    validate_source(self.ls, doc_uri, doc_text_err)
+    # Mock workspace.get_text_document to return the new document with syntax error
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text_err
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Position at line 7 (LSP is 0-based), after "char." (character 9)
+    params_completion_fallback = CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=9)
+    )
+    res_comp_fallback = completion(self.ls, params_completion_fallback)
+    self.assertIsNotNone(res_comp_fallback)
+    self.assertTrue(len(res_comp_fallback.items) > 0)
+    field_item_fallback = next((item for item in res_comp_fallback.items if item.label == "health"), None)
+    self.assertIsNotNone(field_item_fallback)
 
   def test_hover_and_completion_edge_cases(self):
     from lsprotocol.types import HoverParams, CompletionParams, Position, TextDocumentIdentifier
@@ -406,6 +680,36 @@ class TestLSPServer(unittest.TestCase):
       with patch("src.lsp.server.find_node_at_position", return_value=ident_node_y):
         self.assertIsNone(hover(self.ls, params))
 
+      # Test visit_IfNode fallback when condition is not OptionalType
+      mock_if_node = MagicMock()
+      mock_if_node.is_if_let = True
+      mock_if_node.let_name_line = 1
+      mock_if_node.let_name_column = 1
+      mock_if_node.let_name_length = 5
+      mock_if_node.condition_or_expr = MagicMock()
+      try:
+        from lsp.semantic_tokens import SemanticTokensTypeChecker
+      except ImportError:
+        from src.lsp.semantic_tokens import SemanticTokensTypeChecker
+      checker = SemanticTokensTypeChecker()
+      from semantics.symbol_table import PrimitiveType
+      with patch.object(checker, "visit", return_value=PrimitiveType("int")):
+        with patch.object(checker, "symbol_table") as mock_st:
+          checker.visit_IfNode(mock_if_node)
+          self.assertEqual(checker.node_types[mock_if_node], PrimitiveType("int"))
+
+      # Test visit_ForNode fallback when iterable is not ArrayType
+      mock_for_node = MagicMock()
+      mock_for_node.is_mutable = False
+      mock_for_node.loop_var_line = 1
+      mock_for_node.loop_var_column = 1
+      mock_for_node.loop_var_length = 5
+      mock_for_node.iterable = MagicMock()
+      with patch.object(checker, "visit", return_value=PrimitiveType("int")):
+        with patch.object(checker, "symbol_table") as mock_st:
+          checker.visit_ForNode(mock_for_node)
+          self.assertEqual(checker.node_types[mock_for_node], PrimitiveType("none"))
+
     # 3. Test Completion edge cases with mocked caches
     # Completion when receiver type lookup in node_types fails but exists in symbol table
     with patch("src.lsp.server.find_node_at_position", return_value=ident_node):
@@ -440,6 +744,22 @@ class TestLSPServer(unittest.TestCase):
       ident_node_y.end_column = 20
       with patch("src.lsp.server.find_node_at_position", return_value=ident_node_y):
         self.assertEqual(len(completion(self.ls, params_comp).items), 0)
+
+      # Completion fallback when get_text_document raises an exception
+      with patch("src.lsp.server.find_node_at_position", return_value=None):
+        self.ls.workspace.get_text_document.side_effect = Exception("Test get_text_document exception")
+        self.assertEqual(len(completion(self.ls, params_comp).items), 0)
+        self.ls.workspace.get_text_document.side_effect = None
+
+  def test_extract_comments_above(self):
+    from src.lsp.semantic_tokens import extract_comments_above
+    # Test line is None
+    self.assertEqual(extract_comments_above("any text", None), "")
+    # Test idx <= 0
+    self.assertEqual(extract_comments_above("func foo()", 1), "")
+    # Test single-line block comment
+    doc = "/* Single-line block */\nfunc foo()"
+    self.assertEqual(extract_comments_above(doc, 2), "Single-line block")
 
   def test_main(self):
     try:

@@ -38,16 +38,79 @@ TOKEN_MODIFIERS = [
 ]
 
 
+def extract_comments_above(doc_text: str, start_line: Optional[int]) -> str:
+  """Extracts comments directly above start_line (1-based)."""
+  if start_line is None:
+    return ""
+  lines = doc_text.splitlines()
+  idx = start_line - 1
+  if idx <= 0:
+    return ""
+
+  comments = []
+  idx -= 1
+
+  in_block_comment = False
+  block_comment_lines = []
+
+  while idx >= 0:
+    line = lines[idx].strip()
+
+    if not line and not in_block_comment:
+      break
+
+    if line.endswith("*/"):
+      in_block_comment = True
+      block_comment_lines.insert(0, lines[idx])
+      if line.startswith("/*"):
+        in_block_comment = False
+      idx -= 1
+      continue
+
+    if in_block_comment:
+      block_comment_lines.insert(0, lines[idx])
+      if line.startswith("/*"):
+        in_block_comment = False
+      idx -= 1
+      continue
+
+    if line.startswith("//"):
+      comment_content = line[2:].strip()
+      comments.insert(0, comment_content)
+      idx -= 1
+    else:
+      break
+
+  if block_comment_lines:
+    block_text = "\n".join(block_comment_lines).strip()
+    if block_text.startswith("/*") and block_text.endswith("*/"):
+      block_content = block_text[2:-2].strip()
+      cleaned_lines = []
+      for line in block_content.splitlines():
+        line = line.strip()
+        if line.startswith("*"):
+          line = line[1:].strip()
+        cleaned_lines.append(line)
+      return "\n".join(cleaned_lines)
+
+  if comments:
+    return "\n".join(comments)
+
+  return ""
+
+
 class SemanticTokensTypeChecker(TypeChecker):
   """Subclass of TypeChecker that extracts semantic tokens during analysis."""
 
-  def __init__(self):
+  def __init__(self, doc_text: Optional[str] = None):
     super().__init__()
+    self.doc_text = doc_text
     # List of raw tokens: (line, column, length, token_type, modifier_bitmask)
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
     self.current_node: Optional[ASTNode] = None
     self.lsp_errors: List[dict] = []
-    self.node_types: Dict[ASTNode, Any] = {}
+    self.node_types: dict = {}
+    self.current_trait: Optional[Any] = None
 
   def visit(self, node: ASTNode) -> Any:
     old_node = self.current_node
@@ -74,7 +137,10 @@ class SemanticTokensTypeChecker(TypeChecker):
   def _resolve_type_node(self, node: Optional[ASTNode]) -> Any:
     if node:
       self.visit(node)
-    return super()._resolve_type_node(node)
+    res = super()._resolve_type_node(node)
+    if node and res:
+      self.node_types[node] = res
+    return res
 
   def error(self, message: str) -> None:
     # Use position from current_node if available
@@ -112,9 +178,21 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.add_token(node.name_line, node.name_column, node.name_length, "struct", 1)  # declaration
     if node.parent_name:
       self.add_token(node.parent_name_line, node.parent_name_column, node.parent_name_length, "struct")
-    for field in node.fields:
-      self.visit(field)
+    
+    struct_type = self.symbol_table.lookup_type(node.name)
+    old_struct = self.current_struct
+    self.current_struct = struct_type
+    try:
+      for field in node.fields:
+        self.visit(field)
+    finally:
+      self.current_struct = old_struct
+
     super().visit_StructDeclNode(node)
+    if struct_type and self.doc_text:
+      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+      if comments:
+        struct_type.comments = comments
 
   def visit_StructFieldNode(self, node) -> None:
     # Field declaration
@@ -122,19 +200,43 @@ class SemanticTokensTypeChecker(TypeChecker):
     if not node.is_mutable:
       mods |= 4  # readonly
     self.add_token(node.name_line, node.name_column, node.name_length, "property", mods)
-    # No parent visitor exists for struct fields
+    if self.current_struct and node.name in self.current_struct.fields:
+      field = self.current_struct.fields[node.name]
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          field.comments = comments
+      self.node_types[node] = field.field_type
 
   def visit_TraitDeclNode(self, node) -> None:
     # Trait name declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "interface", 1)
-    for member in node.members:
-      self.visit(member)
+    
+    trait_type = self.symbol_table.lookup_type(node.name)
+    old_trait = self.current_trait
+    self.current_trait = trait_type
+    try:
+      for member in node.members:
+        self.visit(member)
+    finally:
+      self.current_trait = old_trait
+
     super().visit_TraitDeclNode(node)
+    if trait_type and self.doc_text:
+      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+      if comments:
+        trait_type.comments = comments
 
   def visit_TraitMemberNode(self, node) -> None:
     # Trait method declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "method", 1)
-    # No parent visitor exists for trait members
+    if self.current_trait and node.name in self.current_trait.methods:
+      method_type = self.current_trait.methods[node.name]
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          method_type.comments = comments
+      self.node_types[node] = method_type
 
   def visit_FuncDeclNode(self, node) -> None:
     # Function declaration (only highlight if not a method; methods are handled by ImplMemberNode)
@@ -144,6 +246,18 @@ class SemanticTokensTypeChecker(TypeChecker):
     for p in node.parameters:
       self.visit(p)
     super().visit_FuncDeclNode(node)
+    if not is_method:
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        try:
+          from semantics.symbol_table import FunctionType
+        except ImportError:  # pragma: no cover
+          from src.semantics.symbol_table import FunctionType
+        if isinstance(sym.symbol_type, FunctionType) and self.doc_text:
+          comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+          if comments:
+            sym.symbol_type.comments = comments
+        self.node_types[node] = sym.symbol_type
 
   def visit_ImplMemberNode(self, node) -> None:
     # Method declaration
@@ -151,7 +265,20 @@ class SemanticTokensTypeChecker(TypeChecker):
     if node.modifier == "static":
       mods |= 2  # static
     self.add_token(node.func_decl.name_line, node.func_decl.name_column, node.func_decl.name_length, "method", mods)
+    for p in node.func_decl.parameters:
+      self.visit(p)
     super().visit_ImplMemberNode(node)
+    if self.current_struct and node.func_decl.name in self.current_struct.methods:
+      method_type = self.current_struct.methods[node.func_decl.name].method_type
+      try:
+        from semantics.symbol_table import FunctionType
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import FunctionType
+      if isinstance(method_type, FunctionType) and self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node.func_decl, "start_line", None))
+        if comments:
+          method_type.comments = comments
+      self.node_types[node.func_decl] = method_type
 
   def visit_ParameterNode(self, node) -> None:
     mods = 1
@@ -166,6 +293,52 @@ class SemanticTokensTypeChecker(TypeChecker):
       mods |= 4
     self.add_token(node.name_line, node.name_column, node.name_length, "variable", mods)
     super().visit_VarDeclNode(node)
+    sym = self.symbol_table.lookup(node.name)
+    if sym:
+      self.node_types[node] = sym.symbol_type
+
+  def visit_AssignmentNode(self, node) -> None:
+    self.visit(node.target)
+    super().visit_AssignmentNode(node)
+
+  def visit_IfNode(self, node) -> None:
+    if node.is_if_let:
+      # Add semantic token for let_name
+      mods = 1 | 4  # declaration | readonly
+      self.add_token(node.let_name_line, node.let_name_column, node.let_name_length, "variable", mods)
+      # Calculate unwrapped type for hover info
+      expr_type = self.visit(node.condition_or_expr)
+      try:
+        from semantics.symbol_table import OptionalType
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import OptionalType
+      if isinstance(expr_type, OptionalType):
+        unwrapped_type = expr_type.base_type
+      else:
+        unwrapped_type = expr_type
+      self.node_types[node] = unwrapped_type
+
+    super().visit_IfNode(node)
+
+  def visit_ForNode(self, node) -> None:
+    # Add semantic token for loop_var
+    mods = 1  # declaration
+    if not node.is_mutable:
+      mods |= 4  # readonly
+    self.add_token(node.loop_var_line, node.loop_var_column, node.loop_var_length, "variable", mods)
+    # Calculate loop var element type for hover info
+    iter_type = self.visit(node.iterable)
+    try:
+      from semantics.symbol_table import ArrayType, PrimitiveType
+    except ImportError:  # pragma: no cover
+      from src.semantics.symbol_table import ArrayType, PrimitiveType
+    if isinstance(iter_type, ArrayType):
+      elem_type = iter_type.element_type
+    else:
+      elem_type = PrimitiveType("none")
+    self.node_types[node] = elem_type
+
+    super().visit_ForNode(node)
 
   def visit_IdentifierNode(self, node) -> None:
     # Variable or symbol reference

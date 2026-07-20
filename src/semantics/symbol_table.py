@@ -74,10 +74,12 @@ class FunctionType(Type):
       param_types: List[Type],
       return_type: Type,
       param_mutabilities: Optional[List[bool]] = None,
+      param_names: Optional[List[str]] = None,
   ):
     self.param_types = param_types
     self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
+    self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, FunctionType):
@@ -102,11 +104,12 @@ class FunctionType(Type):
 class StructField:
   """Represents a field in a struct."""
 
-  def __init__(self, name: str, field_type: Type, is_mutable: bool, has_default: bool = False):
+  def __init__(self, name: str, field_type: Type, is_mutable: bool, has_default: bool = False, comments: str = ""):
     self.name = name
     self.field_type = field_type
     self.is_mutable = is_mutable
     self.has_default = has_default
+    self.comments = comments
 
 
 class StructMethod:
@@ -121,13 +124,14 @@ class StructMethod:
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False):
+  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False, comments: Optional[str] = None):
     self.name = name
     self.parent_name = parent_name
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.is_cloned = False  # Set during clone-tracking analysis
     self.is_prototype = is_prototype
+    self.comments = comments or ""
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):
@@ -142,9 +146,10 @@ class StructType(Type):
 class TraitType(Type):
   """Represents a user-defined trait type."""
 
-  def __init__(self, name: str):
+  def __init__(self, name: str, comments: Optional[str] = None):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
+    self.comments = comments or ""
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, TraitType):

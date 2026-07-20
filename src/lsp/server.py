@@ -125,14 +125,11 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   parser.addErrorListener(listener)
   tree = parser.program()
 
-  # If syntax errors are present, report them immediately & clear semantic cache
+  # If syntax errors are present, report them immediately (but retain last successful semantic cache)
   if listener.diagnostics:
     ls.text_document_publish_diagnostics(
         PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
     )
-    ls.ast_cache.pop(doc_uri, None)
-    ls.node_types_cache.pop(doc_uri, None)
-    ls.symbol_table_cache.pop(doc_uri, None)
     return
 
   # 3. AST Building
@@ -156,13 +153,10 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
             ],
         )
     )
-    ls.ast_cache.pop(doc_uri, None)
-    ls.node_types_cache.pop(doc_uri, None)
-    ls.symbol_table_cache.pop(doc_uri, None)
     return
 
   # 4. Semantic Validation & Token Extraction
-  checker = SemanticTokensTypeChecker()
+  checker = SemanticTokensTypeChecker(doc_text)
   try:
     checker.check(ast)
   except Exception:
@@ -267,54 +261,118 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
   node_type = node_types.get(node)
   if not node_type:
-    from parser.ast import IdentifierNode
+    try:
+      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode
+    except ImportError:  # pragma: no cover
+      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode
+
     if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
       if sym:
         node_type = getattr(sym, "symbol_type", None)
+    elif isinstance(node, StructDeclNode) and uri in ls.symbol_table_cache:
+      node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
+    elif isinstance(node, TraitDeclNode) and uri in ls.symbol_table_cache:
+      node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
+    elif isinstance(node, ImplBlockNode) and uri in ls.symbol_table_cache:
+      if node.struct_name_line == line and node.struct_name_column <= col < node.struct_name_column + node.struct_name_length:
+        node_type = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
+      elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
+        node_type = ls.symbol_table_cache[uri].lookup_type(node.trait_name)
 
   if not node_type:
     return None
 
-  from parser.ast import (
-      IdentifierNode,
-      MemberAccessNode,
-      FuncDeclNode,
-      VarDeclNode,
-      ParameterNode,
-      StructFieldNode,
-  )
+  try:
+    from parser.ast import (
+        IdentifierNode,
+        MemberAccessNode,
+        FuncDeclNode,
+        VarDeclNode,
+        ParameterNode,
+        StructFieldNode,
+        IfNode,
+        ForNode,
+        StructDeclNode,
+        TraitDeclNode,
+        ImplBlockNode,
+        BasicTypeNode,
+        TraitMemberNode,
+    )
+  except ImportError:  # pragma: no cover
+    from src.parser.ast import (
+        IdentifierNode,
+        MemberAccessNode,
+        FuncDeclNode,
+        VarDeclNode,
+        ParameterNode,
+        StructFieldNode,
+        IfNode,
+        ForNode,
+        StructDeclNode,
+        TraitDeclNode,
+        ImplBlockNode,
+        BasicTypeNode,
+        TraitMemberNode,
+    )
 
   node_name = ""
+  category = "symbol"
+
   if isinstance(node, IdentifierNode):
     node_name = node.name
+    if uri in ls.symbol_table_cache:
+      sym = ls.symbol_table_cache[uri].lookup(node.name)
+      if sym:
+        try:
+          from semantics.symbol_table import (
+              VariableSymbol,
+              FunctionSymbol,
+              StructSymbol,
+              TraitSymbol,
+          )
+        except ImportError:  # pragma: no cover
+          from src.semantics.symbol_table import (
+              VariableSymbol,
+              FunctionSymbol,
+              StructSymbol,
+              TraitSymbol,
+          )
+        if isinstance(sym, VariableSymbol):
+          category = "parameter" if sym.is_parameter else "variable"
+        elif isinstance(sym, FunctionSymbol):
+          category = "function"
+        elif isinstance(sym, StructSymbol):
+          category = "struct"
+        elif isinstance(sym, TraitSymbol):
+          category = "trait"
+
+
   elif isinstance(node, MemberAccessNode):
     node_name = node.member
+  elif isinstance(node, StructDeclNode):
+    node_name = node.name
+    category = "proto" if node.is_prototype else "struct"
+  elif isinstance(node, TraitDeclNode):
+    node_name = node.name
+    category = "trait"
+  elif isinstance(node, ImplBlockNode):
+    if node.struct_name_line == line and node.struct_name_column <= col < node.struct_name_column + node.struct_name_length:
+      node_name = node.struct_name
+      st = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
+      category = "proto" if getattr(st, "is_prototype", False) else "struct"
+    elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
+      node_name = node.trait_name
+      category = "trait"
 
-  category = "symbol"
-  if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
-    sym = ls.symbol_table_cache[uri].lookup(node.name)
-    if sym:
-      from semantics.symbol_table import (
-          VariableSymbol,
-          FunctionSymbol,
-          StructSymbol,
-          TraitSymbol,
-      )
-      if isinstance(sym, VariableSymbol):
-        category = "parameter" if sym.is_parameter else "variable"
-      elif isinstance(sym, FunctionSymbol):
-        category = "function"
-      elif isinstance(sym, StructSymbol):
-        category = "struct"
-      elif isinstance(sym, TraitSymbol):
-        category = "trait"
-
-  if isinstance(node, ParameterNode):
+  elif isinstance(node, ParameterNode):
     category = "parameter"
     node_name = node.name
   elif isinstance(node, StructFieldNode):
     category = "property"
+    node_name = node.name
+  elif isinstance(node, TraitMemberNode):
+    category = "method"
     node_name = node.name
   elif isinstance(node, VarDeclNode):
     category = "variable"
@@ -322,10 +380,93 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   elif isinstance(node, FuncDeclNode):
     category = "function"
     node_name = node.name
+  elif isinstance(node, IfNode) and node.is_if_let:
+    category = "variable"
+    node_name = node.let_name
+  elif isinstance(node, ForNode):
+    category = "variable"
+    node_name = node.loop_var
+  elif isinstance(node, BasicTypeNode):
+    node_name = node.name
 
-  type_desc = str(node_type)
-  markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"
-                   if node_name else f"`{type_desc}`")
+  if category == "symbol" and node_type:
+    try:
+      from semantics.symbol_table import StructType, TraitType
+    except ImportError:  # pragma: no cover
+      from src.semantics.symbol_table import StructType, TraitType
+    if isinstance(node_type, StructType):
+      category = "proto" if node_type.is_prototype else "struct"
+    elif isinstance(node_type, TraitType):
+      category = "trait"
+
+  try:
+    from semantics.symbol_table import FunctionType, StructType, TraitType
+  except ImportError:  # pragma: no cover
+    from src.semantics.symbol_table import FunctionType, StructType, TraitType
+
+  if isinstance(node_type, FunctionType):
+    params_lines = []
+    for idx, p_type in enumerate(node_type.param_types):
+      p_name = (node_type.param_names[idx]
+                if idx < len(node_type.param_names)
+                else f"p{idx}")
+      is_mut = (node_type.param_mutabilities[idx]
+                if idx < len(node_type.param_mutabilities) else False)
+      mut_str = "var " if is_mut else ""
+      # Show bulleted list of params & their types.
+      params_lines.append(f"- `{mut_str}{p_name}: {str(p_type)}`")
+
+    params_section = "\n".join(params_lines)
+    markdown_text = f"**({category})** `{node_name}`\n"
+    if params_lines:
+      markdown_text += f"\nParameters:\n{params_section}\n"
+    else:
+      markdown_text += "\nParameters: none\n"
+    markdown_text += f"\nReturns: `{str(node_type.return_type)}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
+  elif isinstance(node_type, StructType) and category in ("struct", "proto"):
+    kind = "proto" if node_type.is_prototype else "struct"
+    inheritance = f" : {node_type.parent_name}" if node_type.parent_name else ""
+    markdown_text = f"**({kind})** `{node_type.name}{inheritance}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
+  elif isinstance(node_type, TraitType) and category == "trait":
+    markdown_text = f"**(trait)** `{node_type.name}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
+  else:
+    type_desc = str(node_type)
+    markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"
+                     if node_name else f"`{type_desc}`")
+    
+    # Extract property/field comments from parent struct definition:
+    field_comments = ""
+    declarations = getattr(ast, "declarations", [])
+    if isinstance(node, StructFieldNode) and uri in ls.symbol_table_cache:
+      parent_struct = None
+      for child in declarations:
+        if isinstance(child, StructDeclNode) and any(f is node for f in child.fields):
+          parent_struct = child
+          break
+      if parent_struct:
+        st = ls.symbol_table_cache[uri].lookup_type(parent_struct.name)
+        if st and node.name in st.fields:
+          field = st.fields[node.name]
+          field_comments = getattr(field, "comments", "")
+    elif isinstance(node, MemberAccessNode) and uri in ls.symbol_table_cache:
+      receiver_type = node_types.get(node.receiver)
+      if receiver_type:
+        try:
+          from semantics.symbol_table import StructType
+        except ImportError:  # pragma: no cover
+          from src.semantics.symbol_table import StructType
+        if isinstance(receiver_type, StructType) and node.member in receiver_type.fields:
+          field = receiver_type.fields[node.member]
+          field_comments = getattr(field, "comments", "")
+
+    if field_comments:
+      markdown_text += f"\n\n{field_comments}"
 
   return Hover(contents=MarkupContent(kind=MarkupKind.Markdown,
                                       value=markdown_text))
@@ -349,16 +490,42 @@ def completion(ls: SapphireLanguageServer,
 
   # Search receiver at col - 1 (the dot)
   receiver = find_node_at_position(ast, line, col - 1)
-  if not receiver:
-    return CompletionList(is_incomplete=False, items=[])
+  receiver_type = None
+  if receiver:
+    receiver_type = node_types.get(receiver)
+    if not receiver_type:
+      from parser.ast import IdentifierNode
+      if isinstance(receiver, IdentifierNode) and uri in ls.symbol_table_cache:
+        sym = ls.symbol_table_cache[uri].lookup(receiver.name)
+        if sym:
+          receiver_type = getattr(sym, "symbol_type", None)
 
-  receiver_type = node_types.get(receiver)
+  # Robust fallback: extract identifier right before the dot from the current document source
   if not receiver_type:
-    from parser.ast import IdentifierNode
-    if isinstance(receiver, IdentifierNode) and uri in ls.symbol_table_cache:
-      sym = ls.symbol_table_cache[uri].lookup(receiver.name)
-      if sym:
-        receiver_type = getattr(sym, "symbol_type", None)
+    try:
+      doc = ls.workspace.get_text_document(uri)
+      lines = doc.source.splitlines()
+      if 0 <= line - 1 < len(lines):
+        line_text = lines[line - 1]
+        text_before_dot = line_text[:col - 1]
+        import re
+        match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)$', text_before_dot)
+        if match:
+          ident_name = match.group(1)
+          # Find the IdentifierNode in node_types with this name closest to the current line
+          best_node = None
+          min_dist = float('inf')
+          for node in node_types.keys():
+            from parser.ast import IdentifierNode
+            if isinstance(node, IdentifierNode) and node.name == ident_name:
+              dist = abs(node.start_line - line)
+              if dist < min_dist:
+                min_dist = dist
+                best_node = node
+          if best_node:
+            receiver_type = node_types[best_node]
+    except Exception:
+      pass
 
   if not receiver_type:
     return CompletionList(is_incomplete=False, items=[])
