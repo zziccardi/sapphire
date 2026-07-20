@@ -138,7 +138,12 @@ class TypeChecker:
           param_types.append(ptype)
           param_mutabilities.append(p.is_mutable)
         ret_type = self._resolve_type_node(decl.return_type) if decl.return_type else PrimitiveType("none")
-        signature = FunctionType(param_types, ret_type, param_mutabilities)
+        signature = FunctionType(
+            param_types,
+            ret_type,
+            param_mutabilities,
+            param_names=[p.name for p in decl.parameters],
+        )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
@@ -210,7 +215,12 @@ class TypeChecker:
             param_types.append(ptype)
             param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
-          signature = FunctionType(param_types, ret_type, param_mutabilities)
+          signature = FunctionType(
+              param_types,
+              ret_type,
+              param_mutabilities,
+              param_names=[p.name for p in func_decl.parameters],
+          )
 
           method = StructMethod(func_decl.name, signature, member.modifier)
 
@@ -328,7 +338,12 @@ class TypeChecker:
     resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
     param_mutabilities = [p.is_mutable for p in func_decl.parameters]
     ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
-    self.current_function = FunctionType(resolved_params, ret_type, param_mutabilities)
+    self.current_function = FunctionType(
+        resolved_params,
+        ret_type,
+        param_mutabilities,
+        param_names=[p.name for p in func_decl.parameters],
+    )
 
     # Visit body
     self.visit(func_decl.body)

@@ -144,6 +144,10 @@ class SemanticTokensTypeChecker(TypeChecker):
     for p in node.parameters:
       self.visit(p)
     super().visit_FuncDeclNode(node)
+    if not is_method:
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        self.node_types[node] = sym.symbol_type
 
   def visit_ImplMemberNode(self, node) -> None:
     # Method declaration
@@ -151,7 +155,11 @@ class SemanticTokensTypeChecker(TypeChecker):
     if node.modifier == "static":
       mods |= 2  # static
     self.add_token(node.func_decl.name_line, node.func_decl.name_column, node.func_decl.name_length, "method", mods)
+    for p in node.func_decl.parameters:
+      self.visit(p)
     super().visit_ImplMemberNode(node)
+    if self.current_struct and node.func_decl.name in self.current_struct.methods:
+      self.node_types[node.func_decl] = self.current_struct.methods[node.func_decl.name].method_type
 
   def visit_ParameterNode(self, node) -> None:
     mods = 1

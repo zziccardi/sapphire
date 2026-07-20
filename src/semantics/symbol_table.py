@@ -74,10 +74,12 @@ class FunctionType(Type):
       param_types: List[Type],
       return_type: Type,
       param_mutabilities: Optional[List[bool]] = None,
+      param_names: Optional[List[str]] = None,
   ):
     self.param_types = param_types
     self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
+    self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, FunctionType):
@@ -86,6 +88,7 @@ class FunctionType(Type):
         self.param_types == other.param_types
         and self.return_type == other.return_type
         and self.param_mutabilities == other.param_mutabilities
+        and getattr(self, "param_names", None) == getattr(other, "param_names", None)
     )
 
   def __repr__(self) -> str:
