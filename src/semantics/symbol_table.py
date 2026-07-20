@@ -123,13 +123,14 @@ class StructMethod:
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False):
+  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False, comments: Optional[str] = None):
     self.name = name
     self.parent_name = parent_name
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.is_cloned = False  # Set during clone-tracking analysis
     self.is_prototype = is_prototype
+    self.comments = comments or ""
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):
@@ -144,9 +145,10 @@ class StructType(Type):
 class TraitType(Type):
   """Represents a user-defined trait type."""
 
-  def __init__(self, name: str):
+  def __init__(self, name: str, comments: Optional[str] = None):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
+    self.comments = comments or ""
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, TraitType):

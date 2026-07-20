@@ -168,8 +168,17 @@ class TestLSPServer(unittest.TestCase):
     # 1. Setup a valid document that has fields, methods, parameters, etc.
     doc_uri = "file:///test.sp"
     doc_text = """
+    // A player character in the game.
     struct Character {
       var health: int;
+    }
+    // A base game entity.
+    proto Entity {
+      let id: int;
+    }
+    // A contract for damageable entities.
+    trait Damageable {
+      func take_damage(var amount: int);
     }
     impl Character {
       /*
@@ -180,21 +189,29 @@ class TestLSPServer(unittest.TestCase):
         self.health = self.health - amount;
       }
     }
+    // Implements Damageable for Character
+    impl Damageable for Character {
+      func take_damage(var amount: int) {
+        self.health = self.health - amount;
+      }
+    }
     // Tests function functionality.
     // Also does some other tests.
     func test_func(char: Character) {
       let score: int = 100;
       char.health = char.health - 10;
-
+      
       let opt_char: Character? = char;
       if let active = opt_char {
         let h: int = active.health;
       }
-
+      
       let items = [1, 2, 3];
       for x in items {
         let val: int = x;
       }
+      let c = Character(health=100);
+      let d: Damageable = char;
     }
     // Another test function
     func another_func(char: Character) {
@@ -212,10 +229,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn(doc_uri, self.ls.node_types_cache)
 
     # 2. Test Hover on variable 'char' in `char.health = ...` (LHS of assignment)
-    # We test hover at line=17, character=7 (0-based)
+    # We test hover at line=32, character=7 (0-based)
     params_hover = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=17, character=7)
+        position=Position(line=32, character=7)
     )
 
     from src.lsp.server import hover
@@ -225,10 +242,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Character", res_hover.contents.value)
 
     # Test Hover on field access 'health' in LHS of assignment `char.health = ...`
-    # LSP line is 17, character is 13 (in LHS `char.health`)
+    # LSP line is 32, character is 13 (in LHS `char.health`)
     params_hover_lhs_field = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=17, character=13)
+        position=Position(line=32, character=13)
     )
     res_hover_lhs_field = hover(self.ls, params_hover_lhs_field)
     self.assertIsNotNone(res_hover_lhs_field)
@@ -236,10 +253,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_lhs_field.contents.value)
 
     # Test Hover on variable declaration 'score' (LHS name of declaration)
-    # LSP line is 16, character is 11 (in `score` inside `let score: int = ...`)
+    # LSP line is 31, character is 11 (in `score` inside `let score: int = ...`)
     params_hover_decl = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=16, character=11)
+        position=Position(line=31, character=11)
     )
     res_hover_decl = hover(self.ls, params_hover_decl)
     self.assertIsNotNone(res_hover_decl)
@@ -247,10 +264,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_decl.contents.value)
 
     # Test Hover on field access 'health' in RHS `char.health`
-    # LSP line is 17, character is 26 (in right-hand `char.health`)
+    # LSP line is 32, character is 26 (in right-hand `char.health`)
     params_hover_field = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=17, character=26)
+        position=Position(line=32, character=26)
     )
     res_hover_field = hover(self.ls, params_hover_field)
     self.assertIsNotNone(res_hover_field)
@@ -258,10 +275,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_field.contents.value)
 
     # Test Hover on 'if let' variable 'active'
-    # LSP line is 20, character is 14 (inside `if let active = ...`)
+    # LSP line is 35, character is 14 (inside `if let active = ...`)
     params_hover_if_let = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=20, character=14)
+        position=Position(line=35, character=14)
     )
     res_hover_if_let = hover(self.ls, params_hover_if_let)
     self.assertIsNotNone(res_hover_if_let)
@@ -269,10 +286,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Character", res_hover_if_let.contents.value)
 
     # Test Hover on 'for' loop variable 'x'
-    # LSP line is 25, character is 10 (inside `for x in ...`)
+    # LSP line is 40, character is 10 (inside `for x in ...`)
     params_hover_for = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=25, character=10)
+        position=Position(line=40, character=10)
     )
     res_hover_for = hover(self.ls, params_hover_for)
     self.assertIsNotNone(res_hover_for)
@@ -280,10 +297,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("int", res_hover_for.contents.value)
 
     # Test Hover on function name 'test_func' at call site
-    # LSP line is 31, character is 7 (inside `test_func(char);`)
+    # LSP line is 48, character is 7 (inside `test_func(char);`)
     params_hover_call = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=31, character=7)
+        position=Position(line=48, character=7)
     )
     res_hover_call = hover(self.ls, params_hover_call)
     self.assertIsNotNone(res_hover_call)
@@ -295,10 +312,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Also does some other tests.", res_hover_call.contents.value)
 
     # Test Hover on function with no parameters
-    # LSP line is 35, character is 10 (inside `no_param_func`)
+    # LSP line is 52, character is 10 (inside `no_param_func`)
     params_hover_no_param = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=35, character=10)
+        position=Position(line=52, character=10)
     )
     res_hover_no_param = hover(self.ls, params_hover_no_param)
     self.assertIsNotNone(res_hover_no_param)
@@ -307,10 +324,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertNotIn("separated by an empty line", res_hover_no_param.contents.value)
 
     # Test Hover on method 'take_damage' declaration in impl block
-    # LSP line is 9, character is 16 (inside `func take_damage`)
+    # LSP line is 18, character is 16 (inside `func take_damage`)
     params_hover_method = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=9, character=16)
+        position=Position(line=18, character=16)
     )
     res_hover_method = hover(self.ls, params_hover_method)
     self.assertIsNotNone(res_hover_method)
@@ -319,10 +336,96 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("Damages the character by amount.", res_hover_method.contents.value)
     self.assertIn("Decreases self.health.", res_hover_method.contents.value)
 
+    # Test Hover on struct name declaration
+    params_hover_struct = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=11)
+    )
+    res_hover_struct = hover(self.ls, params_hover_struct)
+    self.assertIsNotNone(res_hover_struct)
+    self.assertIn("struct", res_hover_struct.contents.value)
+    self.assertIn("Character", res_hover_struct.contents.value)
+    self.assertIn("A player character in the game.", res_hover_struct.contents.value)
+
+    # Test Hover on proto name declaration
+    params_hover_proto = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=10)
+    )
+    res_hover_proto = hover(self.ls, params_hover_proto)
+    self.assertIsNotNone(res_hover_proto)
+    self.assertIn("proto", res_hover_proto.contents.value)
+    self.assertIn("Entity", res_hover_proto.contents.value)
+    self.assertIn("A base game entity.", res_hover_proto.contents.value)
+
+    # Test Hover on trait name declaration
+    params_hover_trait = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=10)
+    )
+    res_hover_trait = hover(self.ls, params_hover_trait)
+    self.assertIsNotNone(res_hover_trait)
+    self.assertIn("trait", res_hover_trait.contents.value)
+    self.assertIn("Damageable", res_hover_trait.contents.value)
+    self.assertIn("A contract for damageable entities.", res_hover_trait.contents.value)
+
+    # Test Hover on struct name in impl block
+    params_hover_impl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=13, character=9)
+    )
+    res_hover_impl = hover(self.ls, params_hover_impl)
+    self.assertIsNotNone(res_hover_impl)
+    self.assertIn("struct", res_hover_impl.contents.value)
+    self.assertIn("Character", res_hover_impl.contents.value)
+    self.assertIn("A player character in the game.", res_hover_impl.contents.value)
+
+    # Test Hover on trait name in impl block (impl Damageable for Character)
+    params_hover_impl_trait = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=23, character=9)
+    )
+    res_hover_impl_trait = hover(self.ls, params_hover_impl_trait)
+    self.assertIsNotNone(res_hover_impl_trait)
+    self.assertIn("trait", res_hover_impl_trait.contents.value)
+    self.assertIn("Damageable", res_hover_impl_trait.contents.value)
+    self.assertIn("A contract for damageable entities.", res_hover_impl_trait.contents.value)
+
+    # Test Hover on type identifier reference in signature
+    params_hover_ref = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=30, character=25)
+    )
+    res_hover_ref = hover(self.ls, params_hover_ref)
+    self.assertIsNotNone(res_hover_ref)
+    self.assertIn("struct", res_hover_ref.contents.value)
+    self.assertIn("Character", res_hover_ref.contents.value)
+    self.assertIn("A player character in the game.", res_hover_ref.contents.value)
+
+    # Test Hover on instantiation call fallback lookup
+    params_hover_instantiation = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=43, character=14)
+    )
+    res_hover_instantiation = hover(self.ls, params_hover_instantiation)
+    self.assertIsNotNone(res_hover_instantiation)
+    self.assertIn("struct", res_hover_instantiation.contents.value)
+    self.assertIn("Character", res_hover_instantiation.contents.value)
+
+    # Test Hover on trait type reference in variable declaration
+    params_hover_trait_ref = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=44, character=13)
+    )
+    res_hover_trait_ref = hover(self.ls, params_hover_trait_ref)
+    self.assertIsNotNone(res_hover_trait_ref)
+    self.assertIn("trait", res_hover_trait_ref.contents.value)
+    self.assertIn("Damageable", res_hover_trait_ref.contents.value)
+
     # Test Hover on an invalid position
     params_hover_invalid = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=40, character=0)
+        position=Position(line=56, character=0)
     )
     res_hover_invalid = hover(self.ls, params_hover_invalid)
     self.assertIsNone(res_hover_invalid)
@@ -335,10 +438,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNone(hover(self.ls, params_hover_uncached))
 
     # 3. Test Completion on 'char.'
-    # The dot in `char.` on line 18 (LSP line 17, character 25)
+    # The dot in `char.` on line 33 (LSP line 32, character 25)
     params_completion = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=17, character=25) # Position after the dot
+        position=Position(line=32, character=25) # Position after the dot
     )
 
     from src.lsp.server import completion

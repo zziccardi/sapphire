@@ -45,7 +45,7 @@ proto GameObject {
   var active: bool;
 }
 
-// 4. Dynamically inherited struct: reuse GameObject layout via delegation
+// 4. Dynamically inherited proto: reuse GameObject layout via delegation
 proto Character: GameObject {
   var health: int;
   var max_health: int;

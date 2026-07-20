@@ -261,52 +261,109 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
   node_type = node_types.get(node)
   if not node_type:
-    from parser.ast import IdentifierNode
+    try:
+      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode
+    except ImportError:  # pragma: no cover
+      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode
+
     if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
       if sym:
         node_type = getattr(sym, "symbol_type", None)
+    elif isinstance(node, StructDeclNode) and uri in ls.symbol_table_cache:
+      node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
+    elif isinstance(node, TraitDeclNode) and uri in ls.symbol_table_cache:
+      node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
+    elif isinstance(node, ImplBlockNode) and uri in ls.symbol_table_cache:
+      if node.struct_name_line == line and node.struct_name_column <= col < node.struct_name_column + node.struct_name_length:
+        node_type = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
+      elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
+        node_type = ls.symbol_table_cache[uri].lookup_type(node.trait_name)
 
   if not node_type:
     return None
 
-  from parser.ast import (
-      IdentifierNode,
-      MemberAccessNode,
-      FuncDeclNode,
-      VarDeclNode,
-      ParameterNode,
-      StructFieldNode,
-      IfNode,
-      ForNode,
-  )
+  try:
+    from parser.ast import (
+        IdentifierNode,
+        MemberAccessNode,
+        FuncDeclNode,
+        VarDeclNode,
+        ParameterNode,
+        StructFieldNode,
+        IfNode,
+        ForNode,
+        StructDeclNode,
+        TraitDeclNode,
+        ImplBlockNode,
+        BasicTypeNode,
+    )
+  except ImportError:  # pragma: no cover
+    from src.parser.ast import (
+        IdentifierNode,
+        MemberAccessNode,
+        FuncDeclNode,
+        VarDeclNode,
+        ParameterNode,
+        StructFieldNode,
+        IfNode,
+        ForNode,
+        StructDeclNode,
+        TraitDeclNode,
+        ImplBlockNode,
+        BasicTypeNode,
+    )
 
   node_name = ""
+  category = "symbol"
+
   if isinstance(node, IdentifierNode):
     node_name = node.name
+    if uri in ls.symbol_table_cache:
+      sym = ls.symbol_table_cache[uri].lookup(node.name)
+      if sym:
+        try:
+          from semantics.symbol_table import (
+              VariableSymbol,
+              FunctionSymbol,
+              StructSymbol,
+              TraitSymbol,
+          )
+        except ImportError:  # pragma: no cover
+          from src.semantics.symbol_table import (
+              VariableSymbol,
+              FunctionSymbol,
+              StructSymbol,
+              TraitSymbol,
+          )
+        if isinstance(sym, VariableSymbol):
+          category = "parameter" if sym.is_parameter else "variable"
+        elif isinstance(sym, FunctionSymbol):
+          category = "function"
+        elif isinstance(sym, StructSymbol):
+          category = "struct"
+        elif isinstance(sym, TraitSymbol):
+          category = "trait"
+
+
   elif isinstance(node, MemberAccessNode):
     node_name = node.member
+  elif isinstance(node, StructDeclNode):
+    node_name = node.name
+    category = "proto" if node.is_prototype else "struct"
+  elif isinstance(node, TraitDeclNode):
+    node_name = node.name
+    category = "trait"
+  elif isinstance(node, ImplBlockNode):
+    if node.struct_name_line == line and node.struct_name_column <= col < node.struct_name_column + node.struct_name_length:
+      node_name = node.struct_name
+      st = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
+      category = "proto" if getattr(st, "is_prototype", False) else "struct"
+    elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
+      node_name = node.trait_name
+      category = "trait"
 
-  category = "symbol"
-  if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
-    sym = ls.symbol_table_cache[uri].lookup(node.name)
-    if sym:
-      from semantics.symbol_table import (
-          VariableSymbol,
-          FunctionSymbol,
-          StructSymbol,
-          TraitSymbol,
-      )
-      if isinstance(sym, VariableSymbol):
-        category = "parameter" if sym.is_parameter else "variable"
-      elif isinstance(sym, FunctionSymbol):
-        category = "function"
-      elif isinstance(sym, StructSymbol):
-        category = "struct"
-      elif isinstance(sym, TraitSymbol):
-        category = "trait"
-
-  if isinstance(node, ParameterNode):
+  elif isinstance(node, ParameterNode):
     category = "parameter"
     node_name = node.name
   elif isinstance(node, StructFieldNode):
@@ -324,8 +381,24 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   elif isinstance(node, ForNode):
     category = "variable"
     node_name = node.loop_var
+  elif isinstance(node, BasicTypeNode):
+    node_name = node.name
 
-  from semantics.symbol_table import FunctionType
+  if category == "symbol" and node_type:
+    try:
+      from semantics.symbol_table import StructType, TraitType
+    except ImportError:  # pragma: no cover
+      from src.semantics.symbol_table import StructType, TraitType
+    if isinstance(node_type, StructType):
+      category = "proto" if node_type.is_prototype else "struct"
+    elif isinstance(node_type, TraitType):
+      category = "trait"
+
+  try:
+    from semantics.symbol_table import FunctionType, StructType, TraitType
+  except ImportError:  # pragma: no cover
+    from src.semantics.symbol_table import FunctionType, StructType, TraitType
+
   if isinstance(node_type, FunctionType):
     params_lines = []
     for idx, p_type in enumerate(node_type.param_types):
@@ -345,6 +418,16 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     else:
       markdown_text += "\nParameters: none\n"
     markdown_text += f"\nReturns: `{str(node_type.return_type)}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
+  elif isinstance(node_type, StructType) and category in ("struct", "proto"):
+    kind = "proto" if node_type.is_prototype else "struct"
+    inheritance = f" : {node_type.parent_name}" if node_type.parent_name else ""
+    markdown_text = f"**({kind})** `{node_type.name}{inheritance}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
+  elif isinstance(node_type, TraitType) and category == "trait":
+    markdown_text = f"**(trait)** `{node_type.name}`"
     if getattr(node_type, "comments", None):
       markdown_text += f"\n\n{node_type.comments}"
   else:

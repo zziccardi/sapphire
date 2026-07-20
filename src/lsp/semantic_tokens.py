@@ -136,7 +136,10 @@ class SemanticTokensTypeChecker(TypeChecker):
   def _resolve_type_node(self, node: Optional[ASTNode]) -> Any:
     if node:
       self.visit(node)
-    return super()._resolve_type_node(node)
+    res = super()._resolve_type_node(node)
+    if node and res:
+      self.node_types[node] = res
+    return res
 
   def error(self, message: str) -> None:
     # Use position from current_node if available
@@ -177,6 +180,11 @@ class SemanticTokensTypeChecker(TypeChecker):
     for field in node.fields:
       self.visit(field)
     super().visit_StructDeclNode(node)
+    struct_type = self.symbol_table.lookup_type(node.name)
+    if struct_type and self.doc_text:
+      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+      if comments:
+        struct_type.comments = comments
 
   def visit_StructFieldNode(self, node) -> None:
     # Field declaration
@@ -192,6 +200,11 @@ class SemanticTokensTypeChecker(TypeChecker):
     for member in node.members:
       self.visit(member)
     super().visit_TraitDeclNode(node)
+    trait_type = self.symbol_table.lookup_type(node.name)
+    if trait_type and self.doc_text:
+      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+      if comments:
+        trait_type.comments = comments
 
   def visit_TraitMemberNode(self, node) -> None:
     # Trait method declaration
@@ -214,7 +227,9 @@ class SemanticTokensTypeChecker(TypeChecker):
         except ImportError:  # pragma: no cover
           from src.semantics.symbol_table import FunctionType
         if isinstance(sym.symbol_type, FunctionType) and self.doc_text:
-          sym.symbol_type.comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+          comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+          if comments:
+            sym.symbol_type.comments = comments
         self.node_types[node] = sym.symbol_type
 
   def visit_ImplMemberNode(self, node) -> None:
@@ -233,7 +248,9 @@ class SemanticTokensTypeChecker(TypeChecker):
       except ImportError:  # pragma: no cover
         from src.semantics.symbol_table import FunctionType
       if isinstance(method_type, FunctionType) and self.doc_text:
-        method_type.comments = extract_comments_above(self.doc_text, getattr(node.func_decl, "start_line", None))
+        comments = extract_comments_above(self.doc_text, getattr(node.func_decl, "start_line", None))
+        if comments:
+          method_type.comments = comments
       self.node_types[node.func_decl] = method_type
 
   def visit_ParameterNode(self, node) -> None:
