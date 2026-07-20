@@ -120,7 +120,13 @@ class TypeChecker:
         for member in decl.members:
           p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
           ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
-          trait_type.methods[member.name] = FunctionType(p_types, ret_t)
+          p_mutabilities = [p.is_mutable for p in member.parameters]
+          trait_type.methods[member.name] = FunctionType(
+              p_types,
+              ret_t,
+              p_mutabilities,
+              param_names=[p.name for p in member.parameters],
+          )
 
         self.symbol_table.define_type(decl.name, trait_type)
         self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))

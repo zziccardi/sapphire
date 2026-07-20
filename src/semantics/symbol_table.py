@@ -88,7 +88,6 @@ class FunctionType(Type):
         self.param_types == other.param_types
         and self.return_type == other.return_type
         and self.param_mutabilities == other.param_mutabilities
-        and getattr(self, "param_names", None) == getattr(other, "param_names", None)
     )
 
   def __repr__(self) -> str:
