@@ -172,6 +172,7 @@ class TestLSPServer(unittest.TestCase):
       var health: int;
     }
     func test_func(char: Character) {
+      let score: int = 100;
       char.health = char.health - 10;
     }
     """
@@ -181,11 +182,11 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn(doc_uri, self.ls.ast_cache)
     self.assertIn(doc_uri, self.ls.node_types_cache)
 
-    # 2. Test Hover on variable 'char' in `char.health = ...`
-    # We test hover at line=5, character=7 (0-based)
+    # 2. Test Hover on variable 'char' in `char.health = ...` (LHS of assignment)
+    # We test hover at line=6, character=7 (0-based)
     params_hover = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=7)
+        position=Position(line=6, character=7)
     )
 
     from src.lsp.server import hover
@@ -194,11 +195,33 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("char", res_hover.contents.value)
     self.assertIn("Character", res_hover.contents.value)
 
-    # Test Hover on field access 'health' in `char.health`
-    # LSP line is 5, character is 26 (in right-hand `char.health`)
+    # Test Hover on field access 'health' in LHS of assignment `char.health = ...`
+    # LSP line is 6, character is 13 (in LHS `char.health`)
+    params_hover_lhs_field = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=13)
+    )
+    res_hover_lhs_field = hover(self.ls, params_hover_lhs_field)
+    self.assertIsNotNone(res_hover_lhs_field)
+    self.assertIn("health", res_hover_lhs_field.contents.value)
+    self.assertIn("int", res_hover_lhs_field.contents.value)
+
+    # Test Hover on variable declaration 'score' (LHS name of declaration)
+    # LSP line is 5, character is 11 (in `score` inside `let score: int = ...`)
+    params_hover_decl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=5, character=11)
+    )
+    res_hover_decl = hover(self.ls, params_hover_decl)
+    self.assertIsNotNone(res_hover_decl)
+    self.assertIn("score", res_hover_decl.contents.value)
+    self.assertIn("int", res_hover_decl.contents.value)
+
+    # Test Hover on field access 'health' in RHS `char.health`
+    # LSP line is 6, character is 26 (in right-hand `char.health`)
     params_hover_field = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=26)
+        position=Position(line=6, character=26)
     )
     res_hover_field = hover(self.ls, params_hover_field)
     self.assertIsNotNone(res_hover_field)
@@ -221,10 +244,10 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNone(hover(self.ls, params_hover_uncached))
 
     # 3. Test Completion on 'char.'
-    # The dot in `char.` on line 6 (LSP line 5, character 24)
+    # The dot in `char.` on line 7 (LSP line 6, character 25)
     params_completion = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=5, character=25) # Position after the dot
+        position=Position(line=6, character=25) # Position after the dot
     )
 
     from src.lsp.server import completion

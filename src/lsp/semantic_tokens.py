@@ -166,6 +166,13 @@ class SemanticTokensTypeChecker(TypeChecker):
       mods |= 4
     self.add_token(node.name_line, node.name_column, node.name_length, "variable", mods)
     super().visit_VarDeclNode(node)
+    sym = self.symbol_table.lookup(node.name)
+    if sym:
+      self.node_types[node] = sym.symbol_type
+
+  def visit_AssignmentNode(self, node) -> None:
+    self.visit(node.target)
+    super().visit_AssignmentNode(node)
 
   def visit_IdentifierNode(self, node) -> None:
     # Variable or symbol reference
