@@ -125,14 +125,11 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   parser.addErrorListener(listener)
   tree = parser.program()
 
-  # If syntax errors are present, report them immediately & clear semantic cache
+  # If syntax errors are present, report them immediately (but retain last successful semantic cache)
   if listener.diagnostics:
     ls.text_document_publish_diagnostics(
         PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
     )
-    ls.ast_cache.pop(doc_uri, None)
-    ls.node_types_cache.pop(doc_uri, None)
-    ls.symbol_table_cache.pop(doc_uri, None)
     return
 
   # 3. AST Building
@@ -156,9 +153,6 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
             ],
         )
     )
-    ls.ast_cache.pop(doc_uri, None)
-    ls.node_types_cache.pop(doc_uri, None)
-    ls.symbol_table_cache.pop(doc_uri, None)
     return
 
   # 4. Semantic Validation & Token Extraction
@@ -349,16 +343,42 @@ def completion(ls: SapphireLanguageServer,
 
   # Search receiver at col - 1 (the dot)
   receiver = find_node_at_position(ast, line, col - 1)
-  if not receiver:
-    return CompletionList(is_incomplete=False, items=[])
+  receiver_type = None
+  if receiver:
+    receiver_type = node_types.get(receiver)
+    if not receiver_type:
+      from parser.ast import IdentifierNode
+      if isinstance(receiver, IdentifierNode) and uri in ls.symbol_table_cache:
+        sym = ls.symbol_table_cache[uri].lookup(receiver.name)
+        if sym:
+          receiver_type = getattr(sym, "symbol_type", None)
 
-  receiver_type = node_types.get(receiver)
+  # Robust fallback: extract identifier right before the dot from the current document source
   if not receiver_type:
-    from parser.ast import IdentifierNode
-    if isinstance(receiver, IdentifierNode) and uri in ls.symbol_table_cache:
-      sym = ls.symbol_table_cache[uri].lookup(receiver.name)
-      if sym:
-        receiver_type = getattr(sym, "symbol_type", None)
+    try:
+      doc = ls.workspace.get_text_document(uri)
+      lines = doc.source.splitlines()
+      if 0 <= line - 1 < len(lines):
+        line_text = lines[line - 1]
+        text_before_dot = line_text[:col - 1]
+        import re
+        match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)$', text_before_dot)
+        if match:
+          ident_name = match.group(1)
+          # Find the IdentifierNode in node_types with this name closest to the current line
+          best_node = None
+          min_dist = float('inf')
+          for node in node_types.keys():
+            from parser.ast import IdentifierNode
+            if isinstance(node, IdentifierNode) and node.name == ident_name:
+              dist = abs(node.start_line - line)
+              if dist < min_dist:
+                min_dist = dist
+                best_node = node
+          if best_node:
+            receiver_type = node_types[best_node]
+    except Exception:
+      pass
 
   if not receiver_type:
     return CompletionList(is_incomplete=False, items=[])

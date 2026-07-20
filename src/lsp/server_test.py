@@ -252,6 +252,34 @@ class TestLSPServer(unittest.TestCase):
     )
     self.assertEqual(len(completion(self.ls, params_completion_uncached).items), 0)
 
+    # 4. Test Completion fallback when document has syntax errors (incomplete receiver at current line)
+    doc_text_err = """
+    struct Character {
+      var health: int;
+    }
+    func test_func(char: Character) {
+      char.health = char.health - 10;
+    }
+    char.
+    """
+    validate_source(self.ls, doc_uri, doc_text_err)
+    # Mock workspace.get_text_document to return the new document with syntax error
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text_err
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Position at line 7 (LSP is 0-based), after "char." (character 9)
+    params_completion_fallback = CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=9)
+    )
+    res_comp_fallback = completion(self.ls, params_completion_fallback)
+    self.assertIsNotNone(res_comp_fallback)
+    self.assertTrue(len(res_comp_fallback.items) > 0)
+    field_item_fallback = next((item for item in res_comp_fallback.items if item.label == "health"), None)
+    self.assertIsNotNone(field_item_fallback)
+
   def test_hover_and_completion_edge_cases(self):
     from lsprotocol.types import HoverParams, CompletionParams, Position, TextDocumentIdentifier
     from parser.ast import ASTNode, IdentifierNode, ParameterNode, StructFieldNode, VarDeclNode, FuncDeclNode, BasicTypeNode
@@ -440,6 +468,12 @@ class TestLSPServer(unittest.TestCase):
       ident_node_y.end_column = 20
       with patch("src.lsp.server.find_node_at_position", return_value=ident_node_y):
         self.assertEqual(len(completion(self.ls, params_comp).items), 0)
+
+      # Completion fallback when get_text_document raises an exception
+      with patch("src.lsp.server.find_node_at_position", return_value=None):
+        self.ls.workspace.get_text_document.side_effect = Exception("Test get_text_document exception")
+        self.assertEqual(len(completion(self.ls, params_comp).items), 0)
+        self.ls.workspace.get_text_document.side_effect = None
 
   def test_main(self):
     try:
