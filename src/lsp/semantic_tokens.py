@@ -174,6 +174,45 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.visit(node.target)
     super().visit_AssignmentNode(node)
 
+  def visit_IfNode(self, node) -> None:
+    if node.is_if_let:
+      # Add semantic token for let_name
+      mods = 1 | 4  # declaration | readonly
+      self.add_token(node.let_name_line, node.let_name_column, node.let_name_length, "variable", mods)
+      # Calculate unwrapped type for hover info
+      expr_type = self.visit(node.condition_or_expr)
+      try:
+        from semantics.symbol_table import OptionalType
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import OptionalType
+      if isinstance(expr_type, OptionalType):
+        unwrapped_type = expr_type.base_type
+      else:
+        unwrapped_type = expr_type
+      self.node_types[node] = unwrapped_type
+
+    super().visit_IfNode(node)
+
+  def visit_ForNode(self, node) -> None:
+    # Add semantic token for loop_var
+    mods = 1  # declaration
+    if not node.is_mutable:
+      mods |= 4  # readonly
+    self.add_token(node.loop_var_line, node.loop_var_column, node.loop_var_length, "variable", mods)
+    # Calculate loop var element type for hover info
+    iter_type = self.visit(node.iterable)
+    try:
+      from semantics.symbol_table import ArrayType, PrimitiveType
+    except ImportError:  # pragma: no cover
+      from src.semantics.symbol_table import ArrayType, PrimitiveType
+    if isinstance(iter_type, ArrayType):
+      elem_type = iter_type.element_type
+    else:
+      elem_type = PrimitiveType("none")
+    self.node_types[node] = elem_type
+
+    super().visit_ForNode(node)
+
   def visit_IdentifierNode(self, node) -> None:
     # Variable or symbol reference
     sym = self.symbol_table.lookup(node.name)

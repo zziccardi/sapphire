@@ -216,6 +216,10 @@ class ASTBuilder(SapphireVisitor):
       expr = self.visit(ctx.expression())
       then_block = self.visit(ctx.block(0))
       node = IfNode(expr, then_block, else_block, is_if_let=True, let_name=let_name)
+      let_token = ctx.IDENTIFIER().getSymbol()
+      node.let_name_line = let_token.line
+      node.let_name_column = let_token.column
+      node.let_name_length = len(let_token.text)
     else:
       expr = self.visit(ctx.expression())
       then_block = self.visit(ctx.block(0))
@@ -232,7 +236,12 @@ class ASTBuilder(SapphireVisitor):
     loop_var = ctx.IDENTIFIER().getText()
     iterable = self.visit(ctx.expression())
     block = self.visit(ctx.block())
-    return ForNode(is_mutable, loop_var, iterable, block)
+    node = ForNode(is_mutable, loop_var, iterable, block)
+    var_token = ctx.IDENTIFIER().getSymbol()
+    node.loop_var_line = var_token.line
+    node.loop_var_column = var_token.column
+    node.loop_var_length = len(var_token.text)
+    return node
 
   # ==========================================
   # Expression labeled alternatives visitor

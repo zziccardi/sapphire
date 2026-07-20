@@ -174,6 +174,16 @@ class TestLSPServer(unittest.TestCase):
     func test_func(char: Character) {
       let score: int = 100;
       char.health = char.health - 10;
+      
+      let opt_char: Character? = char;
+      if let active = opt_char {
+        let h: int = active.health;
+      }
+      
+      let items = [1, 2, 3];
+      for x in items {
+        let val: int = x;
+      }
     }
     """
 
@@ -228,10 +238,32 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("health", res_hover_field.contents.value)
     self.assertIn("int", res_hover_field.contents.value)
 
+    # Test Hover on 'if let' variable 'active'
+    # LSP line is 9, character is 14 (inside `if let active = ...`)
+    params_hover_if_let = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=9, character=14)
+    )
+    res_hover_if_let = hover(self.ls, params_hover_if_let)
+    self.assertIsNotNone(res_hover_if_let)
+    self.assertIn("active", res_hover_if_let.contents.value)
+    self.assertIn("Character", res_hover_if_let.contents.value)
+
+    # Test Hover on 'for' loop variable 'x'
+    # LSP line is 14, character is 10 (inside `for x in ...`)
+    params_hover_for = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=14, character=10)
+    )
+    res_hover_for = hover(self.ls, params_hover_for)
+    self.assertIsNotNone(res_hover_for)
+    self.assertIn("x", res_hover_for.contents.value)
+    self.assertIn("int", res_hover_for.contents.value)
+
     # Test Hover on an invalid position
     params_hover_invalid = HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=10, character=0)
+        position=Position(line=25, character=0)
     )
     res_hover_invalid = hover(self.ls, params_hover_invalid)
     self.assertIsNone(res_hover_invalid)
@@ -456,6 +488,36 @@ class TestLSPServer(unittest.TestCase):
       ident_node_y.end_column = 20
       with patch("src.lsp.server.find_node_at_position", return_value=ident_node_y):
         self.assertIsNone(hover(self.ls, params))
+
+      # Test visit_IfNode fallback when condition is not OptionalType
+      mock_if_node = MagicMock()
+      mock_if_node.is_if_let = True
+      mock_if_node.let_name_line = 1
+      mock_if_node.let_name_column = 1
+      mock_if_node.let_name_length = 5
+      mock_if_node.condition_or_expr = MagicMock()
+      try:
+        from lsp.semantic_tokens import SemanticTokensTypeChecker
+      except ImportError:
+        from src.lsp.semantic_tokens import SemanticTokensTypeChecker
+      checker = SemanticTokensTypeChecker()
+      from semantics.symbol_table import PrimitiveType
+      with patch.object(checker, "visit", return_value=PrimitiveType("int")):
+        with patch.object(checker, "symbol_table") as mock_st:
+          checker.visit_IfNode(mock_if_node)
+          self.assertEqual(checker.node_types[mock_if_node], PrimitiveType("int"))
+
+      # Test visit_ForNode fallback when iterable is not ArrayType
+      mock_for_node = MagicMock()
+      mock_for_node.is_mutable = False
+      mock_for_node.loop_var_line = 1
+      mock_for_node.loop_var_column = 1
+      mock_for_node.loop_var_length = 5
+      mock_for_node.iterable = MagicMock()
+      with patch.object(checker, "visit", return_value=PrimitiveType("int")):
+        with patch.object(checker, "symbol_table") as mock_st:
+          checker.visit_ForNode(mock_for_node)
+          self.assertEqual(checker.node_types[mock_for_node], PrimitiveType("none"))
 
     # 3. Test Completion edge cases with mocked caches
     # Completion when receiver type lookup in node_types fails but exists in symbol table

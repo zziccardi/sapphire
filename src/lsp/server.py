@@ -277,6 +277,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
       VarDeclNode,
       ParameterNode,
       StructFieldNode,
+      IfNode,
+      ForNode,
   )
 
   node_name = ""
@@ -316,6 +318,12 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   elif isinstance(node, FuncDeclNode):
     category = "function"
     node_name = node.name
+  elif isinstance(node, IfNode) and node.is_if_let:
+    category = "variable"
+    node_name = node.let_name
+  elif isinstance(node, ForNode):
+    category = "variable"
+    node_name = node.loop_var
 
   type_desc = str(node_type)
   markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"
