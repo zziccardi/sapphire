@@ -110,6 +110,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.current_node: Optional[ASTNode] = None
     self.lsp_errors: List[dict] = []
     self.node_types: dict = {}
+    self.current_trait: Optional[Any] = None
 
   def visit(self, node: ASTNode) -> Any:
     old_node = self.current_node
@@ -177,10 +178,17 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.add_token(node.name_line, node.name_column, node.name_length, "struct", 1)  # declaration
     if node.parent_name:
       self.add_token(node.parent_name_line, node.parent_name_column, node.parent_name_length, "struct")
-    for field in node.fields:
-      self.visit(field)
-    super().visit_StructDeclNode(node)
+    
     struct_type = self.symbol_table.lookup_type(node.name)
+    old_struct = self.current_struct
+    self.current_struct = struct_type
+    try:
+      for field in node.fields:
+        self.visit(field)
+    finally:
+      self.current_struct = old_struct
+
+    super().visit_StructDeclNode(node)
     if struct_type and self.doc_text:
       comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
       if comments:
@@ -192,15 +200,28 @@ class SemanticTokensTypeChecker(TypeChecker):
     if not node.is_mutable:
       mods |= 4  # readonly
     self.add_token(node.name_line, node.name_column, node.name_length, "property", mods)
-    # No parent visitor exists for struct fields
+    if self.current_struct and node.name in self.current_struct.fields:
+      field = self.current_struct.fields[node.name]
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          field.comments = comments
+      self.node_types[node] = field.field_type
 
   def visit_TraitDeclNode(self, node) -> None:
     # Trait name declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "interface", 1)
-    for member in node.members:
-      self.visit(member)
-    super().visit_TraitDeclNode(node)
+    
     trait_type = self.symbol_table.lookup_type(node.name)
+    old_trait = self.current_trait
+    self.current_trait = trait_type
+    try:
+      for member in node.members:
+        self.visit(member)
+    finally:
+      self.current_trait = old_trait
+
+    super().visit_TraitDeclNode(node)
     if trait_type and self.doc_text:
       comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
       if comments:
@@ -209,7 +230,13 @@ class SemanticTokensTypeChecker(TypeChecker):
   def visit_TraitMemberNode(self, node) -> None:
     # Trait method declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "method", 1)
-    # No parent visitor exists for trait members
+    if self.current_trait and node.name in self.current_trait.methods:
+      method_type = self.current_trait.methods[node.name]
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          method_type.comments = comments
+      self.node_types[node] = method_type
 
   def visit_FuncDeclNode(self, node) -> None:
     # Function declaration (only highlight if not a method; methods are handled by ImplMemberNode)

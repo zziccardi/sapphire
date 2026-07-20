@@ -297,6 +297,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
         TraitDeclNode,
         ImplBlockNode,
         BasicTypeNode,
+        TraitMemberNode,
     )
   except ImportError:  # pragma: no cover
     from src.parser.ast import (
@@ -312,6 +313,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
         TraitDeclNode,
         ImplBlockNode,
         BasicTypeNode,
+        TraitMemberNode,
     )
 
   node_name = ""
@@ -368,6 +370,9 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     node_name = node.name
   elif isinstance(node, StructFieldNode):
     category = "property"
+    node_name = node.name
+  elif isinstance(node, TraitMemberNode):
+    category = "method"
     node_name = node.name
   elif isinstance(node, VarDeclNode):
     category = "variable"
@@ -434,6 +439,34 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     type_desc = str(node_type)
     markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"
                      if node_name else f"`{type_desc}`")
+    
+    # Extract property/field comments from parent struct definition:
+    field_comments = ""
+    declarations = getattr(ast, "declarations", [])
+    if isinstance(node, StructFieldNode) and uri in ls.symbol_table_cache:
+      parent_struct = None
+      for child in declarations:
+        if isinstance(child, StructDeclNode) and any(f is node for f in child.fields):
+          parent_struct = child
+          break
+      if parent_struct:
+        st = ls.symbol_table_cache[uri].lookup_type(parent_struct.name)
+        if st and node.name in st.fields:
+          field = st.fields[node.name]
+          field_comments = getattr(field, "comments", "")
+    elif isinstance(node, MemberAccessNode) and uri in ls.symbol_table_cache:
+      receiver_type = node_types.get(node.receiver)
+      if receiver_type:
+        try:
+          from semantics.symbol_table import StructType
+        except ImportError:  # pragma: no cover
+          from src.semantics.symbol_table import StructType
+        if isinstance(receiver_type, StructType) and node.member in receiver_type.fields:
+          field = receiver_type.fields[node.member]
+          field_comments = getattr(field, "comments", "")
+
+    if field_comments:
+      markdown_text += f"\n\n{field_comments}"
 
   return Hover(contents=MarkupContent(kind=MarkupKind.Markdown,
                                       value=markdown_text))
