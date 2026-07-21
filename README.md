@@ -6,8 +6,9 @@ Sapphire is a statically typed programming language that combines the
 **expressive API clarity** of modern languages like Swift.
 
 This repository contains the ANTLR4 grammar, abstract syntax tree (AST) builder,
-semantic analyzer, type checker, and a transpiler that compiles Sapphire source
-code (`.sp`) into clean, executable Python (`.py`).
+semantic analyzer, type checker, a transpiler that compiles Sapphire source
+code (`.sp`) into executable Python (`.py`), as well as a Language Server
+Protocol (LSP) server implementation and corresponding VS Code extension.
 
 ## Key features of Sapphire
 
@@ -52,7 +53,10 @@ code (`.sp`) into clean, executable Python (`.py`).
   * `parser/`: AST definitions (`ast.py`) and the visitor that builds the AST (`ast_builder.py`).
   * `semantics/`: Scope management, symbol tables (`symbol_table.py`), and compiler type-checking rules (`type_checker.py`).
   * `code_gen/`: Python transpiler logic (`transpiler.py`) and runtime wrappers.
+  * `lsp/`: Language Server Protocol (LSP) server implementation providing diagnostics, semantic tokens, hover info, and member autocompletion.
   * `run_transpiler.py`: CLI tool to compile `.sp` source files to Python.
+* `tools/`
+  * `vscode-extension/`: VS Code extension for Sapphire language support (syntax highlighting and LSP integration).
 * `docs/`
   * [SPEC.md](docs/SPEC.md): Deep dive language-design specification.
   * [compiler.md](docs/compiler.md): Comprehensive compiler pipeline and architectural documentation.
