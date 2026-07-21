@@ -19,14 +19,16 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 def main():
-  # Determine input and output file paths
+  target = "python"
   if len(sys.argv) > 1:
     input_file = sys.argv[1]
+    if len(sys.argv) > 2:
+      target = sys.argv[2]
   else:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     input_file = os.path.normpath(os.path.join(script_dir, "..", "sample.sp"))
 
-  transpile_file(input_file)
+  transpile_file(input_file, target=target)
 
 
 if __name__ == "__main__":  # pragma: no cover

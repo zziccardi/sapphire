@@ -38,21 +38,29 @@ class CustomErrorListener(ErrorListener):
     print(f"Syntax Error: Line {line}:{column} - {msg}", file=sys.stderr)
 
 
-def transpile_file(input_file: str, output_file: Optional[str] = None) -> str:
-  """Transpiles a Sapphire source file into Python.
+def transpile_file(
+    input_file: str,
+    output_file: Optional[str] = None,
+    target: str = "python",
+) -> str:
+  """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
   Args:
     input_file: Path to the Sapphire source file (.sp).
-    output_file: Optional output path for generated Python code (.py).
-      If None, defaults to input_file with .py extension.
+    output_file: Optional output path for generated code (.py or .lua). If None,
+      defaults to input_file with .py or .lua extension depending on target.
+    target: Code generation target ("python" or "lua" / "lua5.1").
 
   Returns:
-    The path to the generated Python file.
+    The path to the generated output file.
   """
+
+  target_lower = target.lower()
+  ext = ".lua" if target_lower in ("lua", "lua5.1") else ".py"
 
   if not output_file:
     base_path, _ = os.path.splitext(input_file)
-    output_file = base_path + ".py"
+    output_file = base_path + ext
 
   print(f"Reading source file: {input_file}...")
 
@@ -98,20 +106,31 @@ def transpile_file(input_file: str, output_file: Optional[str] = None) -> str:
     sys.exit(1)
 
   # 5. Transpile
-  print("Transpiling to Python...")
-  transpiler = Transpiler()
-  python_code = transpiler.transpile(ast)
+  if target_lower in ("lua", "lua5.1"):
+    try:
+      from code_gen.lua_transpiler import LuaTranspiler
+    except ModuleNotFoundError:
+      from src.code_gen.lua_transpiler import LuaTranspiler
+    print("Transpiling to Lua 5.1...")
+    transpiler = LuaTranspiler()
+    generated_code = transpiler.transpile(ast)
+    target_name = "Lua 5.1"
+  else:
+    print("Transpiling to Python...")
+    transpiler = Transpiler()
+    generated_code = transpiler.transpile(ast)
+    target_name = "Python"
 
   # Write generated code
   try:
     with open(output_file, "w", encoding="utf-8") as f:
-      f.write(python_code)
-    print(f"\nCompilation successful! Python output written to:\n{output_file}")
+      f.write(generated_code)
+    print(f"\nCompilation successful! {target_name} output written to:\n"
+          f"{output_file}")
     return output_file
   except Exception as e:
     print(f"Failed to write output file: {e}", file=sys.stderr)
     sys.exit(1)
-
 
 
 # ==========================================
