@@ -108,3 +108,6 @@ def main():
   dir_code = get_direction_code(current_dir)
   status_code = status
   return (dir_code + status_code)
+
+if __name__ == "__main__":
+  main()
