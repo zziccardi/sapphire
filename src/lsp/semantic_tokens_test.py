@@ -274,3 +274,26 @@ class TestSemanticTokens(unittest.TestCase):
     node_param.name_length = 6
     checker.visit(node_param)
     self.assertTrue(any(t[3] == "parameter" and t[4] == 0 for t in checker.raw_tokens))
+
+  def test_enum_semantic_tokens(self):
+    """Verifies semantic token extraction for enum declarations and member usage."""
+    code = """
+    enum Direction {
+        North,
+        East,
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+
+    token_types = [t[3] for t in checker.raw_tokens]
+    self.assertIn("enum", token_types)
+    self.assertIn("enumMember", token_types)

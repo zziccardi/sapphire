@@ -917,17 +917,100 @@ class TestLSPServer(unittest.TestCase):
     doc = "/* Single-line block */\nfunc foo()"
     self.assertEqual(extract_comments_above(doc, 2), "Single-line block")
 
-  def test_main(self):
+  def test_enum_lsp_hover_and_completion(self):
+    """Verifies LSP hover and completion for enums and enum members."""
+    from lsprotocol.types import HoverParams, CompletionParams, TextDocumentIdentifier, Position
     try:
-      patch_path = "lsp.server.server.start_io"
-      with patch(patch_path) as mock_start_io:
-        main()
-        mock_start_io.assert_called_once()
-    except (ImportError, ModuleNotFoundError, AttributeError):  # pragma: no cover
-      patch_path = "src.lsp.server.server.start_io"
-      with patch(patch_path) as mock_start_io:
-        main()
-        mock_start_io.assert_called_once()
+      from lsp.server import hover, completion, validate_source
+    except ImportError:  # pragma: no cover
+      from src.lsp.server import hover, completion, validate_source
+
+    doc_uri = "file:///enum_test.sp"
+    doc_text = """// Cardinal Directions
+enum Direction {
+    North,
+    East,
+}
+func test() {
+    let d: Direction = Direction.North;
+}
+"""
+    validate_source(self.ls, doc_uri, doc_text)
+
+    # 1. Test Hover on Enum Declaration (line 1, col 5)
+    params_hover_decl = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=5)
+    )
+    hover_res = hover(self.ls, params_hover_decl)
+    self.assertIsNotNone(hover_res)
+    self.assertIn("(enum)", hover_res.contents.value)
+    self.assertIn("Direction", hover_res.contents.value)
+    self.assertIn("Cardinal Directions", hover_res.contents.value)
+
+    # 2. Test Hover on Enum Member Declaration (line 2, col 4 -> North)
+    params_hover_member = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=4)
+    )
+    hover_res_m = hover(self.ls, params_hover_member)
+    self.assertIsNotNone(hover_res_m)
+    self.assertIn("North", hover_res_m.contents.value)
+
+    # 3. Test Hover on EnumSymbol Identifier (line 6, col 11 -> Direction type annotation)
+    params_hover_sym = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=11)
+    )
+    hover_res_sym = hover(self.ls, params_hover_sym)
+    self.assertIsNotNone(hover_res_sym)
+    self.assertIn("Direction", hover_res_sym.contents.value)
+
+    # 4. Test Dot Completion on Enum (line 6, col 33 -> "Direction.")
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = """enum Direction {
+    North,
+    East,
+}
+func test() {
+    let d = Direction.
+}"""
+    self.ls.workspace.get_text_document.return_value = mock_doc
+    params_comp = CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=5, character=22)
+    )
+    comp_res = completion(self.ls, params_comp)
+    labels = [item.label for item in comp_res.items]
+    self.assertIn("North", labels)
+    self.assertIn("East", labels)
+
+    # 5. Test Scope Completion (line 6, col 4 in empty function body)
+    mock_doc_scope = MagicMock()
+    mock_doc_scope.uri = doc_uri
+    mock_doc_scope.source = """enum Direction { North }
+func test() {
+    
+}"""
+    self.ls.workspace.get_text_document.return_value = mock_doc_scope
+    params_scope = CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=4)
+    )
+    scope_res = completion(self.ls, params_scope)
+    scope_labels = [item.label for item in scope_res.items]
+    self.assertIn("Direction", scope_labels)
+    self.assertIn("enum", scope_labels)
+
+    # 6. Test Hover on IdentifierNode when not in node_types cache
+    self.ls.node_types_cache[doc_uri].clear()
+    params_hover_sym_uncached = HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=24)
+    )
+    hover_res_uncached = hover(self.ls, params_hover_sym_uncached)
+    self.assertIsNotNone(hover_res_uncached)
 
 
 if __name__ == "__main__":

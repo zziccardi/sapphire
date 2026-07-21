@@ -10,11 +10,11 @@ from typing import List, Tuple, Optional
 try:
   from parser.ast import ASTNode
   from semantics.type_checker import TypeChecker
-  from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
+  from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType
 except ImportError:  # pragma: no cover
   from src.parser.ast import ASTNode
   from src.semantics.type_checker import TypeChecker
-  from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
+  from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType
 
 # Legend mappings for the LSP client
 TOKEN_TYPES = [
@@ -28,6 +28,8 @@ TOKEN_TYPES = [
     "function",     # 7
     "method",       # 8
     "keyword",      # 9
+    "enum",         # 10
+    "enumMember",   # 11
 ]
 
 TOKEN_MODIFIERS = [
@@ -237,6 +239,30 @@ class SemanticTokensTypeChecker(TypeChecker):
         if comments:
           method_type.comments = comments
       self.node_types[node] = method_type
+
+  def visit_EnumDeclNode(self, node) -> None:
+    # Enum name declaration
+    self.add_token(node.name_line, node.name_column, node.name_length, "enum", 1)
+    enum_type = self.symbol_table.lookup_type(node.name)
+    old_enum = getattr(self, "current_enum", None)
+    self.current_enum = enum_type
+    try:
+      for member in node.members:
+        self.visit(member)
+    finally:
+      self.current_enum = old_enum
+
+    super().visit_EnumDeclNode(node)
+    if enum_type and self.doc_text:
+      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+      if comments:
+        enum_type.comments = comments
+
+  def visit_EnumMemberNode(self, node) -> None:
+    # Enum member declaration (readonly)
+    self.add_token(node.name_line, node.name_column, node.name_length, "enumMember", 1 | 4)
+    if getattr(self, "current_enum", None):
+      self.node_types[node] = self.current_enum
 
   def visit_FuncDeclNode(self, node) -> None:
     # Function declaration (only highlight if not a method; methods are handled by ImplMemberNode)
