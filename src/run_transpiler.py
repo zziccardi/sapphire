@@ -1,14 +1,20 @@
-"""CLI runner script to compile a Sapphire source file into executable Python code.
+"""CLI runner script to compile a Sapphire source file into executable Python.
 
-This script parses a Sapphire source file, performs semantic analysis/type checking,
-and calls the Transpiler to generate clean, executable Python output.
+This script parses a Sapphire source file, performs semantic analysis /
+type-checking, and calls the transpiler to generate executable Python output.
 """
 
-import sys
 import os
+import sys
+from typing import Optional
 
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
+
+# Ensure `src` directory is in sys.path for relative imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+  sys.path.insert(0, script_dir)
 
 try:
   from parser.gen.SapphireLexer import SapphireLexer
@@ -36,16 +42,21 @@ class CustomErrorListener(ErrorListener):
     print(f"Syntax Error: Line {line}:{column} - {msg}", file=sys.stderr)
 
 
-def main():
-  # Determine input and output file paths
-  if len(sys.argv) > 1:
-    input_file = sys.argv[1]
-  else:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    input_file = os.path.normpath(os.path.join(script_dir, "..", "sample.sp"))
+def transpile_file(input_file: str, output_file: Optional[str] = None) -> str:
+  """Transpiles a Sapphire source file into Python.
 
-  base_path, _ = os.path.splitext(input_file)
-  output_file = base_path + ".py"
+  Args:
+    input_file: Path to the Sapphire source file (.sp).
+    output_file: Optional output path for generated Python code (.py).
+      If None, defaults to input_file with .py extension.
+
+  Returns:
+    The path to the generated Python file.
+  """
+
+  if not output_file:
+    base_path, _ = os.path.splitext(input_file)
+    output_file = base_path + ".py"
 
   print(f"Reading source file: {input_file}...")
 
@@ -100,9 +111,21 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f:
       f.write(python_code)
     print(f"\nCompilation successful! Python output written to:\n{output_file}")
+    return output_file
   except Exception as e:
     print(f"Failed to write output file: {e}", file=sys.stderr)
     sys.exit(1)
+
+
+def main():
+  # Determine input and output file paths
+  if len(sys.argv) > 1:
+    input_file = sys.argv[1]
+  else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    input_file = os.path.normpath(os.path.join(script_dir, "..", "sample.sp"))
+
+  transpile_file(input_file)
 
 
 if __name__ == "__main__":

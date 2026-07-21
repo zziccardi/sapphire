@@ -24,23 +24,24 @@ and `SapphireVisitor.py` in the workspace.
 
 ## Compilation & execution
 
-To compile a Sapphire source file to Python (e.g. `overview.sp` to
-`overview.py`):
+The `sapphire` CLI tool provides convenient commands for compiling and executing Sapphire programs.
+
+To compile and immediately run a Sapphire source file in one step:
+
+```bash
+pipenv run sapphire samples/overview.sp
+```
+
+To compile a Sapphire source file to Python without running it:
+
+```bash
+pipenv run sapphire build samples/overview.sp [-o custom_output.py]
+```
+
+Note: You can also call the low-level transpiler script directly via:
 
 ```bash
 pipenv run python src/run_transpiler.py samples/overview.sp
-```
-
-To execute the transpiled Python file:
-
-```bash
-pipenv run python samples/overview.py
-```
-
-To run the full semantics demo of the transpiled file:
-
-```bash
-pipenv run python -c "import samples.overview as sample; sample.run_demo()"
 ```
 
 ## Test coverage

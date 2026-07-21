@@ -76,7 +76,8 @@ features described in the spec.
   * `code_gen/`: Python transpiler logic (`transpiler.py`) and runtime wrappers.
   * `lsp/`: Language Server Protocol (LSP) server implementation providing
     diagnostics, semantic tokens, hover info, and member autocompletion.
-  * `run_transpiler.py`: CLI tool to compile `.sp` source files to Python.
+  * `cli/sapphire.py`: Unified CLI entry point (`build`, `run`).
+  * `run_transpiler.py`: Low-level script to compile `.sp` source files to Python.
 * `tools/`
   * `vscode-extension/`: VS Code extension for Sapphire language support (syntax
     highlighting and LSP integration).

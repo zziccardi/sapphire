@@ -1,5 +1,6 @@
 # Sapphire Runtime Header
 import copy
+from enum import IntEnum
 
 class Arena:
   def __init__(self):
