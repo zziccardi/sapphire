@@ -32,6 +32,11 @@ either `snake_case` or `PascalCase` but should be consistent.
 * Comments on the same line as code should have two spaces before the `//`.
 * Constant params should precede mutable params in function definitions.
 
+## Program entry & top-level script execution
+
+Sapphire supports top-level script-style execution. Programs do not require a mandatory `func main()` entry point. Top-level statements (variable initializations, function calls, conditional branches, and loops) are executed sequentially upon program execution. If a `func main()` function is defined, it will be automatically invoked after any top-level statements execute. Return statements (`return`) at top-level module scope are prohibited and produce a compile-time error.
+
+
 ## 2. Variable declaration & memory semantics
 
 Variables are immutable constants by default to encourage safety. Mutability must be explicitly declared.

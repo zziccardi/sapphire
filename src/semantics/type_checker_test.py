@@ -1357,8 +1357,27 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Redefinition of identifier 'Direction'", str(context.exception))
 
+  def test_top_level_return_error(self):
+    """Verifies that return statements outside functions raise a SemanticError."""
+    with self.assertRaises(SemanticError) as context:
+      self._check("""
+      return 42;
+      """)
+    self.assertIn("Return statement outside function context", str(context.exception))
+
+  def test_top_level_script_statements(self):
+    """Verifies that top-level script statements pass semantic analysis cleanly."""
+    self._check("""
+    var x: int = 10;
+    x += 5;
+    while x > 0 {
+      x -= 1;
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()
+
 
 

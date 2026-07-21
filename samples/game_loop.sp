@@ -231,7 +231,5 @@ func run_game_loop() {
   }
 }
 
-func main(): int {
-  run_game_loop();
-  return 0;
-}
+// Top-level script execution entry point
+run_game_loop();

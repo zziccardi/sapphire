@@ -151,12 +151,40 @@ class Transpiler:
           self.struct_methods[decl.struct_name] = []
         self.struct_methods[decl.struct_name].extend(decl.members)
 
-    # 3. Transpile all top-level declarations
+    top_level_decls = []
+    executable_stmts = []
+    has_main = False
+
     for decl in program.declarations:
-      # Skip ImplBlockNode since methods are processed inline with StructDeclNode
-      if not isinstance(decl, ImplBlockNode):
-        self.visit(decl)
+      if isinstance(decl, ImplBlockNode):
+        continue
+      elif isinstance(decl, FuncDeclNode):
+        if decl.name == "main":
+          has_main = True
+        top_level_decls.append(decl)
+      elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode, VarDeclNode)):
+        top_level_decls.append(decl)
+      else:
+        executable_stmts.append(decl)
+
+    # 3. Transpile all top-level declarations (types, functions, global variables)
+    for decl in top_level_decls:
+      self.visit(decl)
+      self.newline()
+
+    # 4. Transpile executable top-level statements and/or main call
+    if executable_stmts or has_main:
+      self.newline()
+      self.emit('if __name__ == "__main__":')
+      self.indent()
+      for stmt in executable_stmts:
         self.newline()
+        self.visit(stmt)
+      if has_main:
+        self.newline()
+        self.emit("main()")
+      self.dedent()
+      self.newline()
 
     return self.get_output()
 

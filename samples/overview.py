@@ -174,3 +174,7 @@ def run_demo():
     final_score = damage_multiplier(score)
   for score in scores:
     score += 5
+
+if __name__ == "__main__":
+  
+  run_demo()

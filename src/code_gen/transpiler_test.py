@@ -475,6 +475,43 @@ class TestTranspiler(unittest.TestCase):
     self.assertIn("class Empty(IntEnum):", py_code)
     self.assertIn("pass", py_code)
 
+  def test_top_level_script_transpilation_without_main(self):
+    """Verifies that top-level script statements transpile into if __name__ == '__main__': block."""
+    code = """
+    var val: int = 10;
+    val += 5;
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+    self.assertIn('if __name__ == "__main__":', py_code)
+    self.assertIn('val += 5', py_code)
+
+  def test_top_level_script_with_main_function(self):
+    """Verifies that defining main() appends main() call inside if __name__ == '__main__': block."""
+    code = """
+    func main() {
+      let x = 1;
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+    self.assertIn('if __name__ == "__main__":', py_code)
+    self.assertIn('main()', py_code)
+
 
 if __name__ == "__main__":
   unittest.main()
