@@ -3,7 +3,7 @@
 local Arena = {}
 Arena.__index = Arena
 
-function Arena.new()
+function Arena.init()
   local self = setmetatable({}, Arena)
   self.objects = {}
   return self
@@ -40,7 +40,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-local _DEFAULT_ARENA = Arena.new()
+local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 
@@ -112,7 +112,7 @@ end
 
 local Vector2D = {}
 Vector2D.__index = Vector2D
-function Vector2D.new(kwargs, proto)
+function Vector2D.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = setmetatable({}, Vector2D)
@@ -142,7 +142,7 @@ end
 
 local GameObject = {}
 GameObject.__index = GameObject
-function GameObject.new(kwargs, proto)
+function GameObject.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, GameObject)
@@ -157,7 +157,7 @@ end
 
 local Character = {}
 Character.__index = Character
-function Character.new(kwargs, proto)
+function Character.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Character)
@@ -176,7 +176,7 @@ function Character:_init_sapphire(id, name, x, y, hp, spd)
   if hp == nil then hp = 50 end
   if spd == nil then spd = 2.0 end
   self.id = id
-  self.position = Vector2D.new({x = x, y = y})
+  self.position = Vector2D.init({x = x, y = y})
   self.active = true
   self.health = hp
   self.max_health = hp
@@ -217,16 +217,16 @@ end
 
 
 local function run_demo()
-  local base_goblin = Character.new({id = 0, name = "Goblin Archer", x = 0.0, y = 0.0, hp = 30, spd = 1.5})
+  local base_goblin = Character.init({id = 0, name = "Goblin Archer", x = 0.0, y = 0.0, hp = 30, spd = 1.5})
   local goblin_1 = _clone_helper(base_goblin, function(self)
     self.id = 101
-    self.position = Vector2D.new({x = 10.0, y = 5.0})
+    self.position = Vector2D.init({x = 10.0, y = 5.0})
   end)
   local goblin_2 = _clone_helper(base_goblin, function(self)
     self.id = 102
-    self.position = Vector2D.new({x = 12.0, y = 6.0})
+    self.position = Vector2D.init({x = 12.0, y = 6.0})
   end)
-  local hero = Character.new({id = 1, name = "Arthur", x = 8.0, y = 5.0, hp = 80, spd = 2.5})
+  local hero = Character.init({id = 1, name = "Arthur", x = 8.0, y = 5.0, hp = 80, spd = 2.5})
   base_goblin.speed = 3.5
   local target = nil
   target = goblin_1

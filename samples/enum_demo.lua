@@ -3,7 +3,7 @@
 local Arena = {}
 Arena.__index = Arena
 
-function Arena.new()
+function Arena.init()
   local self = setmetatable({}, Arena)
   self.objects = {}
   return self
@@ -40,7 +40,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-local _DEFAULT_ARENA = Arena.new()
+local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 

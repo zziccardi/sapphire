@@ -3,7 +3,7 @@
 local Arena = {}
 Arena.__index = Arena
 
-function Arena.new()
+function Arena.init()
   local self = setmetatable({}, Arena)
   self.objects = {}
   return self
@@ -40,7 +40,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-local _DEFAULT_ARENA = Arena.new()
+local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 
@@ -119,7 +119,7 @@ local GameState = {
 
 local Vector2D = {}
 Vector2D.__index = Vector2D
-function Vector2D.new(kwargs, proto)
+function Vector2D.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = setmetatable({}, Vector2D)
@@ -155,7 +155,7 @@ end
 
 local GameObject = {}
 GameObject.__index = GameObject
-function GameObject.new(kwargs, proto)
+function GameObject.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, GameObject)
@@ -171,7 +171,7 @@ end
 
 local Entity = {}
 Entity.__index = Entity
-function Entity.new(kwargs, proto)
+function Entity.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Entity)
@@ -190,7 +190,7 @@ function Entity:_init_sapphire(id, name, x, y, hp, spd)
   if hp == nil then hp = 100 end
   if spd == nil then spd = 5.0 end
   self.id = id
-  self.position = Vector2D.new({x = x, y = y})
+  self.position = Vector2D.init({x = x, y = y})
   self.health = hp
   self.speed = spd
   self.name = name
@@ -213,7 +213,7 @@ end
 
 local GameEngine = {}
 GameEngine.__index = GameEngine
-function GameEngine.new(kwargs, proto)
+function GameEngine.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = setmetatable({}, GameEngine)
@@ -232,8 +232,8 @@ function GameEngine:_init_sapphire()
   self.state = GameState.Menu
   self.score = 0
   self.frame_count = 0
-  self.player = Entity.new({id = 1, name = "Hero", x = 10.0, y = 20.0, hp = 100, spd = 12.0})
-  self.base_enemy = Entity.new({id = 0, name = "Slime", x = 100.0, y = 20.0, hp = 30, spd = (-4.0)})
+  self.player = Entity.init({id = 1, name = "Hero", x = 10.0, y = 20.0, hp = 100, spd = 12.0})
+  self.base_enemy = Entity.init({id = 0, name = "Slime", x = 100.0, y = 20.0, hp = 30, spd = (-4.0)})
   self.active_enemy = nil
   self.game_over_timer = 0.0
 end
@@ -245,7 +245,7 @@ function GameEngine:load()
   self.game_over_timer = 0.0
   self.active_enemy = _clone_helper(self.base_enemy, function(self)
     self.id = 101
-    self.position = Vector2D.new({x = 80.0, y = 20.0})
+    self.position = Vector2D.init({x = 80.0, y = 20.0})
   end)
 end
 
@@ -269,7 +269,7 @@ function GameEngine:update(dt)
     else
       self.active_enemy = _clone_helper(self.base_enemy, function(self)
         self.id = 102
-        self.position = Vector2D.new({x = 120.0, y = 20.0})
+        self.position = Vector2D.init({x = 120.0, y = 20.0})
         self.health = 50
       end)
     end
@@ -305,7 +305,7 @@ end
 
 
 local function run_game_loop()
-  local engine = GameEngine.new({})
+  local engine = GameEngine.init({})
   engine:load()
   local frame_deltas = {0.016, 0.016, 0.016, 0.016, 0.016}
   for _, dt in ipairs(frame_deltas) do

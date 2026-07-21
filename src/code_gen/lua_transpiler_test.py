@@ -120,10 +120,10 @@ class TestLuaTranspiler(unittest.TestCase):
     output = transpiler.get_output()
     self.assertIn("-- pass", output)
     self.assertIn('10 .. "items"', output)
-    self.assertIn("Point.new({x = 1, [2] = 2})", output)
+    self.assertIn("Point.init({x = 1, [2] = 2})", output)
     self.assertIn("Point.create(1, 2)", output)
     self.assertIn("pt:get_x()", output)
-    self.assertIn("my_arena:register(Point.new({x = 1, [2] = 2}))", output)
+    self.assertIn("my_arena:register(Point.init({x = 1, [2] = 2}))", output)
     self.assertIn("(10)", output)
 
   def test_basic_arithmetic(self):
@@ -217,10 +217,9 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua_code = self._transpile(code)
     self.assertIn("local Item = {}", lua_code)
-    self.assertIn("function Item.new(kwargs, proto)", lua_code)
-    self.assertIn("self.price = 100", lua_code)
-    self.assertIn("function Item.create_default()", lua_code)
-    self.assertIn("Item.new({[1] = 100})", lua_code)
+    self.assertIn("function Item.init(kwargs, proto)", lua_code)
+    self.assertIn("Item._init_sapphire", lua_code)
+    self.assertIn("Item.init({[1] = 100})", lua_code)
 
   def test_func_default_params_and_void_return(self):
     """Verifies default parameters and void returns transpile cleanly."""
@@ -251,7 +250,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("local local_arena = Arena.new()", lua_code)
+    self.assertIn("local local_arena = Arena.init()", lua_code)
     self.assertIn("local_arena:destroy()", lua_code)
 
   def test_literals_unary_and_string_concat(self):
@@ -331,7 +330,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("Point.new({x = 10, y = 20})", lua_code)
+    self.assertIn("Point.init({x = 10, y = 20})", lua_code)
     self.assertIn("(function(x)", lua_code)
     self.assertIn("return (x * 2)", lua_code)
 

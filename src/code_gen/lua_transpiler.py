@@ -35,7 +35,7 @@ LUA_RUNTIME_PREAMBLE = """-- Sapphire Lua 5.1 Runtime Header
 local Arena = {}
 Arena.__index = Arena
 
-function Arena.new()
+function Arena.init()
   local self = setmetatable({}, Arena)
   self.objects = {}
   return self
@@ -72,7 +72,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-local _DEFAULT_ARENA = Arena.new()
+local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 
@@ -272,8 +272,8 @@ class LuaTranspiler:
     self.emit(f"{struct_name}.__index = {struct_name}")
     self.newline()
 
-    # Define constructor `.new(...)`
-    self.emit(f"function {struct_name}.new(kwargs, proto)")
+    # Define constructor `.init(...)`
+    self.emit(f"function {struct_name}.init(kwargs, proto)")
     self.indent()
     self.newline()
     self.emit("kwargs = kwargs or {}")
@@ -523,7 +523,7 @@ class LuaTranspiler:
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
     if node.name == "Arena":
-      self.emit("Arena.new")
+      self.emit("Arena.init")
     else:
       self.emit(node.name)
 
@@ -561,7 +561,7 @@ class LuaTranspiler:
     if (isinstance(node.callee, IdentifierNode) and
         node.callee.name in self.known_structs):
       struct_name = node.callee.name
-      self.emit(f"{struct_name}.new({{")
+      self.emit(f"{struct_name}.init({{")
       for idx, arg in enumerate(node.arguments):
         if idx > 0:
           self.emit(", ")
@@ -664,7 +664,7 @@ class LuaTranspiler:
     if node.arena_expr:
       self.visit(node.arena_expr)
       self.emit(":register(")
-    self.emit(f"{node.struct_name}.new({{")
+    self.emit(f"{node.struct_name}.init({{")
     for idx, arg in enumerate(node.fields):
       if idx > 0:
         self.emit(", ")

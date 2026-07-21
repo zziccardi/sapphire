@@ -3,7 +3,7 @@
 local Arena = {}
 Arena.__index = Arena
 
-function Arena.new()
+function Arena.init()
   local self = setmetatable({}, Arena)
   self.objects = {}
   return self
@@ -40,7 +40,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-local _DEFAULT_ARENA = Arena.new()
+local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 
@@ -112,7 +112,7 @@ end
 
 local Point = {}
 Point.__index = Point
-function Point.new(kwargs, proto)
+function Point.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = setmetatable({}, Point)
@@ -142,7 +142,7 @@ end
 
 local Particle = {}
 Particle.__index = Particle
-function Particle.new(kwargs, proto)
+function Particle.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = setmetatable({}, Particle)
@@ -166,7 +166,7 @@ end
 
 local Entity = {}
 Entity.__index = Entity
-function Entity.new(kwargs, proto)
+function Entity.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Entity)
@@ -181,7 +181,7 @@ end
 
 local Enemy = {}
 Enemy.__index = Enemy
-function Enemy.new(kwargs, proto)
+function Enemy.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Enemy)
@@ -214,7 +214,7 @@ end
 
 local Boss = {}
 Boss.__index = Boss
-function Boss.new(kwargs, proto)
+function Boss.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Boss)
@@ -239,10 +239,10 @@ end
 
 
 local function demo_explicit_arenas()
-  local level_arena = Arena.new()
-  local combat_arena = Arena.new()
-  local spawn_point = level_arena:register(Point.new({x = 100.0, y = 200.0}))
-  local base_goblin = level_arena:register(Enemy.new({name = "Goblin Archer", hp = 50, pos = spawn_point, damage = 12}))
+  local level_arena = Arena.init()
+  local combat_arena = Arena.init()
+  local spawn_point = level_arena:register(Point.init({x = 100.0, y = 200.0}))
+  local base_goblin = level_arena:register(Enemy.init({name = "Goblin Archer", hp = 50, pos = spawn_point, damage = 12}))
   local minion = _clone_helper(base_goblin, function(self)
     self.hp = 30
   end)
@@ -259,11 +259,11 @@ end
 
 local function demo_scoped_raii_cleanup()
   local total_lifetime = 0.0
-  local temp_arena = Arena.new()
-  local origin = temp_arena:register(Point.new({x = 5.0, y = 10.0}))
-  local p1 = temp_arena:register(Particle.new({pos = origin, lifetime = 1.5}))
-  local p2 = temp_arena:register(Particle.new({pos = origin, lifetime = 2.5}))
-  local temp_boss = temp_arena:register(Boss.new({name = "Dungeon Boss", hp = 500, pos = origin, phase = 1}))
+  local temp_arena = Arena.init()
+  local origin = temp_arena:register(Point.init({x = 5.0, y = 10.0}))
+  local p1 = temp_arena:register(Particle.init({pos = origin, lifetime = 1.5}))
+  local p2 = temp_arena:register(Particle.init({pos = origin, lifetime = 2.5}))
+  local temp_boss = temp_arena:register(Boss.init({name = "Dungeon Boss", hp = 500, pos = origin, phase = 1}))
   total_lifetime = (p1.lifetime + p2.lifetime)
   temp_arena:destroy()
   return total_lifetime
@@ -271,8 +271,8 @@ end
 
 
 local function demo_implicit_default_arena()
-  local default_pos = Point.new({x = 0.0, y = 0.0})
-  local default_enemy = Enemy.new({name = "Default Skeleton", hp = 100, pos = default_pos})
+  local default_pos = Point.init({x = 0.0, y = 0.0})
+  local default_enemy = Enemy.init({name = "Default Skeleton", hp = 100, pos = default_pos})
   local cloned_skeleton = _clone_helper(default_enemy, function(self)
     self.hp = 60
   end)

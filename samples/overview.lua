@@ -3,7 +3,7 @@
 local Arena = {}
 Arena.__index = Arena
 
-function Arena.new()
+function Arena.init()
   local self = setmetatable({}, Arena)
   self.objects = {}
   return self
@@ -40,7 +40,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-local _DEFAULT_ARENA = Arena.new()
+local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 
@@ -115,7 +115,7 @@ local MAX_PLAYERS = 100
 
 local Position = {}
 Position.__index = Position
-function Position.new(kwargs, proto)
+function Position.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = setmetatable({}, Position)
@@ -138,7 +138,7 @@ end
 
 local Entity = {}
 Entity.__index = Entity
-function Entity.new(kwargs, proto)
+function Entity.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Entity)
@@ -153,7 +153,7 @@ end
 
 local Character = {}
 Character.__index = Character
-function Character.new(kwargs, proto)
+function Character.init(kwargs, proto)
   kwargs = kwargs or {}
   local self
   self = _create_proto_object(proto, Character)
@@ -171,7 +171,7 @@ end
 function Character:_init_sapphire(id, name, max_hp)
   if max_hp == nil then max_hp = 100 end
   self.id = id
-  self.pos = Position.new({x = 0.0, y = 0.0})
+  self.pos = Position.init({x = 0.0, y = 0.0})
   self.health = max_hp
   self.max_health = max_hp
   self.name = name
@@ -214,8 +214,8 @@ end
 
 
 local function run_demo()
-  local player_one = Character.new({id = 1, name = "Galahad"})
-  local player_two = Character.new({id = 2, name = "Lancelot", max_hp = 120})
+  local player_one = Character.init({id = 1, name = "Galahad"})
+  local player_two = Character.init({id = 2, name = "Lancelot", max_hp = 120})
   local target_player = nil
   target_player = player_two
   local _val_active_target = target_player
@@ -225,7 +225,7 @@ local function run_demo()
   else
     -- pass
   end
-  local prototype_enemy = Character.new({id = 99, name = "Goblin Minion", max_hp = 30})
+  local prototype_enemy = Character.init({id = 99, name = "Goblin Minion", max_hp = 30})
   local active_clone = _clone_helper(prototype_enemy, function(self)
     self.health = 25
   end)
