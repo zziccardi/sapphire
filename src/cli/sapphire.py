@@ -9,11 +9,16 @@ import os
 import sys
 import subprocess
 
+# Ensure `src` directory is in `sys.path` so submodules like `code_gen`, `parser`,
+# and `semantics` can be imported when running `sapphire` directly.
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if src_dir not in sys.path:
+  sys.path.insert(0, src_dir)
+
 try:
   from code_gen.transpiler import transpile_file
 except ModuleNotFoundError:  # pragma: no cover
   from src.code_gen.transpiler import transpile_file
-
 
 
 def run_command(args):
@@ -28,15 +33,7 @@ def run_command(args):
   out_path = transpile_file(source_file, output_file)
 
   print("\n--- Executing Sapphire Program ---")
-  if args.demo:
-    # Convert file path to module path for import (e.g. samples/overview.py ->
-    # samples.overview)
-    rel_path = os.path.relpath(out_path)
-    module_name = os.path.splitext(rel_path)[0].replace(os.sep, ".")
-    cmd = [sys.executable, "-c",
-           f"import {module_name} as sample; sample.run_demo()"]
-  else:
-    cmd = [sys.executable, out_path]
+  cmd = [sys.executable, out_path]
 
   result = subprocess.run(cmd)
   sys.exit(result.returncode)
@@ -75,10 +72,6 @@ def main():
   run_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   run_parser.add_argument(
       "-o", "--output", help="Optional output path for generated Python file")
-  run_parser.add_argument(
-      "--demo",
-      action="store_true",
-      help="Invoke the run_demo() function after importing generated module")
   run_parser.set_defaults(func=run_command)
 
   # Handle shortcut invocation: if first argument is a file (e.g.

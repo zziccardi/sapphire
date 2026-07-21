@@ -1,4 +1,6 @@
+import importlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -51,16 +53,6 @@ class SapphireCLITest(unittest.TestCase):
         main()
       self.assertEqual(cm.exception.code, 1)
 
-  def test_run_demo_flag(self):
-    test_args = ["sapphire", "run", self.sp_file, "--demo"]
-    with patch.object(sys, "argv", test_args):
-      with patch("subprocess.run") as mock_run:
-        mock_run.return_value.returncode = 0
-        with self.assertRaises(SystemExit) as cm:
-          main()
-        self.assertEqual(cm.exception.code, 0)
-        mock_run.assert_called_once()
-
   def test_shortcut_invocation(self):
     test_args = ["sapphire", self.sp_file]
     with patch.object(sys, "argv", test_args):
@@ -75,6 +67,45 @@ class SapphireCLITest(unittest.TestCase):
     test_args = ["sapphire"]
     with patch.object(sys, "argv", test_args):
       main()
+
+  def test_game_loop_sample_execution(self):
+    game_loop_sp = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../samples/game_loop.sp")
+    )
+    self.assertTrue(os.path.exists(game_loop_sp))
+
+    test_args = ["sapphire", "run", game_loop_sp]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        main()
+      self.assertEqual(cm.exception.code, 0)
+
+  def test_sys_path_auto_injection(self):
+    """Ensures src/cli/sapphire.py injects the src directory into sys.path when absent."""
+    src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    with patch.object(sys, "path", [p for p in sys.path if p != src_dir]):
+      import src.cli.sapphire as sapphire_cli
+
+      importlib.reload(sapphire_cli)
+      self.assertIn(src_dir, sys.path)
+
+  def test_isolated_pythonpath_execution(self):
+    """Verifies that running sapphire CLI without PYTHONPATH succeeds without ModuleNotFoundError."""
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../..")
+    )
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+
+    res = subprocess.run(
+        [sys.executable, "-m", "src.cli.sapphire", "build", self.sp_file],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    self.assertEqual(res.returncode, 0)
+    self.assertNotIn("ModuleNotFoundError", res.stderr)
 
 
 if __name__ == "__main__":

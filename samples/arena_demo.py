@@ -83,131 +83,116 @@ def _clone_helper(obj, init_fn=None, arena=None):
   return clone_obj
 
 
-class GameState(IntEnum):
-  Menu = 0
-  Playing = 1
-  GameOver = 2
-
-
-class Vector2D(object):
+class Point(object):
   def __init__(self, *args, **kwargs):
     for k, v in kwargs.items():
       setattr(self, k, v)
+    self._init_sapphire(*args, **kwargs)
+  def _init_sapphire(self, x=0.0, y=0.0):
+    self.x = x
+    self.y = y
   def translate(self, dx, dy):
     self.x += dx
     self.y += dy
-  def get_distance_to(self, other):
-    dx = (self.x - other.x)
-    dy = (self.y - other.y)
-    abs_dx = dx
-    abs_dy = dy
-    if (abs_dx < 0.0):
-      abs_dx = (-abs_dx)
-    if (abs_dy < 0.0):
-      abs_dy = (-abs_dy)
-    return (abs_dx + abs_dy)
 
 
+class Particle(object):
+  def __init__(self, *args, **kwargs):
+    for k, v in kwargs.items():
+      setattr(self, k, v)
+    self._init_sapphire(*args, **kwargs)
+  def _init_sapphire(self, pos, lifetime=1.0):
+    self.pos = pos
+    self.lifetime = lifetime
 
 
-class GameObject(SapphireObject):
+class Entity(SapphireObject):
   def __init__(self, *args, proto=None, **kwargs):
     super().__init__(proto=proto)
     if proto is None:
-      self.active = True
       for k, v in kwargs.items():
         setattr(self, k, v)
   pass
 
 
-class Entity(GameObject):
+class Enemy(Entity):
   def __init__(self, *args, proto=None, **kwargs):
     super().__init__(proto=proto)
     if proto is None:
       for k, v in kwargs.items():
         setattr(self, k, v)
       self._init_sapphire(*args, **kwargs)
-  def _init_sapphire(self, id, name, x, y, hp=100, spd=5.0):
-    self.id = id
-    self.position = Vector2D(x=x, y=y)
-    self.health = hp
-    self.speed = spd
+  def _init_sapphire(self, name, hp, pos, damage=10):
     self.name = name
-  def update(self, dt):
-    if (self.health <= 0):
-      self.active = False
-      return
-    self.position.translate(dx=(self.speed * dt), dy=0.0)
-  def draw(self):
-    if self.active:
-      pass
+    self.hp = hp
+    self.pos = pos
+    self.damage = damage
+  def take_damage(self, amount):
+    self.hp -= amount
+    if (self.hp < 0):
+      self.hp = 0
 
 
-class GameEngine(object):
-  def __init__(self, *args, **kwargs):
-    for k, v in kwargs.items():
-      setattr(self, k, v)
-    self._init_sapphire(*args, **kwargs)
-  def _init_sapphire(self):
-    self.state = GameState.Menu
-    self.score = 0
-    self.frame_count = 0
-    self.player = Entity(id=1, name="Hero", x=10.0, y=20.0, hp=100, spd=12.0)
-    self.base_enemy = Entity(id=0, name="Slime", x=100.0, y=20.0, hp=30, spd=(-4.0))
-    self.active_enemy = None
-    self.game_over_timer = 0.0
-  def load(self):
-    self.state = GameState.Playing
-    self.score = 0
-    self.frame_count = 0
-    self.game_over_timer = 0.0
-    self.active_enemy = _clone_helper(self.base_enemy, lambda self: [setattr(self, 'id', 101), setattr(self, 'position', Vector2D(x=80.0, y=20.0))])
-  def update(self, dt):
-    self.frame_count += 1
-    if (self.state == GameState.Playing):
-      self.player.update(dt)
-      _val_enemy = self.active_enemy
-      if _val_enemy is not None:
-        enemy = _val_enemy
-        enemy.update(dt)
-        dist = self.player.position.get_distance_to(other=enemy.position)
-        if (dist < 15.0):
-          enemy.health -= 30
-          self.score += 50
-          if (enemy.health <= 0):
-            self.active_enemy = None
-            self.state = GameState.GameOver
-      else:
-        self.active_enemy = _clone_helper(self.base_enemy, lambda self: [setattr(self, 'id', 102), setattr(self, 'position', Vector2D(x=120.0, y=20.0)), setattr(self, 'health', 50)])
-    else:
-      if (self.state == GameState.GameOver):
-        self.game_over_timer += dt
-        if (self.game_over_timer >= 3.0):
-          self.load()
-  def draw(self):
-    if (self.state == GameState.Menu):
-      pass
-    else:
-      if (self.state == GameState.Playing):
-        self.player.draw()
-        _val_enemy = self.active_enemy
-        if _val_enemy is not None:
-          enemy = _val_enemy
-          enemy.draw()
-      else:
-        if (self.state == GameState.GameOver):
-          pass
+class Boss(Entity):
+  def __init__(self, *args, proto=None, **kwargs):
+    super().__init__(proto=proto)
+    if proto is None:
+      for k, v in kwargs.items():
+        setattr(self, k, v)
+      self._init_sapphire(*args, **kwargs)
+  def _init_sapphire(self, name, hp, pos, phase=1):
+    self.name = name
+    self.hp = hp
+    self.pos = pos
+    self.phase = phase
 
 
+def demo_explicit_arenas():
+  level_arena = Arena()
+  try:
+    combat_arena = Arena()
+    try:
+      spawn_point = level_arena.register(Point(x=100.0, y=200.0))
+      base_goblin = level_arena.register(Enemy(name="Goblin Archer", hp=50, pos=spawn_point, damage=12))
+      minion = _clone_helper(base_goblin, lambda self: [setattr(self, 'hp', 30)])
+      combat_goblin = _clone_helper(base_goblin, lambda self: [setattr(self, 'hp', 75)], arena=combat_arena)
+      minion.take_damage(10)
+      combat_goblin.take_damage(25)
+      return (minion.hp + combat_goblin.hp)
+    finally:
+      combat_arena.destroy()
+  finally:
+    level_arena.destroy()
 
-def run_game_loop():
-  engine = GameEngine()
-  engine.load()
-  frame_deltas = [0.016, 0.016, 0.016, 0.016, 0.016]
-  for dt in frame_deltas:
-    engine.update(dt)
-    engine.draw()
+def demo_scoped_raii_cleanup():
+  total_lifetime = 0.0
+  temp_arena = Arena()
+  try:
+    origin = temp_arena.register(Point(x=5.0, y=10.0))
+    p1 = temp_arena.register(Particle(pos=origin, lifetime=1.5))
+    p2 = temp_arena.register(Particle(pos=origin, lifetime=2.5))
+    temp_boss = temp_arena.register(Boss(name="Dungeon Boss", hp=500, pos=origin, phase=1))
+    total_lifetime = (p1.lifetime + p2.lifetime)
+  finally:
+    temp_arena.destroy()
+  return total_lifetime
+
+def demo_implicit_default_arena():
+  default_pos = Point(x=0.0, y=0.0)
+  default_enemy = Enemy(name="Default Skeleton", hp=100, pos=default_pos)
+  cloned_skeleton = _clone_helper(default_enemy, lambda self: [setattr(self, 'hp', 60)])
+  cloned_skeleton.take_damage(15)
+  return (default_enemy.hp + cloned_skeleton.hp)
+
+def run_demo():
+  score1 = demo_explicit_arenas()
+  score2 = demo_implicit_default_arena()
+  duration = demo_scoped_raii_cleanup()
+  result = (score1 + score2)
+  if (duration > 3.0):
+    result += 10
+  return result
 
 if __name__ == "__main__":
   
-  run_game_loop()
+  run_demo()

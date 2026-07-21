@@ -4,7 +4,7 @@
  *
  * This sample demonstrates:
  * - Enums for game state-machine management (Menu, Playing, GameOver)
- * - Trait contracts for component behavior (Updatable, Renderable)
+ * - Trait contracts for component behavior (Updatable, Drawable)
  * - Prototypal inheritance (`proto` and `clone`) for entity spawning from
  *   blueprints
  * - Swift-style safe optional unwrapping (`if let`) for entity target tracking
@@ -26,11 +26,6 @@ struct Vector2D {
 }
 
 impl Vector2D {
-  func __init__(x: float, y: float) {
-    self.x = x;
-    self.y = y;
-  }
-
   func translate(dx: float, dy: float) {
     self.x += dx;
     self.y += dy;
@@ -41,12 +36,11 @@ impl Vector2D {
     let dx = self.x - other.x;
     let dy = self.y - other.y;
     var abs_dx = dx;
+    var abs_dy = dy;
 
     if abs_dx < 0.0 {
       abs_dx = -abs_dx;
     }
-
-    var abs_dy = dy;
 
     if abs_dy < 0.0 {
       abs_dy = -abs_dy;
@@ -61,7 +55,7 @@ trait Updatable {
   func update(dt: float);
 }
 
-trait Renderable {
+trait Drawable {
   func draw();
 }
 
@@ -69,7 +63,7 @@ trait Renderable {
 proto GameObject {
   var id: int;
   var position: Vector2D;
-  var active: bool;
+  var active: bool = true;
 }
 
 proto Entity: GameObject {
@@ -79,11 +73,11 @@ proto Entity: GameObject {
 }
 
 impl Entity {
+  // Python-style constructor for nontrivial initialization of entity fields.
   func __init__(id: int, name: String, x: float, y: float, hp: int = 100,
                 spd: float = 5.0) {
     self.id = id;
-    self.position = Vector2D(x = x, y = y);
-    self.active = true;
+    self.position = Vector2D { x = x, y = y };
     self.health = hp;
     self.speed = spd;
     self.name = name;
@@ -96,12 +90,13 @@ impl Updatable for Entity {
       self.active = false;
       return;
     }
+
     // Update entity position by applying horizontal velocity.
     self.position.translate(dx = self.speed * dt, dy = 0.0);
   }
 }
 
-impl Renderable for Entity {
+impl Drawable for Entity {
   func draw() {
     if self.active {
       // Frame rendering step for active entity
@@ -135,80 +130,89 @@ impl GameEngine {
 }
 
 // 5. Core love2d-style engine callbacks
-
-// `love.load()` -- Initializes game state, entities, and parameters.
-func load(var game: GameEngine) {
-  game.state = GameState.Playing;
-  game.score = 0;
-  game.frame_count = 0;
-  game.game_over_timer = 0.0;
-
-  // Use prototypal cloning (`clone`) to spawn an enemy instance from template.
-  let spawned_slime = clone game.base_enemy {
-    self.id = 101;
-    self.position = Vector2D(x = 80.0, y = 20.0);
-  };
-
-  game.active_enemy = spawned_slime;
+trait Love2D {
+  func load();
+  func update(dt: float);
+  func draw();
 }
 
-// `love.update(dt)` -- Process physics, inputs, AI updates, & state
-// transitions.
-func update(var game: GameEngine, dt: float) {
-  game.frame_count += 1;
+impl Love2D for GameEngine {
+  // Initializes game state, entities, and parameters.
+  // This is called once at the start of the game loop.
+  // Simulates `love.load()` in love2d.
+  func load() {
+    self.state = GameState.Playing;
+    self.score = 0;
+    self.frame_count = 0;
+    self.game_over_timer = 0.0;
 
-  // TODO: Add switch/match expressions.
-  if game.state == GameState.Playing {
-    game.player.update(dt);
+    // Use prototypal cloning (`clone`) to spawn an enemy instance from the
+    // base enemy template.
+    self.active_enemy = clone self.base_enemy {
+      self.id = 101;
+      self.position = Vector2D { x = 80.0, y = 20.0 };
+    };
+  }
 
-    // Swift-style safe optional unwrapping for active enemy
-    if let enemy = game.active_enemy {
-      enemy.update(dt);
+  // Process physics, inputs, AI updates, & state transitions.
+  // This is called once per frame with a delta-time param.
+  // Simulates `love.update(dt)` in love2d.
+  func update(dt: float) {
+    self.frame_count += 1;
 
-      // Check collision distance between player and enemy
-      let dist = game.player.position.get_distance_to(other = enemy.position);
+    // TODO: Add switch/match expressions.
+    if self.state == GameState.Playing {
+      self.player.update(dt);
 
-      if dist < 15.0 {
-        enemy.health -= 30;
-        game.score += 50;
+      // Swift-style safe optional unwrapping for active enemy
+      if let enemy = self.active_enemy {
+        enemy.update(dt);
 
-        if enemy.health <= 0 {
-          game.active_enemy = none;
-          game.state = GameState.GameOver;
+        // Check collision distance between player and enemy
+        let dist = self.player.position.get_distance_to(other = enemy.position);
+
+        if dist < 15.0 {
+          enemy.health -= 30;
+          self.score += 50;
+
+          if enemy.health <= 0 {
+            self.active_enemy = none;
+            self.state = GameState.GameOver;
+          }
         }
+      } else {
+        // Spawn next enemy wave when active enemy is defeated
+        self.active_enemy = clone self.base_enemy {
+          self.id = 102;
+          self.position = Vector2D { x = 120.0, y = 20.0 };
+          self.health = 50;
+        };
       }
-    } else {
-      // Spawn next enemy wave when active enemy is defeated
-      let wave_enemy = clone game.base_enemy {
-        self.id = 102;
-        self.position = Vector2D(x = 120.0, y = 20.0);
-        self.health = 50;
-      };
+    } else if self.state == GameState.GameOver {
+      self.game_over_timer += dt;
 
-      game.active_enemy = wave_enemy;
-    }
-  } else if game.state == GameState.GameOver {
-    game.game_over_timer += dt;
-
-    if game.game_over_timer >= 3.0 {
-      load(game = game);
+      if self.game_over_timer >= 3.0 {
+        self.load();
+      }
     }
   }
-}
 
-// `love.draw()` -- Perform rendering calls for graphics and HUD UI.
-func draw(game: GameEngine) {
-  if game.state == GameState.Menu {
-    // Draw main menu screen
-  } else if game.state == GameState.Playing {
-    // Render game objects
-    game.player.draw();
+  // Perform rendering calls for graphics and HUD UI.
+  // This is called once per frame after the update step.
+  // Simulates `love.draw()` in love2d.
+  func draw() {
+    if self.state == GameState.Menu {
+      // Drawable main menu screen
+    } else if self.state == GameState.Playing {
+      // Render game objects
+      self.player.draw();
 
-    if let enemy = game.active_enemy {
-      enemy.draw();
+      if let enemy = self.active_enemy {
+        enemy.draw();
+      }
+    } else if self.state == GameState.GameOver {
+      // Drawable game over screen
     }
-  } else if game.state == GameState.GameOver {
-    // Draw game over screen
   }
 }
 
@@ -217,17 +221,17 @@ func run_game_loop() {
   var engine = GameEngine();
 
   // 1. Initialize game engine state and spawn entities.
-  load(game = engine);
+  engine.load();
 
   // Run game loop across simulated frames with 60FPS delta time (0.016s)
   let frame_deltas = [0.016, 0.016, 0.016, 0.016, 0.016];
 
   for dt in frame_deltas {
     // 2. Update engine world state.
-    update(game = engine, dt = dt);
+    engine.update(dt);
 
     // 3. Render frame graphics.
-    draw(game = engine);
+    engine.draw();
   }
 }
 
