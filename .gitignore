@@ -11,3 +11,5 @@ tools/vscode-extension/sapphire-*.vsix
 .antlr/
 .coverage
 .vscode/
+
+*__pycache__*
