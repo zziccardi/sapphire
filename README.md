@@ -73,7 +73,7 @@ enable the memory-safety features described in the spec.
     (`ast_builder.py`).
   * `semantics/`: Scope management, symbol tables (`symbol_table.py`), and
     compiler type-checking rules (`type_checker.py`).
-  * `code_gen/`: Transpiler logic for Python (`transpiler.py`) and Lua 5.1 (`lua_transpiler.py`), high-level compilation driver API (`transpile_file`), and runtime headers.
+  * `code_gen/`: Transpiler logic for Python (`python_transpiler.py`) and Lua 5.1 (`lua_transpiler.py`), driver facade (`transpiler.py`), and runtime headers.
   * `lsp/`: Language Server Protocol (LSP) server implementation providing
     diagnostics, semantic tokens, hover info, and member autocompletion.
   * `cli/sapphire.py`: Unified CLI entry point (`build`, `run`).

@@ -66,7 +66,7 @@ The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) trav
 
 Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), mapping Sapphire semantics to the target runtime environment.
 
-### 1. Python Target (`transpiler.py`)
+### 1. Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
 - **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, and `if let` unwrapping to Python `None` checks.
 

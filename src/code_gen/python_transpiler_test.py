@@ -13,15 +13,17 @@ try:
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
-  from code_gen.transpiler import Transpiler, transpile_file
+  from code_gen.python_transpiler import PythonTranspiler, Transpiler
+  from code_gen.transpiler import transpile_file
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
-  from src.code_gen.transpiler import Transpiler, transpile_file
+  from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
+  from src.code_gen.transpiler import transpile_file
 
 
-class TestTranspiler(unittest.TestCase):
+class TestPythonTranspiler(unittest.TestCase):
   """Suite of unit tests verifying correct code generation and execution."""
 
   def _transpile_and_run(self, code: str, run_expr: str) -> Any:
