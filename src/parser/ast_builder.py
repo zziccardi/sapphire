@@ -46,12 +46,18 @@ class ASTBuilder(SapphireVisitor):
   def visitDeclaration(self, ctx: SapphireParser.DeclarationContext) -> DeclNode:
     return self.visit(ctx.getChild(0))
 
+  def visitAnnotation(self, ctx: SapphireParser.AnnotationContext) -> AnnotationNode:
+    name = ctx.IDENTIFIER().getText()
+    arg = ctx.STRING_LIT().getText()[1:-1] if ctx.STRING_LIT() else None
+    return AnnotationNode(name, arg)
+
   def visitStructDeclaration(self, ctx: SapphireParser.StructDeclarationContext) -> StructDeclNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.IDENTIFIER(0).getText()
     parent_name = ctx.IDENTIFIER(1).getText() if len(ctx.IDENTIFIER()) > 1 else None
-    fields = [self.visit(field) for field in ctx.structField()]
+    fields = [self.visit(field) for field in ctx.structField()] if ctx.structField() else []
     is_prototype = ctx.PROTO_KEYWORD() is not None
-    node = StructDeclNode(name, parent_name, fields, is_prototype)
+    node = StructDeclNode(name, parent_name, fields, is_prototype, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER(0).getSymbol()
     node.name_line = name_token.line
@@ -65,9 +71,10 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitEnumDeclaration(self, ctx: SapphireParser.EnumDeclarationContext) -> EnumDeclNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.IDENTIFIER().getText()
     members = [self.visit(member) for member in ctx.enumMember()]
-    node = EnumDeclNode(name, members)
+    node = EnumDeclNode(name, members, annotations=annotations)
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
     node.name_column = name_token.column
@@ -98,10 +105,11 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitImplBlock(self, ctx: SapphireParser.ImplBlockContext) -> ImplBlockNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     trait_name = ctx.traitName.text if ctx.traitName else None
     struct_name = ctx.structName.text
     members = [self.visit(m) for m in ctx.implMember()]
-    node = ImplBlockNode(struct_name, trait_name, members)
+    node = ImplBlockNode(struct_name, trait_name, members, annotations=annotations)
     # Positioning for Language Server:
     struct_token = ctx.structName
     node.struct_name_line = struct_token.line
@@ -115,18 +123,20 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitImplMember(self, ctx: SapphireParser.ImplMemberContext) -> ImplMemberNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     modifier = None
     if ctx.STATIC():
       modifier = "static"
     elif ctx.CONST():
       modifier = "const"
     func_decl = self.visit(ctx.functionDeclaration())
-    return ImplMemberNode(modifier, func_decl)
+    return ImplMemberNode(modifier, func_decl, annotations=annotations)
 
   def visitTraitDeclaration(self, ctx: SapphireParser.TraitDeclarationContext) -> TraitDeclNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.IDENTIFIER().getText()
     members = [self.visit(m) for m in ctx.traitMember()]
-    node = TraitDeclNode(name, members)
+    node = TraitDeclNode(name, members, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
@@ -135,10 +145,16 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitTraitMember(self, ctx: SapphireParser.TraitMemberContext) -> TraitMemberNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
+    modifier = None
+    if ctx.STATIC():
+      modifier = "static"
+    elif ctx.CONST():
+      modifier = "const"
     name = ctx.IDENTIFIER().getText()
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_type = self.visit(ctx.type_()) if ctx.type_() else None
-    node = TraitMemberNode(name, params, return_type)
+    node = TraitMemberNode(name, params, return_type, modifier=modifier, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
@@ -147,11 +163,12 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitFunctionDeclaration(self, ctx: SapphireParser.FunctionDeclarationContext) -> FuncDeclNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.functionName().getText()
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_type = self.visit(ctx.type_()) if ctx.type_() else None
-    body = self.visit(ctx.block())
-    node = FuncDeclNode(name, params, return_type, body)
+    body = self.visit(ctx.block()) if ctx.block() else None
+    node = FuncDeclNode(name, params, return_type, body, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.functionName().IDENTIFIER().getSymbol() if ctx.functionName().IDENTIFIER() else ctx.functionName().INIT().getSymbol()
     node.name_line = name_token.line
@@ -207,11 +224,12 @@ class ASTBuilder(SapphireVisitor):
   def visitVariableDeclarationStatement(
       self, ctx: SapphireParser.VariableDeclarationStatementContext
   ) -> VarDeclNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     is_mutable = ctx.VAR() is not None
     name = ctx.IDENTIFIER().getText()
     val_type = self.visit(ctx.type_()) if ctx.type_() else None
-    expr = self.visit(ctx.expression())
-    node = VarDeclNode(is_mutable, name, val_type, expr)
+    expr = self.visit(ctx.expression()) if ctx.expression() else None
+    node = VarDeclNode(is_mutable, name, val_type, expr, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line

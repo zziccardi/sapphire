@@ -334,6 +334,41 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("(function(x)", lua_code)
     self.assertIn("return (x * 2)", lua_code)
 
+  def test_export_annotation_lua(self):
+    """Verifies that @export("target.path") transpiles to function target.path(...)."""
+    code = """
+    @export("love.update")
+    func update(dt: float) {
+      let step = dt;
+    }
+
+    @export
+    func global_callback() {
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("function love.update(dt)", lua_code)
+    self.assertIn("function global_callback()", lua_code)
+    self.assertNotIn("local function update", lua_code)
+
+  def test_extern_annotations_lua(self):
+    """Verifies that @extern var and @extern trait omit runtime initialization code."""
+    code = """
+    @extern
+    var love: int;
+
+    @extern
+    struct LoveGraphics;
+
+    @extern
+    trait LoveGraphics {
+      static func rectangle(mode: String, x: float, y: float);
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertNotIn("local love =", lua_code)
+    self.assertNotIn("LoveGraphics = {}", lua_code)
+
   def test_lua_execution_if_available(self):
     """Executes transpiled Lua code using system Lua interpreter if present."""
     lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")

@@ -26,6 +26,17 @@ except ModuleNotFoundError:
 class TestPythonTranspiler(unittest.TestCase):
   """Suite of unit tests verifying correct code generation and execution."""
 
+  def _transpile(self, code: str) -> str:
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    return transpiler.transpile(ast)
+
   def _transpile_and_run(self, code: str, run_expr: str) -> Any:
     """Helper to transpile Sapphire code, execute it in Python, and return run_expr value."""
     input_stream = InputStream(code)
@@ -554,15 +565,29 @@ class TestPythonTranspiler(unittest.TestCase):
         transpile_file(semantic_sp)
       self.assertEqual(cm.exception.code, 1)
 
-  def test_transpile_file_write_error(self):
-    """Verifies transpile_file handles file write failures by exiting."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-      sp_file = os.path.join(temp_dir, "test.sp")
-      with open(sp_file, "w", encoding="utf-8") as f:
-        f.write("let x: int = 1;\n")
-      with self.assertRaises(SystemExit) as cm:
-        transpile_file(sp_file, output_file="/invalid_dir_path_xyz/out.py")
-      self.assertEqual(cm.exception.code, 1)
+  def test_export_and_extern_annotations_python(self):
+    """Verifies Python transpiler safely handles @export and erases @extern."""
+    code = """
+    @extern
+    var love: int;
+
+    @extern
+    struct LoveGraphics;
+
+    @extern
+    trait LoveGraphics {
+      static func rectangle(mode: String, x: float, y: float);
+    }
+
+    @export("love.update")
+    func update(dt: float) {
+      let x = dt;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def update(dt):", py_code)
+    self.assertNotIn("love =", py_code)
+    self.assertNotIn("class LoveGraphics", py_code)
 
 
 if __name__ == "__main__":

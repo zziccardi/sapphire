@@ -13,6 +13,10 @@ topLevelItem
     | statement
     ;
 
+annotation
+    : AT IDENTIFIER (LPAREN STRING_LIT RPAREN)?
+    ;
+
 declaration
     : structDeclaration
     | enumDeclaration
@@ -23,7 +27,7 @@ declaration
     ;
 
 enumDeclaration
-    : ENUM IDENTIFIER LBRACE (enumMember (COMMA enumMember)* COMMA?)? RBRACE
+    : annotation* ENUM IDENTIFIER LBRACE (enumMember (COMMA enumMember)* COMMA?)? RBRACE
     ;
 
 enumMember
@@ -31,31 +35,31 @@ enumMember
     ;
 
 structDeclaration
-    : (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
+    : annotation* (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? (LBRACE structField* RBRACE | SEMICOLON)
     ;
 
 structField
-    : (LET | VAR) IDENTIFIER COLON type (ASSIGN expression)? SEMICOLON
+    : annotation* (LET | VAR) IDENTIFIER COLON type (ASSIGN expression)? SEMICOLON
     ;
 
 implBlock
-    : IMPL (traitName=IDENTIFIER FOR)? structName=IDENTIFIER LBRACE implMember* RBRACE
+    : annotation* IMPL (traitName=IDENTIFIER FOR)? structName=IDENTIFIER LBRACE implMember* RBRACE
     ;
 
 implMember
-    : (STATIC | CONST)? functionDeclaration
+    : annotation* (STATIC | CONST)? functionDeclaration
     ;
 
 traitDeclaration
-    : TRAIT IDENTIFIER LBRACE traitMember* RBRACE
+    : annotation* TRAIT IDENTIFIER LBRACE traitMember* RBRACE
     ;
 
 traitMember
-    : FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
+    : annotation* (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
     ;
 
 functionDeclaration
-    : FUNC functionName LPAREN parameterList? RPAREN (COLON type)? block
+    : annotation* FUNC functionName LPAREN parameterList? RPAREN (COLON type)? block
     ;
 
 functionName
@@ -104,7 +108,7 @@ block
     ;
 
 variableDeclarationStatement
-    : (LET | VAR) IDENTIFIER (COLON type)? ASSIGN expression SEMICOLON
+    : annotation* (LET | VAR) IDENTIFIER (COLON type)? (ASSIGN expression)? SEMICOLON
     ;
 
 assignmentStatement
@@ -286,6 +290,7 @@ LBRACE : '{';
 RBRACE : '}';
 LBRACKET : '[';
 RBRACKET : ']';
+AT : '@';
 
 // Literals & Identifiers
 IDENTIFIER : [a-zA-Z_][a-zA-Z0-9_]*;

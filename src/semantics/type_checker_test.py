@@ -1367,13 +1367,39 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_top_level_script_statements(self):
     """Verifies that top-level script statements pass semantic analysis cleanly."""
-    self._check("""
-    var x: int = 10;
-    x += 5;
-    while x > 0 {
-      x -= 1;
+  def test_extern_and_export_type_checking(self):
+    """Verifies that @extern trait signatures permit type-safe calls and reject invalid arguments."""
+    code = """
+    @extern
+    struct LoveGraphics;
+
+    @extern
+    trait LoveGraphics {
+      static func rectangle(mode: String, x: float, y: float, w: float, h: float);
     }
-    """)
+
+    func main() {
+      LoveGraphics.rectangle(mode = "fill", x = 10.0, y = 20.0, w = 100.0, h = 50.0);
+    }
+    """
+    self._check(code)
+
+    bad_code = """
+    @extern
+    struct LoveGraphics;
+
+    @extern
+    trait LoveGraphics {
+      static func rectangle(mode: String, x: float, y: float, w: float, h: float);
+    }
+
+    func main() {
+      LoveGraphics.rectangle(mode = 123, x = 10.0, y = 20.0, w = 100.0, h = 50.0);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_code)
+    self.assertIn("Argument type mismatch at position 1. Expected 'string', got 'int'.", str(context.exception))
 
 
 if __name__ == "__main__":

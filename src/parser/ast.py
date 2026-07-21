@@ -98,14 +98,23 @@ class StructFieldNode(ASTNode):
     self.default_expr = default_expr
 
 
+class AnnotationNode(ASTNode):
+  """Represents an annotation decorator (e.g. '@extern' or '@export("love.update")')."""
+
+  def __init__(self, name: str, arg: Optional[str] = None):
+    self.name = name
+    self.arg = arg
+
+
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
-  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False):
+  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False, annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.parent_name = parent_name
     self.fields = fields
     self.is_prototype = is_prototype
+    self.annotations = annotations or []
 
 
 class EnumMemberNode(ASTNode):
@@ -119,9 +128,10 @@ class EnumMemberNode(ASTNode):
 class EnumDeclNode(DeclNode):
   """Represents an enum declaration."""
 
-  def __init__(self, name: str, members: List[EnumMemberNode]):
+  def __init__(self, name: str, members: List[EnumMemberNode], annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.members = members
+    self.annotations = annotations or []
 
 
 class ParameterNode(ASTNode):
@@ -137,45 +147,51 @@ class ParameterNode(ASTNode):
 class FuncDeclNode(DeclNode):
   """Represents a function declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], body: 'BlockNode'):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.parameters = parameters
     self.return_type = return_type
     self.body = body
+    self.annotations = annotations or []
 
 
 class ImplMemberNode(ASTNode):
   """Represents a member inside an impl block (e.g. static/const/mutable methods)."""
 
-  def __init__(self, modifier: Optional[str], func_decl: FuncDeclNode):
+  def __init__(self, modifier: Optional[str], func_decl: FuncDeclNode, annotations: Optional[List[AnnotationNode]] = None):
     self.modifier = modifier  # 'static', 'const', or None
     self.func_decl = func_decl
+    self.annotations = annotations or []
 
 
 class ImplBlockNode(DeclNode):
   """Represents a Rust-style implementation block."""
 
-  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode]):
+  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode], annotations: Optional[List[AnnotationNode]] = None):
     self.struct_name = struct_name
     self.trait_name = trait_name
     self.members = members
+    self.annotations = annotations or []
 
 
 class TraitMemberNode(ASTNode):
   """Represents a method signature inside a trait declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode]):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], modifier: Optional[str] = None, annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.parameters = parameters
     self.return_type = return_type
+    self.modifier = modifier
+    self.annotations = annotations or []
 
 
 class TraitDeclNode(DeclNode):
   """Represents a trait declaration."""
 
-  def __init__(self, name: str, members: List[TraitMemberNode]):
+  def __init__(self, name: str, members: List[TraitMemberNode], annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.members = members
+    self.annotations = annotations or []
 
 
 # ==========================================
@@ -197,11 +213,12 @@ class BlockNode(StmtNode):
 class VarDeclNode(StmtNode):
   """Represents a variable declaration statement (let/var)."""
 
-  def __init__(self, is_mutable: bool, name: str, val_type: Optional[TypeNode], expr: ASTNode):
+  def __init__(self, is_mutable: bool, name: str, val_type: Optional[TypeNode], expr: Optional[ASTNode] = None, annotations: Optional[List[AnnotationNode]] = None):
     self.is_mutable = is_mutable
     self.name = name
     self.val_type = val_type
     self.expr = expr
+    self.annotations = annotations or []
 
 
 class AssignmentNode(StmtNode):
