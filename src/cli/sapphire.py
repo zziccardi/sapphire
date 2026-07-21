@@ -11,8 +11,9 @@ import subprocess
 
 try:
   from src.run_transpiler import transpile_file
-except ModuleNotFoundError:
+except ModuleNotFoundError:  # pragma: no cover
   from run_transpiler import transpile_file
+
 
 
 def run_command(args):
@@ -94,5 +95,5 @@ def main():
     parser.print_help()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
   main()

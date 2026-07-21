@@ -25,6 +25,14 @@ class SapphireCLITest(unittest.TestCase):
       main()
     self.assertTrue(os.path.exists(py_file))
 
+  def test_build_file_not_found(self):
+    non_existent = os.path.join(self.temp_dir.name, "does_not_exist.sp")
+    test_args = ["sapphire", "build", non_existent]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        main()
+      self.assertEqual(cm.exception.code, 1)
+
   def test_run_subcommand(self):
     test_args = ["sapphire", "run", self.sp_file]
     with patch.object(sys, "argv", test_args):
@@ -34,6 +42,39 @@ class SapphireCLITest(unittest.TestCase):
           main()
         self.assertEqual(cm.exception.code, 0)
         mock_run.assert_called_once()
+
+  def test_run_file_not_found(self):
+    non_existent = os.path.join(self.temp_dir.name, "does_not_exist.sp")
+    test_args = ["sapphire", "run", non_existent]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_run_demo_flag(self):
+    test_args = ["sapphire", "run", self.sp_file, "--demo"]
+    with patch.object(sys, "argv", test_args):
+      with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        with self.assertRaises(SystemExit) as cm:
+          main()
+        self.assertEqual(cm.exception.code, 0)
+        mock_run.assert_called_once()
+
+  def test_shortcut_invocation(self):
+    test_args = ["sapphire", self.sp_file]
+    with patch.object(sys, "argv", test_args):
+      with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        with self.assertRaises(SystemExit) as cm:
+          main()
+        self.assertEqual(cm.exception.code, 0)
+        mock_run.assert_called_once()
+
+  def test_no_args_prints_help(self):
+    test_args = ["sapphire"]
+    with patch.object(sys, "argv", test_args):
+      main()
 
 
 if __name__ == "__main__":

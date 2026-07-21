@@ -13,7 +13,7 @@ from antlr4.error.ErrorListener import ErrorListener
 
 # Ensure `src` directory is in sys.path for relative imports
 script_dir = os.path.dirname(os.path.abspath(__file__))
-if script_dir not in sys.path:
+if script_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, script_dir)
 
 try:
@@ -22,7 +22,7 @@ try:
   from parser.ast_builder import ASTBuilder
   from semantics.type_checker import TypeChecker, SemanticError
   from code_gen.transpiler import Transpiler
-except ModuleNotFoundError:
+except ModuleNotFoundError:  # pragma: no cover
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
@@ -128,5 +128,5 @@ def main():
   transpile_file(input_file)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
   main()
