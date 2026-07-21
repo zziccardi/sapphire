@@ -22,6 +22,37 @@ antlr -Dlanguage=Python3 -visitor -o src/parser/gen -Xexact-output-dir \
 This will create `SapphireLexer.py`, `SapphireParser.py`, `SapphireListener.py`,
 and `SapphireVisitor.py` in the workspace.
 
+## Installing CLI as a package
+
+You can install the `sapphire` CLI directly into your Python environment so it
+can be executed from anywhere without prefixing `pipenv run`:
+
+### Option A: Editable installation via `pipenv` virtual environment
+
+Inside `pipenv shell` (or with an active virtualenv):
+
+```bash
+pip install -e .
+```
+
+After installation, invoke the command directly:
+
+```bash
+sapphire run samples/overview.sp
+sapphire build samples/overview.sp
+```
+
+### Option B: System-wide global CLI via `pipx`
+
+To install `sapphire` as a global executable isolated from system Python:
+
+```bash
+pipx install -e .
+
+# Now executable anywhere in your terminal:
+sapphire samples/overview.sp
+```
+
 ## Compilation & execution
 
 The `sapphire` CLI tool provides convenient commands for compiling and executing Sapphire programs.
@@ -29,13 +60,16 @@ The `sapphire` CLI tool provides convenient commands for compiling and executing
 To compile and immediately run a Sapphire source file in one step:
 
 ```bash
+sapphire samples/overview.sp
+
+# Or via Pipenv:
 pipenv run sapphire samples/overview.sp
 ```
 
 To compile a Sapphire source file to Python without running it:
 
 ```bash
-pipenv run sapphire build samples/overview.sp [-o custom_output.py]
+sapphire build samples/overview.sp [-o custom_output.py]
 ```
 
 Note: You can also call the low-level transpiler script directly via:
