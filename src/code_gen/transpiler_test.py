@@ -433,6 +433,31 @@ class TestTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "test_arena_raii()")
     self.assertEqual(result, [100, 42, 100])
 
+  def test_enum_transpilation(self):
+    """Verifies that enums transpile to IntEnum and execute correctly with integer backing."""
+    code = """
+    enum Direction {
+        North,
+        East,
+        South,
+        West,
+    }
+
+    enum Status {
+        Ok = 200,
+        NotFound = 404,
+    }
+
+    func check_direction(): int {
+      let d = Direction.South;
+      let s = Status.NotFound;
+      let val: int = d;
+      return val + s;
+    }
+    """
+    result = self._transpile_and_run(code, "check_direction()")
+    self.assertEqual(result, 2 + 404)
+
 
 if __name__ == "__main__":
   unittest.main()

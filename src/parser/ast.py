@@ -108,6 +108,22 @@ class StructDeclNode(DeclNode):
     self.is_prototype = is_prototype
 
 
+class EnumMemberNode(ASTNode):
+  """Represents a member/variant in an enum declaration."""
+
+  def __init__(self, name: str, value: Optional[int] = None):
+    self.name = name
+    self.value = value
+
+
+class EnumDeclNode(DeclNode):
+  """Represents an enum declaration."""
+
+  def __init__(self, name: str, members: List[EnumMemberNode]):
+    self.name = name
+    self.members = members
+
+
 class ParameterNode(ASTNode):
   """Represents a parameter in a function signature."""
 

@@ -16,6 +16,7 @@ from parser.ast import *
 
 RUNTIME_PREAMBLE = """# Sapphire Runtime Header
 import copy
+from enum import IntEnum
 
 class Arena:
   def __init__(self):
@@ -175,6 +176,24 @@ class Transpiler:
   # ==========================================
   # Visitor Implementations
   # ==========================================
+
+  def visit_EnumDeclNode(self, node: EnumDeclNode) -> None:
+    self.newline()
+    self.emit(f"class {node.name}(IntEnum):")
+    self.indent()
+    if not node.members:
+      self.newline()
+      self.emit("pass")
+    else:
+      current_val = 0
+      for member in node.members:
+        self.newline()
+        if member.value is not None:
+          current_val = member.value
+        self.emit(f"{member.name} = {current_val}")
+        current_val += 1
+    self.dedent()
+    self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     is_proto = node.is_prototype
