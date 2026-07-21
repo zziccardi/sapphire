@@ -221,7 +221,59 @@ let sword = Weapon(...);
 sword.use();
 ```
 
-## 7. Inheritance & polymorphism
+## 7. Enums
+
+Sapphire provides native support for integer-backed enumerations via the `enum` keyword. Enums define a named set of integral constants with static type safety and optional explicit integer assignments.
+
+### Definition & auto-incrementing values
+
+Enum members are declared as comma-separated identifiers inside curly braces. Trailing commas are optional and recommended.
+
+* **Default values**: By default, enum members are automatically assigned sequential integers starting at `0`.
+* **Explicit values**: Members can be assigned explicit integer values. Unassigned subsequent members automatically resume auto-incrementing from the previous member's value.
+
+```sapphire
+// Default auto-incrementing values (North = 0, East = 1, South = 2, West = 3)
+enum Direction {
+  North,
+  East,
+  South,
+  West,
+}
+
+// Explicit integer values
+enum HttpStatusCode {
+  Ok = 200,
+  Created = 201,
+  BadRequest = 400,
+  NotFound = 404,
+  InternalError = 500,
+}
+```
+
+### Type-checking & usage
+
+* **Nominal typing**: Declaring an enum introduces a named type into the scope (e.g., `Direction`).
+* **Type inference**: Variable bindings assigned an enum variant automatically infer the enum type without requiring explicit type annotations.
+* **Integer interoperability**: Because Sapphire enums are integer-backed, enum values can be assigned to `int` variables or compared with `int` expressions.
+
+```sapphire
+// Type inferred as 'Direction'
+let current_dir = Direction.North;
+
+// Explicit type annotation
+let status: HttpStatusCode = HttpStatusCode.Ok;
+
+// Comparison
+if status == HttpStatusCode.Ok {
+  let is_ok = true;
+}
+
+// Integer conversion
+let dir_code: int = current_dir;
+```
+
+## 8. Inheritance & polymorphism
 
 Sapphire implements clean, type-safe inheritance divided into a compile-time mechanism and a runtime mechanism.
 
@@ -343,7 +395,7 @@ Every struct instance automatically exposes a built-in, compiler-generated `__pr
   * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
   * Since static inheritance is resolved at compile time via delegation, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
 
-## 8. Design decisions
+## 9. Design decisions
 
 This section outlines the architectural decisions and design trade-offs made in Sapphire.
 
@@ -362,7 +414,7 @@ While single, flat physical inheritance avoids vtable overhead by organizing mem
 
 Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
 
-## 9. Compiler & runtime implementation
+## 10. Compiler & runtime implementation
 
 This section outlines how the Sapphire compiler and runtime optimize code execution and manage memory without sacrificing performance or safety.
 
@@ -382,7 +434,7 @@ All `proto` instances and their clones are automatically allocated on a managed 
 3. **Explicit Arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix (e.g., `Point { x = 10 } in my_arena`).
 4. **Lexical scope destruction (RAII)**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. The compiler enforces that references to arena-allocated objects do not escape the scope of the `Arena` variable.
 
-## 10. Core operators, expressions, & control flow
+## 11. Core operators, expressions, & control flow
 
 This section outlines the basic syntax of Sapphire's expressions, operators, conditionals, and control-flow loop constructs which are fully supported by the compiler and language grammar.
 
