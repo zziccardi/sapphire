@@ -35,6 +35,16 @@
         "path": "./syntaxes/sapphire.tmLanguage.json"
       }
     ],
+    "configurationDefaults": {
+      "[sapphire]": {
+        "editor.quickSuggestions": {
+          "other": "on",
+          "comments": "off",
+          "strings": "off"
+        },
+        "editor.suggestOnTriggerCharacters": true
+      }
+    },
     "configuration": {
       "type": "object",
       "title": "Sapphire",
@@ -60,7 +70,7 @@
     "coverage": "vitest run --coverage src/"
   },
   "devDependencies": {
-    "@types/node": "^16.18.34",
+    "@types/node": "^20.0.0",
     "@types/vscode": "^1.75.0",
     "@vitest/coverage-v8": "^4.1.10",
     "typescript": "^5.1.3",
