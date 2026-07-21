@@ -10,9 +10,9 @@ import sys
 import subprocess
 
 try:
-  from src.run_transpiler import transpile_file
+  from code_gen.transpiler import transpile_file
 except ModuleNotFoundError:  # pragma: no cover
-  from run_transpiler import transpile_file
+  from src.code_gen.transpiler import transpile_file
 
 
 

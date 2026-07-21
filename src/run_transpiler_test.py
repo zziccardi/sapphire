@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.run_transpiler import transpile_file, main
+try:
+  from code_gen.transpiler import transpile_file
+except ModuleNotFoundError:  # pragma: no cover
+  from src.code_gen.transpiler import transpile_file
+from src.run_transpiler import main
 
 
 class RunTranspilerTest(unittest.TestCase):

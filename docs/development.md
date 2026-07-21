@@ -72,7 +72,7 @@ To compile a Sapphire source file to Python without running it:
 sapphire build samples/overview.sp [-o custom_output.py]
 ```
 
-Note: You can also call the low-level transpiler script directly via:
+Note: The high-level compilation driver function `transpile_file()` is exported by `src/code_gen/transpiler.py`. You can also call the runner script directly via:
 
 ```bash
 pipenv run python src/run_transpiler.py samples/overview.sp

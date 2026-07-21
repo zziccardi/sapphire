@@ -73,11 +73,11 @@ features described in the spec.
     (`ast_builder.py`).
   * `semantics/`: Scope management, symbol tables (`symbol_table.py`), and
     compiler type-checking rules (`type_checker.py`).
-  * `code_gen/`: Python transpiler logic (`transpiler.py`) and runtime wrappers.
+  * `code_gen/`: Python transpiler logic (`transpiler.py`), high-level compilation driver API (`transpile_file`), and runtime wrappers.
   * `lsp/`: Language Server Protocol (LSP) server implementation providing
     diagnostics, semantic tokens, hover info, and member autocompletion.
   * `cli/sapphire.py`: Unified CLI entry point (`build`, `run`).
-  * `run_transpiler.py`: Low-level script to compile `.sp` source files to Python.
+  * `run_transpiler.py`: Script wrapper to compile `.sp` source files to Python.
 * `tools/`
   * `vscode-extension/`: VS Code extension for Sapphire language support (syntax
     highlighting and LSP integration).
