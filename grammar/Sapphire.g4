@@ -10,10 +10,19 @@ program
 
 declaration
     : structDeclaration
+    | enumDeclaration
     | implBlock
     | traitDeclaration
     | functionDeclaration
     | variableDeclarationStatement
+    ;
+
+enumDeclaration
+    : ENUM IDENTIFIER LBRACE (enumMember (COMMA enumMember)* COMMA?)? RBRACE
+    ;
+
+enumMember
+    : IDENTIFIER (ASSIGN INT_LIT)?
     ;
 
 structDeclaration
@@ -202,6 +211,7 @@ arrayLiteral
 // ==========================================
 
 // Keywords
+ENUM : 'enum';
 PROTO_KEYWORD : 'proto';
 LET : 'let';
 VAR : 'var';

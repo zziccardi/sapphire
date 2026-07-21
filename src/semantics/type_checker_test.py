@@ -1306,6 +1306,57 @@ class TestTypeChecker(unittest.TestCase):
     checker.visit(node)
     self.assertTrue(any("in outer scope cannot hold a reference to an object allocated in nested arena" in err for err in checker.errors))
 
+  def test_enum_semantics(self):
+    """Verifies type checking of valid enum declarations, type inference, member access, and error cases."""
+    self._check("""
+    enum Direction {
+        North,
+        East,
+        South,
+        West,
+    }
+
+    enum Status {
+        Ok = 200,
+        Created = 201,
+    }
+
+    func test() {
+      let d = Direction.North;
+      let d2: Direction = Direction.East;
+      let code: int = Direction.South;
+      let s: Status = Status.Ok;
+      if (d == Direction.North) {
+        let x: int = 1;
+      }
+    }
+    """)
+
+    # Test invalid enum member access
+    with self.assertRaises(SemanticError) as context:
+      self._check("""
+      enum Direction { North, South }
+      func test() {
+        let d = Direction.East;
+      }
+      """)
+    self.assertIn("Enum 'Direction' has no member 'East'", str(context.exception))
+
+    # Test duplicate enum member
+    with self.assertRaises(SemanticError) as context:
+      self._check("""
+      enum Direction { North, North }
+      """)
+    self.assertIn("Duplicate member 'North' in enum 'Direction'", str(context.exception))
+
+    # Test duplicate enum identifier redefinition
+    with self.assertRaises(SemanticError) as context:
+      self._check("""
+      enum Direction { North }
+      enum Direction { South }
+      """)
+    self.assertIn("Redefinition of identifier 'Direction'", str(context.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

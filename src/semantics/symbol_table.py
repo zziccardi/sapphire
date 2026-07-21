@@ -28,6 +28,10 @@ class Type:
         and other.name == "float"
     ):
       return True
+    if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and other.name == "int":
+      return True
+    if isinstance(self, PrimitiveType) and self.name == "int" and isinstance(other, EnumType):
+      return True
     return self == other
 
   def __eq__(self, other: object) -> bool:
@@ -160,6 +164,23 @@ class TraitType(Type):
     return f"trait {self.name}"
 
 
+class EnumType(Type):
+  """Represents a user-defined integer-backed enum type."""
+
+  def __init__(self, name: str, variants: Optional[Dict[str, int]] = None, comments: Optional[str] = None):
+    self.name = name
+    self.variants: Dict[str, int] = variants or {}
+    self.comments = comments or ""
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, EnumType):
+      return False
+    return self.name == other.name
+
+  def __repr__(self) -> str:
+    return self.name
+
+
 class ArenaType(Type):
   """Represents the built-in Arena type."""
 
@@ -233,6 +254,13 @@ class TraitSymbol(Symbol):
 
   def __init__(self, name: str, trait_type: TraitType):
     super().__init__(name, trait_type)
+
+
+class EnumSymbol(Symbol):
+  """Represents an enum definition symbol."""
+
+  def __init__(self, name: str, enum_type: EnumType):
+    super().__init__(name, enum_type)
 
 
 # ==========================================

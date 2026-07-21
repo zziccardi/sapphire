@@ -17,6 +17,7 @@ try:
       FunctionType,
       StructType,
       TraitType,
+      EnumType,
       Type,
   )
 except ModuleNotFoundError:
@@ -30,6 +31,7 @@ except ModuleNotFoundError:
       FunctionType,
       StructType,
       TraitType,
+      EnumType,
       Type,
   )
 
@@ -160,6 +162,16 @@ class TestSymbolTable(unittest.TestCase):
     arr = ArrayType(self.int_type)
     self.assertEqual(repr(arr), "[int]")
     self.assertFalse(arr == self.int_type)
+
+    # EnumType __eq__, __repr__, and compatibility
+    e1 = EnumType("Color", {"Red": 0})
+    e2 = EnumType("Status", {"Ok": 200})
+    self.assertEqual(e1, EnumType("Color"))
+    self.assertFalse(e1 == e2)
+    self.assertFalse(e1 == "not an EnumType")
+    self.assertEqual(repr(e1), "Color")
+    self.assertTrue(self.int_type.is_compatible(e1))
+    self.assertTrue(e1.is_compatible(self.int_type))
 
 
 if __name__ == "__main__":

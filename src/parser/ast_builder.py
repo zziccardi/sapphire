@@ -55,6 +55,26 @@ class ASTBuilder(SapphireVisitor):
       node.parent_name_length = len(parent_token.text)
     return node
 
+  def visitEnumDeclaration(self, ctx: SapphireParser.EnumDeclarationContext) -> EnumDeclNode:
+    name = ctx.IDENTIFIER().getText()
+    members = [self.visit(member) for member in ctx.enumMember()]
+    node = EnumDeclNode(name, members)
+    name_token = ctx.IDENTIFIER().getSymbol()
+    node.name_line = name_token.line
+    node.name_column = name_token.column
+    node.name_length = len(name_token.text)
+    return node
+
+  def visitEnumMember(self, ctx: SapphireParser.EnumMemberContext) -> EnumMemberNode:
+    name = ctx.IDENTIFIER().getText()
+    val = int(ctx.INT_LIT().getText()) if ctx.INT_LIT() else None
+    node = EnumMemberNode(name, val)
+    name_token = ctx.IDENTIFIER().getSymbol()
+    node.name_line = name_token.line
+    node.name_column = name_token.column
+    node.name_length = len(name_token.text)
+    return node
+
   def visitStructField(self, ctx: SapphireParser.StructFieldContext) -> StructFieldNode:
     is_mutable = ctx.VAR() is not None
     name = ctx.IDENTIFIER().getText()

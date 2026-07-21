@@ -196,6 +196,36 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(decl2.expr, CloneNode)
     self.assertEqual(decl2.expr.arena_expr.name, "other_arena")
 
+  def test_enum_declaration(self):
+    """Verifies parsing of enum declarations with auto and explicit values and trailing commas."""
+    ast = self._get_ast("""
+    enum Direction {
+        North,
+        East,
+        South,
+        West,
+    }
+    enum Status {
+        Ok = 200,
+        NotFound = 404,
+    }
+    """)
+    self.assertEqual(len(ast.declarations), 2)
+
+    enum1 = ast.declarations[0]
+    self.assertEqual(enum1.name, "Direction")
+    self.assertEqual(len(enum1.members), 4)
+    self.assertEqual(enum1.members[0].name, "North")
+    self.assertIsNone(enum1.members[0].value)
+
+    enum2 = ast.declarations[1]
+    self.assertEqual(enum2.name, "Status")
+    self.assertEqual(len(enum2.members), 2)
+    self.assertEqual(enum2.members[0].name, "Ok")
+    self.assertEqual(enum2.members[0].value, 200)
+    self.assertEqual(enum2.members[1].name, "NotFound")
+    self.assertEqual(enum2.members[1].value, 404)
+
 
 if __name__ == "__main__":
   unittest.main()

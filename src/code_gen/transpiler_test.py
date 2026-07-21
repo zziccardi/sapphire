@@ -433,6 +433,48 @@ class TestTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "test_arena_raii()")
     self.assertEqual(result, [100, 42, 100])
 
+  def test_enum_transpilation(self):
+    """Verifies that enums transpile to IntEnum and execute correctly with integer backing."""
+    code = """
+    enum Direction {
+        North,
+        East,
+        South,
+        West,
+    }
+
+    enum Status {
+        Ok = 200,
+        NotFound = 404,
+    }
+
+    func check_direction(): int {
+      let d = Direction.South;
+      let s = Status.NotFound;
+      let val: int = d;
+      return val + s;
+    }
+    """
+    result = self._transpile_and_run(code, "check_direction()")
+    self.assertEqual(result, 2 + 404)
+
+  def test_empty_enum_transpilation(self):
+    """Verifies that an empty enum transpiles with pass statement."""
+    code = """
+    enum Empty {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+    self.assertIn("class Empty(IntEnum):", py_code)
+    self.assertIn("pass", py_code)
+
 
 if __name__ == "__main__":
   unittest.main()

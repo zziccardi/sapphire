@@ -261,15 +261,17 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   node_type = node_types.get(node)
   if not node_type:
     try:
-      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode
+      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode
     except ImportError:  # pragma: no cover
-      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode
+      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode
 
     if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
       if sym:
         node_type = getattr(sym, "symbol_type", None)
     elif isinstance(node, StructDeclNode) and uri in ls.symbol_table_cache:
+      node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
+    elif isinstance(node, EnumDeclNode) and uri in ls.symbol_table_cache:
       node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
     elif isinstance(node, TraitDeclNode) and uri in ls.symbol_table_cache:
       node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
@@ -293,6 +295,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
         IfNode,
         ForNode,
         StructDeclNode,
+        EnumDeclNode,
+        EnumMemberNode,
         TraitDeclNode,
         ImplBlockNode,
         BasicTypeNode,
@@ -309,6 +313,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
         IfNode,
         ForNode,
         StructDeclNode,
+        EnumDeclNode,
+        EnumMemberNode,
         TraitDeclNode,
         ImplBlockNode,
         BasicTypeNode,
@@ -329,6 +335,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
               FunctionSymbol,
               StructSymbol,
               TraitSymbol,
+              EnumSymbol,
           )
         except ImportError:  # pragma: no cover
           from src.semantics.symbol_table import (
@@ -336,6 +343,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
               FunctionSymbol,
               StructSymbol,
               TraitSymbol,
+              EnumSymbol,
           )
         if isinstance(sym, VariableSymbol):
           category = "parameter" if sym.is_parameter else "variable"
@@ -343,6 +351,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
           category = "function"
         elif isinstance(sym, StructSymbol):
           category = "struct"
+        elif isinstance(sym, EnumSymbol):
+          category = "enum"
         elif isinstance(sym, TraitSymbol):
           category = "trait"
 
@@ -352,6 +362,12 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   elif isinstance(node, StructDeclNode):
     node_name = node.name
     category = "proto" if node.is_prototype else "struct"
+  elif isinstance(node, EnumDeclNode):
+    node_name = node.name
+    category = "enum"
+  elif isinstance(node, EnumMemberNode):
+    node_name = node.name
+    category = "enum member"
   elif isinstance(node, TraitDeclNode):
     node_name = node.name
     category = "trait"
@@ -390,18 +406,20 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
   if category == "symbol" and node_type:
     try:
-      from semantics.symbol_table import StructType, TraitType
+      from semantics.symbol_table import StructType, TraitType, EnumType
     except ImportError:  # pragma: no cover
-      from src.semantics.symbol_table import StructType, TraitType
+      from src.semantics.symbol_table import StructType, TraitType, EnumType
     if isinstance(node_type, StructType):
       category = "proto" if node_type.is_prototype else "struct"
+    elif isinstance(node_type, EnumType):
+      category = "enum"
     elif isinstance(node_type, TraitType):
       category = "trait"
 
   try:
-    from semantics.symbol_table import FunctionType, StructType, TraitType
+    from semantics.symbol_table import FunctionType, StructType, TraitType, EnumType
   except ImportError:  # pragma: no cover
-    from src.semantics.symbol_table import FunctionType, StructType, TraitType
+    from src.semantics.symbol_table import FunctionType, StructType, TraitType, EnumType
 
   if isinstance(node_type, FunctionType):
     params_lines = []
@@ -428,6 +446,13 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     kind = "proto" if node_type.is_prototype else "struct"
     inheritance = f" : {node_type.parent_name}" if node_type.parent_name else ""
     markdown_text = f"**({kind})** `{node_type.name}{inheritance}`"
+    if getattr(node_type, "comments", None):
+      markdown_text += f"\n\n{node_type.comments}"
+  elif isinstance(node_type, EnumType) and category == "enum":
+    markdown_text = f"**(enum)** `{node_type.name}`"
+    if node_type.variants:
+      members_str = "\n".join(f"- `{k} = {v}`" for k, v in node_type.variants.items())
+      markdown_text += f"\n\nMembers:\n{members_str}"
     if getattr(node_type, "comments", None):
       markdown_text += f"\n\n{node_type.comments}"
   elif isinstance(node_type, TraitType) and category == "trait":
@@ -575,6 +600,8 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
         elif sym_kind == "StructSymbol":
           kind_name = "proto" if getattr(sym.symbol_type, "is_prototype", False) else "struct"
           add_item(sym_name, 22, f"({kind_name}) {sym_name}")
+        elif sym_kind == "EnumSymbol":
+          add_item(sym_name, 13, f"(enum) {sym_name}")
         elif sym_kind == "TraitSymbol":
           add_item(sym_name, 8, f"(trait) {sym_name}")
 
@@ -588,7 +615,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
 
   # 3. Sapphire Keywords
   KEYWORDS = [
-      "let", "var", "func", "struct", "proto", "trait", "impl", "if", "else",
+      "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else",
       "for", "in", "while", "return", "true", "false", "none", "const", "static",
       "clone", "arena"
   ]
@@ -672,6 +699,20 @@ def completion(ls: SapphireLanguageServer,
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
 
+    if hasattr(receiver_type, "variants"):
+      items = []
+      enum_name = getattr(receiver_type, "name", receiver_name)
+      for variant_name, val in getattr(receiver_type, "variants", {}).items():
+        items.append(
+            CompletionItem(
+                label=variant_name,
+                kind=20,  # EnumMember
+                detail=f"(enum member) {enum_name}.{variant_name} = {val}",
+                insert_text=variant_name,
+            )
+        )
+      return CompletionList(is_incomplete=True, items=items)
+
     if hasattr(receiver_type, "fields"):
       items = []
       # Suggest fields
@@ -703,7 +744,7 @@ def completion(ls: SapphireLanguageServer,
   return CompletionList(is_incomplete=True, items=scope_items)
 
 
-def main():
+def main():  # pragma: no cover
   # Start the language server over standard I/O (stdio)
   server.start_io()
 

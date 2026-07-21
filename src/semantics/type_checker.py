@@ -19,6 +19,7 @@ from semantics.symbol_table import (
     StructMethod,
     StructType,
     TraitType,
+    EnumType,
     NoneType,
     ArrayType,
     ArenaType,
@@ -26,6 +27,7 @@ from semantics.symbol_table import (
     FunctionSymbol,
     StructSymbol,
     TraitSymbol,
+    EnumSymbol,
 )
 
 
@@ -110,6 +112,26 @@ class TypeChecker:
         struct_type = StructType(decl.name, decl.parent_name, decl.is_prototype)
         self.symbol_table.define_type(decl.name, struct_type)
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
+
+      elif isinstance(decl, EnumDeclNode):
+        if self.symbol_table.lookup_current_scope(decl.name):
+          self.error(f"Redefinition of identifier '{decl.name}'.")
+          continue
+        current_val = 0
+        variants: Dict[str, int] = {}
+        seen_members = set()
+        for member in decl.members:
+          if member.name in seen_members:
+            self.error(f"Duplicate member '{member.name}' in enum '{decl.name}'.")
+            continue
+          seen_members.add(member.name)
+          if member.value is not None:
+            current_val = member.value
+          variants[member.name] = current_val
+          current_val += 1
+        enum_type = EnumType(decl.name, variants)
+        self.symbol_table.define_type(decl.name, enum_type)
+        self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
 
       elif isinstance(decl, TraitDeclNode):
         if self.symbol_table.lookup_current_scope(decl.name):
@@ -281,6 +303,10 @@ class TypeChecker:
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Fields already verified in pre-pass
+    pass
+
+  def visit_EnumDeclNode(self, node: EnumDeclNode) -> None:
+    # Members already verified in pre-pass
     pass
 
   def visit_ImplBlockNode(self, node: ImplBlockNode) -> None:
@@ -837,6 +863,12 @@ class TypeChecker:
       if isinstance(receiver_type, OptionalType):
         self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
         return PrimitiveType("none")
+
+    if isinstance(receiver_type, EnumType):
+      if node.member in receiver_type.variants:
+        return receiver_type
+      self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
+      return PrimitiveType("none")
 
     if not isinstance(receiver_type, StructType):
       self.error("Member access receiver is not a struct.")
