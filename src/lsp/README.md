@@ -42,3 +42,12 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 To ensure a smooth editor experience, when a syntax error is introduced temporarily during active typing:
 - The server will report the syntax error diagnostics immediately.
 - The server caches the last successfully resolved semantic token highlights and keeps displaying them, preventing the entire editor's syntax coloring from flashing or collapsing.
+
+## Development
+
+When making changes to the language server, assuming the VS Code extension is
+already installed, you can quickly test them by opening the command palette
+(`Cmd+Shift+P`) and selecting `Developer: Reload Window`.
+
+When changing any of the extension's (client-side) files, however, it will be
+necessary to repackage and reinstall the `.vsix` file.
