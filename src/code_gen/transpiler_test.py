@@ -4,6 +4,8 @@ This module validates that transpiled Python code is syntactically correct
 and preserves all Sapphire runtime semantics, including prototypal delegation.
 """
 
+import os
+import tempfile
 import unittest
 from antlr4 import InputStream, CommonTokenStream
 
@@ -11,12 +13,12 @@ try:
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
-  from code_gen.transpiler import Transpiler
+  from code_gen.transpiler import Transpiler, transpile_file
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
-  from src.code_gen.transpiler import Transpiler
+  from src.code_gen.transpiler import Transpiler, transpile_file
 
 
 class TestTranspiler(unittest.TestCase):
@@ -511,6 +513,54 @@ class TestTranspiler(unittest.TestCase):
     py_code = transpiler.transpile(ast)
     self.assertIn('if __name__ == "__main__":', py_code)
     self.assertIn('main()', py_code)
+
+  def test_transpile_file_success(self):
+    """Verifies transpile_file default and custom output file handling."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      sp_file = os.path.join(temp_dir, "test.sp")
+      with open(sp_file, "w", encoding="utf-8") as f:
+        f.write("let val: int = 100;\n")
+      out_path = transpile_file(sp_file)
+      self.assertEqual(out_path, os.path.join(temp_dir, "test.py"))
+      self.assertTrue(os.path.exists(out_path))
+
+  def test_transpile_file_read_error(self):
+    """Verifies transpile_file handles missing source files by exiting."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      non_existent = os.path.join(temp_dir, "missing.sp")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(non_existent)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_transpile_file_syntax_error(self):
+    """Verifies transpile_file handles syntax errors by exiting."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      bad_sp = os.path.join(temp_dir, "syntax.sp")
+      with open(bad_sp, "w", encoding="utf-8") as f:
+        f.write("let x: int = ;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(bad_sp)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_transpile_file_semantic_error(self):
+    """Verifies transpile_file handles semantic errors by exiting."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      semantic_sp = os.path.join(temp_dir, "semantic.sp")
+      with open(semantic_sp, "w", encoding="utf-8") as f:
+        f.write("return 42;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(semantic_sp)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_transpile_file_write_error(self):
+    """Verifies transpile_file handles file write failures by exiting."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      sp_file = os.path.join(temp_dir, "test.sp")
+      with open(sp_file, "w", encoding="utf-8") as f:
+        f.write("let x: int = 1;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(sp_file, output_file="/invalid_dir_path_xyz/out.py")
+      self.assertEqual(cm.exception.code, 1)
 
 
 if __name__ == "__main__":
