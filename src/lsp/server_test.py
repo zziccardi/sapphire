@@ -468,6 +468,11 @@ class TestLSPServer(unittest.TestCase):
 
     # 3. Test Completion on 'char.'
     # The dot in `char.` on line 37 (LSP line 36, character 25)
+    mock_doc_main = MagicMock()
+    mock_doc_main.uri = doc_uri
+    mock_doc_main.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc_main
+
     params_completion = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
         position=Position(line=36, character=25) # Position after the dot
@@ -483,13 +488,120 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNotNone(field_item)
     self.assertEqual(field_item.kind, 10) # Field
 
-    # Test Completion on invalid receiver position (no receiver expression found)
-    params_completion_invalid = CompletionParams(
+    # Test Scope Completion (suggests variables, parameters, functions, structs, types, keywords)
+    params_completion_scope = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=0, character=0)
+        position=Position(line=35, character=15)
     )
-    res_completion_invalid = completion(self.ls, params_completion_invalid)
-    self.assertEqual(len(res_completion_invalid.items), 0)
+    res_completion_scope = completion(self.ls, params_completion_scope)
+    self.assertIsNotNone(res_completion_scope)
+    self.assertTrue(len(res_completion_scope.items) > 0)
+    
+    labels = {item.label for item in res_completion_scope.items}
+    self.assertIn("char", labels)
+    self.assertIn("score", labels)
+    self.assertIn("Character", labels)
+    self.assertIn("test_func", labels)
+    self.assertIn("int", labels)
+    self.assertIn("let", labels)
+
+    # Test Scope Completion inside if-let block (active variable)
+    res_iflet = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=40, character=10)
+    ))
+    labels_iflet = {item.label for item in res_iflet.items}
+    self.assertIn("active", labels_iflet)
+
+    # Test Scope Completion inside for-loop block (x variable)
+    res_for = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=45, character=10)
+    ))
+    labels_for = {item.label for item in res_for.items}
+    self.assertIn("x", labels_for)
+
+    # Test Scope Completion inside impl block (self and method parameters)
+    res_impl = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=23, character=2)
+    ))
+    labels_impl = {item.label for item in res_impl.items}
+    self.assertIn("self", labels_impl)
+    self.assertIn("amount", labels_impl)
+
+    # Test Completion on optional type receiver
+    from src.parser.ast import IdentifierNode
+    from src.semantics.symbol_table import OptionalType, StructType
+    mock_opt_node = IdentifierNode("opt_char_test")
+    mock_opt_node.start_line = 38
+    mock_opt_node.end_line = 38
+    mock_opt_node.start_column = 15
+    mock_opt_node.end_column = 23
+    st_char = self.ls.symbol_table_cache[doc_uri].lookup_type("Character")
+    self.ls.node_types_cache[doc_uri][mock_opt_node] = OptionalType(st_char)
+    with patch("src.lsp.server.find_node_at_position", return_value=mock_opt_node):
+      res_opt = completion(self.ls, CompletionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=37, character=24)
+      ))
+      self.assertIn("health", {item.label for item in res_opt.items})
+
+    # Test Completion inside impl block containing let, if-let, and for statements
+    doc_impl_stmts = """
+    struct Dummy { var val: int; }
+    impl Dummy {
+      func test_method(var p: int) {
+        let local_var: int = 1;
+        let opt_d: Dummy? = self;
+        if let active_d = opt_d {
+          let inner: int = 2;
+        }
+        let arr = [1, 2];
+        for loop_i in arr {
+          let in_loop: int = 3;
+        }
+      }
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_impl_stmts)
+    mock_doc_impl = MagicMock()
+    mock_doc_impl.uri = doc_uri
+    mock_doc_impl.source = doc_impl_stmts
+    self.ls.workspace.get_text_document.return_value = mock_doc_impl
+
+    # Scope completion inside if-let in impl
+    res_impl_iflet = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=10)
+    ))
+    labels_impl_iflet = {item.label for item in res_impl_iflet.items}
+    self.assertIn("local_var", labels_impl_iflet)
+    self.assertIn("active_d", labels_impl_iflet)
+
+    # Scope completion inside for loop in impl
+    res_impl_for = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=11, character=10)
+    ))
+    labels_impl_for = {item.label for item in res_impl_for.items}
+    self.assertIn("loop_i", labels_impl_for)
+
+    # Reset workspace mock and doc_text
+    validate_source(self.ls, doc_uri, doc_text)
+    mock_doc_reset = MagicMock()
+    mock_doc_reset.uri = doc_uri
+    mock_doc_reset.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc_reset
+
+    # Test VariableSymbol in symbol table scope for completion
+    from src.semantics.symbol_table import VariableSymbol, PrimitiveType
+    self.ls.symbol_table_cache[doc_uri].define("temp_var", VariableSymbol("temp_var", PrimitiveType("int"), is_mutable=False))
+    res_sym_var = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=35, character=15)
+    ))
+    self.assertIn("temp_var", {item.label for item in res_sym_var.items})
 
     # Test Completion when doc is not cached
     params_completion_uncached = CompletionParams(
@@ -726,9 +838,14 @@ class TestLSPServer(unittest.TestCase):
       sym_struct.symbol_type = st_type
       sym_table.current_scope.symbols["x"] = sym_struct
 
+      mock_doc_comp = MagicMock()
+      mock_doc_comp.uri = doc_uri
+      mock_doc_comp.source = "    let x = x.\n"
+      self.ls.workspace.get_text_document.return_value = mock_doc_comp
+
       params_comp = CompletionParams(
           text_document=TextDocumentIdentifier(uri=doc_uri),
-          position=Position(line=4, character=21)
+          position=Position(line=0, character=14)
       )
       from src.lsp.server import completion
       res_comp = completion(self.ls, params_comp)
@@ -736,20 +853,59 @@ class TestLSPServer(unittest.TestCase):
       self.assertEqual(len(res_comp.items), 2) # f1 and m1, __init__ skipped
       self.assertIsNone(next((item for item in res_comp.items if item.label == "__init__"), None))
 
-      # Completion on receiver with no resolved type (returns empty list)
+      # Completion on receiver with no resolved type (falls back to scope completion)
       ident_node_y = IdentifierNode("y")
       ident_node_y.start_line = 5
       ident_node_y.end_line = 5
       ident_node_y.start_column = 10
       ident_node_y.end_column = 20
       with patch("src.lsp.server.find_node_at_position", return_value=ident_node_y):
-        self.assertEqual(len(completion(self.ls, params_comp).items), 0)
+        self.assertTrue(len(completion(self.ls, params_comp).items) > 0)
 
       # Completion fallback when get_text_document raises an exception
       with patch("src.lsp.server.find_node_at_position", return_value=None):
         self.ls.workspace.get_text_document.side_effect = Exception("Test get_text_document exception")
-        self.assertEqual(len(completion(self.ls, params_comp).items), 0)
-        self.ls.workspace.get_text_document.side_effect = None
+  def test_completion_typing_between_statements(self):
+    doc_uri = "file:///between_test.sp"
+    doc_text_between = """
+    func test_func(char: Character) {
+      let score: int = 100;
+
+      let opt_char: Character? = char;
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_text_between)
+
+    # Simulate user typing 'c' on line 3
+    doc_text_typing_c = """
+    func test_func(char: Character) {
+      let score: int = 100;
+      c
+      let opt_char: Character? = char;
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_text_typing_c)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text_typing_c
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Position on line 3 (LSP 0-based line 3, character 7 after 'c')
+    from lsprotocol.types import CompletionParams, TextDocumentIdentifier, Position
+    params = CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=7)
+    )
+    from src.lsp.server import completion
+    res = completion(self.ls, params)
+    self.assertIsNotNone(res)
+    labels = {item.label for item in res.items}
+    self.assertIn("char", labels)
+    self.assertIn("score", labels)
+    self.assertIn("Character", labels)
+    self.assertIn("int", labels)
+    self.assertIn("let", labels)
 
   def test_extract_comments_above(self):
     from src.lsp.semantic_tokens import extract_comments_above

@@ -125,18 +125,33 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   parser.addErrorListener(listener)
   tree = parser.program()
 
-  # If syntax errors are present, report them immediately (but retain last successful semantic cache)
+  # 3. AST Building & Semantic Tokens Extraction (Attempt AST generation & cache even with syntax errors)
+  ast = None
+  ast_error = None
+  checker = SemanticTokensTypeChecker(doc_text)
+  try:
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    if ast:
+      checker.check(ast)
+  except Exception as e:
+    ast_error = str(e)
+
+  if ast:
+    encoded = encode_semantic_tokens(checker.raw_tokens)
+    ls.tokens_cache[doc_uri] = encoded
+    ls.ast_cache[doc_uri] = ast
+    ls.node_types_cache[doc_uri] = checker.node_types
+    ls.symbol_table_cache[doc_uri] = checker.symbol_table
+
+  # If syntax errors are present, report them immediately
   if listener.diagnostics:
     ls.text_document_publish_diagnostics(
         PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
     )
     return
 
-  # 3. AST Building
-  try:
-    builder = ASTBuilder()
-    ast = builder.visit(tree)
-  except Exception as e:
+  if ast_error and not ast:
     ls.text_document_publish_diagnostics(
         PublishDiagnosticsParams(
             uri=doc_uri,
@@ -146,7 +161,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
                         start=Position(line=0, character=0),
                         end=Position(line=0, character=1),
                     ),
-                    message=f"Internal AST generation failure: {str(e)}",
+                    message=f"Internal AST generation failure: {ast_error}",
                     severity=DiagnosticSeverity.Error,
                     source="sapphire-compiler",
                 )
@@ -154,15 +169,6 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
         )
     )
     return
-
-  # 4. Semantic Validation & Token Extraction
-  checker = SemanticTokensTypeChecker(doc_text)
-  try:
-    checker.check(ast)
-  except Exception:
-    # Standard check raises SemanticError when errors are present.
-    # However, checker.lsp_errors contains all collected diagnostics.
-    pass
 
   # Map custom diagnostics back to LSP Diagnostic types
   diagnostics = []
@@ -187,13 +193,6 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   ls.text_document_publish_diagnostics(
       PublishDiagnosticsParams(uri=doc_uri, diagnostics=diagnostics)
   )
-
-  # Cache successfully compiled semantic tokens
-  encoded = encode_semantic_tokens(checker.raw_tokens)
-  ls.tokens_cache[doc_uri] = encoded
-  ls.ast_cache[doc_uri] = ast
-  ls.node_types_cache[doc_uri] = checker.node_types
-  ls.symbol_table_cache[doc_uri] = checker.symbol_table
 
 
 @server.feature(TEXT_DOCUMENT_DID_OPEN)
@@ -472,89 +471,236 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
                                       value=markdown_text))
 
 
+TRIGGER_CHARACTERS = [
+    ".", ":",
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+    "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "_"
+]
+
+
+def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: SapphireLanguageServer, node_types: dict) -> List[CompletionItem]:
+  items: List[CompletionItem] = []
+  seen: set = set()
+
+  def add_item(label: str, kind: int, detail: str) -> None:
+    if label and label not in seen:
+      seen.add(label)
+      items.append(CompletionItem(label=label, kind=kind, detail=detail, insert_text=label))
+
+  # 1. Local Scope AST Traversal
+  declarations = getattr(ast, "declarations", [])
+  for decl in declarations:
+    try:
+      from parser.ast import FuncDeclNode, ImplBlockNode, VarDeclNode, IfNode, ForNode
+    except ImportError:  # pragma: no cover
+      from src.parser.ast import FuncDeclNode, ImplBlockNode, VarDeclNode, IfNode, ForNode
+
+    if isinstance(decl, FuncDeclNode):
+      s_start = getattr(decl, "start_line", None)
+      s_end = getattr(decl, "end_line", None)
+      if s_start is not None and s_start <= line and (s_end is None or line <= s_end + 10):
+        for p in decl.parameters:
+          ptype = node_types.get(p)
+          type_str = f": {ptype}" if ptype else ""
+          add_item(p.name, 6, f"(parameter) {p.name}{type_str}")
+        
+        stmts = getattr(decl.body, "statements", []) if hasattr(decl, "body") else []
+        for stmt in stmts:
+          st_start = getattr(stmt, "start_line", None)
+          if isinstance(stmt, VarDeclNode):
+            if st_start is None or st_start <= line:
+              vtype = node_types.get(stmt)
+              type_str = f": {vtype}" if vtype else ""
+              add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
+          elif isinstance(stmt, IfNode) and getattr(stmt, "is_if_let", False):
+            if st_start is None or st_start <= line:
+              add_item(stmt.let_name, 6, f"(variable) {stmt.let_name}")
+          elif isinstance(stmt, ForNode):
+            if st_start is None or st_start <= line:
+              add_item(stmt.loop_var, 6, f"(variable) {stmt.loop_var}")
+
+    elif isinstance(decl, ImplBlockNode):
+      s_start = getattr(decl, "start_line", None)
+      s_end = getattr(decl, "end_line", None)
+      if s_start is not None and s_start <= line and (s_end is None or line <= s_end + 10):
+        for member in decl.members:
+          func_decl = getattr(member, "func_decl", None)
+          if func_decl:
+            f_start = getattr(func_decl, "start_line", None)
+            f_end = getattr(func_decl, "end_line", None)
+            if f_start is not None and f_start <= line and (f_end is None or line <= f_end + 10):
+              if getattr(member, "modifier", None) != "static":
+                add_item("self", 6, f"(variable) self: {decl.struct_name}")
+              for p in func_decl.parameters:
+                ptype = node_types.get(p)
+                type_str = f": {ptype}" if ptype else ""
+                add_item(p.name, 6, f"(parameter) {p.name}{type_str}")
+              stmts = getattr(func_decl.body, "statements", []) if hasattr(func_decl, "body") else []
+              for stmt in stmts:
+                st_start = getattr(stmt, "start_line", None)
+                if isinstance(stmt, VarDeclNode):
+                  if st_start is None or st_start <= line:
+                    vtype = node_types.get(stmt)
+                    type_str = f": {vtype}" if vtype else ""
+                    add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
+                elif isinstance(stmt, IfNode) and getattr(stmt, "is_if_let", False):
+                  if st_start is None or st_start <= line:
+                    add_item(stmt.let_name, 6, f"(variable) {stmt.let_name}")
+                elif isinstance(stmt, ForNode):
+                  if st_start is None or st_start <= line:
+                    add_item(stmt.loop_var, 6, f"(variable) {stmt.loop_var}")
+
+  # 2. Symbols and Types from Symbol Table
+  if uri in ls.symbol_table_cache:
+    sym_table = ls.symbol_table_cache[uri]
+    scope = getattr(sym_table, "current_scope", None)
+    while scope:
+      try:
+        from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
+
+      for sym_name, sym in scope.symbols.items():
+        if sym_name == "Arena":
+          continue
+        sym_kind = type(sym).__name__
+        if sym_kind == "VariableSymbol":
+          is_param = getattr(sym, "is_parameter", False)
+          detail = f"(parameter) {sym_name}: {sym.symbol_type}" if is_param else f"(variable) {sym_name}: {sym.symbol_type}"
+          add_item(sym_name, 6, detail)
+        elif sym_kind == "FunctionSymbol":
+          add_item(sym_name, 3, f"(function) {sym_name}{sym.symbol_type}")
+        elif sym_kind == "StructSymbol":
+          kind_name = "proto" if getattr(sym.symbol_type, "is_prototype", False) else "struct"
+          add_item(sym_name, 22, f"({kind_name}) {sym_name}")
+        elif sym_kind == "TraitSymbol":
+          add_item(sym_name, 8, f"(trait) {sym_name}")
+
+      for type_name, type_obj in scope.types.items():
+        if type_name in ("int", "float", "bool", "String", "none", "Arena"):
+          add_item(type_name, 14, f"(primitive type) {type_name}")
+        else:
+          add_item(type_name, 22, f"(type) {type_name}")
+
+      scope = scope.parent
+
+  # 3. Sapphire Keywords
+  KEYWORDS = [
+      "let", "var", "func", "struct", "proto", "trait", "impl", "if", "else",
+      "for", "in", "while", "return", "true", "false", "none", "const", "static",
+      "clone", "arena"
+  ]
+  for kw in KEYWORDS:
+    add_item(kw, 14, f"(keyword) {kw}")
+
+  # 4. Document Text Word Extraction Fallback
+  try:
+    doc = ls.workspace.get_text_document(uri)
+    source = getattr(doc, "source", None)
+    if isinstance(source, str):
+      import re
+      words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', source)
+      for word in words:
+        if len(word) > 1:
+          add_item(word, 1, f"(text) {word}")
+  except Exception:  # pragma: no cover
+    pass
+
+  return items
+
+
 @server.feature(TEXT_DOCUMENT_COMPLETION,
-                CompletionOptions(trigger_characters=["."]))
+                CompletionOptions(trigger_characters=TRIGGER_CHARACTERS))
 def completion(ls: SapphireLanguageServer,
                params: CompletionParams) -> CompletionList:
-  """Triggered when user types a dot for member suggestion."""
+  """Triggered when user requests completion (either dot-access or scope-level identifier)."""
   uri = params.text_document.uri
-  if uri not in ls.ast_cache or uri not in ls.node_types_cache:
+  if uri not in ls.ast_cache and uri not in ls.symbol_table_cache:
     return CompletionList(is_incomplete=False, items=[])
 
-  ast = ls.ast_cache[uri]
-  node_types = ls.node_types_cache[uri]
+  ast = ls.ast_cache.get(uri)
+  node_types = ls.node_types_cache.get(uri, {})
 
   # Line coordinates
   line = params.position.line + 1
   col = params.position.character
 
-  # Search receiver at col - 1 (the dot)
-  receiver = find_node_at_position(ast, line, col - 1)
-  receiver_type = None
-  if receiver:
-    receiver_type = node_types.get(receiver)
-    if not receiver_type:
-      from parser.ast import IdentifierNode
-      if isinstance(receiver, IdentifierNode) and uri in ls.symbol_table_cache:
-        sym = ls.symbol_table_cache[uri].lookup(receiver.name)
-        if sym:
-          receiver_type = getattr(sym, "symbol_type", None)
-
-  # Robust fallback: extract identifier right before the dot from the current document source
-  if not receiver_type:
-    try:
-      doc = ls.workspace.get_text_document(uri)
-      lines = doc.source.splitlines()
+  line_text = ""
+  try:
+    doc = ls.workspace.get_text_document(uri)
+    source = getattr(doc, "source", None)
+    if isinstance(source, str):
+      lines = source.splitlines()
       if 0 <= line - 1 < len(lines):
         line_text = lines[line - 1]
-        text_before_dot = line_text[:col - 1]
-        import re
-        match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)$', text_before_dot)
-        if match:
-          ident_name = match.group(1)
-          # Find the IdentifierNode in node_types with this name closest to the current line
-          best_node = None
-          min_dist = float('inf')
-          for node in node_types.keys():
-            from parser.ast import IdentifierNode
-            if isinstance(node, IdentifierNode) and node.name == ident_name:
-              dist = abs(node.start_line - line)
-              if dist < min_dist:
-                min_dist = dist
-                best_node = node
-          if best_node:
-            receiver_type = node_types[best_node]
-    except Exception:
-      pass
+  except Exception:  # pragma: no cover
+    pass
 
-  if not receiver_type:
-    return CompletionList(is_incomplete=False, items=[])
+  text_before_cursor = line_text[:col]
+  import re
 
-  items = []
-  from semantics.symbol_table import StructType
-  if isinstance(receiver_type, StructType):
-    # Suggest fields
-    for field_name, field in receiver_type.fields.items():
-      items.append(
-          CompletionItem(
-              label=field_name,
-              kind=10,  # Field
-              detail=f"(property) {field_name}: {str(field.field_type)}",
-          )
-      )
-    # Suggest methods
-    for method_name, method in receiver_type.methods.items():
-      if method_name == "__init__":
-        continue
-      items.append(
-          CompletionItem(
-              label=method_name,
-              kind=2,  # Method
-              detail=f"(method) {method_name}{str(method.method_type)}",
-          )
-      )
+  # Check if cursor is after a dot (dot completion context)
+  dot_match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z0-9_]*)$', text_before_cursor)
+  receiver_name = dot_match.group(1) if dot_match else None
 
-  return CompletionList(is_incomplete=False, items=items)
+  if receiver_name:
+    receiver_type = None
+
+    # 1. Search node_types for AST declaration or identifier node matching receiver_name
+    best_node = None
+    min_dist = float('inf')
+    for node in node_types.keys():
+      n_name = getattr(node, "name", None) or getattr(node, "let_name", None) or getattr(node, "loop_var", None)
+      if n_name == receiver_name:
+        s_line = getattr(node, "start_line", getattr(node, "name_line", None))
+        dist = abs(s_line - line) if s_line else 0
+        if dist < min_dist:
+          min_dist = dist
+          best_node = node
+
+    if best_node:
+      receiver_type = node_types.get(best_node)
+
+    # 2. Symbol table fallback if not in node_types
+    if not receiver_type and uri in ls.symbol_table_cache:
+      sym = ls.symbol_table_cache[uri].lookup(receiver_name)
+      if sym:
+        receiver_type = getattr(sym, "symbol_type", None)
+
+    if type(receiver_type).__name__ == "OptionalType":
+      receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
+
+    if hasattr(receiver_type, "fields"):
+      items = []
+      # Suggest fields
+      for field_name, field in getattr(receiver_type, "fields", {}).items():
+        items.append(
+            CompletionItem(
+                label=field_name,
+                kind=10,  # Field
+                detail=f"(property) {field_name}: {str(field.field_type)}",
+                insert_text=field_name,
+            )
+        )
+      # Suggest methods
+      for method_name, method in getattr(receiver_type, "methods", {}).items():
+        if method_name == "__init__":
+          continue
+        items.append(
+            CompletionItem(
+                label=method_name,
+                kind=2,  # Method
+                detail=f"(method) {method_name}{str(method.method_type)}",
+                insert_text=method_name,
+            )
+        )
+      return CompletionList(is_incomplete=True, items=items)
+
+  # Fallback to Scope Completion when not in a dot-access expression
+  scope_items = _get_scope_completion_items(ast, line, col, uri, ls, node_types)
+  return CompletionList(is_incomplete=True, items=scope_items)
 
 
 def main():
