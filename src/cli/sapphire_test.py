@@ -27,6 +27,13 @@ class SapphireCLITest(unittest.TestCase):
       main()
     self.assertTrue(os.path.exists(py_file))
 
+  def test_build_subcommand_lua(self):
+    lua_file = os.path.join(self.temp_dir.name, "output.lua")
+    test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file]
+    with patch.object(sys, "argv", test_args):
+      main()
+    self.assertTrue(os.path.exists(lua_file))
+
   def test_build_file_not_found(self):
     non_existent = os.path.join(self.temp_dir.name, "does_not_exist.sp")
     test_args = ["sapphire", "build", non_existent]
@@ -35,16 +42,6 @@ class SapphireCLITest(unittest.TestCase):
         main()
       self.assertEqual(cm.exception.code, 1)
 
-  def test_run_subcommand(self):
-    test_args = ["sapphire", "run", self.sp_file]
-    with patch.object(sys, "argv", test_args):
-      with patch("subprocess.run") as mock_run:
-        mock_run.return_value.returncode = 0
-        with self.assertRaises(SystemExit) as cm:
-          main()
-        self.assertEqual(cm.exception.code, 0)
-        mock_run.assert_called_once()
-
   def test_run_file_not_found(self):
     non_existent = os.path.join(self.temp_dir.name, "does_not_exist.sp")
     test_args = ["sapphire", "run", non_existent]
@@ -52,6 +49,25 @@ class SapphireCLITest(unittest.TestCase):
       with self.assertRaises(SystemExit) as cm:
         main()
       self.assertEqual(cm.exception.code, 1)
+
+  def test_run_subcommand_lua(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "lua"]
+    with patch.object(sys, "argv", test_args):
+      with patch("shutil.which", return_value="/usr/bin/lua"):
+        with patch("subprocess.run") as mock_run:
+          mock_run.return_value.returncode = 0
+          with self.assertRaises(SystemExit) as cm:
+            main()
+          self.assertEqual(cm.exception.code, 0)
+          mock_run.assert_called_once()
+
+  def test_run_subcommand_lua_not_found(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "lua"]
+    with patch.object(sys, "argv", test_args):
+      with patch("shutil.which", return_value=None):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+        self.assertEqual(cm.exception.code, 1)
 
   def test_shortcut_invocation(self):
     test_args = ["sapphire", self.sp_file]

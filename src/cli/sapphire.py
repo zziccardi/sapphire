@@ -6,6 +6,7 @@ step (`run`).
 
 import argparse
 import os
+import shutil
 import sys
 import subprocess
 
@@ -29,11 +30,22 @@ def run_command(args):
     print(f"Error: File '{source_file}' not found.", file=sys.stderr)
     sys.exit(1)
 
-  output_file = args.output or (os.path.splitext(source_file)[0] + ".py")
-  out_path = transpile_file(source_file, output_file)
+  target = getattr(args, "target", "python").lower()
+  ext = ".lua" if target in ("lua", "lua5.1") else ".py"
+  output_file = args.output or (os.path.splitext(source_file)[0] + ext)
+  out_path = transpile_file(source_file, output_file, target=target)
 
   print("\n--- Executing Sapphire Program ---")
-  cmd = [sys.executable, out_path]
+  if target in ("lua", "lua5.1"):
+    lua_bin = (shutil.which("lua") or shutil.which("luajit") or
+               shutil.which("lua5.1"))
+    if not lua_bin:
+      print("Error: Lua interpreter ('lua', 'luajit', or 'lua5.1')"
+            " not found in PATH.", file=sys.stderr)
+      sys.exit(1)
+    cmd = [lua_bin, out_path]
+  else:
+    cmd = [sys.executable, out_path]
 
   result = subprocess.run(cmd)
   sys.exit(result.returncode)
@@ -47,8 +59,10 @@ def build_command(args):
     print(f"Error: File '{source_file}' not found.", file=sys.stderr)
     sys.exit(1)
 
-  output_file = args.output or (os.path.splitext(source_file)[0] + ".py")
-  transpile_file(source_file, output_file)
+  target = getattr(args, "target", "python").lower()
+  ext = ".lua" if target in ("lua", "lua5.1") else ".py"
+  output_file = args.output or (os.path.splitext(source_file)[0] + ext)
+  transpile_file(source_file, output_file, target=target)
 
 
 def main():
@@ -60,10 +74,13 @@ def main():
 
   # `build` subcommand
   build_parser = subparsers.add_parser(
-      "build", help="Transpile Sapphire source (.sp) to Python (.py)")
+      "build", help="Transpile Sapphire source (.sp) to Python or Lua")
   build_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   build_parser.add_argument(
-      "-o", "--output", help="Optional output path for generated Python file")
+      "-o", "--output", help="Optional output path for generated target file")
+  build_parser.add_argument(
+      "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
+      help="Code generation target (default: python)")
   build_parser.set_defaults(func=build_command)
 
   # `run` subcommand
@@ -71,7 +88,10 @@ def main():
       "run", help="Transpile and immediately execute Sapphire source (.sp)")
   run_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   run_parser.add_argument(
-      "-o", "--output", help="Optional output path for generated Python file")
+      "-o", "--output", help="Optional output path for generated target file")
+  run_parser.add_argument(
+      "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
+      help="Code generation target (default: python)")
   run_parser.set_defaults(func=run_command)
 
   # Handle shortcut invocation: if first argument is a file (e.g.
