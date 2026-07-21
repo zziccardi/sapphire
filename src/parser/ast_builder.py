@@ -7,9 +7,15 @@ ast.py.
 
 from typing import List
 
-from parser.ast import *
-from parser.gen.SapphireVisitor import SapphireVisitor
-from parser.gen.SapphireParser import SapphireParser
+try:
+  from parser.ast import *
+  from parser.gen.SapphireVisitor import SapphireVisitor
+  from parser.gen.SapphireParser import SapphireParser
+except ModuleNotFoundError:  # pragma: no cover
+  from src.parser.ast import *
+  from src.parser.gen.SapphireVisitor import SapphireVisitor
+  from src.parser.gen.SapphireParser import SapphireParser
+
 
 
 class ASTBuilder(SapphireVisitor):

@@ -9,11 +9,16 @@ import os
 import sys
 import subprocess
 
+# Ensure `src` directory is in `sys.path` so submodules like `code_gen`, `parser`,
+# and `semantics` can be imported when running `sapphire` directly.
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if src_dir not in sys.path:
+  sys.path.insert(0, src_dir)
+
 try:
   from code_gen.transpiler import transpile_file
 except ModuleNotFoundError:  # pragma: no cover
   from src.code_gen.transpiler import transpile_file
-
 
 
 def run_command(args):

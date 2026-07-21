@@ -7,28 +7,51 @@ Sapphire language.
 
 from typing import Any, Dict, List, Optional
 
-from parser.ast import *
+try:
+  from parser.ast import *
+  from semantics.symbol_table import (
+      SymbolTable,
+      Type,
+      PrimitiveType,
+      OptionalType,
+      FunctionType,
+      StructField,
+      StructMethod,
+      StructType,
+      TraitType,
+      EnumType,
+      NoneType,
+      ArrayType,
+      ArenaType,
+      VariableSymbol,
+      FunctionSymbol,
+      StructSymbol,
+      TraitSymbol,
+      EnumSymbol,
+  )
+except ModuleNotFoundError:  # pragma: no cover
+  from src.parser.ast import *
+  from src.semantics.symbol_table import (
+      SymbolTable,
+      Type,
+      PrimitiveType,
+      OptionalType,
+      FunctionType,
+      StructField,
+      StructMethod,
+      StructType,
+      TraitType,
+      EnumType,
+      NoneType,
+      ArrayType,
+      ArenaType,
+      VariableSymbol,
+      FunctionSymbol,
+      StructSymbol,
+      TraitSymbol,
+      EnumSymbol,
+  )
 
-from semantics.symbol_table import (
-    SymbolTable,
-    Type,
-    PrimitiveType,
-    OptionalType,
-    FunctionType,
-    StructField,
-    StructMethod,
-    StructType,
-    TraitType,
-    EnumType,
-    NoneType,
-    ArrayType,
-    ArenaType,
-    VariableSymbol,
-    FunctionSymbol,
-    StructSymbol,
-    TraitSymbol,
-    EnumSymbol,
-)
 
 
 class SemanticError(Exception):

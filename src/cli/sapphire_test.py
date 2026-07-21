@@ -1,4 +1,6 @@
+import importlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -77,6 +79,33 @@ class SapphireCLITest(unittest.TestCase):
       with self.assertRaises(SystemExit) as cm:
         main()
       self.assertEqual(cm.exception.code, 0)
+
+  def test_sys_path_auto_injection(self):
+    """Ensures src/cli/sapphire.py injects the src directory into sys.path when absent."""
+    src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    with patch.object(sys, "path", [p for p in sys.path if p != src_dir]):
+      import src.cli.sapphire as sapphire_cli
+
+      importlib.reload(sapphire_cli)
+      self.assertIn(src_dir, sys.path)
+
+  def test_isolated_pythonpath_execution(self):
+    """Verifies that running sapphire CLI without PYTHONPATH succeeds without ModuleNotFoundError."""
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../..")
+    )
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+
+    res = subprocess.run(
+        [sys.executable, "-m", "src.cli.sapphire", "build", self.sp_file],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    self.assertEqual(res.returncode, 0)
+    self.assertNotIn("ModuleNotFoundError", res.stderr)
 
 
 if __name__ == "__main__":
