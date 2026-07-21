@@ -1316,10 +1316,16 @@ class TestTypeChecker(unittest.TestCase):
         West,
     }
 
+    enum Status {
+        Ok = 200,
+        Created = 201,
+    }
+
     func test() {
       let d = Direction.North;
       let d2: Direction = Direction.East;
       let code: int = Direction.South;
+      let s: Status = Status.Ok;
       if (d == Direction.North) {
         let x: int = 1;
       }
@@ -1342,6 +1348,14 @@ class TestTypeChecker(unittest.TestCase):
       enum Direction { North, North }
       """)
     self.assertIn("Duplicate member 'North' in enum 'Direction'", str(context.exception))
+
+    # Test duplicate enum identifier redefinition
+    with self.assertRaises(SemanticError) as context:
+      self._check("""
+      enum Direction { North }
+      enum Direction { South }
+      """)
+    self.assertIn("Redefinition of identifier 'Direction'", str(context.exception))
 
 
 if __name__ == "__main__":
