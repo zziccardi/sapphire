@@ -152,6 +152,7 @@ class LuaTranspiler:
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
+    self.arena_stack: List[List[str]] = []
 
   def emit(self, text: str) -> None:
     """Emits text on the current line."""
@@ -307,13 +308,17 @@ class LuaTranspiler:
     self.newline()
     self.emit("end")
 
-    has_init = any(m.func_decl.name == "__init__" for m in methods)
-    if has_init:
+    init_member = next((m for m in methods if m.func_decl.name == "__init__"), None)
+    if init_member:
+      init_args = []
+      for idx, p in enumerate(init_member.func_decl.parameters):
+        init_args.append(f"(kwargs['{p.name}'] ~= nil and kwargs['{p.name}'] or kwargs[{idx + 1}])")
+      call_args = ["self"] + init_args
       self.newline()
       self.emit(f"if {struct_name}._init_sapphire then")
       self.indent()
       self.newline()
-      self.emit(f"{struct_name}._init_sapphire(self, kwargs)")
+      self.emit(f"{struct_name}._init_sapphire({', '.join(call_args)})")
       self.dedent()
       self.newline()
       self.emit("end")
@@ -346,6 +351,13 @@ class LuaTranspiler:
       self.emit(f"function {struct_name}:{func_name}({', '.join(params[1:])})")
 
     self.indent()
+    for p in func.parameters:
+      if p.default_expr:
+        self.newline()
+        temp = LuaTranspiler()
+        temp.known_structs = self.known_structs
+        temp.visit(p.default_expr)
+        self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
     self.visit(func.body)
     self.dedent()
     self.newline()
@@ -379,43 +391,31 @@ class LuaTranspiler:
   # Statements Visitor
   # ==========================================
 
-  def _visit_statements(self, statements: List[StmtNode]) -> None:
-    if not statements:
-      return
-
-    stmt = statements[0]
-    is_arena = (
-        isinstance(stmt, VarDeclNode)
-        and isinstance(stmt.expr, CallNode)
-        and isinstance(stmt.expr.callee, IdentifierNode)
-        and stmt.expr.callee.name == "Arena"
-    )
-
-    if is_arena:
-      self.visit(stmt)
-      self.newline()
-      self.emit("local _ok, _err = pcall(function()")
-      self.indent()
-      self._visit_statements(statements[1:])
-      self.dedent()
-      self.newline()
-      self.emit("end)")
-      self.newline()
-      self.emit(f"{stmt.name}:destroy()")
-      self.newline()
-      self.emit("if not _ok then error(_err) end")
-    else:
-      self.visit(stmt)
-      self._visit_statements(statements[1:])
-
   def visit_BlockNode(self, node: BlockNode) -> None:
+    self.arena_stack.append([])
     if not node.statements:
       self.newline()
       self.emit("-- pass")
     else:
-      self._visit_statements(node.statements)
+      for stmt in node.statements:
+        self.visit(stmt)
+
+    current_arenas = self.arena_stack.pop()
+    has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
+    if not has_returned:
+      for arena_name in reversed(current_arenas):
+        self.newline()
+        self.emit(f"{arena_name}:destroy()")
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
+    is_arena = (
+        isinstance(node.expr, CallNode)
+        and isinstance(node.expr.callee, IdentifierNode)
+        and node.expr.callee.name == "Arena"
+    )
+    if is_arena and self.arena_stack:
+      self.arena_stack[-1].append(node.name)
+
     self.newline()
     self.emit(f"local {node.name} = ")
     self.visit(node.expr)
@@ -440,6 +440,13 @@ class LuaTranspiler:
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
+    all_active_arenas = [
+        a for frame in reversed(self.arena_stack) for a in reversed(frame)
+    ]
+    for arena_name in all_active_arenas:
+      self.newline()
+      self.emit(f"{arena_name}:destroy()")
+
     self.newline()
     if node.expr:
       self.emit("return ")
@@ -538,6 +545,11 @@ class LuaTranspiler:
     self.emit(")")
 
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> None:
+    if node.op == "+":
+      self.emit("(")
+      self.visit(node.expr)
+      self.emit(")")
+      return
     op_map = {"!": "not "}
     op = op_map.get(node.op, node.op)
     self.emit(f"({op}")

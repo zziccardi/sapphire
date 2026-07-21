@@ -110,38 +110,42 @@ _clone_helper = function(obj, init_fn, arena)
 end
 
 
-local MAX_PLAYERS = 100
-
-
-local Position = {}
-Position.__index = Position
-function Position.new(kwargs, proto)
+local Vector2D = {}
+Vector2D.__index = Vector2D
+function Vector2D.new(kwargs, proto)
   kwargs = kwargs or {}
   local self
-  self = setmetatable({}, Position)
+  self = setmetatable({}, Vector2D)
   if proto == nil then
   end
   for k, v in pairs(kwargs) do
     self[k] = v
   end
-  if Position._init_sapphire then
-    Position._init_sapphire(self, (kwargs['x'] ~= nil and kwargs['x'] or kwargs[1]), (kwargs['y'] ~= nil and kwargs['y'] or kwargs[2]))
+  if Vector2D._init_sapphire then
+    Vector2D._init_sapphire(self, (kwargs['x'] ~= nil and kwargs['x'] or kwargs[1]), (kwargs['y'] ~= nil and kwargs['y'] or kwargs[2]))
   end
   return self
 end
 
-function Position:_init_sapphire(x, y)
+function Vector2D:_init_sapphire(x, y)
   self.x = x
   self.y = y
 end
 
+function Vector2D:translate(dx, dy)
+  self.x = self.x + dx
+  self.y = self.y + dy
+end
 
-local Entity = {}
-Entity.__index = Entity
-function Entity.new(kwargs, proto)
+
+
+
+local GameObject = {}
+GameObject.__index = GameObject
+function GameObject.new(kwargs, proto)
   kwargs = kwargs or {}
   local self
-  self = _create_proto_object(proto, Entity)
+  self = _create_proto_object(proto, GameObject)
   if proto == nil then
   end
   for k, v in pairs(kwargs) do
@@ -163,100 +167,93 @@ function Character.new(kwargs, proto)
     self[k] = v
   end
   if Character._init_sapphire then
-    Character._init_sapphire(self, (kwargs['id'] ~= nil and kwargs['id'] or kwargs[1]), (kwargs['name'] ~= nil and kwargs['name'] or kwargs[2]), (kwargs['max_hp'] ~= nil and kwargs['max_hp'] or kwargs[3]))
+    Character._init_sapphire(self, (kwargs['id'] ~= nil and kwargs['id'] or kwargs[1]), (kwargs['name'] ~= nil and kwargs['name'] or kwargs[2]), (kwargs['x'] ~= nil and kwargs['x'] or kwargs[3]), (kwargs['y'] ~= nil and kwargs['y'] or kwargs[4]), (kwargs['hp'] ~= nil and kwargs['hp'] or kwargs[5]), (kwargs['spd'] ~= nil and kwargs['spd'] or kwargs[6]))
   end
   return self
 end
 
-function Character:_init_sapphire(id, name, max_hp)
-  if max_hp == nil then max_hp = 100 end
+function Character:_init_sapphire(id, name, x, y, hp, spd)
+  if hp == nil then hp = 50 end
+  if spd == nil then spd = 2.0 end
   self.id = id
-  self.pos = Position.new({x = 0.0, y = 0.0})
-  self.health = max_hp
-  self.max_health = max_hp
+  self.position = Vector2D.new({x = x, y = y})
+  self.active = true
+  self.health = hp
+  self.max_health = hp
+  self.speed = spd
   self.name = name
 end
 
-function Character:get_health_ratio()
-  return (self.health / self.max_health)
-end
-
-function Character:heal(amount)
-  self.health = self.health + amount
-  if (self.health > self.max_health) then
-    self.health = self.max_health
+function Character:update(dt)
+  if (self.health <= 0) then
+    self.active = false
+    return
   end
+  self.position:translate((self.speed * dt), 0.0)
 end
 
 function Character:take_damage(amount)
   self.health = self.health - amount
-  if (self.health < 0) then
+  if (self.health <= 0) then
     self.health = 0
-  else
-    if (self.health > self.max_health) then
-      self.health = self.max_health
-    else
-      -- pass
-    end
+    self.active = false
   end
 end
 
+function Character:get_health()
+  return self.health
+end
 
-local function execute_attack(attacker, defender, is_critical)
-  if is_critical == nil then is_critical = false end
-  local base_damage = 15
-  if is_critical then
-    base_damage = base_damage * 2
+
+local function execute_strike(attacker, defender, bonus)
+  if bonus == nil then bonus = 5 end
+  local damage = 10
+  if (attacker.health > 25) then
+    damage = damage + bonus
   end
-  defender:take_damage(base_damage)
-  return base_damage
+  defender:take_damage(damage)
+  return damage
 end
 
 
 local function run_demo()
-  local player_one = Character.new({id = 1, name = "Galahad"})
-  local player_two = Character.new({id = 2, name = "Lancelot", max_hp = 120})
-  local target_player = nil
-  target_player = player_two
-  local _val_active_target = target_player
+  local base_goblin = Character.new({id = 0, name = "Goblin Archer", x = 0.0, y = 0.0, hp = 30, spd = 1.5})
+  local goblin_1 = _clone_helper(base_goblin, function(self)
+    self.id = 101
+    self.position = Vector2D.new({x = 10.0, y = 5.0})
+  end)
+  local goblin_2 = _clone_helper(base_goblin, function(self)
+    self.id = 102
+    self.position = Vector2D.new({x = 12.0, y = 6.0})
+  end)
+  local hero = Character.new({id = 1, name = "Arthur", x = 8.0, y = 5.0, hp = 80, spd = 2.5})
+  base_goblin.speed = 3.5
+  local target = nil
+  target = goblin_1
+  local _val_active_target = target
   if _val_active_target ~= nil then
     local active_target = _val_active_target
-    local damage_dealt = execute_attack(player_one, active_target, true)
+    local damage_dealt = execute_strike(hero, active_target, 10)
   else
     -- pass
   end
-  local prototype_enemy = Character.new({id = 99, name = "Goblin Minion", max_hp = 30})
-  local active_clone = _clone_helper(prototype_enemy, function(self)
-    self.health = 25
+  local target_speed = (target ~= nil and target.speed or nil)
+  local damage = execute_strike(hero, goblin_2)
+  local is_alive = (function(c)
+    return (c.health > 0)
   end)
-  local _val_parent = active_clone.__proto__
-  if _val_parent ~= nil then
-    local parent = _val_parent
-    local name_ref = parent.name
-  end
-  local damage_multiplier = (function(x)
-    return (x * 2)
+  local get_threat_level = (function(c)
+    return c.health
   end)
-  local sum_func = (function(x, y)
-    return (x + y)
-  end)
-  local base_score = (-50)
-  local positive_adjustment = (10)
-  local coord_x = 10
-  local mixed_result = (coord_x + positive_adjustment)
-  local scores = {10, 20, 30}
-  local first_score = scores[1]
-  local timer = 3
-  while (timer > 0) do
-    timer = timer - 1
+  local entities = {hero, goblin_1, goblin_2}
+  for _, entity in ipairs(entities) do
+    entity:update(0.1)
   end
-  for _, score in ipairs(scores) do
-    local final_score = damage_multiplier(score)
-  end
-  for _, score in ipairs(scores) do
-    score = score + 5
+  local total_health = 0
+  for _, entity in ipairs(entities) do
+    if is_alive(entity) then
+      total_health = total_health + get_threat_level(entity)
+    end
   end
 end
 
-
-run_demo()

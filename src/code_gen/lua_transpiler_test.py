@@ -28,6 +28,7 @@ try:
       StructFieldNode,
       StructInitializerNode,
       TraitDeclNode,
+      UnaryOpNode,
   )
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
@@ -50,6 +51,7 @@ except ModuleNotFoundError:
       StructFieldNode,
       StructInitializerNode,
       TraitDeclNode,
+      UnaryOpNode,
   )
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
@@ -112,6 +114,9 @@ class TestLuaTranspiler(unittest.TestCase):
     # StructInitializerNode with arena_expr and positional/named fields
     transpiler.visit(StructInitializerNode("Point", [ArgumentNode("x", LiteralNode(1, "int")), ArgumentNode(None, LiteralNode(2, "int"))], arena_expr=IdentifierNode("my_arena")))
 
+    # UnaryOpNode with unary plus
+    transpiler.visit(UnaryOpNode("+", LiteralNode(10, "int")))
+
     output = transpiler.get_output()
     self.assertIn("-- pass", output)
     self.assertIn('10 .. "items"', output)
@@ -119,6 +124,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("Point.create(1, 2)", output)
     self.assertIn("pt:get_x()", output)
     self.assertIn("my_arena:register(Point.new({x = 1, [2] = 2}))", output)
+    self.assertIn("(10)", output)
 
   def test_basic_arithmetic(self):
     """Verifies that variable declarations and arithmetic expressions transpile to Lua."""
@@ -241,11 +247,11 @@ class TestLuaTranspiler(unittest.TestCase):
     func run_arena() {
       var local_arena = Arena();
       let val = 42;
+      return;
     }
     """
     lua_code = self._transpile(code)
     self.assertIn("local local_arena = Arena.new()", lua_code)
-    self.assertIn("local _ok, _err = pcall(function()", lua_code)
     self.assertIn("local_arena:destroy()", lua_code)
 
   def test_literals_unary_and_string_concat(self):
@@ -269,6 +275,11 @@ class TestLuaTranspiler(unittest.TestCase):
     code = """
     struct Target {
       var hp: int;
+    }
+    impl Target {
+      func set_hp(val: int = 42) {
+        self.hp = val;
+      }
     }
     func test_opt_chain(t: Target?) {
       let hp_val = t?.hp;
