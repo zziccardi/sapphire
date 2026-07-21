@@ -6,15 +6,15 @@ combines the **safety and performance** of systems languages with the
 **expressive API clarity** of modern languages like Swift.
 
 This repository contains the ANTLR4 grammar, abstract syntax tree (AST) builder,
-semantic analyzer, type checker, a transpiler that compiles Sapphire source
-code (`.sp`) into executable Python, as well as a Language Server Protocol (LSP)
+semantic analyzer, type checker, transpilation backends that compile Sapphire source
+code (`.sp`) into executable Python or Lua 5.1, as well as a Language Server Protocol (LSP)
 server implementation and corresponding VS Code extension.
 
 The project is a **work in progress**. The [language spec](docs/SPEC.md) may
-change significantly over time. For now the implementation is in Python to
-facilitate quick iteration; once the language design is finalized, I'd like to
-introduce a proper compiler (likely built in Rust) to enable the memory-safety
-features described in the spec.
+change significantly over time. For now the transpiler toolchain targets Python and
+Lua 5.1 to facilitate rapid iteration and scripting engine integration; once the language
+design is finalized, I'd like to introduce a proper native compiler (likely built in Rust) to
+enable the memory-safety features described in the spec.
 
 ## Key features of Sapphire
 
@@ -73,11 +73,11 @@ features described in the spec.
     (`ast_builder.py`).
   * `semantics/`: Scope management, symbol tables (`symbol_table.py`), and
     compiler type-checking rules (`type_checker.py`).
-  * `code_gen/`: Python transpiler logic (`transpiler.py`), high-level compilation driver API (`transpile_file`), and runtime wrappers.
+  * `code_gen/`: Transpiler logic for Python (`transpiler.py`) and Lua 5.1 (`lua_transpiler.py`), high-level compilation driver API (`transpile_file`), and runtime headers.
   * `lsp/`: Language Server Protocol (LSP) server implementation providing
     diagnostics, semantic tokens, hover info, and member autocompletion.
   * `cli/sapphire.py`: Unified CLI entry point (`build`, `run`).
-  * `run_transpiler.py`: Script wrapper to compile `.sp` source files to Python.
+  * `run_transpiler.py`: Script wrapper to compile `.sp` source files to Python or Lua.
 * `tools/`
   * `vscode-extension/`: VS Code extension for Sapphire language support (syntax
     highlighting and LSP integration).

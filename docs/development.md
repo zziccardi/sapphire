@@ -55,27 +55,35 @@ sapphire samples/overview.sp
 
 ## Compilation & execution
 
-The `sapphire` CLI tool provides convenient commands for compiling and executing Sapphire programs.
+The `sapphire` CLI tool provides convenient commands for compiling and executing Sapphire programs across supported targets (`python`, `lua`).
 
-To compile and immediately run a Sapphire source file in one step:
+To compile and immediately run a Sapphire source file in one step (Python by default, or Lua 5.1 via `-t lua`):
 
 ```bash
+# Python target (default)
 sapphire samples/overview.sp
 
+# Lua 5.1 target (requires lua, luajit, or lua5.1 in PATH)
+sapphire samples/overview.sp -t lua
+
 # Or via Pipenv:
-pipenv run sapphire samples/overview.sp
+pipenv run sapphire samples/overview.sp -t lua
 ```
 
-To compile a Sapphire source file to Python without running it:
+To transpile a Sapphire source file to Python (`.py`) or Lua (`.lua`) without running it:
 
 ```bash
+# Transpile to Python (.py)
 sapphire build samples/overview.sp [-o custom_output.py]
+
+# Transpile to Lua 5.1 (.lua)
+sapphire build samples/overview.sp -t lua [-o custom_output.lua]
 ```
 
 Note: The high-level compilation driver function `transpile_file()` is exported by `src/code_gen/transpiler.py`. You can also call the runner script directly via:
 
 ```bash
-pipenv run python src/run_transpiler.py samples/overview.sp
+pipenv run python src/run_transpiler.py samples/overview.sp [python|lua]
 ```
 
 ## Test coverage

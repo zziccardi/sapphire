@@ -1,10 +1,10 @@
 # Sapphire Compiler Pipeline Documentation
 
-This document provides a comprehensive technical overview of the implementation of the **Sapphire Compiler**, transpiling Sapphire source code (`.sp`) to executable Python (`.py`).
+This document provides a comprehensive technical overview of the implementation of the **Sapphire Compiler**, transpiling Sapphire source code (`.sp`) to executable Python or Lua 5.1.
 
 ## Architecture Overview
 
-The Sapphire compiler is structured as a classic multi-stage pipeline:
+The Sapphire compiler is structured as a classic multi-stage pipeline supporting multiple code generation targets:
 
 ```mermaid
 graph TD
@@ -15,8 +15,10 @@ graph TD
     ast_builder --> ast[Abstract Syntax Tree]
     ast --> sema[Semantic Analyzer & Type Checker]
     sema --> checked_ast[Typed AST]
-    checked_ast --> codegen[Python Transpiler]
-    codegen --> py_source[Generated Python: .py]
+    checked_ast --> codegen_py[Python Transpiler]
+    checked_ast --> codegen_lua[Lua 5.1 Transpiler]
+    codegen_py --> py_source[Generated Python: .py]
+    codegen_lua --> lua_source[Generated Lua: .lua]
 ```
 
 ## Stage 1: AST Design & Building
@@ -62,33 +64,18 @@ The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) trav
 
 ## Stage 3: Code Generation (Transpilation)
 
-Stage 3 compiles the typed AST into Python code, mapping Sapphire semantics to Python's runtime environment.
+Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), mapping Sapphire semantics to the target runtime environment.
 
-### 1. Prototypal Inheritance Runtime Preamble (`transpiler.py`)
-To implement prototypal delegation (`clone`) without performance bottlenecks on standard flat structures, the transpiler outputs a runtime header in the generated file:
-- **`SapphireObject`**: The base class for all struct instances.
-  - Keeps a reference to `__proto__` and a local dictionary `__shadow__` for overridden properties.
-  - Custom `__getattr__` looks up fields in `__shadow__`, and if missing, recursively delegates up the prototype chain `__proto__`.
-  - Custom `__setattr__` intercepts writes: if the instance has a prototype, it shadows the value in `__shadow__` locally, leaving the original prototype immutable.
-  - Implements the `clone()` method which instantiates the same class with `proto=self`.
+### 1. Python Target (`transpiler.py`)
+- **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
+- **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, and `if let` unwrapping to Python `None` checks.
 
-### 2. AST-to-Python Mapping (`transpiler.py`)
-The `Transpiler` class in [transpiler.py](src/code_gen/transpiler.py) maps AST nodes to Python syntax:
-- **Structs**: Compiles to standard Python classes subclassing `SapphireObject` (or their parent class for static inheritance, which automatically copies parent methods).
-- **Methods**: Impl block methods map to instance methods:
-  - Positional/keyword argument wrappers map default arguments (e.g. `max_hp=100`) directly to Python signatures.
-- **Clones**: `clone prototype_enemy { self.health = 25; }` maps to:
-  `_clone_helper(prototype_enemy, lambda self: [setattr(self, 'health', 25)])`
-- **Optional Chaining**: `target?.get_name()` maps to Python's inline ternary:
-  `(target.get_name() if target is not None else None)`
-- **If Let**: Translates to an checking condition:
-  ```python
-  _val = optional_expr
-  if _val is not None:
-      name = _val
-      # Block
-  ```
+### 2. Lua 5.1 Target (`lua_transpiler.py`)
+- **Runtime Preamble**: Emits `Arena`, `_create_proto_object`, and `_clone_helper` using Lua's native `setmetatable` mechanism (`__index` fallback, `__proto`, `__shadow`).
+- **Array Indexing**: Maps Sapphire 0-based array indexing (`arr[i]`) to 1-based Lua table indexing (`arr[i + 1]`).
+- **Compound Assignment Expansion**: Expands compound assignment statements (`+=`, `-=`, `*=`, `/=`) into simple binary operation assignments (`x = x + y`).
+- **Optionals & Lambdas**: Translates optional unwrapping `if let` to safe Lua `nil` checks, and Sapphire lambdas to Lua anonymous functions `(function(...) ... end)`.
 
 ### 3. High-Level compiler driver API (`transpile_file`)
-The high-level compilation driver function `transpile_file(input_file, output_file)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full 5-stage compilation pipeline (lexing, parsing, AST building, semantic analysis, and transpilation) and outputs the compiled Python file. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
+The high-level compilation driver function `transpile_file(input_file, output_file, target="python")` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full 5-stage compilation pipeline and dispatches AST code generation to either Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
 
