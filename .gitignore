@@ -13,3 +13,9 @@ tools/vscode-extension/sapphire-*.vsix
 .vscode/
 
 *__pycache__*
+
+# Python build & package artifacts
+*.egg-info/
+build/
+dist/
+*.pyc

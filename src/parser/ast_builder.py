@@ -31,8 +31,11 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitProgram(self, ctx: SapphireParser.ProgramContext) -> ProgramNode:
-    declarations = [self.visit(decl) for decl in ctx.declaration()]
+    declarations = [self.visit(item) for item in ctx.topLevelItem()]
     return ProgramNode(declarations)
+
+  def visitTopLevelItem(self, ctx: SapphireParser.TopLevelItemContext) -> ASTNode:
+    return self.visit(ctx.getChild(0))
 
   def visitDeclaration(self, ctx: SapphireParser.DeclarationContext) -> DeclNode:
     return self.visit(ctx.getChild(0))

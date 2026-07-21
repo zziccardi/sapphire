@@ -2,8 +2,6 @@
 
 This document provides a comprehensive technical overview of the implementation of the **Sapphire Compiler**, transpiling Sapphire source code (`.sp`) to executable Python (`.py`).
 
----
-
 ## Architecture Overview
 
 The Sapphire compiler is structured as a classic multi-stage pipeline:
@@ -20,8 +18,6 @@ graph TD
     checked_ast --> codegen[Python Transpiler]
     codegen --> py_source[Generated Python: .py]
 ```
-
----
 
 ## Stage 1: AST Design & Building
 
@@ -40,8 +36,6 @@ The `ASTBuilder` visitor class defined in [ast_builder.py](src/parser/ast_builde
 - It overrides methods corresponding to parser grammar rules (like `visitProgram`, `visitVariableDeclarationStatement`, etc.).
 - Converts rule context objects (`ctx`) into strongly-typed `ASTNode` objects.
 - Correctly translates grammar alternatives (like `# AdditiveExpr`, `# CallExpr`) into their respective AST nodes.
-
----
 
 ## Stage 2: Semantic Analysis & Type Checking
 
@@ -65,8 +59,6 @@ The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) trav
   - Verifies that mutable reference (`var`) parameters are only passed mutable lvalues.
 - **Optional Safety (`if let`)**: Validates Swift-style unwrapping where the unwrapped variable is registered inside the `then_block` scope as a non-optional type.
 - **Bidirectional Lambda Inference**: Resolves types of lambda parameters without annotations (e.g. `x -> x * 2`) by matching them against expected function types (like `(int) -> int`) in assignments or call sites.
-
----
 
 ## Stage 3: Code Generation (Transpilation)
 
@@ -96,3 +88,7 @@ The `Transpiler` class in [transpiler.py](src/code_gen/transpiler.py) maps AST n
       name = _val
       # Block
   ```
+
+### 3. High-Level compiler driver API (`transpile_file`)
+The high-level compilation driver function `transpile_file(input_file, output_file)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full 5-stage compilation pipeline (lexing, parsing, AST building, semantic analysis, and transpilation) and outputs the compiled Python file. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
+

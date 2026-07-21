@@ -160,3 +160,6 @@ func run_demo() {
     score += 5;
   }
 }
+
+// Top-level script execution entry point
+run_demo();

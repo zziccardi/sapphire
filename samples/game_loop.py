@@ -100,7 +100,7 @@ class Vector2D(object):
   def translate(self, dx, dy):
     self.x += dx
     self.y += dy
-  def distance_to(self, other):
+  def get_distance_to(self, other):
     dx = (self.x - other.x)
     dy = (self.y - other.y)
     abs_dx = dx
@@ -173,12 +173,12 @@ def load(game):
 def update(game, dt):
   game.frame_count += 1
   if (game.state == GameState.Playing):
-    game.player.update(dt=dt)
+    game.player.update(dt)
     _val_enemy = game.active_enemy
     if _val_enemy is not None:
       enemy = _val_enemy
-      enemy.update(dt=dt)
-      dist = game.player.position.distance_to(other=enemy.position)
+      enemy.update(dt)
+      dist = game.player.position.get_distance_to(other=enemy.position)
       if (dist < 15.0):
         enemy.health -= 30
         game.score += 50
@@ -216,6 +216,6 @@ def run_game_loop():
     update(game=engine, dt=dt)
     draw(game=engine)
 
-def main():
+if __name__ == "__main__":
+  
   run_game_loop()
-  return 0

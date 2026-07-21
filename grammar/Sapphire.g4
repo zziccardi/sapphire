@@ -5,7 +5,12 @@ grammar Sapphire;
 // ==========================================
 
 program
-    : declaration* EOF
+    : topLevelItem* EOF
+    ;
+
+topLevelItem
+    : declaration
+    | statement
     ;
 
 declaration

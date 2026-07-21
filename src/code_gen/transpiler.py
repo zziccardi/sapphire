@@ -5,9 +5,113 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation.
 """
 
-from typing import Any, List, Dict
+import os
+import sys
+from typing import Any, List, Dict, Optional
 
-from parser.ast import *
+from antlr4 import FileStream, CommonTokenStream
+from antlr4.error.ErrorListener import ErrorListener
+
+try:
+  from parser.ast import *
+  from parser.gen.SapphireLexer import SapphireLexer
+  from parser.gen.SapphireParser import SapphireParser
+  from parser.ast_builder import ASTBuilder
+  from semantics.type_checker import TypeChecker, SemanticError
+except ModuleNotFoundError:  # pragma: no cover
+  from src.parser.ast import *
+  from src.parser.gen.SapphireLexer import SapphireLexer
+  from src.parser.gen.SapphireParser import SapphireParser
+  from src.parser.ast_builder import ASTBuilder
+  from src.semantics.type_checker import TypeChecker, SemanticError
+
+
+class CustomErrorListener(ErrorListener):
+  """Custom ANTLR error listener to track and report syntax errors."""
+
+  def __init__(self):
+    super().__init__()
+    self.errors = 0
+
+  def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
+    self.errors += 1
+    print(f"Syntax Error: Line {line}:{column} - {msg}", file=sys.stderr)
+
+
+def transpile_file(input_file: str, output_file: Optional[str] = None) -> str:
+  """Transpiles a Sapphire source file into Python.
+
+  Args:
+    input_file: Path to the Sapphire source file (.sp).
+    output_file: Optional output path for generated Python code (.py).
+      If None, defaults to input_file with .py extension.
+
+  Returns:
+    The path to the generated Python file.
+  """
+
+  if not output_file:
+    base_path, _ = os.path.splitext(input_file)
+    output_file = base_path + ".py"
+
+  print(f"Reading source file: {input_file}...")
+
+  try:
+    input_stream = FileStream(input_file, encoding="utf-8")
+  except Exception as e:
+    print(f"Failed to read file: {e}", file=sys.stderr)
+    sys.exit(1)
+
+  error_listener = CustomErrorListener()
+
+  # 1. Lexical Analysis
+  lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
+
+  stream = CommonTokenStream(lexer)
+
+  # 2. Parsing
+  parser = SapphireParser(stream)
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
+
+  print("Parsing program to Parse Tree...")
+  tree = parser.program()
+
+  if error_listener.errors > 0:
+    print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
+    sys.exit(1)
+
+  # 3. Build AST
+  print("Building AST...")
+  builder = ASTBuilder()
+  ast = builder.visit(tree)
+
+  # 4. Semantic Analysis & Type Checking
+  print("Running Semantic Analysis & Type Checker...")
+  checker = TypeChecker()
+  try:
+    checker.check(ast)
+  except SemanticError as e:
+    print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
+    sys.exit(1)
+
+  # 5. Transpile
+  print("Transpiling to Python...")
+  transpiler = Transpiler()
+  python_code = transpiler.transpile(ast)
+
+  # Write generated code
+  try:
+    with open(output_file, "w", encoding="utf-8") as f:
+      f.write(python_code)
+    print(f"\nCompilation successful! Python output written to:\n{output_file}")
+    return output_file
+  except Exception as e:
+    print(f"Failed to write output file: {e}", file=sys.stderr)
+    sys.exit(1)
+
 
 
 # ==========================================
@@ -151,12 +255,40 @@ class Transpiler:
           self.struct_methods[decl.struct_name] = []
         self.struct_methods[decl.struct_name].extend(decl.members)
 
-    # 3. Transpile all top-level declarations
+    top_level_decls = []
+    executable_stmts = []
+    has_main = False
+
     for decl in program.declarations:
-      # Skip ImplBlockNode since methods are processed inline with StructDeclNode
-      if not isinstance(decl, ImplBlockNode):
-        self.visit(decl)
+      if isinstance(decl, ImplBlockNode):
+        continue
+      elif isinstance(decl, FuncDeclNode):
+        if decl.name == "main":
+          has_main = True
+        top_level_decls.append(decl)
+      elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode, VarDeclNode)):
+        top_level_decls.append(decl)
+      else:
+        executable_stmts.append(decl)
+
+    # 3. Transpile all top-level declarations (types, functions, global variables)
+    for decl in top_level_decls:
+      self.visit(decl)
+      self.newline()
+
+    # 4. Transpile executable top-level statements and/or main call
+    if executable_stmts or has_main:
+      self.newline()
+      self.emit('if __name__ == "__main__":')
+      self.indent()
+      for stmt in executable_stmts:
         self.newline()
+        self.visit(stmt)
+      if has_main:
+        self.newline()
+        self.emit("main()")
+      self.dedent()
+      self.newline()
 
     return self.get_output()
 

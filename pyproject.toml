@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sapphire-lang"
+version = "0.1.0"
+description = "Sapphire programming language compiler and runtime"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "antlr4-python3-runtime",
+    "pygls"
+]
+
+[project.scripts]
+sapphire = "src.cli.sapphire:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
