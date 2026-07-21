@@ -516,7 +516,7 @@ class LuaTranspiler:
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
     if node.name == "Arena":
-      self.emit("Arena.new()")
+      self.emit("Arena.new")
     else:
       self.emit(node.name)
 

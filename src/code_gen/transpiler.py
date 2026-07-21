@@ -109,7 +109,7 @@ def transpile_file(
   if target_lower in ("lua", "lua5.1"):
     try:
       from code_gen.lua_transpiler import LuaTranspiler
-    except ModuleNotFoundError:
+    except ModuleNotFoundError:  # pragma: no cover
       from src.code_gen.lua_transpiler import LuaTranspiler
     print("Transpiling to Lua 5.1...")
     transpiler = LuaTranspiler()
