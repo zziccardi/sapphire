@@ -58,6 +58,12 @@ enable the memory-safety features described in the spec.
 * Bidirectional type inference resolves lambda parameters automatically based on
   expected types at assignment or call sites.
 
+### 5. Host engine & third-party interoperability
+* Native interoperation with host runtimes (such as **Love2D** in Lua 5.1 / LuaJIT environments).
+* `@extern("love") var love: LoveEngine;` binds host runtime global variables with 100% type safety.
+* `@export("love.update") func update(dt: float)` exposes functions directly as global engine callbacks (`function love.update(dt)`).
+* Combines Sapphire `trait`s and `struct`s to model external host APIs without runtime performance penalties.
+
 ## Repository structure
 
 * `docs/`
