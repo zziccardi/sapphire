@@ -533,3 +533,60 @@ for var name in names {
   print(name);
 }
 ```
+
+## 11. Host runtime interoperability & annotations
+
+Sapphire supports native interoperability with third-party scripting host engines (such as **Love2D** in Lua 5.1 / LuaJIT environments) through single-purpose annotation decorators:
+
+### A. `@extern` (host variable binding)
+The `@extern` annotation binds a variable to an external global symbol provided at runtime by the host environment.
+* **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is named `identifier`).
+* **Runtime behavior**: Tells the transpiler to omit runtime variable initializations (`local name = ...`), permitting 100% type-safe access to host-provided engine modules.
+
+### B. `@export` (host global callback export)
+The `@export` annotation exposes a top-level Sapphire function definition as a global callback for the host engine runtime.
+* **Syntax**: `@export("target.global.path") func handler(...) { ... }` or `@export func handler(...) { ... }`.
+* **Runtime behavior**: In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
+
+### C. Trait-based host interfaces
+External host-module contracts are defined cleanly using standard Sapphire `trait`s (which define interface method signatures without implementations) composed inside container `struct` types:
+
+```sapphire
+// 1. Opaque resource-handle struct
+struct Image {}
+
+// 2. Host API traits
+trait Graphics {
+  func setColor(r: float, g: float, b: float);
+  func rectangle(mode: String, x: float, y: float, w: float, h: float);
+  func clear(r: float, g: float, b: float);
+  func newImage(path: String): Image;
+}
+
+trait Keyboard {
+  func isDown(key: String): bool;
+}
+
+// 3. Engine container struct
+struct LoveEngine {
+  var graphics: Graphics;
+  var keyboard: Keyboard;
+}
+
+// 4. External host variable binding
+@extern("love")
+var love: LoveEngine;
+
+// 5. Exported engine callbacks
+@export("love.update")
+func update(dt: float) {
+  // Host call correctly transpiles to dot notation in Lua, i.e.:
+  // `love.keyboard.isDown("right")`
+  if love.keyboard.isDown(key = "right") { ... }
+}
+
+@export("love.draw")
+func draw() {
+  love.graphics.clear(r = 0.1, g = 0.1, b = 0.1);
+}
+```

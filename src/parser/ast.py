@@ -98,6 +98,14 @@ class StructFieldNode(ASTNode):
     self.default_expr = default_expr
 
 
+class AnnotationNode(ASTNode):
+  """Represents an annotation decorator (e.g. '@extern' or '@export("love.update")')."""
+
+  def __init__(self, name: str, arg: Optional[str] = None):
+    self.name = name
+    self.arg = arg
+
+
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
@@ -137,11 +145,12 @@ class ParameterNode(ASTNode):
 class FuncDeclNode(DeclNode):
   """Represents a function declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], body: 'BlockNode'):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.parameters = parameters
     self.return_type = return_type
     self.body = body
+    self.annotations = annotations or []
 
 
 class ImplMemberNode(ASTNode):
@@ -164,10 +173,11 @@ class ImplBlockNode(DeclNode):
 class TraitMemberNode(ASTNode):
   """Represents a method signature inside a trait declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode]):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], modifier: Optional[str] = None):
     self.name = name
     self.parameters = parameters
     self.return_type = return_type
+    self.modifier = modifier
 
 
 class TraitDeclNode(DeclNode):
@@ -197,11 +207,12 @@ class BlockNode(StmtNode):
 class VarDeclNode(StmtNode):
   """Represents a variable declaration statement (let/var)."""
 
-  def __init__(self, is_mutable: bool, name: str, val_type: Optional[TypeNode], expr: ASTNode):
+  def __init__(self, is_mutable: bool, name: str, val_type: Optional[TypeNode], expr: Optional[ASTNode] = None, annotations: Optional[List[AnnotationNode]] = None):
     self.is_mutable = is_mutable
     self.name = name
     self.val_type = val_type
     self.expr = expr
+    self.annotations = annotations or []
 
 
 class AssignmentNode(StmtNode):

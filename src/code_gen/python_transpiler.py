@@ -380,6 +380,8 @@ class PythonTranspiler:
       self._visit_statements(node.statements)
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
+    if any(a.name == "extern" for a in node.annotations):
+      return
     self.newline()
     self.emit(f"{node.name} = ")
     self.visit(node.expr)

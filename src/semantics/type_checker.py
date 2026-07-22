@@ -166,13 +166,13 @@ class TypeChecker:
           p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
           ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
           p_mutabilities = [p.is_mutable for p in member.parameters]
-          trait_type.methods[member.name] = FunctionType(
+          fn_type = FunctionType(
               p_types,
               ret_t,
               p_mutabilities,
               param_names=[p.name for p in member.parameters],
           )
-
+          trait_type.methods[member.name] = fn_type
         self.symbol_table.define_type(decl.name, trait_type)
         self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
 
@@ -196,6 +196,14 @@ class TypeChecker:
             param_names=[p.name for p in decl.parameters],
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature))
+
+      elif isinstance(decl, VarDeclNode):
+        if any(a.name == "extern" for a in decl.annotations):
+          if self.symbol_table.lookup_current_scope(decl.name):
+            self.error(f"Redefinition of identifier '{decl.name}'.")
+            continue
+          var_type = self._resolve_type_node(decl.val_type) if decl.val_type else PrimitiveType("none")
+          self.symbol_table.define(decl.name, VariableSymbol(decl.name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
@@ -449,7 +457,8 @@ class TypeChecker:
     self.symbol_table.exit_scope()
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
-
+    if any(a.name == "extern" for a in node.annotations):
+      return
 
     # 2. Namespace validation: variable shares same namespace with functions/structs/traits in current scope level
     if self.symbol_table.lookup_current_scope(node.name):
@@ -893,8 +902,15 @@ class TypeChecker:
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")
 
+    if isinstance(receiver_type, TraitType):
+      method = receiver_type.methods.get(node.member)
+      if method:
+        return method
+      self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
+      return PrimitiveType("none")
+
     if not isinstance(receiver_type, StructType):
-      self.error("Member access receiver is not a struct.")
+      self.error("Member access receiver is not a struct or trait.")
       return PrimitiveType("none")
 
     # Special member __proto__

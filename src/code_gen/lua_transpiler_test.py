@@ -334,6 +334,68 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("(function(x)", lua_code)
     self.assertIn("return (x * 2)", lua_code)
 
+  def test_export_annotation_lua(self):
+    """Verifies that @export("target.path") transpiles to function target.path(...)."""
+    code = """
+    @export("love.update")
+    func update(dt: float) {
+      let step = dt;
+    }
+
+    @export
+    func global_callback() {
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("function love.update(dt)", lua_code)
+    self.assertIn("function global_callback()", lua_code)
+    self.assertNotIn("local function update", lua_code)
+
+  def test_extern_annotations_lua(self):
+    """Verifies that @extern var omits runtime initialization code."""
+    code = """
+    trait Graphics {
+      func setColor(r: float);
+    }
+
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+    """
+    lua_code = self._transpile(code)
+    self.assertNotIn("local love =", lua_code)
+
+  def test_transpile_file_write_error_lua(self):
+    """Verifies transpile_file handles Lua target write failure by exiting."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      sp_file = os.path.join(temp_dir, "test.sp")
+      with open(sp_file, "w", encoding="utf-8") as f:
+        f.write("let x: int = 1;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(sp_file, output_file="/invalid_dir_xyz/out.lua", target="lua")
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_trait_member_modifiers(self):
+    """Verifies parsing and building AST for const and static trait members."""
+    code = """
+    trait Printable {
+      static func create(): Printable;
+      const func display(): String;
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    self.assertEqual(ast.declarations[0].members[0].modifier, "static")
+    self.assertEqual(ast.declarations[0].members[1].modifier, "const")
+
   def test_lua_execution_if_available(self):
     """Executes transpiled Lua code using system Lua interpreter if present."""
     lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")

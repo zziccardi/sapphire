@@ -30,6 +30,7 @@ TOKEN_TYPES = [
     "keyword",      # 9
     "enum",         # 10
     "enumMember",   # 11
+    "decorator",    # 12
 ]
 
 TOKEN_MODIFIERS = [
@@ -264,7 +265,20 @@ class SemanticTokensTypeChecker(TypeChecker):
     if getattr(self, "current_enum", None):
       self.node_types[node] = self.current_enum
 
+  def visit_AnnotationNode(self, node) -> None:
+    at_line = getattr(node, "at_line", None)
+    at_col = getattr(node, "at_column", None)
+    if at_line is not None and at_col is not None:
+      self.add_token(at_line, at_col, 1, "decorator")
+    line = getattr(node, "line", None)
+    col = getattr(node, "column", None)
+    length = getattr(node, "length", None)
+    if line is not None and col is not None and length is not None:
+      self.add_token(line, col, length, "decorator")
+
   def visit_FuncDeclNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
     # Function declaration (only highlight if not a method; methods are handled by ImplMemberNode)
     is_method = self.current_struct is not None
     if not is_method:
@@ -314,6 +328,8 @@ class SemanticTokensTypeChecker(TypeChecker):
     # No parent visitor exists for parameters
 
   def visit_VarDeclNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
     mods = 1
     if not node.is_mutable:
       mods |= 4

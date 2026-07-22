@@ -262,6 +262,8 @@ class LuaTranspiler:
     self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
+    # Header definition for struct
+    self.known_structs.add(node.name)
     is_proto = node.is_prototype
     struct_name = node.name
     methods = self.struct_methods.get(struct_name, [])
@@ -369,9 +371,16 @@ class LuaTranspiler:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
-    self.newline()
+    export_ann = next((a for a in node.annotations if a.name == "export"), None)
     params = [p.name for p in node.parameters]
-    self.emit(f"local function {node.name}({', '.join(params)})")
+
+    self.newline()
+    if export_ann:
+      target_path = export_ann.arg if export_ann.arg else node.name
+      self.emit(f"function {target_path}({', '.join(params)})")
+    else:
+      self.emit(f"local function {node.name}({', '.join(params)})")
+
     self.indent()
     # Check default parameters
     for p in node.parameters:
@@ -408,6 +417,9 @@ class LuaTranspiler:
         self.emit(f"{arena_name}:destroy()")
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
+    if any(a.name == "extern" for a in node.annotations):
+      return
+
     is_arena = (
         isinstance(node.expr, CallNode)
         and isinstance(node.expr.callee, IdentifierNode)
@@ -577,8 +589,8 @@ class LuaTranspiler:
     # static calls
     if isinstance(node.callee, MemberAccessNode):
       receiver_name = getattr(node.callee.receiver, "name", None)
-      if receiver_name and receiver_name in self.known_structs:
-        # Static method call on Struct name: StructName.static_func(...)
+      if (receiver_name and receiver_name in self.known_structs) or isinstance(node.callee.receiver, MemberAccessNode):
+        # Static method or chained module call (e.g. StructName.func(...) or love.graphics.rectangle(...))
         self.visit(node.callee.receiver)
         self.emit(f".{node.callee.member}(")
       else:

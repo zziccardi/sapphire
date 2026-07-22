@@ -13,6 +13,10 @@ topLevelItem
     | statement
     ;
 
+annotation
+    : AT IDENTIFIER (LPAREN STRING_LIT RPAREN)?
+    ;
+
 declaration
     : structDeclaration
     | enumDeclaration
@@ -51,11 +55,11 @@ traitDeclaration
     ;
 
 traitMember
-    : FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
+    : (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
     ;
 
 functionDeclaration
-    : FUNC functionName LPAREN parameterList? RPAREN (COLON type)? block
+    : annotation* FUNC functionName LPAREN parameterList? RPAREN (COLON type)? block
     ;
 
 functionName
@@ -104,7 +108,7 @@ block
     ;
 
 variableDeclarationStatement
-    : (LET | VAR) IDENTIFIER (COLON type)? ASSIGN expression SEMICOLON
+    : annotation* (LET | VAR) IDENTIFIER (COLON type)? (ASSIGN expression)? SEMICOLON
     ;
 
 assignmentStatement
@@ -286,6 +290,7 @@ LBRACE : '{';
 RBRACE : '}';
 LBRACKET : '[';
 RBRACKET : ']';
+AT : '@';
 
 // Literals & Identifiers
 IDENTIFIER : [a-zA-Z_][a-zA-Z0-9_]*;

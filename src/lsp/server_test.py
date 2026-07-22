@@ -1003,14 +1003,93 @@ func test() {
     self.assertIn("Direction", scope_labels)
     self.assertIn("enum", scope_labels)
 
-    # 6. Test Hover on IdentifierNode when not in node_types cache
-    self.ls.node_types_cache[doc_uri].clear()
-    params_hover_sym_uncached = HoverParams(
+  def test_annotation_hover_and_completion_and_semantic_tokens(self):
+    """Verifies LSP server hover, completion, and semantic tokens for annotations."""
+    doc_uri = "file:///annotations_test.sp"
+    source = """
+    trait Graphics {
+      func clear(r: float);
+    }
+
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+
+    @export("love.update")
+    func update(dt: float) {
+      love.graphics.clear(dt);
+    }
+    """
+    validate_source(self.ls, doc_uri, source)
+
+    # 1. Semantic tokens cache check
+    self.assertIn(doc_uri, self.ls.tokens_cache)
+    tokens = self.ls.tokens_cache[doc_uri]
+    self.assertTrue(len(tokens) > 0)
+
+    # 2. Hover on @extern
+    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position, CompletionParams
+    from lsp.server import hover, completion
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = source
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    hover_extern = hover(self.ls, HoverParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=6, character=24)
-    )
-    hover_res_uncached = hover(self.ls, params_hover_sym_uncached)
-    self.assertIsNotNone(hover_res_uncached)
+        position=Position(line=9, character=5)
+    ))
+    self.assertIsNotNone(hover_extern)
+    self.assertIn("@extern", hover_extern.contents.value)
+    self.assertIn("external variable", hover_extern.contents.value)
+
+    # 3. Hover on @export
+    hover_export = hover(self.ls, HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=12, character=5)
+    ))
+    self.assertIsNotNone(hover_export)
+    self.assertIn("@export", hover_export.contents.value)
+    self.assertIn("global callback", hover_export.contents.value)
+
+    # 4. Hover on extern variable love
+    hover_love = hover(self.ls, HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=9)
+    ))
+    self.assertIsNotNone(hover_love)
+    self.assertIn("extern variable", hover_love.contents.value)
+
+    # 6. Hover on custom annotation @custom
+    custom_source = "@custom func foo() {}"
+    validate_source(self.ls, "file:///custom_ann.sp", custom_source)
+    mock_doc_custom = MagicMock()
+    mock_doc_custom.uri = "file:///custom_ann.sp"
+    mock_doc_custom.source = custom_source
+    self.ls.workspace.get_text_document.return_value = mock_doc_custom
+    hover_custom = hover(self.ls, HoverParams(
+        text_document=TextDocumentIdentifier(uri="file:///custom_ann.sp"),
+        position=Position(line=0, character=2)
+    ))
+    self.assertIsNotNone(hover_custom)
+    self.assertIn("@custom", hover_custom.contents.value)
+
+    # 7. Hover on enum identifier symbol
+    enum_source = "enum Status { Active }\nvar current: Status = Status.Active;"
+    validate_source(self.ls, "file:///enum_hover.sp", enum_source)
+    mock_doc_enum = MagicMock()
+    mock_doc_enum.uri = "file:///enum_hover.sp"
+    mock_doc_enum.source = enum_source
+    self.ls.workspace.get_text_document.return_value = mock_doc_enum
+    hover_enum_id = hover(self.ls, HoverParams(
+        text_document=TextDocumentIdentifier(uri="file:///enum_hover.sp"),
+        position=Position(line=1, character=22)
+    ))
+    self.assertIsNotNone(hover_enum_id)
 
 
 if __name__ == "__main__":

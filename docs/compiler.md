@@ -69,12 +69,17 @@ Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), ma
 ### 1. Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
 - **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, and `if let` unwrapping to Python `None` checks.
+- **Annotation Erasure**: Erases `@extern var` declarations and cleanly strips `@export` target strings so cross-backend compilation remains functional.
 
 ### 2. Lua 5.1 Target (`lua_transpiler.py`)
 - **Runtime Preamble**: Emits `Arena`, `_create_proto_object`, and `_clone_helper` using Lua's native `setmetatable` mechanism (`__index` fallback, `__proto`, `__shadow`).
 - **Array Indexing**: Maps Sapphire 0-based array indexing (`arr[i]`) to 1-based Lua table indexing (`arr[i + 1]`).
 - **Compound Assignment Expansion**: Expands compound assignment statements (`+=`, `-=`, `*=`, `/=`) into simple binary operation assignments (`x = x + y`).
 - **Optionals & Lambdas**: Translates optional unwrapping `if let` to safe Lua `nil` checks, and Sapphire lambdas to Lua anonymous functions `(function(...) ... end)`.
+- **Host Engine Interop (`@extern` & `@export`)**:
+  - `@extern var` declarations omit `local` initializations, leaving variable names bound to host global scope (e.g. `love`).
+  - `@export("path")` functions generate global Lua function definitions (e.g., `function love.update(dt) ... end`).
+  - Calls on host trait fields (e.g. `love.graphics.rectangle(...)`) transpile using dot notation (`.`) rather than colon (`:`) syntax.
 
 ### 3. High-Level compiler driver API (`transpile_file`)
 The high-level compilation driver function `transpile_file(input_file, output_file, target="python")` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full 5-stage compilation pipeline and dispatches AST code generation to either Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
