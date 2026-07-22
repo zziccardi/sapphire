@@ -24,26 +24,19 @@ enable the memory-safety features described in the spec.
 * **Static inheritance**: Structures can inherit layouts statically
   (`struct Character: Entity`) without runtime overhead or traditional OOP
   boilerplate.
-* **Prototypal delegation**: Create runtime objects by cloning existing
-  prototypes using the `clone` keyword. Prototypal delegation is opt-in and uses
-  the `proto` keyword (e.g. `proto Character`). Nested reference fields on
-  cloned objects support **Copy-on-Write (CoW)** to isolate mutations from the
-  shared prototype. All `proto` instances and their clones are automatically
-  managed in arenas (supporting both implicit default arenas and explicit
-  RAII-style arenas).
+* **Prototypal delegation**: Prototypal delegation is opt-in and uses
+  the `proto` keyword (e.g. `proto Character`). Runtime objects can be created
+  by cloning existing prototypes using the `clone` keyword.
+  * Nested reference fields on cloned objects support **copy-on-write (CoW)** to
+    isolate mutations from the shared prototype.
+  * All `proto` instances and their clones are automatically managed in arenas
+    (supporting both implicit default arenas and explicit RAII-style arenas).
 
 ### 2. Optional safety
 * Null-pointer errors are prevented at compile time.
 * Optionals are denoted by a `?` suffix (e.g., `Character?`).
-* Swift-style conditional unwrapping:
-  ```sapphire
-  if let active_target = target_player {
-    // active_target is unwrapped and guaranteed to be non-optional
-  } else {
-    // optional was none fallback branch
-  }
-  ```
-* Safe optional chaining (`let speed = target?.speed`).
+* Optionals can be chained safely (`let speed = target?.speed`).
+* Swift-style conditional unwrapping (`if let`) is supported.
 
 ### 3. Advanced parameter modes
 * Non-primitive types are passed by **constant reference** by default, avoiding
@@ -58,11 +51,24 @@ enable the memory-safety features described in the spec.
 * Bidirectional type inference resolves lambda parameters automatically based on
   expected types at assignment or call sites.
 
-### 5. Host engine & third-party interoperability
+### 5. Scope-bound reference safety
+* Enforces compile-time aliasing rules to prevent simultaneous mutable reference
+  borrows without needing lifetime annotations.
+
+### 6. Host engine & third-party interoperability
 * Native interoperation with host runtimes (such as **Love2D** in Lua 5.1 / LuaJIT environments).
 * `@extern("love") var love: LoveEngine;` binds host runtime global variables with 100% type safety.
 * `@export("love.update") func update(dt: float)` exposes functions directly as global engine callbacks (`function love.update(dt)`).
 * Combines Sapphire `trait`s and `struct`s to model external host APIs without runtime performance penalties.
+
+## CLI overview
+```bash
+# Run a Sapphire script (transpiling to Python by default):
+sapphire samples/overview.sp
+
+# Transpile to Lua 5.1 (without running):
+sapphire build samples/love2d_demo.sp -t lua -o main.lua
+```
 
 ## Repository structure
 
