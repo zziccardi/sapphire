@@ -923,8 +923,15 @@ class TypeChecker:
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")
 
+    if isinstance(receiver_type, TraitType):
+      method = receiver_type.methods.get(node.member)
+      if method:
+        return method
+      self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
+      return PrimitiveType("none")
+
     if not isinstance(receiver_type, StructType):
-      self.error("Member access receiver is not a struct.")
+      self.error("Member access receiver is not a struct or trait.")
       return PrimitiveType("none")
 
     # Special member __proto__

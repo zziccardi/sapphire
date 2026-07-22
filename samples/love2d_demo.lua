@@ -110,7 +110,36 @@ _clone_helper = function(obj, init_fn, arena)
 end
 
 
+local Image = {}
+Image.__index = Image
+function Image.init(kwargs, proto)
+  kwargs = kwargs or {}
+  local self
+  self = setmetatable({}, Image)
+  if proto == nil then
+  end
+  for k, v in pairs(kwargs) do
+    self[k] = v
+  end
+  return self
+end
 
+
+
+
+local LoveEngine = {}
+LoveEngine.__index = LoveEngine
+function LoveEngine.init(kwargs, proto)
+  kwargs = kwargs or {}
+  local self
+  self = setmetatable({}, LoveEngine)
+  if proto == nil then
+  end
+  for k, v in pairs(kwargs) do
+    self[k] = v
+  end
+  return self
+end
 
 
 
@@ -129,17 +158,17 @@ function Player.init(kwargs, proto)
 end
 
 function Player:update(dt)
-  if LoveKeyboard.isDown("right") then
+  if love.keyboard.isDown("right") then
     self.x = self.x + (self.speed * dt)
   end
-  if LoveKeyboard.isDown("left") then
+  if love.keyboard.isDown("left") then
     self.x = self.x - (self.speed * dt)
   end
 end
 
 function Player:draw()
-  LoveGraphics.setColor(0.2, 0.8, 0.4)
-  LoveGraphics.rectangle("fill", self.x, self.y, 40.0, 40.0)
+  love.graphics.setColor(0.2, 0.8, 0.4)
+  love.graphics.rectangle("fill", self.x, self.y, 40.0, 40.0)
 end
 
 
@@ -151,7 +180,7 @@ end
 
 
 function love.draw()
-  LoveGraphics.clear(0.1, 0.1, 0.1)
+  love.graphics.clear(0.1, 0.1, 0.1)
   player:draw()
 end
 

@@ -1,34 +1,40 @@
 /*
- * Sample Sapphire program demonstrating Love2D game-engine interoperation.
+ * Sample Sapphire program demonstrating Love2D (LÖVE) game engine interoperation.
  *
  * Demonstrates:
- * - `@extern struct` and `@extern trait` for type-safe external API
-     declarations
- * - `@export("love.update")` and `@export("love.draw")` for registering global
-     engine callbacks
- * - Object update and rendering logic targeting Love2D
+ * - Opaque resource handles (`struct Image;`)
+ * - Trait contracts for external API interfaces (`trait Graphics`, `trait Keyboard`)
+ * - Engine container struct (`struct LoveEngine`)
+ * - External host variable binding (`@extern("love") var love: LoveEngine;`)
+ * - Exported global callbacks (`@export("love.update")`, `@export("love.draw")`)
  */
 
-// 1. External Love2D API declarations
-@extern
-struct LoveGraphics;
+// 1. Opaque resource handle
+struct Image;
 
-@extern
-struct LoveKeyboard;
-
-@extern
-trait LoveGraphics {
-  static func setColor(r: float, g: float, b: float);
-  static func rectangle(mode: String, x: float, y: float, w: float, h: float);
-  static func clear(r: float, g: float, b: float);
+// 2. Trait contracts (interface method signatures without implementations)
+trait Graphics {
+  func setColor(r: float, g: float, b: float);
+  func rectangle(mode: String, x: float, y: float, w: float, h: float);
+  func clear(r: float, g: float, b: float);
+  func newImage(path: String): Image;
 }
 
-@extern
-trait LoveKeyboard {
-  static func isDown(key: String): bool;
+trait Keyboard {
+  func isDown(key: String): bool;
 }
 
-// 2. Sapphire game entity
+// 3. Engine container struct satisfying normal Sapphire rules
+struct LoveEngine {
+  var graphics: Graphics;
+  var keyboard: Keyboard;
+}
+
+// 4. Global external host variable binding
+@extern("love")
+var love: LoveEngine;
+
+// 5. Sapphire Game Entity
 struct Player {
   var x: float;
   var y: float;
@@ -37,31 +43,31 @@ struct Player {
 
 impl Player {
   func update(dt: float) {
-    if LoveKeyboard.isDown(key = "right") {
+    if love.keyboard.isDown(key = "right") {
       self.x += self.speed * dt;
     }
-    if LoveKeyboard.isDown(key = "left") {
+    if love.keyboard.isDown(key = "left") {
       self.x -= self.speed * dt;
     }
   }
 
   func draw() {
-    LoveGraphics.setColor(r = 0.2, g = 0.8, b = 0.4);
-    LoveGraphics.rectangle(mode = "fill", x = self.x, y = self.y, w = 40.0,
-                           h = 40.0);
+    love.graphics.setColor(r = 0.2, g = 0.8, b = 0.4);
+    love.graphics.rectangle(mode = "fill", x = self.x, y = self.y,
+                            w = 40.0, h = 40.0);
   }
 }
 
 var player = Player { x = 100.0, y = 100.0, speed = 200.0 };
 
-// 3. Exported Love2D callbacks
+// 6. Exported LÖVE callbacks
 @export("love.update")
-func game_update(dt: float) {
+func update(dt: float) {
   player.update(dt);
 }
 
 @export("love.draw")
-func game_draw() {
-  LoveGraphics.clear(r = 0.1, g = 0.1, b = 0.1);
+func draw() {
+  love.graphics.clear(r = 0.1, g = 0.1, b = 0.1);
   player.draw();
 }
