@@ -234,8 +234,6 @@ class PythonTranspiler:
     self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
-    if any(a.name == "extern" for a in node.annotations):
-      return
     is_proto = node.is_prototype
     parent_class = (
         node.parent_name
@@ -338,11 +336,7 @@ class PythonTranspiler:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
-    if node.body is None:
-      return
     self.newline()
-    if any(a.name == "export" for a in node.annotations):
-      pass
     params = [self._format_param(p) for p in node.parameters]
     self.emit(f"def {node.name}({', '.join(params)}):")
     self.indent()

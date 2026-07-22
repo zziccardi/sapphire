@@ -157,46 +157,24 @@ class TypeChecker:
         self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
 
       elif isinstance(decl, TraitDeclNode):
-        is_extern = any(a.name == "extern" for a in decl.annotations)
-        if is_extern:
-          struct_type = self.symbol_table.lookup_type(decl.name)
-          if not struct_type:
-            struct_type = StructType(decl.name)
-            self.symbol_table.define_type(decl.name, struct_type)
-            self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
-          for member in decl.members:
-            p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
-            ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
-            p_mutabilities = [p.is_mutable for p in member.parameters]
-            fn_type = FunctionType(
-                p_types,
-                ret_t,
-                p_mutabilities,
-                param_names=[p.name for p in member.parameters],
-            )
-            is_static = (member.modifier == "static")
-            modifier = "static" if is_static else None
-            if isinstance(struct_type, StructType):
-              struct_type.methods[member.name] = StructMethod(member.name, fn_type, modifier=modifier)
-        else:
-          if self.symbol_table.lookup_current_scope(decl.name):
-            self.error(f"Redefinition of identifier '{decl.name}'.")
-            continue
-          trait_type = TraitType(decl.name)
-          # Populate trait method signatures
-          for member in decl.members:
-            p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
-            ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
-            p_mutabilities = [p.is_mutable for p in member.parameters]
-            trait_type.methods[member.name] = FunctionType(
-                p_types,
-                ret_t,
-                p_mutabilities,
-                param_names=[p.name for p in member.parameters],
-            )
-
-          self.symbol_table.define_type(decl.name, trait_type)
-          self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
+        if self.symbol_table.lookup_current_scope(decl.name):
+          self.error(f"Redefinition of identifier '{decl.name}'.")
+          continue
+        trait_type = TraitType(decl.name)
+        # Populate trait method signatures
+        for member in decl.members:
+          p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
+          ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
+          p_mutabilities = [p.is_mutable for p in member.parameters]
+          fn_type = FunctionType(
+              p_types,
+              ret_t,
+              p_mutabilities,
+              param_names=[p.name for p in member.parameters],
+          )
+          trait_type.methods[member.name] = fn_type
+        self.symbol_table.define_type(decl.name, trait_type)
+        self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
 
       elif isinstance(decl, FuncDeclNode):
         if self.symbol_table.lookup_current_scope(decl.name):
@@ -218,6 +196,14 @@ class TypeChecker:
             param_names=[p.name for p in decl.parameters],
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature))
+
+      elif isinstance(decl, VarDeclNode):
+        if any(a.name == "extern" for a in decl.annotations):
+          if self.symbol_table.lookup_current_scope(decl.name):
+            self.error(f"Redefinition of identifier '{decl.name}'.")
+            continue
+          var_type = self._resolve_type_node(decl.val_type) if decl.val_type else PrimitiveType("none")
+          self.symbol_table.define(decl.name, VariableSymbol(decl.name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
@@ -444,8 +430,6 @@ class TypeChecker:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
-    if node.body is None:
-      return
     # Register parameters and check body
     self.symbol_table.enter_scope()
     old_function_scope = self.current_function_scope
@@ -473,12 +457,7 @@ class TypeChecker:
     self.symbol_table.exit_scope()
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
-    is_extern = any(a.name == "extern" for a in node.annotations)
-    if is_extern:
-      if not self.symbol_table.lookup_current_scope(node.name):
-        var_type = self._resolve_type_node(node.val_type) if node.val_type else PrimitiveType("none")
-        sym = VariableSymbol(node.name, var_type, node.is_mutable)
-        self.symbol_table.define(node.name, sym)
+    if any(a.name == "extern" for a in node.annotations):
       return
 
     # 2. Namespace validation: variable shares same namespace with functions/structs/traits in current scope level

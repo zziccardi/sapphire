@@ -262,8 +262,8 @@ class LuaTranspiler:
     self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
-    if any(a.name == "extern" for a in node.annotations):
-      return
+    # Header definition for struct
+    self.known_structs.add(node.name)
     is_proto = node.is_prototype
     struct_name = node.name
     methods = self.struct_methods.get(struct_name, [])
@@ -371,9 +371,6 @@ class LuaTranspiler:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
-    if node.body is None:
-      return
-
     export_ann = next((a for a in node.annotations if a.name == "export"), None)
     params = [p.name for p in node.parameters]
 

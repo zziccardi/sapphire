@@ -109,12 +109,11 @@ class AnnotationNode(ASTNode):
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
-  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False, annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False):
     self.name = name
     self.parent_name = parent_name
     self.fields = fields
     self.is_prototype = is_prototype
-    self.annotations = annotations or []
 
 
 class EnumMemberNode(ASTNode):
@@ -128,10 +127,9 @@ class EnumMemberNode(ASTNode):
 class EnumDeclNode(DeclNode):
   """Represents an enum declaration."""
 
-  def __init__(self, name: str, members: List[EnumMemberNode], annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, name: str, members: List[EnumMemberNode]):
     self.name = name
     self.members = members
-    self.annotations = annotations or []
 
 
 class ParameterNode(ASTNode):
@@ -158,40 +156,36 @@ class FuncDeclNode(DeclNode):
 class ImplMemberNode(ASTNode):
   """Represents a member inside an impl block (e.g. static/const/mutable methods)."""
 
-  def __init__(self, modifier: Optional[str], func_decl: FuncDeclNode, annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, modifier: Optional[str], func_decl: FuncDeclNode):
     self.modifier = modifier  # 'static', 'const', or None
     self.func_decl = func_decl
-    self.annotations = annotations or []
 
 
 class ImplBlockNode(DeclNode):
   """Represents a Rust-style implementation block."""
 
-  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode], annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode]):
     self.struct_name = struct_name
     self.trait_name = trait_name
     self.members = members
-    self.annotations = annotations or []
 
 
 class TraitMemberNode(ASTNode):
   """Represents a method signature inside a trait declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], modifier: Optional[str] = None, annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], modifier: Optional[str] = None):
     self.name = name
     self.parameters = parameters
     self.return_type = return_type
     self.modifier = modifier
-    self.annotations = annotations or []
 
 
 class TraitDeclNode(DeclNode):
   """Represents a trait declaration."""
 
-  def __init__(self, name: str, members: List[TraitMemberNode], annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, name: str, members: List[TraitMemberNode]):
     self.name = name
     self.members = members
-    self.annotations = annotations or []
 
 
 # ==========================================

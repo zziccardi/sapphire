@@ -568,16 +568,16 @@ class TestPythonTranspiler(unittest.TestCase):
   def test_export_and_extern_annotations_python(self):
     """Verifies Python transpiler safely handles @export and erases @extern."""
     code = """
-    @extern
-    var love: int;
-
-    @extern
-    struct LoveGraphics;
-
-    @extern
-    trait LoveGraphics {
-      static func rectangle(mode: String, x: float, y: float);
+    trait Graphics {
+      func setColor(r: float);
     }
+
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
 
     @export("love.update")
     func update(dt: float) {
@@ -587,7 +587,6 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     self.assertIn("def update(dt):", py_code)
     self.assertNotIn("love =", py_code)
-    self.assertNotIn("class LoveGraphics", py_code)
 
 
 if __name__ == "__main__":

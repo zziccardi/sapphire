@@ -27,7 +27,7 @@ declaration
     ;
 
 enumDeclaration
-    : annotation* ENUM IDENTIFIER LBRACE (enumMember (COMMA enumMember)* COMMA?)? RBRACE
+    : ENUM IDENTIFIER LBRACE (enumMember (COMMA enumMember)* COMMA?)? RBRACE
     ;
 
 enumMember
@@ -35,27 +35,27 @@ enumMember
     ;
 
 structDeclaration
-    : annotation* (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? (LBRACE structField* RBRACE | SEMICOLON)
+    : (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
     ;
 
 structField
-    : annotation* (LET | VAR) IDENTIFIER COLON type (ASSIGN expression)? SEMICOLON
+    : (LET | VAR) IDENTIFIER COLON type (ASSIGN expression)? SEMICOLON
     ;
 
 implBlock
-    : annotation* IMPL (traitName=IDENTIFIER FOR)? structName=IDENTIFIER LBRACE implMember* RBRACE
+    : IMPL (traitName=IDENTIFIER FOR)? structName=IDENTIFIER LBRACE implMember* RBRACE
     ;
 
 implMember
-    : annotation* (STATIC | CONST)? functionDeclaration
+    : (STATIC | CONST)? functionDeclaration
     ;
 
 traitDeclaration
-    : annotation* TRAIT IDENTIFIER LBRACE traitMember* RBRACE
+    : TRAIT IDENTIFIER LBRACE traitMember* RBRACE
     ;
 
 traitMember
-    : annotation* (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
+    : (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
     ;
 
 functionDeclaration

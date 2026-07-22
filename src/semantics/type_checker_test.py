@@ -1368,38 +1368,77 @@ class TestTypeChecker(unittest.TestCase):
   def test_top_level_script_statements(self):
     """Verifies that top-level script statements pass semantic analysis cleanly."""
   def test_extern_and_export_type_checking(self):
-    """Verifies that @extern trait signatures permit type-safe calls and reject invalid arguments."""
+    """Verifies that @extern var and trait signatures permit type-safe calls and reject invalid arguments."""
     code = """
-    @extern
-    struct LoveGraphics;
-
-    @extern
-    trait LoveGraphics {
-      static func rectangle(mode: String, x: float, y: float, w: float, h: float);
+    trait Graphics {
+      func rectangle(mode: String, x: float, y: float, w: float, h: float);
     }
 
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+
     func main() {
-      LoveGraphics.rectangle(mode = "fill", x = 10.0, y = 20.0, w = 100.0, h = 50.0);
+      love.graphics.rectangle(mode = "fill", x = 10.0, y = 20.0, w = 100.0, h = 50.0);
     }
     """
     self._check(code)
 
     bad_code = """
-    @extern
-    struct LoveGraphics;
-
-    @extern
-    trait LoveGraphics {
-      static func rectangle(mode: String, x: float, y: float, w: float, h: float);
+    trait Graphics {
+      func rectangle(mode: String, x: float, y: float, w: float, h: float);
     }
 
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+
     func main() {
-      LoveGraphics.rectangle(mode = 123, x = 10.0, y = 20.0, w = 100.0, h = 50.0);
+      love.graphics.rectangle(mode = 123, x = 10.0, y = 20.0, w = 100.0, h = 50.0);
     }
     """
     with self.assertRaises(SemanticError) as context:
       self._check(bad_code)
     self.assertIn("Argument type mismatch at position 1. Expected 'string', got 'int'.", str(context.exception))
+
+    invalid_member_code = """
+    trait Graphics {
+      func rectangle(mode: String);
+    }
+
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+
+    func main() {
+      love.graphics.non_existent();
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(invalid_member_code)
+    self.assertIn("Trait 'Graphics' has no member 'non_existent'.", str(context.exception))
+
+  def test_extern_var_redefinition(self):
+    """Verifies redefinition error for duplicate @extern var identifiers."""
+    code = """
+    @extern
+    var love: int;
+
+    @extern
+    var love: float;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Redefinition of identifier 'love'.", str(context.exception))
 
 
 if __name__ == "__main__":
