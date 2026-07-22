@@ -281,7 +281,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
       elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
         node_type = ls.symbol_table_cache[uri].lookup_type(node.trait_name)
 
-  if not node_type:
+  if not node_type and type(node).__name__ != "AnnotationNode":
     return None
 
   try:
@@ -390,11 +390,25 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     category = "method"
     node_name = node.name
   elif isinstance(node, VarDeclNode):
-    category = "variable"
+    is_extern = any(a.name == "extern" for a in getattr(node, "annotations", []))
+    category = "extern variable" if is_extern else "variable"
     node_name = node.name
   elif isinstance(node, FuncDeclNode):
-    category = "function"
+    is_export = any(a.name == "export" for a in getattr(node, "annotations", []))
+    category = "exported function" if is_export else "function"
     node_name = node.name
+  elif type(node).__name__ == "AnnotationNode":
+    category = "annotation"
+    ann_arg = getattr(node, "arg", None)
+    ann_name = getattr(node, "name", "")
+    node_name = f"@{ann_name}" + (f'("{ann_arg}")' if ann_arg else "")
+    if ann_name == "extern":
+      markdown_text = f"**({category})** `{node_name}`\n\nDeclares an external variable provided by the host runtime environment."
+    elif ann_name == "export":
+      markdown_text = f"**({category})** `{node_name}`\n\nExposes a function as a global callback for the host runtime environment."
+    else:
+      markdown_text = f"**({category})** `{node_name}`"
+    return Hover(contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text))
   elif isinstance(node, IfNode) and node.is_if_let:
     category = "variable"
     node_name = node.let_name
@@ -497,7 +511,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
 
 TRIGGER_CHARACTERS = [
-    ".", ":",
+    ".", ":", "@",
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
     "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
@@ -613,7 +627,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
 
       scope = scope.parent
 
-  # 3. Sapphire Keywords
+  # 3. Sapphire Keywords & Annotations
   KEYWORDS = [
       "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else",
       "for", "in", "while", "return", "true", "false", "none", "const", "static",
@@ -621,6 +635,9 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
   ]
   for kw in KEYWORDS:
     add_item(kw, 14, f"(keyword) {kw}")
+
+  add_item("@extern", 15, "(annotation) @extern")
+  add_item("@export", 15, "(annotation) @export")
 
   # 4. Document Text Word Extraction Fallback
   try:

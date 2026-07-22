@@ -49,7 +49,23 @@ class ASTBuilder(SapphireVisitor):
   def visitAnnotation(self, ctx: SapphireParser.AnnotationContext) -> AnnotationNode:
     name = ctx.IDENTIFIER().getText()
     arg = ctx.STRING_LIT().getText()[1:-1] if ctx.STRING_LIT() else None
-    return AnnotationNode(name, arg)
+    node = AnnotationNode(name, arg)
+    token = ctx.IDENTIFIER().getSymbol()
+    at_token = ctx.AT().getSymbol()
+    node.at_line = at_token.line
+    node.at_column = at_token.column
+    node.line = token.line
+    node.column = token.column
+    node.length = len(token.text)
+    node.start_line = at_token.line
+    node.start_column = at_token.column
+    node.end_line = token.line
+    node.end_column = token.column + len(token.text)
+    if ctx.RPAREN():
+      rparen = ctx.RPAREN().getSymbol()
+      node.end_line = rparen.line
+      node.end_column = rparen.column + 1
+    return node
 
   def visitStructDeclaration(self, ctx: SapphireParser.StructDeclarationContext) -> StructDeclNode:
     name = ctx.IDENTIFIER(0).getText()
