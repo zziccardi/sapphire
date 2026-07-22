@@ -177,7 +177,7 @@ indicates that `self` cannot be modified.
 ```
 struct Weapon {
   var damage: int;
-  var durability: int;
+  var durability: int = 100;
   let name: String;
 }
 
@@ -214,7 +214,11 @@ let sword = Weapon {
 };
 ```
 
-The compiler statically verifies that all non-optional fields of the struct are initialized and that their types are compatible.
+Fields declared with default initialization expressions (e.g.
+`var durability: int = 100;`) or optional types (`T?`) may be omitted during
+struct initialization. The compiler statically verifies that all remaining
+required (non-optional) fields are initialized and that their assigned types are
+compatible.
 
 The following code will not compile because `sword` is a constant:
 
@@ -437,7 +441,16 @@ All `proto` instances and their clones are automatically allocated on a managed 
 1. **Implicit default arena**: If no arena is explicitly specified, `proto` instances are allocated in an implicit, thread-local or global reference-counted arena.
 2. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
 3. **Explicit Arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix (e.g., `Point { x = 10 } in my_arena`).
-4. **Lexical scope destruction (RAII)**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. The compiler enforces that references to arena-allocated objects do not escape the scope of the `Arena` variable.
+4. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena`
+instances have lexical lifecycles. When the `Arena` variable goes out of scope,
+the runtime automatically tears down the arena and deallocates all objects (both
+`struct` and `proto` references) allocated within it. To prevent dangling
+references, the compiler statically enforces scope-bound escape rules:
+   * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an
+     outer scope cannot be assigned a reference to an object allocated in a
+     nested/inner arena.
+   * **Function-return escape**: A function cannot return a reference to an
+     object allocated in an arena local to the function scope.
 
 ## 11. Core operators, expressions, & control flow
 
