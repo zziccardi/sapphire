@@ -1,16 +1,18 @@
 /*
- * Sample Sapphire program demonstrating Love2D (LÖVE) game engine interoperation.
+ * Sample Sapphire program demonstrating Love2D game-engine interoperation.
  *
  * Demonstrates:
- * - Opaque resource handles (`struct Image;`)
- * - Trait contracts for external API interfaces (`trait Graphics`, `trait Keyboard`)
+ * - Opaque resource handles (`struct Image {}`)
+ * - Trait contracts for external API interfaces (`trait Graphics`,
+     `trait Keyboard`)
  * - Engine container struct (`struct LoveEngine`)
  * - External host variable binding (`@extern("love") var love: LoveEngine;`)
- * - Exported global callbacks (`@export("love.update")`, `@export("love.draw")`)
+ * - Exported global callbacks (`@export("love.update")`,
+     `@export("love.draw")`)
  */
 
 // 1. Opaque resource handle
-struct Image;
+struct Image {}
 
 // 2. Trait contracts (interface method signatures without implementations)
 trait Graphics {
@@ -34,7 +36,7 @@ struct LoveEngine {
 @extern("love")
 var love: LoveEngine;
 
-// 5. Sapphire Game Entity
+// 5. Sapphire game entity
 struct Player {
   var x: float;
   var y: float;
@@ -60,7 +62,7 @@ impl Player {
 
 var player = Player { x = 100.0, y = 100.0, speed = 200.0 };
 
-// 6. Exported LÖVE callbacks
+// 6. Exported Love2D callbacks
 @export("love.update")
 func update(dt: float) {
   player.update(dt);
