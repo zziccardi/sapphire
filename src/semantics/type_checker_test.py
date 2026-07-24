@@ -1556,6 +1556,24 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code)
 
+  def test_trait_self_parameter_type_checking(self):
+    """Verifies argument checking for trait methods with explicit self parameters."""
+    code = """
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+      func getWidth(var self): float;
+    }
+
+    @extern
+    var img: ImageHandle;
+
+    func main() {
+      img.draw(10.0, 20.0);
+      let w = img.getWidth();
+    }
+    """
+    self._check(code)
+
 
 if __name__ == "__main__":
   unittest.main()

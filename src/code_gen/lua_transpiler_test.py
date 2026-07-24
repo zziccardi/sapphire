@@ -476,6 +476,35 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('Line = "line"', out)
     self.assertIn('Default = "Default"', out)
 
+  def test_lua_resource_handle_method_transpilation(self):
+    """Verifies Lua transpilation for resource handles with colon vs dot calls."""
+    code = """
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+    }
+    trait Graphics {
+      func rectangle(mode: String, x: float, y: float, w: float, h: float);
+    }
+
+    struct Love {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: Love;
+
+    @extern("hero")
+    var hero_img: ImageHandle;
+
+    func main() {
+      love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0);
+      hero_img.draw(10.0, 20.0);
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0)', output)
+    self.assertIn('hero_img:draw(10.0, 20.0)', output)
+
 
 if __name__ == "__main__":
   unittest.main()

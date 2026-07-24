@@ -169,14 +169,22 @@ class TypeChecker:
         trait_type = TraitType(decl.name)
         # Populate trait method signatures
         for member in decl.members:
-          p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
+          p_types = []
+          for p in member.parameters:
+            if p.name == "self" and p.param_type is None:
+              p_types.append(trait_type)
+            else:
+              p_types.append(self._resolve_type_node(p.param_type))
           ret_t = self._resolve_return_types(member)
           p_mutabilities = [p.is_mutable for p in member.parameters]
+          param_names = [p.name for p in member.parameters]
+          has_self = bool(param_names) and param_names[0] == "self"
           fn_type = FunctionType(
               p_types,
               ret_t,
               p_mutabilities,
-              param_names=[p.name for p in member.parameters],
+              param_names=param_names,
+              has_self=has_self,
           )
           trait_type.methods[member.name] = fn_type
         self.symbol_table.define_type(decl.name, trait_type)
@@ -878,7 +886,7 @@ class TypeChecker:
         self.error("Target is not callable.")
         return PrimitiveType("none")
       signature = callee_type
-      self._check_arguments(node.arguments, signature)
+      self._check_arguments(node.arguments, signature, callee_node=node.callee)
 
     # Perform borrow checking / aliasing rules
     if signature:
@@ -888,27 +896,17 @@ class TypeChecker:
       return callee_type
     return signature.return_type
 
-  def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False) -> None:
+  def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False, callee_node: Optional[ASTNode] = None) -> None:
     """Helper to match argument lists against signatures (including parameter modes)."""
-    # Map arguments (positional vs named)
-    mapped_args: Dict[int, ArgumentNode] = {}
-    named_map: Dict[str, int] = {}
+    expected_param_types = signature.param_types
+    if getattr(signature, "has_self", False) and isinstance(callee_node, MemberAccessNode):
+      expected_param_types = signature.param_types[1:]
 
-    # Normally we need parameter names to resolve named parameters. But wait, how do we know the param names?
-    # For now, let's assume we map named arguments by resolving their names if we have the signature context.
-    # To properly support named parameters, we'd need to store the parameter names in the FunctionType or StructMethod.
-    # Let's add param names to FunctionType:
-    # Wait, we can keep named parameters matching very simple.
-    # If arguments have names, let's verify that the names exist on the parameters of the constructor / function.
-    # Let's see if we can do this simply by comparing lengths and types positional-first.
-    # To implement robust named parameter matching, we should look up the function declaration or constructor to match names.
-    # Let's inspect function parameter names.
-    # If the callee is resolved, we can match argument types. For now, let's check positional type compatibility:
     for idx, arg in enumerate(arguments):
       # Pass expected parameter type for lambda type inference
       old_expected = self.expected_type
-      if idx < len(signature.param_types):
-        self.expected_type = signature.param_types[idx]
+      if idx < len(expected_param_types):
+        self.expected_type = expected_param_types[idx]
       else:
         self.expected_type = None
 
@@ -916,8 +914,8 @@ class TypeChecker:
       self.expected_type = old_expected
 
       # Check positional constraints (since this is basic subset)
-      if idx < len(signature.param_types):
-        param_type = signature.param_types[idx]
+      if idx < len(expected_param_types):
+        param_type = expected_param_types[idx]
         if not arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
 

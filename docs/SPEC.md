@@ -357,11 +357,29 @@ This provides the ergonomic benefits of traditional inheritance while giving the
 To support data-oriented design and decouple behaviors from layout, Sapphire supports two primary alternatives:
 
 ##### 1. Traits (compile-time monomorphization)
-Traits define behavioral contracts (methods) without prescribing any physical memory layout. They are resolved entirely at compile time through monomorphization, ensuring zero runtime overhead.
+Traits define behavioral contracts without prescribing physical memory layout.
+They are resolved entirely at compile time through monomorphization, ensuring
+zero runtime overhead.
+
+* **Explicit `self` for instance methods**: Trait method signatures can specify
+  an explicit first `self` parameter (which may be `var self` for mutable
+  access). The presence of `self` designates the method as an
+  **instance method**. This is mostly useful for interoperability with external
+  environments (e.g. transpiled using Lua colon syntax `:draw(x, y)`).
+* **Module / Static Functions**: Omitting `self` from a trait method signature
+  designates it as a **module or static function** (e.g. transpiled using Lua
+  dot syntax `.rectangle(...)`).
 
 ```
-trait Actor {
-  func update();
+// Resource-handle trait (instance methods)
+trait Image {
+  func draw(self, x: float, y: float);
+  func getWidth(self): float;
+}
+
+// Module trait (static functions)
+trait Graphics {
+  func rectangle(mode: String, x: float, y: float, w: float, h: float);
 }
 
 struct Cat {

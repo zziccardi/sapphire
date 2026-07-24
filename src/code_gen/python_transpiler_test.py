@@ -637,6 +637,22 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn('Line = "line"', py_code)
     self.assertIn('Default = "Default"', py_code)
 
+  def test_python_resource_handle_method_transpilation(self):
+    """Verifies Python transpilation for resource handles."""
+    code = """
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+    }
+    @extern("hero")
+    var hero_img: ImageHandle;
+
+    func main() {
+      hero_img.draw(10.0, 20.0);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("hero_img.draw(10.0, 20.0)", py_code)
+
 
 if __name__ == "__main__":
   unittest.main()

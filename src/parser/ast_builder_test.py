@@ -294,6 +294,22 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(enum_decl.members[1].value, "line")
     self.assertIsNone(enum_decl.members[2].value)
 
+  def test_trait_self_parameter_parsing(self):
+    """Verifies AST construction for trait declarations with explicit self parameter."""
+    ast = self._get_ast("""
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+      func getWidth(var self): float;
+    }
+    """)
+    trait_decl = ast.declarations[0]
+    self.assertEqual(trait_decl.name, "ImageHandle")
+    self.assertEqual(len(trait_decl.members), 2)
+    self.assertEqual(trait_decl.members[0].parameters[0].name, "self")
+    self.assertFalse(trait_decl.members[0].parameters[0].is_mutable)
+    self.assertEqual(trait_decl.members[1].parameters[0].name, "self")
+    self.assertTrue(trait_decl.members[1].parameters[0].is_mutable)
+
 
 if __name__ == "__main__":
   unittest.main()

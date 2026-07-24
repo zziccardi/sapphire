@@ -76,7 +76,7 @@ parameterList
     ;
 
 parameter
-    : VAR? IDENTIFIER COLON type (ASSIGN expression)?
+    : (VAR | CONST)? (SELF | IDENTIFIER) (COLON type)? (ASSIGN expression)?
     ;
 
 type

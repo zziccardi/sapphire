@@ -199,12 +199,17 @@ class ASTBuilder(SapphireVisitor):
 
   def visitParameter(self, ctx: SapphireParser.ParameterContext) -> ParameterNode:
     is_mutable = ctx.VAR() is not None
-    name = ctx.IDENTIFIER().getText()
-    param_type = self.visit(ctx.type_())
+    if ctx.SELF():
+      name = "self"
+      name_token = ctx.SELF().getSymbol()
+    else:
+      name = ctx.IDENTIFIER().getText()
+      name_token = ctx.IDENTIFIER().getSymbol()
+
+    param_type = self.visit(ctx.type_()) if ctx.type_() else None
     default_expr = self.visit(ctx.expression()) if ctx.expression() else None
     node = ParameterNode(is_mutable, name, param_type, default_expr)
     # Positioning for Language Server:
-    name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
     node.name_column = name_token.column
     node.name_length = len(name_token.text)

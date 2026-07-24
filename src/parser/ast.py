@@ -145,7 +145,7 @@ class EnumDeclNode(DeclNode):
 class ParameterNode(ASTNode):
   """Represents a parameter in a function signature."""
 
-  def __init__(self, is_mutable: bool, name: str, param_type: TypeNode, default_expr: Optional[ASTNode] = None):
+  def __init__(self, is_mutable: bool, name: str, param_type: Optional[TypeNode] = None, default_expr: Optional[ASTNode] = None):
     self.is_mutable = is_mutable
     self.name = name
     self.param_type = param_type
