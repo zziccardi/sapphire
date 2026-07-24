@@ -70,20 +70,52 @@ class OptionalType(Type):
     return f"{self.base_type}?"
 
 
+class MultiReturnType(Type):
+  """Represents a multi-return type tuple (e.g. (float, float))."""
+
+  def __init__(self, types: List[Type]):
+    self.types = types
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, MultiReturnType):
+      return False
+    return self.types == other.types
+
+  def __repr__(self) -> str:
+    return f"({', '.join(str(t) for t in self.types)})"
+
+
 class FunctionType(Type):
-  """Represents a function type signature (e.g., '(int, int) -> float')."""
+  """Represents a function type signature (e.g., '(int, int) -> float' or '(int, int) -> (float, float)')."""
 
   def __init__(
       self,
       param_types: List[Type],
-      return_type: Type,
+      return_type: Any,
       param_mutabilities: Optional[List[bool]] = None,
       param_names: Optional[List[str]] = None,
   ):
     self.param_types = param_types
-    self.return_type = return_type
+    if isinstance(return_type, list):
+      if len(return_type) == 0:
+        self.return_type = PrimitiveType("none")
+      elif len(return_type) == 1:
+        self.return_type = return_type[0]
+      else:
+        self.return_type = MultiReturnType(return_type)
+    else:
+      self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
+
+  @property
+  def return_types(self) -> List[Type]:
+    if isinstance(self.return_type, MultiReturnType):
+      return self.return_type.types
+    elif isinstance(self.return_type, PrimitiveType) and self.return_type.name == "none":
+      return []
+    else:
+      return [self.return_type]
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, FunctionType):

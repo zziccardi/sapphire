@@ -6,7 +6,7 @@
  * - Trait contracts for external API interfaces (`trait Graphics`,
      `trait Keyboard`)
  * - Engine container struct (`struct LoveEngine`)
- * - External host variable binding (`@extern("love") var love: LoveEngine;`)
+ * - External host variable binding (`@extern var love: LoveEngine;`)
  * - Exported global callbacks (`@export("love.update")`,
      `@export("love.draw")`)
  */
@@ -33,7 +33,7 @@ struct LoveEngine {
 }
 
 // 4. Global external host variable binding
-@extern("love")
+@extern
 var love: LoveEngine;
 
 // 5. Sapphire game entity

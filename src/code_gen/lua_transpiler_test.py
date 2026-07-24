@@ -429,5 +429,23 @@ class TestLuaTranspiler(unittest.TestCase):
         os.remove(lua_path)
 
 
+  def test_lua_multi_return_transpilation(self):
+    """Verifies Lua transpilation for multi-return functions, declarations, and assignments."""
+    code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+    let x, y = get_pos();
+    var a, b = 1.0, 2.0;
+    a, b = get_pos();
+    """
+    output = self._transpile(code)
+    self.assertIn("local function get_pos()", output)
+    self.assertIn("return 10.0, 20.0", output)
+    self.assertIn("local x, y = get_pos()", output)
+    self.assertIn("local a, b = 1.0, 2.0", output)
+    self.assertIn("a, b = get_pos()", output)
+
+
 if __name__ == "__main__":
   unittest.main()

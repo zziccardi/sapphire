@@ -226,6 +226,42 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(enum2.members[1].name, "NotFound")
     self.assertEqual(enum2.members[1].value, 404)
 
+  def test_multi_return_and_bindings(self):
+    """Verifies AST construction for multi-return functions and multi-variable declarations/assignments."""
+    ast = self._get_ast("""
+    func getPos(): float, float {
+      return 10.0, 20.0;
+    }
+    let x, y = getPos();
+    var a: float, b: float = 1.0, 2.0;
+    a, b = getPos();
+    """)
+    self.assertEqual(len(ast.declarations), 4)
+
+    # Multi-return function
+    fn = ast.declarations[0]
+    self.assertEqual(fn.name, "getPos")
+    self.assertEqual(len(fn.return_types), 2)
+    self.assertEqual(fn.return_types[0].name, "float")
+    self.assertEqual(fn.return_types[1].name, "float")
+    ret_stmt = fn.body.statements[0]
+    self.assertEqual(len(ret_stmt.expressions), 2)
+
+    # Multi-variable declaration unboxing function call
+    var_decl1 = ast.declarations[1]
+    self.assertEqual(var_decl1.names, ["x", "y"])
+    self.assertEqual(len(var_decl1.exprs), 1)
+
+    # Multi-variable declaration with literal list
+    var_decl2 = ast.declarations[2]
+    self.assertEqual(var_decl2.names, ["a", "b"])
+    self.assertEqual(len(var_decl2.exprs), 2)
+
+    # Multi-variable assignment
+    assign_stmt = ast.declarations[3]
+    self.assertEqual(len(assign_stmt.targets), 2)
+    self.assertEqual(len(assign_stmt.exprs), 1)
+
 
 if __name__ == "__main__":
   unittest.main()

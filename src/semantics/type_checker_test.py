@@ -1440,6 +1440,53 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Redefinition of identifier 'love'.", str(context.exception))
 
+  def test_multi_return_and_bindings_type_checking(self):
+    """Verifies semantic type checking for multi-return functions, unpacking, and assignments."""
+    valid_code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+
+    func main() {
+      let x, y = get_pos();
+      var a: float, b: float = 1.0, 2.0;
+      a, b = get_pos();
+      a, b = 3.0, 4.0;
+    }
+    """
+    self._check(valid_code)
+
+    # Quantity mismatch on return
+    bad_return_count = """
+    func get_pos(): float, float {
+      return 10.0;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_return_count)
+    self.assertIn("Function expected 2 return value(s), but return statement provided 1 value(s).", str(context.exception))
+
+    # Type mismatch on return
+    bad_return_type = """
+    func get_pos(): float, float {
+      return 10.0, "invalid";
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_return_type)
+    self.assertIn("Cannot return value of type 'string' for return value #2", str(context.exception))
+
+    # Quantity mismatch on unpack
+    bad_unpack = """
+    func get_pos(): float, float { return 1.0, 2.0; }
+    func main() {
+      let x, y, z = get_pos();
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_unpack)
+    self.assertIn("Cannot unpack 2 value(s) into 3 variable(s).", str(context.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

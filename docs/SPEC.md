@@ -45,6 +45,7 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **`var`**: Declares a mutable variable.
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
 * **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
+* **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
 
 ```
 let speed: int = 60;
@@ -52,6 +53,8 @@ let name = "Hero";    // Type inferred as String
 
 var health = 100;
 health = 90;          // Valid mutation
+
+let x, y = 10.0, 20.0;  // Multi-variable declaration
 ```
 
 ## 3. Optionals (null safety)
@@ -72,7 +75,7 @@ if let active_target = target {
 ## 4. Functions & parameter modes
 
 Named functions must fully declare the types of all parameters and the explicit
-return value using colon syntax.
+return value(s) using colon syntax.
 
 * **Primitive types**: Assumed to be passed by **value** by default.
 * **Non-primitive types**: Assumed to be passed by **constant reference** by
@@ -86,6 +89,9 @@ non-primitive types.
 * **Default parameters**: Parameters can define default values using the `=`
 operator in the function signature. If omitted at the call site, the default
 value is evaluated and used instead.
+* **Multiple Return Values**: Functions can declare multiple return types as a comma-separated list following the colon (e.g.,
+`func getPosition(): float, float`). Return statements accept comma-separated
+expressions (`return x, y;`).
 
 ```
 func calculate_damage(attacker: Player, var defender: Enemy,
@@ -97,6 +103,14 @@ func calculate_damage(attacker: Player, var defender: Enemy,
   defender.health -= base_damage;
   return base_damage;
 }
+
+// Function with multiple return values
+func get_position(entity: Player): float, float {
+  return entity.x, entity.y;
+}
+
+// Invocation using multi-variable destructuring
+let pos_x, pos_y = get_position(current_player);
 
 // Invocation using named parameters via assignment syntax (is_critical defaults
 // to false)

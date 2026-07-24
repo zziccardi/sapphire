@@ -15,6 +15,7 @@ try:
       PrimitiveType,
       OptionalType,
       FunctionType,
+      MultiReturnType,
       StructField,
       StructMethod,
       StructType,
@@ -37,6 +38,7 @@ except ModuleNotFoundError:  # pragma: no cover
       PrimitiveType,
       OptionalType,
       FunctionType,
+      MultiReturnType,
       StructField,
       StructMethod,
       StructType,
@@ -164,7 +166,7 @@ class TypeChecker:
         # Populate trait method signatures
         for member in decl.members:
           p_types = [self._resolve_type_node(p.param_type) for p in member.parameters]
-          ret_t = self._resolve_type_node(member.return_type) if member.return_type else PrimitiveType("none")
+          ret_t = self._resolve_return_types(member)
           p_mutabilities = [p.is_mutable for p in member.parameters]
           fn_type = FunctionType(
               p_types,
@@ -180,15 +182,13 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        # We will fully resolve parameter/return types of global functions in Pass 4,
-        # but we register their name and placeholder signature here for mutual recursion.
         param_types = []
         param_mutabilities = []
         for p in decl.parameters:
           ptype = self._resolve_type_node(p.param_type)
           param_types.append(ptype)
           param_mutabilities.append(p.is_mutable)
-        ret_type = self._resolve_type_node(decl.return_type) if decl.return_type else PrimitiveType("none")
+        ret_type = self._resolve_return_types(decl)
         signature = FunctionType(
             param_types,
             ret_type,
@@ -199,11 +199,12 @@ class TypeChecker:
 
       elif isinstance(decl, VarDeclNode):
         if any(a.name == "extern" for a in decl.annotations):
-          if self.symbol_table.lookup_current_scope(decl.name):
-            self.error(f"Redefinition of identifier '{decl.name}'.")
-            continue
-          var_type = self._resolve_type_node(decl.val_type) if decl.val_type else PrimitiveType("none")
-          self.symbol_table.define(decl.name, VariableSymbol(decl.name, var_type, decl.is_mutable))
+          for name, val_type_node in zip(decl.names, decl.val_types):
+            if self.symbol_table.lookup_current_scope(name):
+              self.error(f"Redefinition of identifier '{name}'.")
+              continue
+            var_type = self._resolve_type_node(val_type_node) if val_type_node else PrimitiveType("none")
+            self.symbol_table.define(name, VariableSymbol(name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
@@ -248,7 +249,7 @@ class TypeChecker:
       process_struct(s)
 
   def _register_impl_signatures(self, program: ProgramNode) -> None:
-    """Pre-pass to register all impl block methods."""
+    """Pre-pass to register methods defined inside impl blocks onto struct types."""
     for decl in program.declarations:
       if isinstance(decl, ImplBlockNode):
         struct_type = self.symbol_table.lookup_type(decl.struct_name)
@@ -273,7 +274,7 @@ class TypeChecker:
             ptype = self._resolve_type_node(p.param_type)
             param_types.append(ptype)
             param_mutabilities.append(p.is_mutable)
-          ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
+          ret_type = self._resolve_return_types(func_decl)
           signature = FunctionType(
               param_types,
               ret_type,
@@ -292,6 +293,14 @@ class TypeChecker:
           if trait_type:
             pass
 
+  def _resolve_return_types(self, node: Any) -> List[Type]:
+    if hasattr(node, "return_types") and node.return_types:
+      return [self._resolve_type_node(t) for t in node.return_types]
+    elif hasattr(node, "return_type") and node.return_type:
+      return [self._resolve_type_node(node.return_type)]
+    else:
+      return [PrimitiveType("none")]
+
   def _resolve_type_node(self, node: Optional[TypeNode]) -> Type:
     """Helper to map an AST TypeNode into a semantic Type object."""
     if not node:
@@ -306,8 +315,8 @@ class TypeChecker:
       return OptionalType(self._resolve_type_node(node.base_type))
     if isinstance(node, FunctionTypeNode):
       param_types = [self._resolve_type_node(t) for t in node.param_types]
-      ret_type = self._resolve_type_node(node.return_type)
-      return FunctionType(param_types, ret_type)
+      ret_types = self._resolve_return_types(node)
+      return FunctionType(param_types, ret_types)
     return PrimitiveType("none")
 
   # ==========================================
@@ -441,8 +450,8 @@ class TypeChecker:
 
     resolved_params = [self._resolve_type_node(p.param_type) for p in node.parameters]
     param_mutabilities = [p.is_mutable for p in node.parameters]
-    ret_type = self._resolve_type_node(node.return_type) if node.return_type else PrimitiveType("none")
-    self.current_function = FunctionType(resolved_params, ret_type, param_mutabilities)
+    ret_types = self._resolve_return_types(node)
+    self.current_function = FunctionType(resolved_params, ret_types, param_mutabilities)
 
     self.visit(node.body)
 
@@ -460,68 +469,101 @@ class TypeChecker:
     if any(a.name == "extern" for a in node.annotations):
       return
 
-    # 2. Namespace validation: variable shares same namespace with functions/structs/traits in current scope level
-    if self.symbol_table.lookup_current_scope(node.name):
-      self.error(f"Identifier '{node.name}' is already defined in this scope.")
+    # 1. Namespace validation
+    for name in node.names:
+      if self.symbol_table.lookup_current_scope(name):
+        self.error(f"Identifier '{name}' is already defined in this scope.")
+        return
+
+    # 2. Evaluate expressions and resolve RHS types
+    if not node.exprs:
+      for name, val_type_node in zip(node.names, node.val_types):
+        v_type = self._resolve_type_node(val_type_node) if val_type_node else PrimitiveType("none")
+        sym = VariableSymbol(name, v_type, node.is_mutable)
+        self.symbol_table.define(name, sym)
       return
 
-    # 3. Handle type annotations & inference
-    if node.val_type:
-      val_type = self._resolve_type_node(node.val_type)
-      self.expected_type = val_type
-      expr_type = self.visit(node.expr)
-      self.expected_type = None
-      if not expr_type.is_compatible(val_type):
-        self.error(f"Cannot assign expression of type '{expr_type}' to variable '{node.name}' of type '{val_type}'.")
-      var_type = val_type
-    else:
-      # Inference
-      expr_type = self.visit(node.expr)
-      if isinstance(expr_type, NoneType):
-        self.error(f"Cannot infer type of '{node.name}' from 'none' alone. Specify an optional type annotation.")
-        var_type = OptionalType(PrimitiveType("none"))
+    # Set expected_type for type inference (e.g. lambdas)
+    old_expected = self.expected_type
+    if len(node.names) == 1 and node.val_types[0]:
+      self.expected_type = self._resolve_type_node(node.val_types[0])
+
+    rhs_types: List[Type] = []
+    if len(node.exprs) == 1:
+      single_type = self.visit(node.exprs[0])
+      if isinstance(single_type, MultiReturnType):
+        rhs_types = single_type.types
       else:
-        var_type = expr_type
+        rhs_types = [single_type]
+    else:
+      rhs_types = [self.visit(e) for e in node.exprs]
 
-    # Define symbol
-    sym = VariableSymbol(node.name, var_type, node.is_mutable)
-    self.symbol_table.define(node.name, sym)
+    self.expected_type = old_expected
 
-    # Check arena escape
-    arena_name = self._get_arena_dependency(node.expr)
-    if arena_name:
-      sym.arena_dependency = arena_name
-      arena_sym = self.symbol_table.lookup(arena_name)
-      if arena_sym and arena_sym.scope_defined and sym.scope_defined:
-        if self._is_descendant_scope(arena_sym.scope_defined, sym.scope_defined) and arena_sym.scope_defined != sym.scope_defined:
-          self.error(f"Variable '{node.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
+    if len(rhs_types) != len(node.names):
+      self.error(f"Cannot unpack {len(rhs_types)} value(s) into {len(node.names)} variable(s).")
+      return
+
+    for i, (name, val_type_node, expr_type) in enumerate(zip(node.names, node.val_types, rhs_types)):
+      if val_type_node:
+        val_type = self._resolve_type_node(val_type_node)
+        if not expr_type.is_compatible(val_type):
+          self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.")
+        var_type = val_type
+      else:
+        if isinstance(expr_type, NoneType):
+          self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.")
+          var_type = OptionalType(PrimitiveType("none"))
+        else:
+          var_type = expr_type
+
+      sym = VariableSymbol(name, var_type, node.is_mutable)
+      self.symbol_table.define(name, sym)
+
+      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      arena_name = self._get_arena_dependency(expr_node)
+      if arena_name:
+        sym.arena_dependency = arena_name
+        arena_sym = self.symbol_table.lookup(arena_name)
+        if arena_sym and arena_sym.scope_defined and sym.scope_defined:
+          if self._is_descendant_scope(arena_sym.scope_defined, sym.scope_defined) and arena_sym.scope_defined != sym.scope_defined:
+            self.error(f"Variable '{name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
-    # 1. Target validation
-    # Must resolve target type and check lvalue mutability
-    target_type = self._check_lvalue(node.target)
-    self.expected_type = target_type
-    expr_type = self.visit(node.expr)
-    self.expected_type = None
+    target_types = [self._check_lvalue(t) for t in node.targets]
 
-    if not expr_type.is_compatible(target_type):
-      self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.")
+    rhs_types: List[Type] = []
+    if len(node.exprs) == 1:
+      single_type = self.visit(node.exprs[0])
+      if isinstance(single_type, MultiReturnType):
+        rhs_types = single_type.types
+      else:
+        rhs_types = [single_type]
+    else:
+      rhs_types = [self.visit(e) for e in node.exprs]
 
-    # Check arena escape
-    arena_name = self._get_arena_dependency(node.expr)
-    if arena_name:
-      target_sym = self._get_target_symbol(node.target)
-      if target_sym:
-        target_sym.arena_dependency = arena_name
-        arena_sym = self.symbol_table.lookup(arena_name)
-        if arena_sym and arena_sym.scope_defined and target_sym.scope_defined:
-          if self._is_descendant_scope(arena_sym.scope_defined, target_sym.scope_defined) and arena_sym.scope_defined != target_sym.scope_defined:
-            self.error(f"Variable '{target_sym.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
+    if len(rhs_types) != len(target_types):
+      self.error(f"Cannot assign {len(rhs_types)} value(s) to {len(target_types)} target(s).")
+      return
 
-    # If assigning to self field in constructor, track it
-    if self.is_in_init and isinstance(node.target, MemberAccessNode):
-      if isinstance(node.target.receiver, IdentifierNode) and node.target.receiver.name == "self":
-        self.initialized_fields.add(node.target.member)
+    for i, (target, target_type, expr_type) in enumerate(zip(node.targets, target_types, rhs_types)):
+      if not expr_type.is_compatible(target_type):
+        self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.")
+
+      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      arena_name = self._get_arena_dependency(expr_node)
+      if arena_name:
+        target_sym = self._get_target_symbol(target)
+        if target_sym:
+          target_sym.arena_dependency = arena_name
+          arena_sym = self.symbol_table.lookup(arena_name)
+          if arena_sym and arena_sym.scope_defined and target_sym.scope_defined:
+            if self._is_descendant_scope(arena_sym.scope_defined, target_sym.scope_defined) and arena_sym.scope_defined != target_sym.scope_defined:
+              self.error(f"Variable '{target_sym.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
+
+      if self.is_in_init and isinstance(target, MemberAccessNode):
+        if isinstance(target.receiver, IdentifierNode) and target.receiver.name == "self":
+          self.initialized_fields.add(target.member)
 
   def _check_lvalue(self, node: ASTNode) -> Type:
     """Helper to check if AST node is a mutable lvalue and returns its resolved type."""
@@ -593,14 +635,23 @@ class TypeChecker:
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
-    ret_type = self.visit(node.expr) if node.expr else PrimitiveType("none")
     if not self.current_function:
       self.error("Return statement outside function context.")
       return
 
-    expected_type = self.current_function.return_type
-    if not ret_type.is_compatible(expected_type):
-      self.error(f"Return type mismatch. Expected '{expected_type}', got '{ret_type}'.")
+    expected_ret_types = self.current_function.return_types
+    actual_ret_types = [self.visit(e) for e in node.expressions] if node.expressions else []
+
+    if len(actual_ret_types) != len(expected_ret_types):
+      if len(expected_ret_types) == 0:
+        self.error(f"Function with no return type cannot return {len(actual_ret_types)} values.")
+      else:
+        self.error(f"Function expected {len(expected_ret_types)} return value(s), but return statement provided {len(actual_ret_types)} value(s).")
+      return
+
+    for idx, (act, exp) in enumerate(zip(actual_ret_types, expected_ret_types)):
+      if not act.is_compatible(exp):
+        self.error(f"Cannot return value of type '{act}' for return value #{idx + 1} (expected '{exp}').")
 
     # Check return escaping arena reference
     if node.expr:

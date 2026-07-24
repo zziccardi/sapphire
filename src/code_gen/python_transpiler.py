@@ -383,14 +383,32 @@ class PythonTranspiler:
     if any(a.name == "extern" for a in node.annotations):
       return
     self.newline()
-    self.emit(f"{node.name} = ")
-    self.visit(node.expr)
+    names_str = ", ".join(node.names)
+    self.emit(f"{names_str}")
+    if node.exprs:
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self.newline()
-    self.visit(node.target)
-    self.emit(f" {node.op} ")
-    self.visit(node.expr)
+    if node.op == "=":
+      for idx, target in enumerate(node.targets):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(target)
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
+    else:
+      raw_op = node.op[:-1]
+      self.visit(node.target)
+      self.emit(f" {node.op} ")
+      self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     self.newline()
@@ -398,9 +416,12 @@ class PythonTranspiler:
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     self.newline()
-    if node.expr:
+    if node.expressions:
       self.emit("return ")
-      self.visit(node.expr)
+      for idx, expr in enumerate(node.expressions):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
     else:
       self.emit("return")
 

@@ -420,24 +420,37 @@ class LuaTranspiler:
     if any(a.name == "extern" for a in node.annotations):
       return
 
-    is_arena = (
-        isinstance(node.expr, CallNode)
-        and isinstance(node.expr.callee, IdentifierNode)
-        and node.expr.callee.name == "Arena"
-    )
-    if is_arena and self.arena_stack:
-      self.arena_stack[-1].append(node.name)
+    if len(node.names) == 1 and node.expr:
+      is_arena = (
+          isinstance(node.expr, CallNode)
+          and isinstance(node.expr.callee, IdentifierNode)
+          and node.expr.callee.name == "Arena"
+      )
+      if is_arena and self.arena_stack:
+        self.arena_stack[-1].append(node.names[0])
 
     self.newline()
-    self.emit(f"local {node.name} = ")
-    self.visit(node.expr)
+    names_str = ", ".join(node.names)
+    self.emit(f"local {names_str}")
+    if node.exprs:
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self.newline()
     if node.op == "=":
-      self.visit(node.target)
+      for idx, target in enumerate(node.targets):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(target)
       self.emit(" = ")
-      self.visit(node.expr)
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
     else:
       # Expand compound assignment (e.g. +=, -=, *=, /=) into binary operation
       raw_op = node.op[:-1]
@@ -460,9 +473,12 @@ class LuaTranspiler:
       self.emit(f"{arena_name}:destroy()")
 
     self.newline()
-    if node.expr:
+    if node.expressions:
       self.emit("return ")
-      self.visit(node.expr)
+      for idx, expr in enumerate(node.expressions):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
     else:
       self.emit("return")
 

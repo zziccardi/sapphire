@@ -589,6 +589,24 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertNotIn("love =", py_code)
 
 
+  def test_python_multi_return_transpilation(self):
+    """Verifies Python transpilation for multi-return functions, declarations, and assignments."""
+    code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+    let x, y = get_pos();
+    var a, b = 1.0, 2.0;
+    a, b = get_pos();
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def get_pos():", py_code)
+    self.assertIn("return 10.0, 20.0", py_code)
+    self.assertIn("x, y = get_pos()", py_code)
+    self.assertIn("a, b = 1.0, 2.0", py_code)
+    self.assertIn("a, b = get_pos()", py_code)
+
+
 if __name__ == "__main__":
   unittest.main()
 
