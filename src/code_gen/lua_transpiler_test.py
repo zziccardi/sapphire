@@ -35,6 +35,7 @@ try:
   from parser.ast_builder import ASTBuilder
   from code_gen.lua_transpiler import LuaTranspiler
   from code_gen.transpiler import transpile_file
+  from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
   from src.parser.ast import (
       ASTNode,
@@ -58,6 +59,7 @@ except ModuleNotFoundError:
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.lua_transpiler import LuaTranspiler
   from src.code_gen.transpiler import transpile_file
+  from src.semantics.type_checker import TypeChecker
 
 
 class DummyNode(ASTNode):
@@ -77,6 +79,12 @@ class TestLuaTranspiler(unittest.TestCase):
 
     builder = ASTBuilder()
     ast = builder.visit(tree)
+
+    try:
+      checker = TypeChecker()
+      checker.check(ast)
+    except Exception:
+      pass
 
     transpiler = LuaTranspiler()
     return transpiler.transpile(ast)
@@ -504,6 +512,26 @@ class TestLuaTranspiler(unittest.TestCase):
     output = self._transpile(code)
     self.assertIn('love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0)', output)
     self.assertIn('hero_img:draw(10.0, 20.0)', output)
+
+  def test_lua_extern_method_alias_transpilation(self):
+    """Verifies Lua transpilation for trait methods with @extern method aliases."""
+    code = """
+    trait Graphics {
+      @extern("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    struct Love {
+      var graphics: Graphics;
+    }
+    @extern("love")
+    var love: Love;
+
+    func main() {
+      love.graphics.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    out = self._transpile(code)
+    self.assertIn('love.graphics.setColor(1.0, 0.0, 0.0)', out)
 
 
 if __name__ == "__main__":

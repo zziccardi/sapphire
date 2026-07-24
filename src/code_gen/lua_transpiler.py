@@ -610,15 +610,16 @@ class LuaTranspiler:
     # Method call optimization for instance methods (e.g. obj.method()) vs
     # static calls
     if isinstance(node.callee, MemberAccessNode):
+      member_name = getattr(node.callee, "target_name", None) or node.callee.member
       receiver_name = getattr(node.callee.receiver, "name", None)
       if (receiver_name and receiver_name in self.known_structs) or isinstance(node.callee.receiver, MemberAccessNode):
         # Static method or chained module call (e.g. StructName.func(...) or love.graphics.rectangle(...))
         self.visit(node.callee.receiver)
-        self.emit(f".{node.callee.member}(")
+        self.emit(f".{member_name}(")
       else:
         # Instance method call: receiver:method(...)
         self.visit(node.callee.receiver)
-        self.emit(f":{node.callee.member}(")
+        self.emit(f":{member_name}(")
     else:
       self.visit(node.callee)
       self.emit("(")

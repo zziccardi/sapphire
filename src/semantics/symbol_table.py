@@ -95,6 +95,7 @@ class FunctionType(Type):
       param_mutabilities: Optional[List[bool]] = None,
       param_names: Optional[List[str]] = None,
       has_self: bool = False,
+      extern_name: Optional[str] = None,
   ):
     self.param_types = param_types
     if isinstance(return_type, list):
@@ -109,6 +110,7 @@ class FunctionType(Type):
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
     self.has_self = has_self or (bool(self.param_names) and self.param_names[0] == "self")
+    self.extern_name = extern_name
 
   @property
   def return_types(self) -> List[Type]:

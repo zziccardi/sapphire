@@ -59,7 +59,7 @@ returnTypeList
     ;
 
 traitMember
-    : (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
+    : annotation* (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
     ;
 
 functionDeclaration

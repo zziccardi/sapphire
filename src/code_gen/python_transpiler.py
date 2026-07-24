@@ -530,15 +530,16 @@ class PythonTranspiler:
     self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
+    member_name = getattr(node, "target_name", None) or node.member
     if node.is_optional:
       self.emit("(")
       self.visit(node.receiver)
-      self.emit(f".{node.member} if ")
+      self.emit(f".{member_name} if ")
       self.visit(node.receiver)
       self.emit(" is not None else None)")
     else:
       self.visit(node.receiver)
-      self.emit(f".{node.member}")
+      self.emit(f".{member_name}")
 
   def visit_CloneNode(self, node: CloneNode) -> None:
     self.emit("_clone_helper(")

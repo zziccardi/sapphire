@@ -1574,6 +1574,23 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code)
 
+  def test_trait_extern_method_type_checking(self):
+    """Verifies type checking for trait methods annotated with @extern."""
+    code = """
+    trait Graphics {
+      @extern("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+
+    @extern
+    var g: Graphics;
+
+    func main() {
+      g.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    self._check(code)
+
 
 if __name__ == "__main__":
   unittest.main()

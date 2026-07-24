@@ -179,12 +179,18 @@ class TypeChecker:
           p_mutabilities = [p.is_mutable for p in member.parameters]
           param_names = [p.name for p in member.parameters]
           has_self = bool(param_names) and param_names[0] == "self"
+          extern_name = None
+          for ann in getattr(member, "annotations", []):
+            if ann.name == "extern" and ann.arg:
+              extern_name = ann.arg
+              break
           fn_type = FunctionType(
               p_types,
               ret_t,
               p_mutabilities,
               param_names=param_names,
               has_self=has_self,
+              extern_name=extern_name,
           )
           trait_type.methods[member.name] = fn_type
         self.symbol_table.define_type(decl.name, trait_type)
@@ -958,6 +964,8 @@ class TypeChecker:
     if isinstance(receiver_type, TraitType):
       method = receiver_type.methods.get(node.member)
       if method:
+        if getattr(method, "extern_name", None):
+          node.target_name = method.extern_name
         return method
       self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")

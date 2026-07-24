@@ -310,6 +310,19 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(trait_decl.members[1].parameters[0].name, "self")
     self.assertTrue(trait_decl.members[1].parameters[0].is_mutable)
 
+  def test_trait_extern_annotation_parsing(self):
+    """Verifies AST construction for trait methods with @extern annotations."""
+    ast = self._get_ast("""
+    trait Graphics {
+      @extern("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    """)
+    trait_decl = ast.declarations[0]
+    self.assertEqual(len(trait_decl.members[0].annotations), 1)
+    self.assertEqual(trait_decl.members[0].annotations[0].name, "extern")
+    self.assertEqual(trait_decl.members[0].annotations[0].arg, "setColor")
+
 
 if __name__ == "__main__":
   unittest.main()

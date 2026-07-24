@@ -164,6 +164,7 @@ class ASTBuilder(SapphireVisitor):
     return [self.visit(t) for t in ctx.type_()]
 
   def visitTraitMember(self, ctx: SapphireParser.TraitMemberContext) -> TraitMemberNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     modifier = None
     if ctx.STATIC():
       modifier = "static"
@@ -172,7 +173,7 @@ class ASTBuilder(SapphireVisitor):
     name = ctx.IDENTIFIER().getText()
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
-    node = TraitMemberNode(name, params, return_types, modifier=modifier)
+    node = TraitMemberNode(name, params, return_types, modifier=modifier, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line

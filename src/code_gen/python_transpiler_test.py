@@ -15,12 +15,14 @@ try:
   from parser.ast_builder import ASTBuilder
   from code_gen.python_transpiler import PythonTranspiler, Transpiler
   from code_gen.transpiler import transpile_file
+  from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
   from src.code_gen.transpiler import transpile_file
+  from src.semantics.type_checker import TypeChecker
 
 
 class TestPythonTranspiler(unittest.TestCase):
@@ -34,6 +36,11 @@ class TestPythonTranspiler(unittest.TestCase):
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
+    try:
+      checker = TypeChecker()
+      checker.check(ast)
+    except Exception:
+      pass
     transpiler = Transpiler()
     return transpiler.transpile(ast)
 
@@ -47,6 +54,11 @@ class TestPythonTranspiler(unittest.TestCase):
     
     builder = ASTBuilder()
     ast = builder.visit(tree)
+    try:
+      checker = TypeChecker()
+      checker.check(ast)
+    except Exception:
+      pass
     
     transpiler = Transpiler()
     py_code = transpiler.transpile(ast)
@@ -652,6 +664,23 @@ class TestPythonTranspiler(unittest.TestCase):
     """
     py_code = self._transpile(code)
     self.assertIn("hero_img.draw(10.0, 20.0)", py_code)
+
+  def test_python_extern_method_alias_transpilation(self):
+    """Verifies Python transpilation for trait methods with @extern method aliases."""
+    code = """
+    trait Graphics {
+      @extern("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    @extern("g")
+    var g: Graphics;
+
+    func main() {
+      g.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("g.setColor(1.0, 0.0, 0.0)", py_code)
 
 
 if __name__ == "__main__":
