@@ -247,15 +247,21 @@ class LuaTranspiler:
     self.newline()
     self.emit(f"local {node.name} = {{")
     self.indent()
-    current_val = 0
+    current_val: Union[int, str] = 0
+    is_string_enum = any(isinstance(m.value, str) for m in node.members)
     for idx, member in enumerate(node.members):
       if member.value is not None:
         current_val = member.value
+      elif is_string_enum and isinstance(current_val, str):
+        current_val = member.name
       self.newline()
-      self.emit(f"{member.name} = {current_val}")
+      if isinstance(current_val, str):
+        self.emit(f'{member.name} = "{current_val}"')
+      else:
+        self.emit(f"{member.name} = {current_val}")
+        current_val += 1
       if idx < len(node.members) - 1:
         self.emit(",")
-      current_val += 1
     self.dedent()
     self.newline()
     self.emit("}")
@@ -420,24 +426,37 @@ class LuaTranspiler:
     if any(a.name == "extern" for a in node.annotations):
       return
 
-    is_arena = (
-        isinstance(node.expr, CallNode)
-        and isinstance(node.expr.callee, IdentifierNode)
-        and node.expr.callee.name == "Arena"
-    )
-    if is_arena and self.arena_stack:
-      self.arena_stack[-1].append(node.name)
+    if len(node.names) == 1 and node.expr:
+      is_arena = (
+          isinstance(node.expr, CallNode)
+          and isinstance(node.expr.callee, IdentifierNode)
+          and node.expr.callee.name == "Arena"
+      )
+      if is_arena and self.arena_stack:
+        self.arena_stack[-1].append(node.names[0])
 
     self.newline()
-    self.emit(f"local {node.name} = ")
-    self.visit(node.expr)
+    names_str = ", ".join(node.names)
+    self.emit(f"local {names_str}")
+    if node.exprs:
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self.newline()
     if node.op == "=":
-      self.visit(node.target)
+      for idx, target in enumerate(node.targets):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(target)
       self.emit(" = ")
-      self.visit(node.expr)
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
     else:
       # Expand compound assignment (e.g. +=, -=, *=, /=) into binary operation
       raw_op = node.op[:-1]
@@ -460,9 +479,12 @@ class LuaTranspiler:
       self.emit(f"{arena_name}:destroy()")
 
     self.newline()
-    if node.expr:
+    if node.expressions:
       self.emit("return ")
-      self.visit(node.expr)
+      for idx, expr in enumerate(node.expressions):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
     else:
       self.emit("return")
 
@@ -545,9 +567,7 @@ class LuaTranspiler:
 
     # Convert '+' for strings to '..' string concatenation in Lua
     if op == "+":
-      if isinstance(node.left, LiteralNode) and node.left.lit_type == "string":
-        op = ".."
-      elif isinstance(node.right, LiteralNode) and node.right.lit_type == "string":
+      if getattr(node, "is_string_concat", False) or (isinstance(node.left, LiteralNode) and node.left.lit_type == "string") or (isinstance(node.right, LiteralNode) and node.right.lit_type == "string"):
         op = ".."
 
     self.emit("(")
@@ -588,15 +608,16 @@ class LuaTranspiler:
     # Method call optimization for instance methods (e.g. obj.method()) vs
     # static calls
     if isinstance(node.callee, MemberAccessNode):
+      member_name = getattr(node.callee, "target_name", None) or node.callee.member
       receiver_name = getattr(node.callee.receiver, "name", None)
       if (receiver_name and receiver_name in self.known_structs) or isinstance(node.callee.receiver, MemberAccessNode):
         # Static method or chained module call (e.g. StructName.func(...) or love.graphics.rectangle(...))
         self.visit(node.callee.receiver)
-        self.emit(f".{node.callee.member}(")
+        self.emit(f".{member_name}(")
       else:
         # Instance method call: receiver:method(...)
         self.visit(node.callee.receiver)
-        self.emit(f":{node.callee.member}(")
+        self.emit(f":{member_name}(")
     else:
       self.visit(node.callee)
       self.emit("(")

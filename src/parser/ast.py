@@ -67,9 +67,19 @@ class OptionalTypeNode(TypeNode):
 class FunctionTypeNode(TypeNode):
   """Represents a function type signature (e.g. '(int, int) -> float')."""
 
-  def __init__(self, param_types: List[TypeNode], return_type: TypeNode):
+class FunctionTypeNode(TypeNode):
+  """Represents a function type signature (e.g. '(int, int) -> float' or '(int) -> (float, float)')."""
+
+  def __init__(self, param_types: List[TypeNode], return_types: Union[TypeNode, List[TypeNode]]):
     self.param_types = param_types
-    self.return_type = return_type
+    if isinstance(return_types, list):
+      self.return_types = return_types
+    else:
+      self.return_types = [return_types]
+
+  @property
+  def return_type(self) -> TypeNode:
+    return self.return_types[0]
 
 
 # ==========================================
@@ -119,7 +129,7 @@ class StructDeclNode(DeclNode):
 class EnumMemberNode(ASTNode):
   """Represents a member/variant in an enum declaration."""
 
-  def __init__(self, name: str, value: Optional[int] = None):
+  def __init__(self, name: str, value: Optional[Union[int, str]] = None):
     self.name = name
     self.value = value
 
@@ -135,7 +145,7 @@ class EnumDeclNode(DeclNode):
 class ParameterNode(ASTNode):
   """Represents a parameter in a function signature."""
 
-  def __init__(self, is_mutable: bool, name: str, param_type: TypeNode, default_expr: Optional[ASTNode] = None):
+  def __init__(self, is_mutable: bool, name: str, param_type: Optional[TypeNode] = None, default_expr: Optional[ASTNode] = None):
     self.is_mutable = is_mutable
     self.name = name
     self.param_type = param_type
@@ -143,14 +153,26 @@ class ParameterNode(ASTNode):
 
 
 class FuncDeclNode(DeclNode):
-  """Represents a function declaration."""
+  """Represents a function declaration, supporting single or multiple return types."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None, return_type: Optional[TypeNode] = None):
     self.name = name
     self.parameters = parameters
-    self.return_type = return_type
+    if return_types is not None:
+      if isinstance(return_types, list):
+        self.return_types = return_types
+      else:
+        self.return_types = [return_types]
+    elif return_type is not None:
+      self.return_types = [return_type]
+    else:
+      self.return_types = []
     self.body = body
     self.annotations = annotations or []
+
+  @property
+  def return_type(self) -> Optional[TypeNode]:
+    return self.return_types[0] if self.return_types else None
 
 
 class ImplMemberNode(ASTNode):
@@ -173,11 +195,24 @@ class ImplBlockNode(DeclNode):
 class TraitMemberNode(ASTNode):
   """Represents a method signature inside a trait declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_type: Optional[TypeNode], modifier: Optional[str] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, modifier: Optional[str] = None, return_type: Optional[TypeNode] = None, annotations: Optional[List[AnnotationNode]] = None):
     self.name = name
     self.parameters = parameters
-    self.return_type = return_type
+    if return_types is not None:
+      if isinstance(return_types, list):
+        self.return_types = return_types
+      else:
+        self.return_types = [return_types]
+    elif return_type is not None:
+      self.return_types = [return_type]
+    else:
+      self.return_types = []
     self.modifier = modifier
+    self.annotations = annotations or []
+
+  @property
+  def return_type(self) -> Optional[TypeNode]:
+    return self.return_types[0] if self.return_types else None
 
 
 class TraitDeclNode(DeclNode):
@@ -205,23 +240,111 @@ class BlockNode(StmtNode):
 
 
 class VarDeclNode(StmtNode):
-  """Represents a variable declaration statement (let/var)."""
+  """Represents a variable declaration statement (let/var), supporting multi-variable bindings."""
 
-  def __init__(self, is_mutable: bool, name: str, val_type: Optional[TypeNode], expr: Optional[ASTNode] = None, annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(
+      self,
+      is_mutable: bool,
+      names: Optional[Union[str, List[str]]] = None,
+      val_types: Optional[Union[TypeNode, List[Optional[TypeNode]]]] = None,
+      exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
+      annotations: Optional[List[AnnotationNode]] = None,
+      val_type: Optional[TypeNode] = None,
+      expr: Optional[ASTNode] = None,
+      name: Optional[str] = None,
+  ):
     self.is_mutable = is_mutable
-    self.name = name
-    self.val_type = val_type
-    self.expr = expr
+    if names is not None:
+      if isinstance(names, list):
+        self.names = names
+      else:
+        self.names = [names]
+    elif name is not None:
+      self.names = [name]
+    else:
+      self.names = []
+
+    if val_types is not None:
+      if isinstance(val_types, list):
+        self.val_types = val_types
+      else:
+        self.val_types = [val_types]
+    elif val_type is not None:
+      self.val_types = [val_type]
+    else:
+      self.val_types = [None] * len(self.names)
+
+    if exprs is not None:
+      if isinstance(exprs, list):
+        self.exprs = exprs
+      else:
+        self.exprs = [exprs]
+    elif expr is not None:
+      self.exprs = [expr]
+    else:
+      self.exprs = []
+
     self.annotations = annotations or []
+
+  @property
+  def name(self) -> str:
+    return self.names[0] if self.names else ""
+
+  @property
+  def val_type(self) -> Optional[TypeNode]:
+    return self.val_types[0] if self.val_types else None
+
+  @property
+  def expr(self) -> Optional[ASTNode]:
+    return self.exprs[0] if self.exprs else None
+
+  def to_dict(self) -> Dict[str, Any]:
+    res = super().to_dict()
+    res["name"] = self.name
+    res["val_type"] = self.val_type.to_dict() if self.val_type else None
+    res["expr"] = self.expr.to_dict() if self.expr else None
+    return res
 
 
 class AssignmentNode(StmtNode):
-  """Represents an assignment statement (e.g. 'x = 5;' or 'y += 1;')."""
+  """Represents an assignment statement (e.g. 'x = 5;' or 'x, y = 10, 20;')."""
 
-  def __init__(self, target: ASTNode, op: str, expr: ASTNode):
-    self.target = target
-    self.op = op  # '=', '+=', '-=', etc.
-    self.expr = expr
+  def __init__(self, targets: Union[ASTNode, List[ASTNode]], op: str, exprs: Union[ASTNode, List[ASTNode]], target: Optional[ASTNode] = None, expr: Optional[ASTNode] = None):
+    if targets is not None and not (isinstance(targets, list) and len(targets) == 0):
+      if isinstance(targets, list):
+        self.targets = targets
+      else:
+        self.targets = [targets]
+    elif target is not None:
+      self.targets = [target]
+    else:
+      self.targets = []
+
+    self.op = op
+
+    if exprs is not None and not (isinstance(exprs, list) and len(exprs) == 0):
+      if isinstance(exprs, list):
+        self.exprs = exprs
+      else:
+        self.exprs = [exprs]
+    elif expr is not None:
+      self.exprs = [expr]
+    else:
+      self.exprs = []
+
+  @property
+  def target(self) -> ASTNode:
+    return self.targets[0]
+
+  @property
+  def expr(self) -> ASTNode:
+    return self.exprs[0]
+
+  def to_dict(self) -> Dict[str, Any]:
+    res = super().to_dict()
+    res["target"] = self.target.to_dict() if self.targets else None
+    res["expr"] = self.expr.to_dict() if self.exprs else None
+    return res
 
 
 class ExprStmtNode(StmtNode):
@@ -232,10 +355,27 @@ class ExprStmtNode(StmtNode):
 
 
 class ReturnNode(StmtNode):
-  """Represents a return statement."""
+  """Represents a return statement, supporting single or multiple returned expressions."""
 
-  def __init__(self, expr: Optional[ASTNode]):
-    self.expr = expr
+  def __init__(self, exprs: Optional[Union[ASTNode, List[ASTNode]]] = None, expr: Optional[ASTNode] = None):
+    if exprs is not None:
+      if isinstance(exprs, list):
+        self.expressions = exprs
+      else:
+        self.expressions = [exprs]
+    elif expr is not None:
+      self.expressions = [expr]
+    else:
+      self.expressions = []
+
+  @property
+  def expr(self) -> Optional[ASTNode]:
+    return self.expressions[0] if self.expressions else None
+
+  def to_dict(self) -> Dict[str, Any]:
+    res = super().to_dict()
+    res["expr"] = self.expr.to_dict() if self.expressions else None
+    return res
 
 
 class IfNode(StmtNode):

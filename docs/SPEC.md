@@ -45,6 +45,7 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **`var`**: Declares a mutable variable.
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
 * **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
+* **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
 
 ```
 let speed: int = 60;
@@ -52,6 +53,8 @@ let name = "Hero";    // Type inferred as String
 
 var health = 100;
 health = 90;          // Valid mutation
+
+let x, y = 10.0, 20.0;  // Multi-variable declaration
 ```
 
 ## 3. Optionals (null safety)
@@ -72,7 +75,7 @@ if let active_target = target {
 ## 4. Functions & parameter modes
 
 Named functions must fully declare the types of all parameters and the explicit
-return value using colon syntax.
+return value(s) using colon syntax.
 
 * **Primitive types**: Assumed to be passed by **value** by default.
 * **Non-primitive types**: Assumed to be passed by **constant reference** by
@@ -86,6 +89,9 @@ non-primitive types.
 * **Default parameters**: Parameters can define default values using the `=`
 operator in the function signature. If omitted at the call site, the default
 value is evaluated and used instead.
+* **Multiple Return Values**: Functions can declare multiple return types as a comma-separated list following the colon (e.g.,
+`func getPosition(): float, float`). Return statements accept comma-separated
+expressions (`return x, y;`).
 
 ```
 func calculate_damage(attacker: Player, var defender: Enemy,
@@ -97,6 +103,14 @@ func calculate_damage(attacker: Player, var defender: Enemy,
   defender.health -= base_damage;
   return base_damage;
 }
+
+// Function with multiple return values
+func get_position(entity: Player): float, float {
+  return entity.x, entity.y;
+}
+
+// Invocation using multi-variable destructuring
+let pos_x, pos_y = get_position(current_player);
 
 // Invocation using named parameters via assignment syntax (is_critical defaults
 // to false)
@@ -177,7 +191,7 @@ indicates that `self` cannot be modified.
 ```
 struct Weapon {
   var damage: int;
-  var durability: int;
+  var durability: int = 100;
   let name: String;
 }
 
@@ -214,7 +228,11 @@ let sword = Weapon {
 };
 ```
 
-The compiler statically verifies that all non-optional fields of the struct are initialized and that their types are compatible.
+Fields declared with default initialization expressions (e.g.
+`var durability: int = 100;`) or optional types (`T?`) may be omitted during
+struct initialization. The compiler statically verifies that all remaining
+required (non-optional) fields are initialized and that their assigned types are
+compatible.
 
 The following code will not compile because `sword` is a constant:
 
@@ -226,24 +244,37 @@ let sword = Weapon(...);
 sword.use();
 ```
 
-## 7. Enums
+### 7. Enums
 
-Sapphire provides native support for integer-backed enumerations via the `enum` keyword. Enums define a named set of integral constants with static type safety and optional explicit integer assignments.
+Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
 
-### Definition & auto-incrementing values
+### Definition, auto-incrementing, & string values
 
 Enum members are declared as comma-separated identifiers inside curly braces. Trailing commas are optional and recommended.
 
-* **Default values**: By default, enum members are automatically assigned sequential integers starting at `0`.
-* **Explicit values**: Members can be assigned explicit integer values. Unassigned subsequent members automatically resume auto-incrementing from the previous member's value.
+* **Default values**: By default, integer enum members are automatically
+  assigned sequential integers starting at `0`.
+* **Explicit integer values**: Members can be assigned explicit integer values.
+  Unassigned subsequent members automatically resume auto-incrementing from the
+  previous member's value.
+* **Native String Enums**: Members can be assigned explicit string literal
+  values (e.g., `Fill = "fill"`). Any subsequent unassigned member in a string
+  enum automatically defaults to its identifier string (`Line` -> `"Line"`).
 
 ```sapphire
-// Default auto-incrementing values (North = 0, East = 1, South = 2, West = 3)
+// Default auto-incrementing integer values:
+// North = 0, East = 1, South = 2, West = 3
 enum Direction {
   North,
   East,
   South,
   West,
+}
+
+enum DrawMode {
+  Fill = "fill",
+  Line = "line",
+  Default,  // Auto-assigned "Default" (note that capitalization is maintained)
 }
 
 // Explicit integer values
@@ -256,18 +287,22 @@ enum HttpStatusCode {
 }
 ```
 
-### Type-checking & usage
+### Type semantics & interoperability
 
-* **Nominal typing**: Declaring an enum introduces a named type into the scope (e.g., `Direction`).
-* **Type inference**: Variable bindings assigned an enum variant automatically infer the enum type without requiring explicit type annotations.
-* **Integer interoperability**: Because Sapphire enums are integer-backed, enum values can be assigned to `int` variables or compared with `int` expressions.
+* **Nominal typing**: Declaring an enum introduces a named type into the scope
+  (e.g., `Direction` or `DrawMode`).
+* **Type inference**: Variable bindings assigned an enum variant automatically
+  infer the enum type without requiring explicit type annotations.
+* **Primitive interoperability**: Integer enums are type-compatible with `int`
+  expressions. String-backed enums are type-compatible with string expressions.
 
 ```sapphire
-// Type inferred as 'Direction'
+// Type inferred as `Direction`
 let current_dir = Direction.North;
 
-// Explicit type annotation
-let status: HttpStatusCode = HttpStatusCode.Ok;
+// String enum interoperability
+let mode: DrawMode = DrawMode.Fill;
+let mode_str: String = DrawMode.Line;  // Compatible with string primitive
 
 // Comparison
 if status == HttpStatusCode.Ok {
@@ -322,11 +357,29 @@ This provides the ergonomic benefits of traditional inheritance while giving the
 To support data-oriented design and decouple behaviors from layout, Sapphire supports two primary alternatives:
 
 ##### 1. Traits (compile-time monomorphization)
-Traits define behavioral contracts (methods) without prescribing any physical memory layout. They are resolved entirely at compile time through monomorphization, ensuring zero runtime overhead.
+Traits define behavioral contracts without prescribing physical memory layout.
+They are resolved entirely at compile time through monomorphization, ensuring
+zero runtime overhead.
+
+* **Explicit `self` for instance methods**: Trait method signatures can specify
+  an explicit first `self` parameter (which may be `var self` for mutable
+  access). The presence of `self` designates the method as an
+  **instance method**. This is mostly useful for interoperability with external
+  environments (e.g. transpiled using Lua colon syntax `:draw(x, y)`).
+* **Module / Static Functions**: Omitting `self` from a trait method signature
+  designates it as a **module or static function** (e.g. transpiled using Lua
+  dot syntax `.rectangle(...)`).
 
 ```
-trait Actor {
-  func update();
+// Resource-handle trait (instance methods)
+trait Image {
+  func draw(self, x: float, y: float);
+  func getWidth(self): float;
+}
+
+// Module trait (static functions)
+trait Graphics {
+  func rectangle(mode: String, x: float, y: float, w: float, h: float);
 }
 
 struct Cat {
@@ -437,7 +490,16 @@ All `proto` instances and their clones are automatically allocated on a managed 
 1. **Implicit default arena**: If no arena is explicitly specified, `proto` instances are allocated in an implicit, thread-local or global reference-counted arena.
 2. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
 3. **Explicit Arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix (e.g., `Point { x = 10 } in my_arena`).
-4. **Lexical scope destruction (RAII)**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. The compiler enforces that references to arena-allocated objects do not escape the scope of the `Arena` variable.
+4. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena`
+instances have lexical lifecycles. When the `Arena` variable goes out of scope,
+the runtime automatically tears down the arena and deallocates all objects (both
+`struct` and `proto` references) allocated within it. To prevent dangling
+references, the compiler statically enforces scope-bound escape rules:
+   * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an
+     outer scope cannot be assigned a reference to an object allocated in a
+     nested/inner arena.
+   * **Function-return escape**: A function cannot return a reference to an
+     object allocated in an arena local to the function scope.
 
 ## 11. Core operators, expressions, & control flow
 
@@ -539,25 +601,39 @@ for var name in names {
 Sapphire supports native interoperability with third-party scripting host engines (such as **Love2D** in Lua 5.1 / LuaJIT environments) through single-purpose annotation decorators:
 
 ### A. `@extern` (host variable binding)
-The `@extern` annotation binds a variable to an external global symbol provided at runtime by the host environment.
-* **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is named `identifier`).
+The `@extern` annotation binds Sapphire variables to external host symbols
+provided at runtime.
+* **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is also named `identifier`).
 * **Runtime behavior**: Tells the transpiler to omit runtime variable initializations (`local name = ...`), permitting 100% type-safe access to host-provided engine modules.
 
-### B. `@export` (host global callback export)
-The `@export` annotation exposes a top-level Sapphire function definition as a global callback for the host engine runtime.
-* **Syntax**: `@export("target.global.path") func handler(...) { ... }` or `@export func handler(...) { ... }`.
-* **Runtime behavior**: In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
+### B. `@export` (transpiled symbol renaming)
+The `@export` annotation configures symbol renaming during transpilation.
+* **Global callback export**: `@export("love.update") func handler(...) { ... }`. In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
+* **Trait method aliasing**: `@export("native_name")` placed on a trait method signature configures the transpiler to emit `native_name` instead of the Sapphire method identifier (e.g. `@export("setColor") func setColorRGBA(r: float, g: float, b: float);`).
 
-### C. Trait-based host interfaces
-External host-module contracts are defined cleanly using standard Sapphire `trait`s (which define interface method signatures without implementations) composed inside container `struct` types:
+### C. Trait-based host interfaces & resource handles
+External host–module contracts are defined cleanly using standard Sapphire `trait`s composed inside container `struct` types:
+
+* **Resource-handle traits**: Specifying an explicit first `self` parameter (e.g. `func draw(self, x: float, y: float)`) designates an instance method on a handle object, transpiling to Lua colon syntax (`handle:draw(x, y)`).
+* **Module traits**: Omitting `self` designates a module or static function, transpiling to Lua dot syntax (`love.graphics.rectangle(...)`).
+* **Method aliases**: Overloaded host functions can be exposed as distinct, type-safe Sapphire methods annotated with `@export("native_name")`.
 
 ```sapphire
-// 1. Opaque resource-handle struct
-struct Image {}
+// 1. Opaque resource-handle trait (instance methods take `self`)
+trait Image {
+  func draw(self, x: float, y: float);
+  func getWidth(self): float;
+}
 
-// 2. Host API traits
+// 2. Host API trait (module functions without `self`, method aliases for
+// overloaded host APIs)
 trait Graphics {
-  func setColor(r: float, g: float, b: float);
+  @export("setColor")
+  func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
+
+  @export("setColor")
+  func setColorObj(color: Color);
+
   func rectangle(mode: String, x: float, y: float, w: float, h: float);
   func clear(r: float, g: float, b: float);
   func newImage(path: String): Image;
@@ -588,5 +664,8 @@ func update(dt: float) {
 @export("love.draw")
 func draw() {
   love.graphics.clear(r = 0.1, g = 0.1, b = 0.1);
+
+  // Transpiles to `love.graphics.setColor(1.0, 0.0, 0.0)`
+  love.graphics.setColorRGBA(1.0, 0.0, 0.0);
 }
 ```

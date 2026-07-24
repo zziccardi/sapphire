@@ -110,19 +110,18 @@ _clone_helper = function(obj, init_fn, arena)
 end
 
 
-local Image = {}
-Image.__index = Image
-function Image.init(kwargs, proto)
-  kwargs = kwargs or {}
-  local self
-  self = setmetatable({}, Image)
-  if proto == nil then
-  end
-  for k, v in pairs(kwargs) do
-    self[k] = v
-  end
-  return self
-end
+local DrawMode = {
+  Fill = "fill",
+  Line = "line"
+}
+
+
+local FilterMode = {
+  Linear = "linear",
+  Nearest = "nearest"
+}
+
+
 
 
 
@@ -143,44 +142,48 @@ end
 
 
 
-local Player = {}
-Player.__index = Player
-function Player.init(kwargs, proto)
-  kwargs = kwargs or {}
-  local self
-  self = setmetatable({}, Player)
-  if proto == nil then
-  end
-  for k, v in pairs(kwargs) do
-    self[k] = v
-  end
-  return self
+local hero_img
+
+local hero_x = 100.0
+
+local hero_y = 100.0
+
+local speed = 250.0
+
+function love.load()
+  love.graphics.setBackgroundColor(0.1, 0.1, 0.15)
+  hero_img = love.graphics.newImage("assets/hero.png")
 end
 
-function Player:update(dt)
-  if love.keyboard.isDown("right") then
-    self.x = self.x + (self.speed * dt)
-  end
-  if love.keyboard.isDown("left") then
-    self.x = self.x - (self.speed * dt)
-  end
-end
-
-function Player:draw()
-  love.graphics.setColor(0.2, 0.8, 0.4)
-  love.graphics.rectangle("fill", self.x, self.y, 40.0, 40.0)
-end
-
-
-local player = Player.init({x = 100.0, y = 100.0, speed = 200.0})
 
 function love.update(dt)
-  player:update(dt)
+  if (love.keyboard.isDown("left") or love.keyboard.isDown("a")) then
+    hero_x = hero_x - (speed * dt)
+  end
+  if (love.keyboard.isDown("right") or love.keyboard.isDown("d")) then
+    hero_x = hero_x + (speed * dt)
+  end
+  if (love.keyboard.isDown("up") or love.keyboard.isDown("w")) then
+    hero_y = hero_y - (speed * dt)
+  end
+  if (love.keyboard.isDown("down") or love.keyboard.isDown("s")) then
+    hero_y = hero_y + (speed * dt)
+  end
 end
 
 
 function love.draw()
-  love.graphics.clear(0.1, 0.1, 0.1)
-  player:draw()
+  love.graphics.clear(0.1, 0.15, 0.2)
+  love.graphics.setColor(0.2, 0.7, 0.5)
+  love.graphics.rectangle(DrawMode.Fill, 50.0, 50.0, 300.0, 150.0)
+  local _val_img = hero_img
+  if _val_img ~= nil then
+    local img = _val_img
+    love.graphics.setColor(1.0, 1.0, 1.0)
+    img:draw(hero_x, hero_y)
+  end
+  love.graphics.setColor(1.0, 1.0, 1.0)
+  local fps_str = ("FPS: " .. love.timer.getFPS())
+  love.graphics.print(fps_str, 10.0, 10.0)
 end
 

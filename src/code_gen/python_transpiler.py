@@ -21,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 PYTHON_RUNTIME_PREAMBLE = """# Sapphire Runtime Header
 import copy
-from enum import IntEnum
+from enum import Enum, IntEnum
 
 class Arena:
   def __init__(self):
@@ -217,19 +217,26 @@ class PythonTranspiler:
 
   def visit_EnumDeclNode(self, node: EnumDeclNode) -> None:
     self.newline()
-    self.emit(f"class {node.name}(IntEnum):")
+    is_string_enum = any(isinstance(m.value, str) for m in node.members)
+    base_class = "str, Enum" if is_string_enum else "IntEnum"
+    self.emit(f"class {node.name}({base_class}):")
     self.indent()
     if not node.members:
       self.newline()
       self.emit("pass")
     else:
-      current_val = 0
+      current_val: Union[int, str] = 0
       for member in node.members:
         self.newline()
         if member.value is not None:
           current_val = member.value
-        self.emit(f"{member.name} = {current_val}")
-        current_val += 1
+        elif is_string_enum and isinstance(current_val, str):
+          current_val = member.name
+        if isinstance(current_val, str):
+          self.emit(f'{member.name} = "{current_val}"')
+        else:
+          self.emit(f"{member.name} = {current_val}")
+          current_val += 1
     self.dedent()
     self.newline()
 
@@ -383,14 +390,32 @@ class PythonTranspiler:
     if any(a.name == "extern" for a in node.annotations):
       return
     self.newline()
-    self.emit(f"{node.name} = ")
-    self.visit(node.expr)
+    names_str = ", ".join(node.names)
+    self.emit(f"{names_str}")
+    if node.exprs:
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self.newline()
-    self.visit(node.target)
-    self.emit(f" {node.op} ")
-    self.visit(node.expr)
+    if node.op == "=":
+      for idx, target in enumerate(node.targets):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(target)
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
+    else:
+      raw_op = node.op[:-1]
+      self.visit(node.target)
+      self.emit(f" {node.op} ")
+      self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     self.newline()
@@ -398,9 +423,12 @@ class PythonTranspiler:
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     self.newline()
-    if node.expr:
+    if node.expressions:
       self.emit("return ")
-      self.visit(node.expr)
+      for idx, expr in enumerate(node.expressions):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
     else:
       self.emit("return")
 
@@ -502,15 +530,16 @@ class PythonTranspiler:
     self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
+    member_name = getattr(node, "target_name", None) or node.member
     if node.is_optional:
       self.emit("(")
       self.visit(node.receiver)
-      self.emit(f".{node.member} if ")
+      self.emit(f".{member_name} if ")
       self.visit(node.receiver)
       self.emit(" is not None else None)")
     else:
       self.visit(node.receiver)
-      self.emit(f".{node.member}")
+      self.emit(f".{member_name}")
 
   def visit_CloneNode(self, node: CloneNode) -> None:
     self.emit("_clone_helper(")

@@ -15,12 +15,14 @@ try:
   from parser.ast_builder import ASTBuilder
   from code_gen.python_transpiler import PythonTranspiler, Transpiler
   from code_gen.transpiler import transpile_file
+  from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
   from src.code_gen.transpiler import transpile_file
+  from src.semantics.type_checker import TypeChecker
 
 
 class TestPythonTranspiler(unittest.TestCase):
@@ -34,6 +36,11 @@ class TestPythonTranspiler(unittest.TestCase):
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
+    try:
+      checker = TypeChecker()
+      checker.check(ast)
+    except Exception:
+      pass
     transpiler = Transpiler()
     return transpiler.transpile(ast)
 
@@ -47,6 +54,11 @@ class TestPythonTranspiler(unittest.TestCase):
     
     builder = ASTBuilder()
     ast = builder.visit(tree)
+    try:
+      checker = TypeChecker()
+      checker.check(ast)
+    except Exception:
+      pass
     
     transpiler = Transpiler()
     py_code = transpiler.transpile(ast)
@@ -587,6 +599,88 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     self.assertIn("def update(dt):", py_code)
     self.assertNotIn("love =", py_code)
+
+
+  def test_python_multi_return_transpilation(self):
+    """Verifies Python transpilation for multi-return functions, declarations, and assignments."""
+    code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+    let x, y = get_pos();
+    var a, b = 1.0, 2.0;
+    a, b = get_pos();
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def get_pos():", py_code)
+    self.assertIn("return 10.0, 20.0", py_code)
+    self.assertIn("x, y = get_pos()", py_code)
+    self.assertIn("a, b = 1.0, 2.0", py_code)
+    self.assertIn("a, b = get_pos()", py_code)
+
+  def test_python_compound_assignment(self):
+    """Verifies Python transpilation of compound assignment operators and empty return."""
+    code = """
+    func test() {
+      var x = 10;
+      x += 5;
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 3.0, 4.0;
+      return;
+    }
+    """
+    py_cmp = self._transpile(code)
+    self.assertIn("x += 5", py_cmp)
+    self.assertIn("a, b = 3.0, 4.0", py_cmp)
+
+  def test_python_string_enum_transpilation(self):
+    """Verifies Python transpilation for string-backed enums."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Mode(str, Enum):", py_code)
+    self.assertIn('Fill = "fill"', py_code)
+    self.assertIn('Line = "line"', py_code)
+    self.assertIn('Default = "Default"', py_code)
+
+  def test_python_resource_handle_method_transpilation(self):
+    """Verifies Python transpilation for resource handles."""
+    code = """
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+    }
+    @extern("hero")
+    var hero_img: ImageHandle;
+
+    func main() {
+      hero_img.draw(10.0, 20.0);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("hero_img.draw(10.0, 20.0)", py_code)
+
+  def test_python_export_method_alias_transpilation(self):
+    """Verifies Python transpilation for trait methods with @export method aliases."""
+    code = """
+    trait Graphics {
+      @export("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    @extern("g")
+    var g: Graphics;
+
+    func main() {
+      g.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("g.setColor(1.0, 0.0, 0.0)", py_code)
 
 
 if __name__ == "__main__":

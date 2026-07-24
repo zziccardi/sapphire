@@ -226,6 +226,103 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(enum2.members[1].name, "NotFound")
     self.assertEqual(enum2.members[1].value, 404)
 
+  def test_multi_return_and_bindings(self):
+    """Verifies AST construction for multi-return functions and multi-variable declarations/assignments."""
+    ast = self._get_ast("""
+    func getPos(): float, float {
+      return 10.0, 20.0;
+    }
+    let x, y = getPos();
+    var a: float, b: float = 1.0, 2.0;
+    a, b = getPos();
+    """)
+    self.assertEqual(len(ast.declarations), 4)
+
+    # Multi-return function
+    fn = ast.declarations[0]
+    self.assertEqual(fn.name, "getPos")
+    self.assertEqual(len(fn.return_types), 2)
+    self.assertEqual(fn.return_types[0].name, "float")
+    self.assertEqual(fn.return_types[1].name, "float")
+    ret_stmt = fn.body.statements[0]
+    self.assertEqual(len(ret_stmt.expressions), 2)
+
+    # Multi-variable declaration unboxing function call
+    var_decl1 = ast.declarations[1]
+    self.assertEqual(var_decl1.names, ["x", "y"])
+    self.assertEqual(len(var_decl1.exprs), 1)
+
+    # Multi-variable declaration with literal list
+    var_decl2 = ast.declarations[2]
+    self.assertEqual(var_decl2.names, ["a", "b"])
+    self.assertEqual(len(var_decl2.exprs), 2)
+
+    # Multi-variable assignment
+    assign_stmt = ast.declarations[3]
+    self.assertEqual(len(assign_stmt.targets), 2)
+    self.assertEqual(len(assign_stmt.exprs), 1)
+
+  def test_visit_statement_directly(self):
+    """Verifies direct invocation of visitStatement on ASTBuilder."""
+    input_stream = InputStream("let x = 1;")
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    stmt_ctx = parser.statement()
+    builder = ASTBuilder()
+    stmt_node = builder.visitStatement(stmt_ctx)
+    self.assertIsInstance(stmt_node, VarDeclNode)
+
+  def test_function_type_with_multi_return(self):
+    """Verifies parsing of function type signatures returning multiple types."""
+    ast = self._get_ast("var fn: (int) -> (float, bool);")
+    var_decl = ast.declarations[0]
+    self.assertEqual(len(var_decl.val_types[0].return_types), 2)
+
+  def test_string_enum_parsing(self):
+    """Verifies AST construction for string-backed enum declarations."""
+    ast = self._get_ast("""
+    enum DrawMode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """)
+    enum_decl = ast.declarations[0]
+    self.assertEqual(enum_decl.name, "DrawMode")
+    self.assertEqual(enum_decl.members[0].value, "fill")
+    self.assertEqual(enum_decl.members[1].value, "line")
+    self.assertIsNone(enum_decl.members[2].value)
+
+  def test_trait_self_parameter_parsing(self):
+    """Verifies AST construction for trait declarations with explicit self parameter."""
+    ast = self._get_ast("""
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+      func getWidth(var self): float;
+    }
+    """)
+    trait_decl = ast.declarations[0]
+    self.assertEqual(trait_decl.name, "ImageHandle")
+    self.assertEqual(len(trait_decl.members), 2)
+    self.assertEqual(trait_decl.members[0].parameters[0].name, "self")
+    self.assertFalse(trait_decl.members[0].parameters[0].is_mutable)
+    self.assertEqual(trait_decl.members[1].parameters[0].name, "self")
+    self.assertTrue(trait_decl.members[1].parameters[0].is_mutable)
+
+  def test_trait_export_annotation_parsing(self):
+    """Verifies AST construction for trait methods with @export annotations."""
+    ast = self._get_ast("""
+    trait Graphics {
+      @export("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    """)
+    trait_decl = ast.declarations[0]
+    self.assertEqual(len(trait_decl.members[0].annotations), 1)
+    self.assertEqual(trait_decl.members[0].annotations[0].name, "export")
+    self.assertEqual(trait_decl.members[0].annotations[0].arg, "setColor")
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -70,7 +70,7 @@
         },
         {
           "name": "storage.modifier.sapphire",
-          "match": "\\b(const|func|impl|let|proto|static|struct|trait|var)\\b"
+          "match": "\\b(const|enum|func|impl|let|proto|static|struct|trait|var)\\b"
         },
         {
           "name": "constant.language.sapphire",

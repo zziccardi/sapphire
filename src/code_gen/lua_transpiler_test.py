@@ -35,6 +35,7 @@ try:
   from parser.ast_builder import ASTBuilder
   from code_gen.lua_transpiler import LuaTranspiler
   from code_gen.transpiler import transpile_file
+  from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
   from src.parser.ast import (
       ASTNode,
@@ -58,6 +59,7 @@ except ModuleNotFoundError:
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.lua_transpiler import LuaTranspiler
   from src.code_gen.transpiler import transpile_file
+  from src.semantics.type_checker import TypeChecker
 
 
 class DummyNode(ASTNode):
@@ -77,6 +79,12 @@ class TestLuaTranspiler(unittest.TestCase):
 
     builder = ASTBuilder()
     ast = builder.visit(tree)
+
+    try:
+      checker = TypeChecker()
+      checker.check(ast)
+    except Exception:
+      pass
 
     transpiler = LuaTranspiler()
     return transpiler.transpile(ast)
@@ -427,6 +435,103 @@ class TestLuaTranspiler(unittest.TestCase):
         os.remove(sp_path)
       if os.path.exists(lua_path):
         os.remove(lua_path)
+
+
+  def test_lua_multi_return_transpilation(self):
+    """Verifies Lua transpilation for multi-return functions, declarations, and assignments."""
+    code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+    let x, y = get_pos();
+    var a, b = 1.0, 2.0;
+    a, b = get_pos();
+    """
+    output = self._transpile(code)
+    self.assertIn("local function get_pos()", output)
+    self.assertIn("return 10.0, 20.0", output)
+    self.assertIn("local x, y = get_pos()", output)
+    self.assertIn("local a, b = 1.0, 2.0", output)
+    self.assertIn("a, b = get_pos()", output)
+
+  def test_lua_compound_assignment(self):
+    """Verifies Lua transpilation of compound assignment operators."""
+    code = """
+    func test() {
+      var x = 10;
+      x += 5;
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 3.0, 4.0;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("x = x + 5", output)
+    self.assertIn("a, b = 3.0, 4.0", output)
+
+  def test_lua_string_enum_transpilation(self):
+    """Verifies Lua transpilation for string-backed enums."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """
+    out = self._transpile(code)
+    self.assertIn('local Mode = {', out)
+    self.assertIn('Fill = "fill"', out)
+    self.assertIn('Line = "line"', out)
+    self.assertIn('Default = "Default"', out)
+
+  def test_lua_resource_handle_method_transpilation(self):
+    """Verifies Lua transpilation for resource handles with colon vs dot calls."""
+    code = """
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+    }
+    trait Graphics {
+      func rectangle(mode: String, x: float, y: float, w: float, h: float);
+    }
+
+    struct Love {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: Love;
+
+    @extern("hero")
+    var hero_img: ImageHandle;
+
+    func main() {
+      love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0);
+      hero_img.draw(10.0, 20.0);
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0)', output)
+    self.assertIn('hero_img:draw(10.0, 20.0)', output)
+
+  def test_lua_export_method_alias_transpilation(self):
+    """Verifies Lua transpilation for trait methods with @export method aliases."""
+    code = """
+    trait Graphics {
+      @export("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    struct Love {
+      var graphics: Graphics;
+    }
+    @extern("love")
+    var love: Love;
+
+    func main() {
+      love.graphics.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    out = self._transpile(code)
+    self.assertIn('love.graphics.setColor(1.0, 0.0, 0.0)', out)
 
 
 if __name__ == "__main__":

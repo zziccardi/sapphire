@@ -28,9 +28,9 @@ class Type:
         and other.name == "float"
     ):
       return True
-    if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and other.name == "int":
+    if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and self.value_type.lower() == other.name.lower():
       return True
-    if isinstance(self, PrimitiveType) and self.name == "int" and isinstance(other, EnumType):
+    if isinstance(self, PrimitiveType) and isinstance(other, EnumType) and self.name.lower() == other.value_type.lower():
       return True
     return self == other
 
@@ -70,20 +70,56 @@ class OptionalType(Type):
     return f"{self.base_type}?"
 
 
+class MultiReturnType(Type):
+  """Represents a multi-return type tuple (e.g. (float, float))."""
+
+  def __init__(self, types: List[Type]):
+    self.types = types
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, MultiReturnType):
+      return False
+    return self.types == other.types
+
+  def __repr__(self) -> str:
+    return f"({', '.join(str(t) for t in self.types)})"
+
+
 class FunctionType(Type):
-  """Represents a function type signature (e.g., '(int, int) -> float')."""
+  """Represents a function type signature (e.g., '(int, int) -> float' or '(int, int) -> (float, float)')."""
 
   def __init__(
       self,
       param_types: List[Type],
-      return_type: Type,
+      return_type: Any,
       param_mutabilities: Optional[List[bool]] = None,
       param_names: Optional[List[str]] = None,
+      has_self: bool = False,
+      extern_name: Optional[str] = None,
   ):
     self.param_types = param_types
-    self.return_type = return_type
+    if isinstance(return_type, list):
+      if len(return_type) == 0:
+        self.return_type = PrimitiveType("none")
+      elif len(return_type) == 1:
+        self.return_type = return_type[0]
+      else:
+        self.return_type = MultiReturnType(return_type)
+    else:
+      self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
+    self.has_self = has_self or (bool(self.param_names) and self.param_names[0] == "self")
+    self.extern_name = extern_name
+
+  @property
+  def return_types(self) -> List[Type]:
+    if isinstance(self.return_type, MultiReturnType):
+      return self.return_type.types
+    elif isinstance(self.return_type, PrimitiveType) and self.return_type.name == "none":
+      return []
+    else:
+      return [self.return_type]
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, FunctionType):
@@ -165,12 +201,24 @@ class TraitType(Type):
 
 
 class EnumType(Type):
-  """Represents a user-defined integer-backed enum type."""
+  """Represents a custom enum type definition."""
 
-  def __init__(self, name: str, variants: Optional[Dict[str, int]] = None, comments: Optional[str] = None):
+  def __init__(
+      self,
+      name: str,
+      variants: Optional[Dict[str, Union[int, str]]] = None,
+      comments: Optional[str] = None,
+  ):
     self.name = name
-    self.variants: Dict[str, int] = variants or {}
+    self.variants: Dict[str, Union[int, str]] = variants or {}
     self.comments = comments or ""
+
+  @property
+  def value_type(self) -> str:
+    """Returns 'String' if any variant is a string, otherwise 'int'."""
+    if any(isinstance(v, str) for v in self.variants.values()):
+      return "String"
+    return "int"
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, EnumType):

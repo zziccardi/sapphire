@@ -1440,6 +1440,157 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Redefinition of identifier 'love'.", str(context.exception))
 
+  def test_multi_return_and_bindings_type_checking(self):
+    """Verifies semantic type checking for multi-return functions, unpacking, and assignments."""
+    valid_code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+
+    func main() {
+      let x, y = get_pos();
+      var a: float, b: float = 1.0, 2.0;
+      a, b = get_pos();
+      a, b = 3.0, 4.0;
+    }
+    """
+    self._check(valid_code)
+
+    # Quantity mismatch on return
+    bad_return_count = """
+    func get_pos(): float, float {
+      return 10.0;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_return_count)
+    self.assertIn("Function expected 2 return value(s), but return statement provided 1 value(s).", str(context.exception))
+
+    # Type mismatch on return
+    bad_return_type = """
+    func get_pos(): float, float {
+      return 10.0, "invalid";
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_return_type)
+    self.assertIn("Cannot return value of type 'string' for return value #2", str(context.exception))
+
+    # Quantity mismatch on unpack
+    bad_unpack = """
+    func get_pos(): float, float { return 1.0, 2.0; }
+    func main() {
+      let x, y, z = get_pos();
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(bad_unpack)
+    self.assertIn("Cannot unpack 2 value(s) into 3 variable(s).", str(context.exception))
+
+    # Void function returning values
+    void_return_err = """
+    func no_ret() {
+      return 1, 2;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(void_return_err)
+    self.assertIn("Function with no return type cannot return 2 values.", str(context.exception))
+
+    # Assignment count mismatch
+    assign_mismatch = """
+    func main() {
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 1.0, 2.0, 3.0;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(assign_mismatch)
+    self.assertIn("Cannot assign 3 value(s) to 2 target(s).", str(context.exception))
+
+    # Uninitialized variable in block
+    uninit_block = """
+    func main() {
+      var x: int;
+      var y: int = 10;
+    }
+    """
+    self._check(uninit_block)
+
+    # _resolve_type_node(None) test
+    try:
+      from semantics.type_checker import TypeChecker
+      from semantics.symbol_table import PrimitiveType
+      from parser.ast import BasicTypeNode
+    except ModuleNotFoundError:
+      from src.semantics.type_checker import TypeChecker
+      from src.semantics.symbol_table import PrimitiveType
+      from src.parser.ast import BasicTypeNode
+
+    tc = TypeChecker()
+    self.assertEqual(tc._resolve_type_node(None), PrimitiveType("none"))
+
+    class DummyWithReturnType:
+      return_type = BasicTypeNode("int")
+
+    res_types = tc._resolve_return_types(DummyWithReturnType())
+    self.assertEqual(res_types, [PrimitiveType("int")])
+
+  def test_string_enum_type_checking(self):
+    """Verifies type compatibility for string-backed enums with string primitive values."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+
+    func set_mode(m: Mode) {}
+
+    func main() {
+      let m: Mode = Mode.Fill;
+      let s: String = Mode.Line;
+      set_mode("fill");
+    }
+    """
+    self._check(code)
+
+  def test_trait_self_parameter_type_checking(self):
+    """Verifies argument checking for trait methods with explicit self parameters."""
+    code = """
+    trait ImageHandle {
+      func draw(self, x: float, y: float);
+      func getWidth(var self): float;
+    }
+
+    @extern
+    var img: ImageHandle;
+
+    func main() {
+      img.draw(10.0, 20.0);
+      let w = img.getWidth();
+    }
+    """
+    self._check(code)
+
+  def test_trait_export_method_type_checking(self):
+    """Verifies type checking for trait methods annotated with @export."""
+    code = """
+    trait Graphics {
+      @export("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+
+    @extern
+    var g: Graphics;
+
+    func main() {
+      g.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    self._check(code)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -31,7 +31,7 @@ enumDeclaration
     ;
 
 enumMember
-    : IDENTIFIER (ASSIGN INT_LIT)?
+    : IDENTIFIER (ASSIGN (INT_LIT | STRING_LIT))?
     ;
 
 structDeclaration
@@ -54,12 +54,16 @@ traitDeclaration
     : TRAIT IDENTIFIER LBRACE traitMember* RBRACE
     ;
 
+returnTypeList
+    : type (COMMA type)*
+    ;
+
 traitMember
-    : (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON type)? SEMICOLON
+    : annotation* (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
     ;
 
 functionDeclaration
-    : annotation* FUNC functionName LPAREN parameterList? RPAREN (COLON type)? block
+    : annotation* FUNC functionName LPAREN parameterList? RPAREN (COLON returnTypeList)? block
     ;
 
 functionName
@@ -72,7 +76,7 @@ parameterList
     ;
 
 parameter
-    : VAR? IDENTIFIER COLON type (ASSIGN expression)?
+    : (VAR | CONST)? (SELF | IDENTIFIER) (COLON type)? (ASSIGN expression)?
     ;
 
 type
@@ -89,7 +93,7 @@ baseType
     ;
 
 functionType
-    : LPAREN (type (COMMA type)*)? RPAREN ARROW type
+    : LPAREN (type (COMMA type)*)? RPAREN ARROW (LPAREN returnTypeList RPAREN | type)
     ;
 
 statement
@@ -107,12 +111,28 @@ block
     : LBRACE statement* RBRACE
     ;
 
+varBinding
+    : IDENTIFIER (COLON type)?
+    ;
+
+varBindingList
+    : varBinding (COMMA varBinding)*
+    ;
+
+expressionList
+    : expression (COMMA expression)*
+    ;
+
 variableDeclarationStatement
-    : annotation* (LET | VAR) IDENTIFIER (COLON type)? (ASSIGN expression)? SEMICOLON
+    : annotation* (LET | VAR) varBindingList (ASSIGN expressionList)? SEMICOLON
+    ;
+
+targetList
+    : expression (COMMA expression)*
     ;
 
 assignmentStatement
-    : expression (ASSIGN | ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN | MOD_ASSIGN) expression SEMICOLON
+    : targetList (ASSIGN | ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN | MOD_ASSIGN) expressionList SEMICOLON
     ;
 
 expressionStatement
@@ -120,7 +140,7 @@ expressionStatement
     ;
 
 returnStatement
-    : RETURN expression? SEMICOLON
+    : RETURN (expression (COMMA expression)*)? SEMICOLON
     ;
 
 ifStatement

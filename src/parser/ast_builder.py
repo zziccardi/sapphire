@@ -97,7 +97,12 @@ class ASTBuilder(SapphireVisitor):
 
   def visitEnumMember(self, ctx: SapphireParser.EnumMemberContext) -> EnumMemberNode:
     name = ctx.IDENTIFIER().getText()
-    val = int(ctx.INT_LIT().getText()) if ctx.INT_LIT() else None
+    val = None
+    if ctx.INT_LIT():
+      val = int(ctx.INT_LIT().getText())
+    elif ctx.STRING_LIT():
+      raw_str = ctx.STRING_LIT().getText()
+      val = raw_str[1:-1]
     node = EnumMemberNode(name, val)
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
@@ -155,7 +160,11 @@ class ASTBuilder(SapphireVisitor):
     node.name_length = len(name_token.text)
     return node
 
+  def visitReturnTypeList(self, ctx: SapphireParser.ReturnTypeListContext) -> List[TypeNode]:
+    return [self.visit(t) for t in ctx.type_()]
+
   def visitTraitMember(self, ctx: SapphireParser.TraitMemberContext) -> TraitMemberNode:
+    annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     modifier = None
     if ctx.STATIC():
       modifier = "static"
@@ -163,8 +172,8 @@ class ASTBuilder(SapphireVisitor):
       modifier = "const"
     name = ctx.IDENTIFIER().getText()
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
-    return_type = self.visit(ctx.type_()) if ctx.type_() else None
-    node = TraitMemberNode(name, params, return_type, modifier=modifier)
+    return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
+    node = TraitMemberNode(name, params, return_types, modifier=modifier, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
@@ -176,9 +185,9 @@ class ASTBuilder(SapphireVisitor):
     annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.functionName().getText()
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
-    return_type = self.visit(ctx.type_()) if ctx.type_() else None
+    return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
     body = self.visit(ctx.block()) if ctx.block() else None
-    node = FuncDeclNode(name, params, return_type, body, annotations=annotations)
+    node = FuncDeclNode(name, params, return_types, body, annotations=annotations)
     # Positioning for Language Server:
     name_token = ctx.functionName().IDENTIFIER().getSymbol() if ctx.functionName().IDENTIFIER() else ctx.functionName().INIT().getSymbol()
     node.name_line = name_token.line
@@ -191,12 +200,17 @@ class ASTBuilder(SapphireVisitor):
 
   def visitParameter(self, ctx: SapphireParser.ParameterContext) -> ParameterNode:
     is_mutable = ctx.VAR() is not None
-    name = ctx.IDENTIFIER().getText()
-    param_type = self.visit(ctx.type_())
+    if ctx.SELF():
+      name = "self"
+      name_token = ctx.SELF().getSymbol()
+    else:
+      name = ctx.IDENTIFIER().getText()
+      name_token = ctx.IDENTIFIER().getSymbol()
+
+    param_type = self.visit(ctx.type_()) if ctx.type_() else None
     default_expr = self.visit(ctx.expression()) if ctx.expression() else None
     node = ParameterNode(is_mutable, name, param_type, default_expr)
     # Positioning for Language Server:
-    name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
     node.name_column = name_token.column
     node.name_length = len(name_token.text)
@@ -220,9 +234,13 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitFunctionType(self, ctx: SapphireParser.FunctionTypeContext) -> FunctionTypeNode:
-    param_types = [self.visit(t) for t in ctx.type_()[:-1]]
-    return_type = self.visit(ctx.type_()[-1])
-    return FunctionTypeNode(param_types, return_type)
+    if ctx.returnTypeList():
+      return_types = self.visit(ctx.returnTypeList())
+      param_types = [self.visit(t) for t in ctx.type_()] if ctx.type_() else []
+    else:
+      param_types = [self.visit(t) for t in ctx.type_()[:-1]] if len(ctx.type_()) > 1 else []
+      return_types = [self.visit(ctx.type_()[-1])]
+    return FunctionTypeNode(param_types, return_types)
 
   def visitStatement(self, ctx: SapphireParser.StatementContext) -> StmtNode:
     return self.visit(ctx.getChild(0))
@@ -231,34 +249,41 @@ class ASTBuilder(SapphireVisitor):
     statements = [self.visit(s) for s in ctx.statement()]
     return BlockNode(statements)
 
+  def visitVarBinding(self, ctx: SapphireParser.VarBindingContext):
+    name = ctx.IDENTIFIER().getText()
+    val_type = self.visit(ctx.type_()) if ctx.type_() else None
+    token = ctx.IDENTIFIER().getSymbol()
+    return {"name": name, "val_type": val_type, "token": token}
+
   def visitVariableDeclarationStatement(
       self, ctx: SapphireParser.VariableDeclarationStatementContext
   ) -> VarDeclNode:
     annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     is_mutable = ctx.VAR() is not None
-    name = ctx.IDENTIFIER().getText()
-    val_type = self.visit(ctx.type_()) if ctx.type_() else None
-    expr = self.visit(ctx.expression()) if ctx.expression() else None
-    node = VarDeclNode(is_mutable, name, val_type, expr, annotations=annotations)
-    # Positioning for Language Server:
-    name_token = ctx.IDENTIFIER().getSymbol()
-    node.name_line = name_token.line
-    node.name_column = name_token.column
-    node.name_length = len(name_token.text)
+    bindings = [self.visitVarBinding(b) for b in ctx.varBindingList().varBinding()]
+    names = [b["name"] for b in bindings]
+    val_types = [b["val_type"] for b in bindings]
+    exprs = [self.visit(e) for e in ctx.expressionList().expression()] if ctx.expressionList() else []
+    node = VarDeclNode(is_mutable, names, val_types, exprs, annotations=annotations)
+    if bindings:
+      name_token = bindings[0]["token"]
+      node.name_line = name_token.line
+      node.name_column = name_token.column
+      node.name_length = len(name_token.text)
     return node
 
   def visitAssignmentStatement(self, ctx: SapphireParser.AssignmentStatementContext) -> AssignmentNode:
-    target = self.visit(ctx.expression(0))
+    targets = [self.visit(t) for t in ctx.targetList().expression()]
     op = ctx.getChild(1).getText()
-    expr = self.visit(ctx.expression(1))
-    return AssignmentNode(target, op, expr)
+    exprs = [self.visit(e) for e in ctx.expressionList().expression()]
+    return AssignmentNode(targets, op, exprs)
 
   def visitExpressionStatement(self, ctx: SapphireParser.ExpressionStatementContext) -> ExprStmtNode:
     return ExprStmtNode(self.visit(ctx.expression()))
 
   def visitReturnStatement(self, ctx: SapphireParser.ReturnStatementContext) -> ReturnNode:
-    expr = self.visit(ctx.expression()) if ctx.expression() else None
-    return ReturnNode(expr)
+    exprs = [self.visit(e) for e in ctx.expression()] if ctx.expression() else []
+    return ReturnNode(exprs)
 
   def visitIfStatement(self, ctx: SapphireParser.IfStatementContext) -> IfNode:
     is_if_let = ctx.LET() is not None
