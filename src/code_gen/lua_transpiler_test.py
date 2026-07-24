@@ -513,11 +513,11 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0)', output)
     self.assertIn('hero_img:draw(10.0, 20.0)', output)
 
-  def test_lua_extern_method_alias_transpilation(self):
-    """Verifies Lua transpilation for trait methods with @extern method aliases."""
+  def test_lua_export_method_alias_transpilation(self):
+    """Verifies Lua transpilation for trait methods with @export method aliases."""
     code = """
     trait Graphics {
-      @extern("setColor")
+      @export("setColor")
       func setColorRGBA(r: float, g: float, b: float);
     }
     struct Love {

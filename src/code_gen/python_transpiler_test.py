@@ -665,11 +665,11 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     self.assertIn("hero_img.draw(10.0, 20.0)", py_code)
 
-  def test_python_extern_method_alias_transpilation(self):
-    """Verifies Python transpilation for trait methods with @extern method aliases."""
+  def test_python_export_method_alias_transpilation(self):
+    """Verifies Python transpilation for trait methods with @export method aliases."""
     code = """
     trait Graphics {
-      @extern("setColor")
+      @export("setColor")
       func setColorRGBA(r: float, g: float, b: float);
     }
     @extern("g")

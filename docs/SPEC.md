@@ -601,25 +601,39 @@ for var name in names {
 Sapphire supports native interoperability with third-party scripting host engines (such as **Love2D** in Lua 5.1 / LuaJIT environments) through single-purpose annotation decorators:
 
 ### A. `@extern` (host variable binding)
-The `@extern` annotation binds a variable to an external global symbol provided at runtime by the host environment.
-* **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is named `identifier`).
+The `@extern` annotation binds Sapphire variables to external host symbols
+provided at runtime.
+* **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is also named `identifier`).
 * **Runtime behavior**: Tells the transpiler to omit runtime variable initializations (`local name = ...`), permitting 100% type-safe access to host-provided engine modules.
 
-### B. `@export` (host global callback export)
-The `@export` annotation exposes a top-level Sapphire function definition as a global callback for the host engine runtime.
-* **Syntax**: `@export("target.global.path") func handler(...) { ... }` or `@export func handler(...) { ... }`.
-* **Runtime behavior**: In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
+### B. `@export` (transpiled symbol renaming)
+The `@export` annotation configures symbol renaming during transpilation.
+* **Global callback export**: `@export("love.update") func handler(...) { ... }`. In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
+* **Trait method aliasing**: `@export("native_name")` placed on a trait method signature configures the transpiler to emit `native_name` instead of the Sapphire method identifier (e.g. `@export("setColor") func setColorRGBA(r: float, g: float, b: float);`).
 
-### C. Trait-based host interfaces
-External host-module contracts are defined cleanly using standard Sapphire `trait`s (which define interface method signatures without implementations) composed inside container `struct` types:
+### C. Trait-based host interfaces & resource handles
+External host–module contracts are defined cleanly using standard Sapphire `trait`s composed inside container `struct` types:
+
+* **Resource-handle traits**: Specifying an explicit first `self` parameter (e.g. `func draw(self, x: float, y: float)`) designates an instance method on a handle object, transpiling to Lua colon syntax (`handle:draw(x, y)`).
+* **Module traits**: Omitting `self` designates a module or static function, transpiling to Lua dot syntax (`love.graphics.rectangle(...)`).
+* **Method aliases**: Overloaded host functions can be exposed as distinct, type-safe Sapphire methods annotated with `@export("native_name")`.
 
 ```sapphire
-// 1. Opaque resource-handle struct
-struct Image {}
+// 1. Opaque resource-handle trait (instance methods take `self`)
+trait Image {
+  func draw(self, x: float, y: float);
+  func getWidth(self): float;
+}
 
-// 2. Host API traits
+// 2. Host API trait (module functions without `self`, method aliases for
+// overloaded host APIs)
 trait Graphics {
-  func setColor(r: float, g: float, b: float);
+  @export("setColor")
+  func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
+
+  @export("setColor")
+  func setColorObj(color: Color);
+
   func rectangle(mode: String, x: float, y: float, w: float, h: float);
   func clear(r: float, g: float, b: float);
   func newImage(path: String): Image;
@@ -650,5 +664,8 @@ func update(dt: float) {
 @export("love.draw")
 func draw() {
   love.graphics.clear(r = 0.1, g = 0.1, b = 0.1);
+
+  // Transpiles to `love.graphics.setColor(1.0, 0.0, 0.0)`
+  love.graphics.setColorRGBA(1.0, 0.0, 0.0);
 }
 ```

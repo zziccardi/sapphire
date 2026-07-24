@@ -181,7 +181,7 @@ class TypeChecker:
           has_self = bool(param_names) and param_names[0] == "self"
           extern_name = None
           for ann in getattr(member, "annotations", []):
-            if ann.name == "extern" and ann.arg:
+            if ann.name == "export" and ann.arg:
               extern_name = ann.arg
               break
           fn_type = FunctionType(
