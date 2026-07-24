@@ -262,6 +262,23 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(len(assign_stmt.targets), 2)
     self.assertEqual(len(assign_stmt.exprs), 1)
 
+  def test_visit_statement_directly(self):
+    """Verifies direct invocation of visitStatement on ASTBuilder."""
+    input_stream = InputStream("let x = 1;")
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    stmt_ctx = parser.statement()
+    builder = ASTBuilder()
+    stmt_node = builder.visitStatement(stmt_ctx)
+    self.assertIsInstance(stmt_node, VarDeclNode)
+
+  def test_function_type_with_multi_return(self):
+    """Verifies parsing of function type signatures returning multiple types."""
+    ast = self._get_ast("var fn: (int) -> (float, bool);")
+    var_decl = ast.declarations[0]
+    self.assertEqual(len(var_decl.val_types[0].return_types), 2)
+
 
 if __name__ == "__main__":
   unittest.main()

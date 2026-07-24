@@ -173,6 +173,31 @@ class TestSymbolTable(unittest.TestCase):
     self.assertTrue(self.int_type.is_compatible(e1))
     self.assertTrue(e1.is_compatible(self.int_type))
 
+  def test_multi_return_type_methods(self):
+    """Verifies MultiReturnType repr, equality, and FunctionType.return_types property."""
+    try:
+      from semantics.symbol_table import MultiReturnType, FunctionType, PrimitiveType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import MultiReturnType, FunctionType, PrimitiveType
+
+    m1 = MultiReturnType([PrimitiveType("float"), PrimitiveType("float")])
+    m2 = MultiReturnType([PrimitiveType("float"), PrimitiveType("float")])
+    self.assertEqual(m1, m2)
+    self.assertFalse(m1 == "not a MultiReturnType")
+    self.assertEqual(repr(m1), "(float, float)")
+
+    fn_multi = FunctionType([], [PrimitiveType("int"), PrimitiveType("float")])
+    self.assertEqual(fn_multi.return_types, [PrimitiveType("int"), PrimitiveType("float")])
+
+    fn_single = FunctionType([], PrimitiveType("int"))
+    self.assertEqual(fn_single.return_types, [PrimitiveType("int")])
+
+    fn_void = FunctionType([], PrimitiveType("none"))
+    self.assertEqual(fn_void.return_types, [])
+
+    fn_empty_list = FunctionType([], [])
+    self.assertEqual(fn_empty_list.return_types, [])
+
 
 if __name__ == "__main__":
   unittest.main()

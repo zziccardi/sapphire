@@ -1487,6 +1487,56 @@ class TestTypeChecker(unittest.TestCase):
       self._check(bad_unpack)
     self.assertIn("Cannot unpack 2 value(s) into 3 variable(s).", str(context.exception))
 
+    # Void function returning values
+    void_return_err = """
+    func no_ret() {
+      return 1, 2;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(void_return_err)
+    self.assertIn("Function with no return type cannot return 2 values.", str(context.exception))
+
+    # Assignment count mismatch
+    assign_mismatch = """
+    func main() {
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 1.0, 2.0, 3.0;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(assign_mismatch)
+    self.assertIn("Cannot assign 3 value(s) to 2 target(s).", str(context.exception))
+
+    # Uninitialized variable in block
+    uninit_block = """
+    func main() {
+      var x: int;
+      var y: int = 10;
+    }
+    """
+    self._check(uninit_block)
+
+    # _resolve_type_node(None) test
+    try:
+      from semantics.type_checker import TypeChecker
+      from semantics.symbol_table import PrimitiveType
+      from parser.ast import BasicTypeNode
+    except ModuleNotFoundError:
+      from src.semantics.type_checker import TypeChecker
+      from src.semantics.symbol_table import PrimitiveType
+      from src.parser.ast import BasicTypeNode
+
+    tc = TypeChecker()
+    self.assertEqual(tc._resolve_type_node(None), PrimitiveType("none"))
+
+    class DummyWithReturnType:
+      return_type = BasicTypeNode("int")
+
+    res_types = tc._resolve_return_types(DummyWithReturnType())
+    self.assertEqual(res_types, [PrimitiveType("int")])
+
 
 if __name__ == "__main__":
   unittest.main()

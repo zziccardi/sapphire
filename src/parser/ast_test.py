@@ -104,6 +104,79 @@ class TestASTNodes(unittest.TestCase):
     self.assertNotIn("start_line", node_dict)
     self.assertNotIn("start_column", node_dict)
 
+  def test_node_properties_and_backward_compatibility_to_dict(self):
+    """Verifies backward compatible properties and to_dict methods on AST nodes."""
+    try:
+      from parser.ast import (
+          ASTNode, FunctionTypeNode, FuncDeclNode, TraitMemberNode, VarDeclNode,
+          AssignmentNode, ReturnNode, IdentifierNode, LiteralNode, BasicTypeNode,
+          ExprStmtNode
+      )
+    except ModuleNotFoundError:
+      from src.parser.ast import (
+          ASTNode, FunctionTypeNode, FuncDeclNode, TraitMemberNode, VarDeclNode,
+          AssignmentNode, ReturnNode, IdentifierNode, LiteralNode, BasicTypeNode,
+          ExprStmtNode
+      )
+
+    fn_type = FunctionTypeNode([BasicTypeNode("int")], BasicTypeNode("float"))
+    self.assertEqual(fn_type.return_type.name, "float")
+
+    func_decl = FuncDeclNode("f", [], return_type=BasicTypeNode("int"))
+    self.assertEqual(func_decl.return_type.name, "int")
+
+    func_decl_none = FuncDeclNode("f", [])
+    self.assertIsNone(func_decl_none.return_type)
+
+    trait_mem = TraitMemberNode("m", [], return_type=BasicTypeNode("int"))
+    self.assertEqual(trait_mem.return_type.name, "int")
+
+    trait_mem_none = TraitMemberNode("m", [])
+    self.assertIsNone(trait_mem_none.return_type)
+
+    var_node = VarDeclNode(False, name="x", val_type=BasicTypeNode("int"))
+    self.assertEqual(var_node.name, "x")
+    self.assertEqual(var_node.val_type.name, "int")
+    self.assertIsNone(var_node.expr)
+
+    var_empty = VarDeclNode(False)
+    self.assertEqual(var_empty.name, "")
+
+    assign_node = AssignmentNode(IdentifierNode("x"), "=", LiteralNode(5, "int"))
+    self.assertEqual(assign_node.target.name, "x")
+    self.assertEqual(assign_node.expr.value, 5)
+    assign_dict = assign_node.to_dict()
+    self.assertEqual(assign_dict["target"]["name"], "x")
+
+    assign_empty = AssignmentNode([], "=", [])
+    self.assertIsNone(assign_empty.to_dict()["target"])
+    self.assertIsNone(assign_empty.to_dict()["expr"])
+
+    ret_node = ReturnNode(LiteralNode(10, "int"))
+    self.assertEqual(ret_node.expr.value, 10)
+    ret_dict = ret_node.to_dict()
+    self.assertEqual(ret_dict["expr"]["value"], 10)
+
+    ret_empty = ReturnNode()
+    self.assertIsNone(ret_empty.expr)
+    self.assertIsNone(ret_empty.to_dict()["expr"])
+
+    class DummySingleReturnTypeNode(ASTNode):
+      return_type = BasicTypeNode("int")
+
+    trait_single_type = TraitMemberNode("m", [], return_types=BasicTypeNode("int"))
+    self.assertEqual(trait_single_type.return_types[0].name, "int")
+
+    assign_target_kw = AssignmentNode(targets=None, op="=", exprs=None, target=IdentifierNode("x"), expr=LiteralNode(1, "int"))
+    self.assertEqual(assign_target_kw.target.name, "x")
+    self.assertEqual(assign_target_kw.expr.value, 1)
+
+    ret_expr_kw = ReturnNode(exprs=None, expr=LiteralNode(1, "int"))
+    self.assertEqual(ret_expr_kw.expr.value, 1)
+
+    expr_stmt = ExprStmtNode(LiteralNode(1, "int"))
+    self.assertEqual(expr_stmt.expr.value, 1)
+
 
 if __name__ == "__main__":
   unittest.main()

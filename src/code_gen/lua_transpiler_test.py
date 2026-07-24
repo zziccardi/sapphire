@@ -446,6 +446,21 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local a, b = 1.0, 2.0", output)
     self.assertIn("a, b = get_pos()", output)
 
+  def test_lua_compound_assignment(self):
+    """Verifies Lua transpilation of compound assignment operators."""
+    code = """
+    func test() {
+      var x = 10;
+      x += 5;
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 3.0, 4.0;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("x = x + 5", output)
+    self.assertIn("a, b = 3.0, 4.0", output)
+
 
 if __name__ == "__main__":
   unittest.main()

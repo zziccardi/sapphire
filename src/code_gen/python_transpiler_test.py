@@ -606,6 +606,22 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("a, b = 1.0, 2.0", py_code)
     self.assertIn("a, b = get_pos()", py_code)
 
+  def test_python_compound_assignment(self):
+    """Verifies Python transpilation of compound assignment operators and empty return."""
+    code = """
+    func test() {
+      var x = 10;
+      x += 5;
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 3.0, 4.0;
+      return;
+    }
+    """
+    py_cmp = self._transpile(code)
+    self.assertIn("x += 5", py_cmp)
+    self.assertIn("a, b = 3.0, 4.0", py_cmp)
+
 
 if __name__ == "__main__":
   unittest.main()
