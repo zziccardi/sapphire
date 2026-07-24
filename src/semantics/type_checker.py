@@ -765,6 +765,9 @@ class TypeChecker:
 
     # Arithmetic operators
     if node.op in ("+", "-", "*", "/", "%"):
+      if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name in ("String", "string")) or (isinstance(right, PrimitiveType) and right.name in ("String", "string"))):
+        node.is_string_concat = True
+        return PrimitiveType("string")
       # Supports int and float operations
       is_numeric_left = isinstance(left, PrimitiveType) and left.name in ("int", "float")
       is_numeric_right = isinstance(right, PrimitiveType) and right.name in ("int", "float")

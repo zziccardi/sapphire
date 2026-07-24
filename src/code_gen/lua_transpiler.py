@@ -567,9 +567,7 @@ class LuaTranspiler:
 
     # Convert '+' for strings to '..' string concatenation in Lua
     if op == "+":
-      if isinstance(node.left, LiteralNode) and node.left.lit_type == "string":
-        op = ".."
-      elif isinstance(node.right, LiteralNode) and node.right.lit_type == "string":
+      if getattr(node, "is_string_concat", False) or (isinstance(node.left, LiteralNode) and node.left.lit_type == "string") or (isinstance(node.right, LiteralNode) and node.right.lit_type == "string"):
         op = ".."
 
     self.emit("(")
