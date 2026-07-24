@@ -244,11 +244,11 @@ let sword = Weapon(...);
 sword.use();
 ```
 
-### 7. Enums
+## 7. Enums
 
 Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
 
-### Definition, auto-incrementing, & string values
+### Definition & auto-incrementing values
 
 Enum members are declared as comma-separated identifiers inside curly braces. Trailing commas are optional and recommended.
 
@@ -302,7 +302,7 @@ let current_dir = Direction.North;
 
 // String enum interoperability
 let mode: DrawMode = DrawMode.Fill;
-let mode_str: String = DrawMode.Line;  // Compatible with string primitive
+let mode_str: String = DrawMode.Line;  // Compatible with strings
 
 // Comparison
 if status == HttpStatusCode.Ok {
