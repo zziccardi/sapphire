@@ -31,7 +31,7 @@ enumDeclaration
     ;
 
 enumMember
-    : IDENTIFIER (ASSIGN INT_LIT)?
+    : IDENTIFIER (ASSIGN (INT_LIT | STRING_LIT))?
     ;
 
 structDeclaration

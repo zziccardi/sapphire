@@ -21,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 PYTHON_RUNTIME_PREAMBLE = """# Sapphire Runtime Header
 import copy
-from enum import IntEnum
+from enum import Enum, IntEnum
 
 class Arena:
   def __init__(self):
@@ -217,19 +217,26 @@ class PythonTranspiler:
 
   def visit_EnumDeclNode(self, node: EnumDeclNode) -> None:
     self.newline()
-    self.emit(f"class {node.name}(IntEnum):")
+    is_string_enum = any(isinstance(m.value, str) for m in node.members)
+    base_class = "str, Enum" if is_string_enum else "IntEnum"
+    self.emit(f"class {node.name}({base_class}):")
     self.indent()
     if not node.members:
       self.newline()
       self.emit("pass")
     else:
-      current_val = 0
+      current_val: Union[int, str] = 0
       for member in node.members:
         self.newline()
         if member.value is not None:
           current_val = member.value
-        self.emit(f"{member.name} = {current_val}")
-        current_val += 1
+        elif is_string_enum and isinstance(current_val, str):
+          current_val = member.name
+        if isinstance(current_val, str):
+          self.emit(f'{member.name} = "{current_val}"')
+        else:
+          self.emit(f"{member.name} = {current_val}")
+          current_val += 1
     self.dedent()
     self.newline()
 

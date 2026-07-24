@@ -1537,6 +1537,25 @@ class TestTypeChecker(unittest.TestCase):
     res_types = tc._resolve_return_types(DummyWithReturnType())
     self.assertEqual(res_types, [PrimitiveType("int")])
 
+  def test_string_enum_type_checking(self):
+    """Verifies type compatibility for string-backed enums with string primitive values."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+
+    func set_mode(m: Mode) {}
+
+    func main() {
+      let m: Mode = Mode.Fill;
+      let s: String = Mode.Line;
+      set_mode("fill");
+    }
+    """
+    self._check(code)
+
 
 if __name__ == "__main__":
   unittest.main()

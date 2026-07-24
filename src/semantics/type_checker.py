@@ -142,8 +142,9 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        current_val = 0
-        variants: Dict[str, int] = {}
+        current_val: Union[int, str] = 0
+        is_string_enum = any(isinstance(m.value, str) for m in decl.members)
+        variants: Dict[str, Union[int, str]] = {}
         seen_members = set()
         for member in decl.members:
           if member.name in seen_members:
@@ -152,8 +153,11 @@ class TypeChecker:
           seen_members.add(member.name)
           if member.value is not None:
             current_val = member.value
+          elif is_string_enum and isinstance(current_val, str):
+            current_val = member.name
           variants[member.name] = current_val
-          current_val += 1
+          if isinstance(current_val, int):
+            current_val += 1
         enum_type = EnumType(decl.name, variants)
         self.symbol_table.define_type(decl.name, enum_type)
         self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))

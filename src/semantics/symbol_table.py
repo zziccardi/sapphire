@@ -28,9 +28,9 @@ class Type:
         and other.name == "float"
     ):
       return True
-    if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and other.name == "int":
+    if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and self.value_type.lower() == other.name.lower():
       return True
-    if isinstance(self, PrimitiveType) and self.name == "int" and isinstance(other, EnumType):
+    if isinstance(self, PrimitiveType) and isinstance(other, EnumType) and self.name.lower() == other.value_type.lower():
       return True
     return self == other
 
@@ -197,12 +197,24 @@ class TraitType(Type):
 
 
 class EnumType(Type):
-  """Represents a user-defined integer-backed enum type."""
+  """Represents a custom enum type definition."""
 
-  def __init__(self, name: str, variants: Optional[Dict[str, int]] = None, comments: Optional[str] = None):
+  def __init__(
+      self,
+      name: str,
+      variants: Optional[Dict[str, Union[int, str]]] = None,
+      comments: Optional[str] = None,
+  ):
     self.name = name
-    self.variants: Dict[str, int] = variants or {}
+    self.variants: Dict[str, Union[int, str]] = variants or {}
     self.comments = comments or ""
+
+  @property
+  def value_type(self) -> str:
+    """Returns 'String' if any variant is a string, otherwise 'int'."""
+    if any(isinstance(v, str) for v in self.variants.values()):
+      return "String"
+    return "int"
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, EnumType):

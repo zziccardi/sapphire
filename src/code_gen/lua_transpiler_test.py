@@ -461,6 +461,21 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("x = x + 5", output)
     self.assertIn("a, b = 3.0, 4.0", output)
 
+  def test_lua_string_enum_transpilation(self):
+    """Verifies Lua transpilation for string-backed enums."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """
+    out = self._transpile(code)
+    self.assertIn('local Mode = {', out)
+    self.assertIn('Fill = "fill"', out)
+    self.assertIn('Line = "line"', out)
+    self.assertIn('Default = "Default"', out)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -279,6 +279,21 @@ class TestASTBuilder(unittest.TestCase):
     var_decl = ast.declarations[0]
     self.assertEqual(len(var_decl.val_types[0].return_types), 2)
 
+  def test_string_enum_parsing(self):
+    """Verifies AST construction for string-backed enum declarations."""
+    ast = self._get_ast("""
+    enum DrawMode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """)
+    enum_decl = ast.declarations[0]
+    self.assertEqual(enum_decl.name, "DrawMode")
+    self.assertEqual(enum_decl.members[0].value, "fill")
+    self.assertEqual(enum_decl.members[1].value, "line")
+    self.assertIsNone(enum_decl.members[2].value)
+
 
 if __name__ == "__main__":
   unittest.main()

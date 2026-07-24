@@ -247,15 +247,21 @@ class LuaTranspiler:
     self.newline()
     self.emit(f"local {node.name} = {{")
     self.indent()
-    current_val = 0
+    current_val: Union[int, str] = 0
+    is_string_enum = any(isinstance(m.value, str) for m in node.members)
     for idx, member in enumerate(node.members):
       if member.value is not None:
         current_val = member.value
+      elif is_string_enum and isinstance(current_val, str):
+        current_val = member.name
       self.newline()
-      self.emit(f"{member.name} = {current_val}")
+      if isinstance(current_val, str):
+        self.emit(f'{member.name} = "{current_val}"')
+      else:
+        self.emit(f"{member.name} = {current_val}")
+        current_val += 1
       if idx < len(node.members) - 1:
         self.emit(",")
-      current_val += 1
     self.dedent()
     self.newline()
     self.emit("}")

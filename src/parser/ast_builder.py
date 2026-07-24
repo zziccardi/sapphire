@@ -97,7 +97,12 @@ class ASTBuilder(SapphireVisitor):
 
   def visitEnumMember(self, ctx: SapphireParser.EnumMemberContext) -> EnumMemberNode:
     name = ctx.IDENTIFIER().getText()
-    val = int(ctx.INT_LIT().getText()) if ctx.INT_LIT() else None
+    val = None
+    if ctx.INT_LIT():
+      val = int(ctx.INT_LIT().getText())
+    elif ctx.STRING_LIT():
+      raw_str = ctx.STRING_LIT().getText()
+      val = raw_str[1:-1]
     node = EnumMemberNode(name, val)
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line

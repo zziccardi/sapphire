@@ -244,24 +244,37 @@ let sword = Weapon(...);
 sword.use();
 ```
 
-## 7. Enums
+### 7. Enums
 
-Sapphire provides native support for integer-backed enumerations via the `enum` keyword. Enums define a named set of integral constants with static type safety and optional explicit integer assignments.
+Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
 
-### Definition & auto-incrementing values
+### Definition, auto-incrementing, & string values
 
 Enum members are declared as comma-separated identifiers inside curly braces. Trailing commas are optional and recommended.
 
-* **Default values**: By default, enum members are automatically assigned sequential integers starting at `0`.
-* **Explicit values**: Members can be assigned explicit integer values. Unassigned subsequent members automatically resume auto-incrementing from the previous member's value.
+* **Default values**: By default, integer enum members are automatically
+  assigned sequential integers starting at `0`.
+* **Explicit integer values**: Members can be assigned explicit integer values.
+  Unassigned subsequent members automatically resume auto-incrementing from the
+  previous member's value.
+* **Native String Enums**: Members can be assigned explicit string literal
+  values (e.g., `Fill = "fill"`). Any subsequent unassigned member in a string
+  enum automatically defaults to its identifier string (`Line` -> `"Line"`).
 
 ```sapphire
-// Default auto-incrementing values (North = 0, East = 1, South = 2, West = 3)
+// Default auto-incrementing integer values:
+// North = 0, East = 1, South = 2, West = 3
 enum Direction {
   North,
   East,
   South,
   West,
+}
+
+enum DrawMode {
+  Fill = "fill",
+  Line = "line",
+  Default,  // Auto-assigned "Default" (note that capitalization is maintained)
 }
 
 // Explicit integer values
@@ -274,18 +287,22 @@ enum HttpStatusCode {
 }
 ```
 
-### Type-checking & usage
+### Type semantics & interoperability
 
-* **Nominal typing**: Declaring an enum introduces a named type into the scope (e.g., `Direction`).
-* **Type inference**: Variable bindings assigned an enum variant automatically infer the enum type without requiring explicit type annotations.
-* **Integer interoperability**: Because Sapphire enums are integer-backed, enum values can be assigned to `int` variables or compared with `int` expressions.
+* **Nominal typing**: Declaring an enum introduces a named type into the scope
+  (e.g., `Direction` or `DrawMode`).
+* **Type inference**: Variable bindings assigned an enum variant automatically
+  infer the enum type without requiring explicit type annotations.
+* **Primitive interoperability**: Integer enums are type-compatible with `int`
+  expressions. String-backed enums are type-compatible with string expressions.
 
 ```sapphire
-// Type inferred as 'Direction'
+// Type inferred as `Direction`
 let current_dir = Direction.North;
 
-// Explicit type annotation
-let status: HttpStatusCode = HttpStatusCode.Ok;
+// String enum interoperability
+let mode: DrawMode = DrawMode.Fill;
+let mode_str: String = DrawMode.Line;  // Compatible with string primitive
 
 // Comparison
 if status == HttpStatusCode.Ok {

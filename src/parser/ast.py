@@ -129,7 +129,7 @@ class StructDeclNode(DeclNode):
 class EnumMemberNode(ASTNode):
   """Represents a member/variant in an enum declaration."""
 
-  def __init__(self, name: str, value: Optional[int] = None):
+  def __init__(self, name: str, value: Optional[Union[int, str]] = None):
     self.name = name
     self.value = value
 

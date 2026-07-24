@@ -622,6 +622,21 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("x += 5", py_cmp)
     self.assertIn("a, b = 3.0, 4.0", py_cmp)
 
+  def test_python_string_enum_transpilation(self):
+    """Verifies Python transpilation for string-backed enums."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Mode(str, Enum):", py_code)
+    self.assertIn('Fill = "fill"', py_code)
+    self.assertIn('Line = "line"', py_code)
+    self.assertIn('Default = "Default"', py_code)
+
 
 if __name__ == "__main__":
   unittest.main()
