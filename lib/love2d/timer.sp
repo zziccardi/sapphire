@@ -1,5 +1,9 @@
 // Sapphire Love2D bindings -- timer subsystem
 
+export {
+  Timer,
+};
+
 trait Timer {
   func getDelta(): float;
   func getFPS(): int;

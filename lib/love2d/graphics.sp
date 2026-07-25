@@ -2,6 +2,14 @@
 
 import lib.love2d.enums;
 
+export {
+  Color,
+  ImageHandle,
+  CanvasHandle,
+  FontHandle,
+  QuadHandle,
+};
+
 struct Color {
   var r: float;
   var g: float;
