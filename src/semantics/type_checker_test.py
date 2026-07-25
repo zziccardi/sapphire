@@ -1623,6 +1623,73 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError):
       self._check(code)
 
+  def test_module_export_errors_and_type_resolution(self):
+    """Verifies module type resolution and export error branches."""
+    try:
+      from semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+
+    # 1. Export from non-imported module
+    with self.assertRaises(SemanticError):
+      self._check("""
+      export {
+        unimported.Symbol,
+      };
+      """)
+
+    # 2. Export non-existent symbol from imported module with populated exports
+    code = """
+    import lib.love2d.enums;
+    export {
+      enums.MissingSymbol,
+    };
+    """
+    checker = TypeChecker()
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker._declare_imports(ast)
+    enums_sym = checker.symbol_table.lookup("enums")
+    if isinstance(enums_sym, ModuleSymbol):
+      enums_sym.exports["DrawMode"] = VariableSymbol("DrawMode", PrimitiveType("int"), is_mutable=False)
+
+    with self.assertRaises(SemanticError):
+      checker.check(ast)
+
+  def test_module_qualified_type_and_member_access(self):
+    """Verifies type resolution for dot-qualified types (enums.DrawMode) and member access."""
+    try:
+      from semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+
+    code = """
+    import lib.love2d.enums;
+
+    var mode: enums.DrawMode;
+    let mode_val = enums.DrawMode;
+    let missing_member = enums.NonExistent;
+    """
+    checker = TypeChecker()
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker._declare_imports(ast)
+    enums_sym = checker.symbol_table.lookup("enums")
+    if isinstance(enums_sym, ModuleSymbol):
+      enums_sym.exports["DrawMode"] = EnumType("DrawMode")
+
+    checker.check(ast)
+
 
 if __name__ == "__main__":
   unittest.main()

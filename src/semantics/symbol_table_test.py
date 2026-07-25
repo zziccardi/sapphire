@@ -198,6 +198,21 @@ class TestSymbolTable(unittest.TestCase):
     fn_empty_list = FunctionType([], [])
     self.assertEqual(fn_empty_list.return_types, [])
 
+  def test_module_symbol_and_type(self):
+    """Verifies ModuleType repr and ModuleSymbol lookup_export."""
+    try:
+      from semantics.symbol_table import ModuleType, ModuleSymbol, PrimitiveType, VariableSymbol
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import ModuleType, ModuleSymbol, PrimitiveType, VariableSymbol
+
+    mod_t = ModuleType("lib.love2d.enums")
+    self.assertEqual(repr(mod_t), "module(lib.love2d.enums)")
+
+    sym_x = VariableSymbol("x", PrimitiveType("int"), is_mutable=False)
+    mod_sym = ModuleSymbol("enums", "lib.love2d.enums", exports={"x": sym_x})
+    self.assertEqual(mod_sym.lookup_export("x"), sym_x)
+    self.assertIsNone(mod_sym.lookup_export("y"))
+
 
 if __name__ == "__main__":
   unittest.main()

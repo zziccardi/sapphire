@@ -18,5 +18,5 @@ struct LoveEngine {
   var timer: Timer;
 }
 
-@extern("love")
+@extern
 var love: LoveEngine;

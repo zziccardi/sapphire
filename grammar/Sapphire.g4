@@ -107,7 +107,7 @@ baseType
     : INT_TYPE
     | FLOAT_TYPE
     | BOOL_TYPE
-    | IDENTIFIER
+    | identifierPath
     ;
 
 functionType

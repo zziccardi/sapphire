@@ -138,9 +138,11 @@ class TypeChecker:
     """Pre-pass to register imported module symbols."""
     for imp in getattr(program, "imports", []):
       module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
-      mod_sym = ModuleSymbol(module_name, imp.path)
-      self.symbol_table.define(module_name, mod_sym)
-      self.symbol_table.define_type(module_name, ModuleType(imp.path))
+      existing = self.symbol_table.lookup_current_scope(module_name)
+      if not existing or not isinstance(existing, ModuleSymbol):
+        mod_sym = ModuleSymbol(module_name, imp.path)
+        self.symbol_table.define(module_name, mod_sym)
+        self.symbol_table.define_type(module_name, ModuleType(imp.path))
 
   def _declare_globals(self, program: ProgramNode) -> None:
     """Pre-pass to register types and global function symbols in the symbol table."""
@@ -344,12 +346,8 @@ class TypeChecker:
         mod_sym = self.symbol_table.lookup(parts[0])
         if isinstance(mod_sym, ModuleSymbol):
           exp_sym = mod_sym.lookup_export(parts[1])
-          if exp_sym and hasattr(exp_sym, "symbol_type"):
-            return exp_sym.symbol_type
-          elif parts[1] in mod_sym.exports:
-            exp_type = mod_sym.exports[parts[1]]
-            if isinstance(exp_type, Type):
-              return exp_type
+          if exp_sym:
+            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
       resolved = self.symbol_table.lookup_type(node.name)
       if not resolved:
         self.error(f"Undefined type '{node.name}'.")
@@ -1010,12 +1008,8 @@ class TypeChecker:
         mod_sym = self.symbol_table.lookup(node.receiver.name)
         if isinstance(mod_sym, ModuleSymbol):
           exp_sym = mod_sym.lookup_export(node.member)
-          if exp_sym and hasattr(exp_sym, "symbol_type"):
-            return exp_sym.symbol_type
-          elif node.member in mod_sym.exports:
-            exp = mod_sym.exports[node.member]
-            if isinstance(exp, Type):
-              return exp
+          if exp_sym:
+            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
       return PrimitiveType("none")
 
     if isinstance(receiver_type, EnumType):

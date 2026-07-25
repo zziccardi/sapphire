@@ -153,11 +153,7 @@ class PythonTranspiler:
 
     # 1b. Transpile module imports
     for imp in getattr(program, "imports", []):
-      if imp.alias:
-        self.emit(f"import {imp.path} as {imp.alias}")
-      else:
-        self.emit(f"import {imp.path}")
-      self.newline()
+      self.visit(imp)
 
     # 2. Collect impl block methods to attach to class definitions
     for decl in program.declarations:
@@ -203,10 +199,7 @@ class PythonTranspiler:
 
     # 5. Transpile export manifest to __all__
     if getattr(program, "export_block", None):
-      exported_names = [f'"{spec.exported_name}"' for spec in program.export_block.specifiers]
-      self.newline()
-      self.emit(f"__all__ = [{', '.join(exported_names)}]")
-      self.newline()
+      self.visit(program.export_block)
 
     return self.get_output()
 
@@ -256,10 +249,17 @@ class PythonTranspiler:
     self.newline()
 
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
-    pass
+    if node.alias:
+      self.emit(f"import {node.path} as {node.alias}")
+    else:
+      self.emit(f"import {node.path}")
+    self.newline()
 
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
-    pass
+    exported_names = [f'"{spec.exported_name}"' for spec in node.specifiers]
+    self.newline()
+    self.emit(f"__all__ = [{', '.join(exported_names)}]")
+    self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     is_proto = node.is_prototype

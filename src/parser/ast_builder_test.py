@@ -333,7 +333,7 @@ class TestASTBuilder(unittest.TestCase):
     export {
       Image,
       new_image as create_image,
-      enums.DrawMode,
+      enums.DrawMode as mode,
     };
 
     struct Image {
