@@ -1,5 +1,7 @@
 // Sapphire Love2D bindings -- graphics subsystem
 
+import lib.love2d.enums;
+
 struct Color {
   var r: float;
   var g: float;
@@ -17,7 +19,7 @@ trait ImageHandle {
   func getWidth(self): float;
   func getHeight(self): float;
   func getDimensions(self): float, float;
-  func setFilter(self, min: FilterMode, mag: FilterMode);
+  func setFilter(self, min: enums.FilterMode, mag: enums.FilterMode);
 }
 
 trait CanvasHandle {

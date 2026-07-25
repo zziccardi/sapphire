@@ -1690,6 +1690,24 @@ class TestTypeChecker(unittest.TestCase):
 
     checker.check(ast)
 
+  def test_real_file_module_import(self):
+    """Verifies that type checking graphics.sp automatically resolves lib.love2d.enums."""
+    import os
+    graphics_path = os.path.join("lib", "love2d", "graphics.sp")
+    with open(graphics_path, "r", encoding="utf-8") as f:
+      code = f.read()
+
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker(source_file_path=graphics_path)
+    checker.check(ast)
+    self.assertEqual(len(checker.errors), 0)
+
 
 if __name__ == "__main__":
   unittest.main()

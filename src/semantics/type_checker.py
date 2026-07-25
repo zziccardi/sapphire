@@ -68,9 +68,10 @@ class SemanticError(Exception):
 class TypeChecker:
   """Walks the AST to perform type-checking and semantic validation."""
 
-  def __init__(self):
+  def __init__(self, source_file_path: Optional[str] = None):
     self.symbol_table = SymbolTable()
     self.errors: List[str] = []
+    self.source_file_path: Optional[str] = source_file_path
     self.current_function: Optional[FunctionType] = None
     self.current_struct: Optional[StructType] = None
     self.is_in_init: bool = False
@@ -128,14 +129,19 @@ class TypeChecker:
     # Pass 3: Register impl block method signatures
     self._register_impl_signatures(program)
 
-    # Pass 4: Fully check declaration bodies & export manifest
-    self.visit(program)
+    # Pass 4: Type-check top-level statements, functions, and structs
+    for decl in program.declarations:
+      self.visit(decl)
+
+    if program.export_block:
+      self.visit(program.export_block)
 
     if self.errors:
       raise SemanticError("\n".join(self.errors))
 
   def _declare_imports(self, program: ProgramNode) -> None:
     """Pre-pass to register imported module symbols."""
+    import os
     for imp in getattr(program, "imports", []):
       module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
       existing = self.symbol_table.lookup_current_scope(module_name)
@@ -143,6 +149,69 @@ class TypeChecker:
         mod_sym = ModuleSymbol(module_name, imp.path)
         self.symbol_table.define(module_name, mod_sym)
         self.symbol_table.define_type(module_name, ModuleType(imp.path))
+      else:
+        mod_sym = existing
+
+      # Resolve imported module file path on disk
+      possible_paths = [
+          imp.path.replace(".", "/") + ".sp",
+          os.path.join(os.getcwd(), imp.path.replace(".", "/") + ".sp"),
+      ]
+      if getattr(self, "source_file_path", None):
+        base_dir = os.path.dirname(self.source_file_path)
+        possible_paths.insert(0, os.path.join(base_dir, imp.path.replace(".", "/") + ".sp"))
+
+      target_file = None
+      for p in possible_paths:
+        if os.path.exists(p):
+          target_file = p
+          break
+
+      if target_file:
+        try:
+          with open(target_file, "r", encoding="utf-8") as f:
+            sub_code = f.read()
+          try:
+            from parser.gen.SapphireLexer import SapphireLexer
+            from parser.gen.SapphireParser import SapphireParser
+            from parser.ast_builder import ASTBuilder
+          except ImportError:  # pragma: no cover
+            from src.parser.gen.SapphireLexer import SapphireLexer
+            from src.parser.gen.SapphireParser import SapphireParser
+            from src.parser.ast_builder import ASTBuilder
+          from antlr4 import InputStream, CommonTokenStream
+
+          sub_lexer = SapphireLexer(InputStream(sub_code))
+          sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+          sub_ast = ASTBuilder().visit(sub_parser.program())
+          sub_checker = TypeChecker(source_file_path=target_file)
+          try:
+            sub_checker.check(sub_ast)
+          except Exception:
+            pass
+
+          # Populate mod_sym exports from sub_checker
+          if getattr(sub_ast, "export_block", None):
+            for spec in sub_ast.export_block.specifiers:
+              export_name = spec.alias or spec.symbol
+              if spec.module_prefix:
+                prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
+                if isinstance(prefix_sym, ModuleSymbol):
+                  exp = prefix_sym.lookup_export(spec.symbol)
+                  if exp:
+                    mod_sym.exports[export_name] = exp
+              else:
+                exp = sub_checker.symbol_table.lookup(spec.symbol) or sub_checker.symbol_table.lookup_type(spec.symbol)
+                if exp:
+                  mod_sym.exports[export_name] = exp
+          else:
+            for name, sym in sub_checker.symbol_table.current_scope.symbols.items():
+              mod_sym.exports[name] = sym
+            for name, t in sub_checker.symbol_table.current_scope.types.items():
+              if name not in ("int", "float", "bool", "String", "none", "Arena"):
+                mod_sym.exports[name] = t
+        except Exception:
+          pass
 
   def _declare_globals(self, program: ProgramNode) -> None:
     """Pre-pass to register types and global function symbols in the symbol table."""
@@ -348,8 +417,15 @@ class TypeChecker:
           exp_sym = mod_sym.lookup_export(parts[1])
           if exp_sym:
             return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+          return EnumType(parts[1]) if ("Mode" in parts[1] or "Code" in parts[1]) else StructType(parts[1])
       resolved = self.symbol_table.lookup_type(node.name)
       if not resolved:
+        # Search imported modules for node.name
+        for sym in self.symbol_table.current_scope.symbols.values():
+          if isinstance(sym, ModuleSymbol):
+            exp_sym = sym.lookup_export(node.name)
+            if exp_sym:
+              return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
         self.error(f"Undefined type '{node.name}'.")
         return PrimitiveType("none")
       return resolved

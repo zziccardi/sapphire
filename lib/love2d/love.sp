@@ -12,10 +12,10 @@ export {
 };
 
 struct LoveEngine {
-  var graphics: Graphics;
-  var keyboard: Keyboard;
-  var mouse: Mouse;
-  var timer: Timer;
+  var graphics: graphics.Graphics;
+  var keyboard: keyboard.Keyboard;
+  var mouse: mouse.Mouse;
+  var timer: timer.Timer;
 }
 
 @extern
