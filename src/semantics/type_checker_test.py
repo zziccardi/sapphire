@@ -1592,6 +1592,38 @@ class TestTypeChecker(unittest.TestCase):
     self._check(code)
 
 
+  def test_module_export_manifest_validation(self):
+    """Verifies that export manifests with valid definitions and re-exported symbols type check clean."""
+    code = """
+    import lib.love2d.enums;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    };
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    self._check(code)
+
+  def test_undefined_export_symbol_error(self):
+    """Verifies that exporting an undefined symbol raises a SemanticError."""
+    code = """
+    export {
+      NonExistentSymbol,
+    };
+    """
+    with self.assertRaises(SemanticError):
+      self._check(code)
+
+
 if __name__ == "__main__":
   unittest.main()
 

@@ -91,11 +91,46 @@ class DeclNode(ASTNode):
   pass
 
 
-class ProgramNode(ASTNode):
-  """Root node of a Sapphire program, containing top-level declarations."""
+class ImportStmtNode(ASTNode):
+  """Represents a module import statement (e.g. 'import lib.love2d.graphics as gfx;')."""
 
-  def __init__(self, declarations: List[DeclNode]):
+  def __init__(self, path: str, alias: Optional[str] = None):
+    self.path = path
+    self.alias = alias
+
+
+class ExportSpecifierNode(ASTNode):
+  """Represents a specifier in an export manifest block (e.g. 'Image', 'enums.DrawMode', or 'new_image as create_image')."""
+
+  def __init__(self, symbol: str, module_prefix: Optional[str] = None, alias: Optional[str] = None):
+    self.symbol = symbol
+    self.module_prefix = module_prefix
+    self.alias = alias
+
+  @property
+  def exported_name(self) -> str:
+    return self.alias if self.alias else self.symbol
+
+
+class ExportStmtNode(ASTNode):
+  """Represents an explicit module export manifest block (e.g. 'export { Image, new_image };')."""
+
+  def __init__(self, specifiers: List[ExportSpecifierNode]):
+    self.specifiers = specifiers
+
+
+class ProgramNode(ASTNode):
+  """Root node of a Sapphire program, containing top-level declarations, imports, and optional export manifest."""
+
+  def __init__(
+      self,
+      declarations: List[ASTNode],
+      imports: Optional[List[ImportStmtNode]] = None,
+      export_block: Optional[ExportStmtNode] = None,
+  ):
     self.declarations = declarations
+    self.imports = imports or []
+    self.export_block = export_block
 
 
 class StructFieldNode(ASTNode):

@@ -534,5 +534,35 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('love.graphics.setColor(1.0, 0.0, 0.0)', out)
 
 
+  def test_lua_module_import_and_export_transpilation(self):
+    """Verifies Lua 5.1 transpilation for module imports and export manifests."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics as gfx;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    };
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('local enums = require("lib.love2d.enums")', output)
+    self.assertIn('local gfx = require("lib.love2d.graphics")', output)
+    self.assertIn('local _M = {}', output)
+    self.assertIn('_M.Player = Player', output)
+    self.assertIn('_M.create_player = create_player', output)
+    self.assertIn('_M.DrawMode = enums.DrawMode', output)
+    self.assertIn('return _M', output)
+
+
 if __name__ == "__main__":
   unittest.main()

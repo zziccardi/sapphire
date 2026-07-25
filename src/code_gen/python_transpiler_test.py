@@ -683,6 +683,32 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("g.setColor(1.0, 0.0, 0.0)", py_code)
 
 
+  def test_python_module_import_and_export_transpilation(self):
+    """Verifies Python transpilation for module imports and export manifests."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics as gfx;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    };
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import lib.love2d.enums", py_code)
+    self.assertIn("import lib.love2d.graphics as gfx", py_code)
+    self.assertIn('__all__ = ["Player", "create_player", "DrawMode"]', py_code)
+
+
 if __name__ == "__main__":
   unittest.main()
 

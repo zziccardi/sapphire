@@ -181,6 +181,12 @@ class LuaTranspiler:
     self.emit(LUA_RUNTIME_PREAMBLE)
     self.newline()
 
+    # 1b. Transpile module imports
+    for imp in getattr(program, "imports", []):
+      alias_name = imp.alias if imp.alias else imp.path.split(".")[-1]
+      self.emit(f"local {alias_name} = require(\"{imp.path}\")")
+      self.newline()
+
     # 2. Collect known struct names and impl block methods
     for decl in program.declarations:
       if isinstance(decl, StructDeclNode):
@@ -218,8 +224,22 @@ class LuaTranspiler:
       self.newline()
 
     if has_main:
-      self.newline()
       self.emit("main()")
+      self.newline()
+
+    # 5. Transpile export manifest module return table _M
+    if getattr(program, "export_block", None):
+      self.newline()
+      self.emit("local _M = {}")
+      self.newline()
+      for spec in program.export_block.specifiers:
+        exp_name = spec.exported_name
+        if spec.module_prefix:
+          self.emit(f"_M.{exp_name} = {spec.module_prefix}.{spec.symbol}")
+        else:
+          self.emit(f"_M.{exp_name} = {spec.symbol}")
+        self.newline()
+      self.emit("return _M")
       self.newline()
 
     return self.get_output()
@@ -266,6 +286,12 @@ class LuaTranspiler:
     self.newline()
     self.emit("}")
     self.newline()
+
+  def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
+    pass
+
+  def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
+    pass
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Header definition for struct
