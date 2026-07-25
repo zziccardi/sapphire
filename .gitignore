@@ -23,3 +23,6 @@ dist/
 lib/love2d/*.lua
 lib/love2d/*.py
 !lib/love2d/__init__.py
+
+# Ignore the generated Lua file used for Love2D.
+main.lua

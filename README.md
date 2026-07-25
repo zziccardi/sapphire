@@ -69,8 +69,8 @@ sapphire samples/overview.sp
 # Transpile to Lua 5.1 (without running directly in the Lua interpreter):
 sapphire build samples/love2d_demo.sp -t lua -o main.lua
 
-# Run the transpiled game code in Love2D.
-love main.lua
+# Run transpiled game in Love2D (pass the directory containing `main.lua`):
+love .
 ```
 
 ## Repository structure
