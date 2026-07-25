@@ -82,43 +82,48 @@ def _clone_helper(obj, init_fn=None, arena=None):
     init_fn(clone_obj)
   return clone_obj
 
-import lib.love2d.enums
-import lib.love2d.graphics
-import lib.love2d.love2d
 
-love = love2d.love
+class DrawMode(str, Enum):
+  Fill = "fill"
+  Line = "line"
 
-hero_img
 
-hero_x = 100.0
+class FilterMode(str, Enum):
+  Linear = "linear"
+  Nearest = "nearest"
 
-hero_y = 100.0
 
-speed = 250.0
+class WrapMode(str, Enum):
+  Clamp = "clamp"
+  Repeat = "repeat"
+  MirroredRepeat = "mirroredrepeat"
 
-def load():
-  love.graphics.setBackgroundColor(r=0.1, g=0.1, b=0.15)
-  hero_img = love.graphics.newImage("assets/hero.png")
 
-def update(dt):
-  if (love.keyboard.isDown("left") or love.keyboard.isDown("a")):
-    hero_x -= (speed * dt)
-  if (love.keyboard.isDown("right") or love.keyboard.isDown("d")):
-    hero_x += (speed * dt)
-  if (love.keyboard.isDown("up") or love.keyboard.isDown("w")):
-    hero_y -= (speed * dt)
-  if (love.keyboard.isDown("down") or love.keyboard.isDown("s")):
-    hero_y += (speed * dt)
+class AlignMode(str, Enum):
+  Left = "left"
+  Center = "center"
+  Right = "right"
+  Justify = "justify"
 
-def draw():
-  love.graphics.clear(r=0.1, g=0.15, b=0.2)
-  love.graphics.setColor(0.2, 0.7, 0.5)
-  love.graphics.rectangle(mode=enums.DrawMode.Fill, x=50.0, y=50.0, width=300.0, height=150.0)
-  _val_img = hero_img
-  if _val_img is not None:
-    img = _val_img
-    love.graphics.setColor(1.0, 1.0, 1.0)
-    img.draw(x=hero_x, y=hero_y)
-  love.graphics.setColor(1.0, 1.0, 1.0)
-  fps_str = ("FPS: " + love.timer.getFPS())
-  love.graphics.print(text=fps_str, x=10.0, y=10.0)
+
+class ArcMode(str, Enum):
+  Pie = "pie"
+  Open = "open"
+  Closed = "closed"
+
+
+class KeyCode(str, Enum):
+  Space = "space"
+  Escape = "escape"
+  Return = "return"
+  Up = "up"
+  Down = "down"
+  Left = "left"
+  Right = "right"
+  W = "w"
+  A = "a"
+  S = "s"
+  D = "d"
+
+
+__all__ = ["DrawMode", "FilterMode", "WrapMode", "AlignMode", "ArcMode", "KeyCode"]

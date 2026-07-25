@@ -564,5 +564,28 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('return _M', output)
 
 
+  def test_transpile_file_with_imports(self):
+    """Verifies that transpile_file recursively transpiles imported module dependencies."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sub_sp = os.path.join(tmpdir, "sub.sp")
+      with open(sub_sp, "w") as f:
+        f.write("import main;\nexport { item }; let item = 42;\n")
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      with open(main_sp, "w") as f:
+        f.write("import sub;\n")
+
+      out_lua = os.path.join(tmpdir, "main.lua")
+      transpile_file(main_sp, output_file=out_lua, target="lua")
+      self.assertTrue(os.path.exists(out_lua))
+      sub_lua = os.path.join(tmpdir, "sub.lua")
+      self.assertTrue(os.path.exists(sub_lua))
+
+  def test_transpile_file_missing_file(self):
+    """Verifies SystemExit on missing file input."""
+    with self.assertRaises(SystemExit):
+      transpile_file("/non_existent_path_xyz_123.sp")
+
+
 if __name__ == "__main__":
   unittest.main()

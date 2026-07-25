@@ -708,6 +708,23 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("import lib.love2d.graphics as gfx", py_code)
     self.assertIn('__all__ = ["Player", "create_player", "DrawMode"]', py_code)
 
+  def test_python_transpile_file_with_transitive_imports(self):
+    """Verifies that transpile_file recursively transpiles imported module dependencies for Python."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sub_sp = os.path.join(tmpdir, "sub.sp")
+      with open(sub_sp, "w") as f:
+        f.write("export { item }; let item = 42;\n")
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      with open(main_sp, "w") as f:
+        f.write("import sub;\n")
+
+      out_py = os.path.join(tmpdir, "main.py")
+      transpile_file(main_sp, output_file=out_py, target="python")
+      self.assertTrue(os.path.exists(out_py))
+      sub_py = os.path.join(tmpdir, "sub.py")
+      self.assertTrue(os.path.exists(sub_py))
+
 
 if __name__ == "__main__":
   unittest.main()
