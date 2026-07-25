@@ -37,20 +37,63 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitProgram(self, ctx: SapphireParser.ProgramContext) -> ProgramNode:
-    declarations = [self.visit(item) for item in ctx.topLevelItem()]
-    return ProgramNode(declarations)
+    declarations = []
+    imports = []
+    export_block = None
+    for item in ctx.topLevelItem():
+      node = self.visit(item)
+      if isinstance(node, ImportStmtNode):
+        imports.append(node)
+      elif isinstance(node, ExportStmtNode):
+        if export_block is not None:
+          raise SyntaxError("Only a single export block is allowed per file.")
+        export_block = node
+      else:
+        declarations.append(node)
+    return ProgramNode(declarations, imports=imports, export_block=export_block)
 
   def visitTopLevelItem(self, ctx: SapphireParser.TopLevelItemContext) -> ASTNode:
     return self.visit(ctx.getChild(0))
+
+  def visitImportStatement(self, ctx: SapphireParser.ImportStatementContext) -> ImportStmtNode:
+    path = ctx.identifierPath().getText()
+    alias = ctx.IDENTIFIER().getText() if ctx.IDENTIFIER() else None
+    return ImportStmtNode(path=path, alias=alias)
+
+  def visitExportStatement(self, ctx: SapphireParser.ExportStatementContext) -> ExportStmtNode:
+    specifiers = [self.visit(spec) for spec in ctx.exportSpecifier()]
+    return ExportStmtNode(specifiers=specifiers)
+
+  def visitExportSpecifier(self, ctx: SapphireParser.ExportSpecifierContext) -> ExportSpecifierNode:
+    has_dot = ctx.DOT() is not None
+    has_as = ctx.AS() is not None
+    identifiers = ctx.IDENTIFIER()
+
+    module_prefix = None
+    symbol = ""
+    alias = None
+
+    if has_dot:
+      module_prefix = identifiers[0].getText()
+      symbol = identifiers[1].getText() if len(identifiers) > 1 else ""
+      if has_as and len(identifiers) > 2:
+        alias = identifiers[2].getText()
+    else:
+      symbol = identifiers[0].getText() if identifiers else ""
+      if has_as and len(identifiers) > 1:
+        alias = identifiers[1].getText()
+
+    return ExportSpecifierNode(symbol=symbol, module_prefix=module_prefix, alias=alias)
 
   def visitDeclaration(self, ctx: SapphireParser.DeclarationContext) -> DeclNode:
     return self.visit(ctx.getChild(0))
 
   def visitAnnotation(self, ctx: SapphireParser.AnnotationContext) -> AnnotationNode:
-    name = ctx.IDENTIFIER().getText()
+    name_token = ctx.IDENTIFIER() or ctx.EXPORT() or ctx.IMPORT()
+    name = name_token.getText()
     arg = ctx.STRING_LIT().getText()[1:-1] if ctx.STRING_LIT() else None
     node = AnnotationNode(name, arg)
-    token = ctx.IDENTIFIER().getSymbol()
+    token = name_token.getSymbol()
     at_token = ctx.AT().getSymbol()
     node.at_line = at_token.line
     node.at_column = at_token.column

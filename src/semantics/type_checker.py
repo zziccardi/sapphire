@@ -24,11 +24,13 @@ try:
       NoneType,
       ArrayType,
       ArenaType,
+      ModuleType,
       VariableSymbol,
       FunctionSymbol,
       StructSymbol,
       TraitSymbol,
       EnumSymbol,
+      ModuleSymbol,
   )
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
@@ -47,11 +49,13 @@ except ModuleNotFoundError:  # pragma: no cover
       NoneType,
       ArrayType,
       ArenaType,
+      ModuleType,
       VariableSymbol,
       FunctionSymbol,
       StructSymbol,
       TraitSymbol,
       EnumSymbol,
+      ModuleSymbol,
   )
 
 
@@ -64,9 +68,10 @@ class SemanticError(Exception):
 class TypeChecker:
   """Walks the AST to perform type-checking and semantic validation."""
 
-  def __init__(self):
+  def __init__(self, source_file_path: Optional[str] = None):
     self.symbol_table = SymbolTable()
     self.errors: List[str] = []
+    self.source_file_path: Optional[str] = source_file_path
     self.current_function: Optional[FunctionType] = None
     self.current_struct: Optional[StructType] = None
     self.is_in_init: bool = False
@@ -112,6 +117,9 @@ class TypeChecker:
 
   def check(self, program: ProgramNode) -> None:
     """Executes semantic analysis on the program."""
+    # Pass 0: Declare imported modules
+    self._declare_imports(program)
+
     # Pass 1: Declare global symbols (Structs, Traits, Functions)
     self._declare_globals(program)
 
@@ -121,11 +129,85 @@ class TypeChecker:
     # Pass 3: Register impl block method signatures
     self._register_impl_signatures(program)
 
-    # Pass 4: Fully check declaration bodies
-    self.visit(program)
+    # Pass 4: Type-check top-level statements, functions, and structs
+    self.visit_ProgramNode(program)
 
     if self.errors:
       raise SemanticError("\n".join(self.errors))
+
+  def _declare_imports(self, program: ProgramNode) -> None:
+    """Pre-pass to register imported module symbols."""
+    import os
+    for imp in getattr(program, "imports", []):
+      module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
+      existing = self.symbol_table.lookup_current_scope(module_name)
+      if not existing or not isinstance(existing, ModuleSymbol):
+        mod_sym = ModuleSymbol(module_name, imp.path)
+        self.symbol_table.define(module_name, mod_sym)
+        self.symbol_table.define_type(module_name, ModuleType(imp.path))
+      else:
+        mod_sym = existing
+
+      # Resolve imported module file path on disk
+      possible_paths = [
+          imp.path.replace(".", "/") + ".sp",
+          os.path.join(os.getcwd(), imp.path.replace(".", "/") + ".sp"),
+      ]
+      if getattr(self, "source_file_path", None):
+        base_dir = os.path.dirname(self.source_file_path)
+        possible_paths.insert(0, os.path.join(base_dir, imp.path.replace(".", "/") + ".sp"))
+
+      target_file = None
+      for p in possible_paths:
+        if os.path.exists(p):
+          target_file = p
+          break
+
+      if target_file:
+        try:
+          with open(target_file, "r", encoding="utf-8") as f:
+            sub_code = f.read()
+          try:
+            from parser.gen.SapphireLexer import SapphireLexer
+            from parser.gen.SapphireParser import SapphireParser
+            from parser.ast_builder import ASTBuilder
+          except ImportError:  # pragma: no cover
+            from src.parser.gen.SapphireLexer import SapphireLexer
+            from src.parser.gen.SapphireParser import SapphireParser
+            from src.parser.ast_builder import ASTBuilder
+          from antlr4 import InputStream, CommonTokenStream
+
+          sub_lexer = SapphireLexer(InputStream(sub_code))
+          sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+          sub_ast = ASTBuilder().visit(sub_parser.program())
+          sub_checker = TypeChecker(source_file_path=target_file)
+          try:
+            sub_checker.check(sub_ast)
+          except Exception:
+            pass
+
+          # Populate mod_sym exports from sub_checker
+          if getattr(sub_ast, "export_block", None):
+            for spec in sub_ast.export_block.specifiers:
+              export_name = spec.alias or spec.symbol
+              if spec.module_prefix:
+                prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
+                if isinstance(prefix_sym, ModuleSymbol):
+                  exp = prefix_sym.lookup_export(spec.symbol)
+                  if exp:
+                    mod_sym.exports[export_name] = exp
+              else:
+                exp = sub_checker.symbol_table.lookup(spec.symbol) or sub_checker.symbol_table.lookup_type(spec.symbol)
+                if exp:
+                  mod_sym.exports[export_name] = exp
+          else:
+            for name, sym in sub_checker.symbol_table.current_scope.symbols.items():
+              mod_sym.exports[name] = sym
+            for name, t in sub_checker.symbol_table.current_scope.types.items():
+              if name not in ("int", "float", "bool", "String", "none", "Arena"):
+                mod_sym.exports[name] = t
+        except Exception:
+          pass
 
   def _declare_globals(self, program: ProgramNode) -> None:
     """Pre-pass to register types and global function symbols in the symbol table."""
@@ -217,11 +299,17 @@ class TypeChecker:
 
       elif isinstance(decl, VarDeclNode):
         if any(a.name == "extern" for a in decl.annotations):
+          if decl.exprs:
+            self.error("An '@extern' variable declaration cannot have an initializer expression.")
           for name, val_type_node in zip(decl.names, decl.val_types):
             if self.symbol_table.lookup_current_scope(name):
               self.error(f"Redefinition of identifier '{name}'.")
               continue
-            var_type = self._resolve_type_node(val_type_node) if val_type_node else PrimitiveType("none")
+            if not val_type_node:
+              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.")
+              var_type = PrimitiveType("none")
+            else:
+              var_type = self._resolve_type_node(val_type_node)
             self.symbol_table.define(name, VariableSymbol(name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
@@ -324,6 +412,14 @@ class TypeChecker:
     if not node:
       return PrimitiveType("none")
     if isinstance(node, BasicTypeNode):
+      if "." in node.name:
+        parts = node.name.split(".")
+        mod_sym = self.symbol_table.lookup(parts[0])
+        if isinstance(mod_sym, ModuleSymbol):
+          exp_sym = mod_sym.lookup_export(parts[1])
+          if exp_sym:
+            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+          return EnumType(parts[1]) if ("Mode" in parts[1] or "Code" in parts[1]) else StructType(parts[1])
       resolved = self.symbol_table.lookup_type(node.name)
       if not resolved:
         self.error(f"Undefined type '{node.name}'.")
@@ -356,8 +452,29 @@ class TypeChecker:
   # ==========================================
 
   def visit_ProgramNode(self, node: ProgramNode) -> None:
+    for imp in getattr(node, "imports", []):
+      self.visit(imp)
     for decl in node.declarations:
       self.visit(decl)
+    if getattr(node, "export_block", None):
+      self.visit(node.export_block)
+
+  def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
+    pass
+
+  def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
+    for spec in node.specifiers:
+      if spec.module_prefix:
+        mod_sym = self.symbol_table.lookup(spec.module_prefix)
+        if not mod_sym or not isinstance(mod_sym, ModuleSymbol):
+          self.error(f"Module '{spec.module_prefix}' is not imported.")
+        elif mod_sym.exports and spec.symbol not in mod_sym.exports:
+          self.error(f"Module '{spec.module_prefix}' does not export symbol '{spec.symbol}'.")
+      else:
+        sym = self.symbol_table.lookup(spec.symbol)
+        type_sym = self.symbol_table.lookup_type(spec.symbol)
+        if not sym and not type_sym:
+          self.error(f"Exported symbol '{spec.symbol}' is not defined in module.")
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Fields already verified in pre-pass
@@ -957,6 +1074,15 @@ class TypeChecker:
       if isinstance(receiver_type, OptionalType):
         self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
         return PrimitiveType("none")
+
+    if isinstance(receiver_type, ModuleType):
+      if isinstance(node.receiver, IdentifierNode):
+        mod_sym = self.symbol_table.lookup(node.receiver.name)
+        if isinstance(mod_sym, ModuleSymbol):
+          exp_sym = mod_sym.lookup_export(node.member)
+          if exp_sym:
+            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+      return PrimitiveType("none")
 
     if isinstance(receiver_type, EnumType):
       if node.member in receiver_type.variants:

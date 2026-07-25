@@ -11,10 +11,28 @@ program
 topLevelItem
     : declaration
     | statement
+    | importStatement
+    | exportStatement
+    ;
+
+importStatement
+    : IMPORT identifierPath (AS IDENTIFIER)? SEMICOLON
+    ;
+
+exportStatement
+    : EXPORT LBRACE (exportSpecifier (COMMA exportSpecifier)* COMMA?)? RBRACE SEMICOLON
+    ;
+
+exportSpecifier
+    : (IDENTIFIER DOT)? IDENTIFIER (AS IDENTIFIER)?
+    ;
+
+identifierPath
+    : IDENTIFIER (DOT IDENTIFIER)*
     ;
 
 annotation
-    : AT IDENTIFIER (LPAREN STRING_LIT RPAREN)?
+    : AT (IDENTIFIER | EXPORT | IMPORT) (LPAREN STRING_LIT RPAREN)?
     ;
 
 declaration
@@ -89,7 +107,7 @@ baseType
     : INT_TYPE
     | FLOAT_TYPE
     | BOOL_TYPE
-    | IDENTIFIER
+    | identifierPath
     ;
 
 functionType
@@ -261,6 +279,9 @@ RETURN : 'return';
 TRUE : 'true';
 FALSE : 'false';
 SELF : 'self';
+IMPORT : 'import';
+EXPORT : 'export';
+AS : 'as';
 
 // Special keywords/identifiers
 INIT : '__init__';

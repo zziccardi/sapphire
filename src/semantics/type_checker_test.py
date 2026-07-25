@@ -1440,6 +1440,24 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Redefinition of identifier 'love'.", str(context.exception))
 
+  def test_extern_var_invalid_declaration(self):
+    """Verifies semantic errors for @extern variable declarations with initializers or missing type annotations."""
+    code_init = """
+    @extern
+    let love = 123;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_init)
+    self.assertIn("An '@extern' variable declaration cannot have an initializer expression.", str(context.exception))
+
+    code_missing_type = """
+    @extern
+    var love;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_missing_type)
+    self.assertIn("An '@extern' variable declaration for 'love' requires an explicit type annotation.", str(context.exception))
+
   def test_multi_return_and_bindings_type_checking(self):
     """Verifies semantic type checking for multi-return functions, unpacking, and assignments."""
     valid_code = """
@@ -1590,6 +1608,252 @@ class TestTypeChecker(unittest.TestCase):
     }
     """
     self._check(code)
+
+
+  def test_module_export_manifest_validation(self):
+    """Verifies that export manifests with valid definitions and re-exported symbols type check clean."""
+    code = """
+    import lib.love2d.enums;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    };
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    self._check(code)
+
+  def test_undefined_export_symbol_error(self):
+    """Verifies that exporting an undefined symbol raises a SemanticError."""
+    code = """
+    export {
+      NonExistentSymbol,
+    };
+    """
+    with self.assertRaises(SemanticError):
+      self._check(code)
+
+  def test_module_export_errors_and_type_resolution(self):
+    """Verifies module type resolution and export error branches."""
+    try:
+      from semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+
+    # 1. Export from non-imported module
+    with self.assertRaises(SemanticError):
+      self._check("""
+      export {
+        unimported.Symbol,
+      };
+      """)
+
+    # 2. Export non-existent symbol from imported module with populated exports
+    code = """
+    import lib.love2d.enums;
+    export {
+      enums.MissingSymbol,
+    };
+    """
+    checker = TypeChecker()
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker._declare_imports(ast)
+    enums_sym = checker.symbol_table.lookup("enums")
+    if isinstance(enums_sym, ModuleSymbol):
+      enums_sym.exports["DrawMode"] = VariableSymbol("DrawMode", PrimitiveType("int"), is_mutable=False)
+
+    with self.assertRaises(SemanticError):
+      checker.check(ast)
+
+  def test_module_qualified_type_and_member_access(self):
+    """Verifies type resolution for dot-qualified types (enums.DrawMode) and member access."""
+    try:
+      from semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+
+    code = """
+    import lib.love2d.enums;
+
+    var mode: enums.DrawMode;
+    let mode_val = enums.DrawMode;
+    let missing_member = enums.NonExistent;
+    """
+    checker = TypeChecker()
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker._declare_imports(ast)
+    enums_sym = checker.symbol_table.lookup("enums")
+    if isinstance(enums_sym, ModuleSymbol):
+      enums_sym.exports["DrawMode"] = EnumType("DrawMode")
+
+    checker.check(ast)
+
+  def test_real_file_module_import(self):
+    """Verifies that type checking graphics.sp automatically resolves lib.love2d.enums."""
+    import os
+    graphics_path = os.path.join("lib", "love2d", "graphics.sp")
+    with open(graphics_path, "r", encoding="utf-8") as f:
+      code = f.read()
+
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker(source_file_path=graphics_path)
+    checker.check(ast)
+    self.assertEqual(len(checker.errors), 0)
+
+  def test_unqualified_module_type_rejected(self):
+    """Verifies that using an unqualified type from an imported module raises an error."""
+    code = """
+    import lib.love2d.enums;
+    func test(mode: DrawMode) {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    with self.assertRaises(SemanticError) as cm:
+      checker.check(ast)
+    self.assertIn("Undefined type 'DrawMode'", str(cm.exception))
+
+  def test_qualified_module_type_accepted(self):
+    """Verifies that using a dot-qualified type from an imported module succeeds."""
+    code = """
+    import lib.love2d.enums;
+    func test(mode: enums.DrawMode) {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(len(checker.errors), 0)
+
+  def test_reexport_module_specifier(self):
+    """Verifies re-exporting a symbol from an imported module."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      mod_a = os.path.join(tmpdir, "mod_a.sp")
+      with open(mod_a, "w") as f:
+        f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n};\n")
+
+      code = f"import mod_a;\n"
+      input_stream = InputStream(code)
+      lexer = SapphireLexer(input_stream)
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+      mod_a_sym = checker.symbol_table.lookup("mod_a")
+      self.assertIsNotNone(mod_a_sym)
+      self.assertIn("DrawMode", mod_a_sym.exports)
+
+  def test_qualified_type_fallback_struct(self):
+    """Verifies dot-qualified fallback to StructType when not ending in Mode or Code."""
+    code = """
+    import lib.love2d.enums;
+    func test(s: enums.CustomStruct) {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(len(checker.errors), 0)
+
+
+  def test_module_import_with_error(self):
+    """Verifies graceful handling when an imported module contains syntax or semantic errors."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      invalid_sp = os.path.join(tmpdir, "invalid.sp")
+      with open(invalid_sp, "w") as f:
+        f.write("let x: int = true;\n")
+
+      code = "import invalid;\n"
+      input_stream = InputStream(code)
+      lexer = SapphireLexer(input_stream)
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+
+      syntax_err_sp = os.path.join(tmpdir, "syntax_err.sp")
+      with open(syntax_err_sp, "w") as f:
+        f.write("func {\n")
+
+      code2 = "import syntax_err;\n"
+      input_stream2 = InputStream(code2)
+      lexer2 = SapphireLexer(input_stream2)
+      stream2 = CommonTokenStream(lexer2)
+      parser2 = SapphireParser(stream2)
+      tree2 = parser2.program()
+      ast2 = ASTBuilder().visit(tree2)
+
+      checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker2.check(ast2)
+
+  def test_import_module_without_export_block(self):
+    """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      no_exp = os.path.join(tmpdir, "no_exp.sp")
+      with open(no_exp, "w") as f:
+        f.write("struct CustomItem {}\n")
+
+      code = "import no_exp;\nvar item: no_exp.CustomItem;\n"
+      input_stream = InputStream(code)
+      lexer = SapphireLexer(input_stream)
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+      self.assertEqual(len(checker.errors), 0)
 
 
 if __name__ == "__main__":

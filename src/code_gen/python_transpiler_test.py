@@ -683,6 +683,49 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("g.setColor(1.0, 0.0, 0.0)", py_code)
 
 
+  def test_python_module_import_and_export_transpilation(self):
+    """Verifies Python transpilation for module imports and export manifests."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics as gfx;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    };
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import lib.love2d.enums", py_code)
+    self.assertIn("import lib.love2d.graphics as gfx", py_code)
+    self.assertIn('__all__ = ["Player", "create_player", "DrawMode"]', py_code)
+
+  def test_python_transpile_file_with_transitive_imports(self):
+    """Verifies that transpile_file recursively transpiles imported module dependencies for Python."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sub_sp = os.path.join(tmpdir, "sub.sp")
+      with open(sub_sp, "w") as f:
+        f.write("export { item }; let item = 42;\n")
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      with open(main_sp, "w") as f:
+        f.write("import sub;\n")
+
+      out_py = os.path.join(tmpdir, "main.py")
+      transpile_file(main_sp, output_file=out_py, target="python")
+      self.assertTrue(os.path.exists(out_py))
+      sub_py = os.path.join(tmpdir, "sub.py")
+      self.assertTrue(os.path.exists(sub_py))
+
+
 if __name__ == "__main__":
   unittest.main()
 

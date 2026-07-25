@@ -1,5 +1,10 @@
 // Sapphire Love2D bindings -- mouse subsystem
 
+export {
+  CursorHandle,
+  Mouse,
+};
+
 trait CursorHandle {
   func getType(self): String;
 }

@@ -324,5 +324,46 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(trait_decl.members[0].annotations[0].arg, "setColor")
 
 
+  def test_import_and_export_parsing(self):
+    """Verifies AST construction for module imports and explicit export manifest."""
+    ast = self._get_ast("""
+    import lib.love2d.enums;
+    import lib.love2d.graphics as gfx;
+
+    export {
+      Image,
+      new_image as create_image,
+      enums.DrawMode as mode,
+    };
+
+    struct Image {
+      var handle: int;
+    }
+    """)
+    self.assertEqual(len(ast.imports), 2)
+    self.assertEqual(ast.imports[0].path, "lib.love2d.enums")
+    self.assertIsNone(ast.imports[0].alias)
+    self.assertEqual(ast.imports[1].path, "lib.love2d.graphics")
+    self.assertEqual(ast.imports[1].alias, "gfx")
+
+    self.assertIsNotNone(ast.export_block)
+    specs = ast.export_block.specifiers
+    self.assertEqual(len(specs), 3)
+    self.assertEqual(specs[0].symbol, "Image")
+    self.assertIsNone(specs[0].alias)
+    self.assertEqual(specs[1].symbol, "new_image")
+    self.assertEqual(specs[1].alias, "create_image")
+    self.assertEqual(specs[2].module_prefix, "enums")
+    self.assertEqual(specs[2].symbol, "DrawMode")
+
+  def test_multiple_export_blocks_error(self):
+    """Verifies that multiple export blocks raise a SyntaxError."""
+    with self.assertRaises(SyntaxError):
+      self._get_ast("""
+      export { A };
+      export { B };
+      """)
+
+
 if __name__ == "__main__":
   unittest.main()

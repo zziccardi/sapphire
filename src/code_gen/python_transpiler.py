@@ -151,6 +151,10 @@ class PythonTranspiler:
     self.emit(PYTHON_RUNTIME_PREAMBLE)
     self.newline()
 
+    # 1b. Transpile module imports
+    for imp in getattr(program, "imports", []):
+      self.visit(imp)
+
     # 2. Collect impl block methods to attach to class definitions
     for decl in program.declarations:
       if isinstance(decl, ImplBlockNode):
@@ -192,6 +196,10 @@ class PythonTranspiler:
         self.emit("main()")
       self.dedent()
       self.newline()
+
+    # 5. Transpile export manifest to __all__
+    if getattr(program, "export_block", None):
+      self.visit(program.export_block)
 
     return self.get_output()
 
@@ -238,6 +246,19 @@ class PythonTranspiler:
           self.emit(f"{member.name} = {current_val}")
           current_val += 1
     self.dedent()
+    self.newline()
+
+  def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
+    if node.alias:
+      self.emit(f"import {node.path} as {node.alias}")
+    else:
+      self.emit(f"import {node.path}")
+    self.newline()
+
+  def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
+    exported_names = [f'"{spec.exported_name}"' for spec in node.specifiers]
+    self.newline()
+    self.emit(f"__all__ = [{', '.join(exported_names)}]")
     self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:

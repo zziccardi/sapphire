@@ -311,6 +311,28 @@ class EnumSymbol(Symbol):
     super().__init__(name, enum_type)
 
 
+class ModuleType(Type):
+  """Represents a module type for imported modules."""
+
+  def __init__(self, path: str):
+    self.path = path
+
+  def __repr__(self) -> str:
+    return f"module({self.path})"
+
+
+class ModuleSymbol(Symbol):
+  """Represents an imported module symbol (e.g. 'graphics' or 'enums')."""
+
+  def __init__(self, name: str, module_path: str, exports: Optional[Dict[str, Symbol]] = None):
+    super().__init__(name, ModuleType(module_path))
+    self.module_path = module_path
+    self.exports: Dict[str, Symbol] = exports or {}
+
+  def lookup_export(self, symbol_name: str) -> Optional[Symbol]:
+    return self.exports.get(symbol_name)
+
+
 # ==========================================
 # Scope & Symbol Table
 # ==========================================

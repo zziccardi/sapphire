@@ -4,7 +4,7 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind
+  Executable
 } from 'vscode-languageclient/node';
 
 let client: LanguageClient;
@@ -26,21 +26,26 @@ export function activate(context: vscode.ExtensionContext) {
     : path.join(workspaceRoot, serverRelativePath);
 
   // Setup options for executing the Python background server
-  let serverOptions: ServerOptions;
+  let executable: Executable;
 
   if (pythonPath === 'pipenv') {
-    serverOptions = {
+    executable = {
       command: 'pipenv',
       args: ['run', 'python', serverPath],
       options: { cwd: workspaceRoot }
     };
   } else {
-    serverOptions = {
+    executable = {
       command: pythonPath,
       args: [serverPath],
       options: { cwd: workspaceRoot }
     };
   }
+
+  const serverOptions: ServerOptions = {
+    run: executable,
+    debug: executable
+  };
 
   // Configure options for the language client
   const clientOptions: LanguageClientOptions = {
@@ -59,7 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
     clientOptions
   );
 
-  client.start().catch(error => {
+  client.start().catch((error: any) => {
     vscode.window.showErrorMessage(
       `Failed to start Sapphire Language Server: ${error.message || error}`
     );

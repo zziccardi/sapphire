@@ -244,11 +244,11 @@ let sword = Weapon(...);
 sword.use();
 ```
 
-### 7. Enums
+## 7. Enums
 
 Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
 
-### Definition, auto-incrementing, & string values
+### Definition & auto-incrementing values
 
 Enum members are declared as comma-separated identifiers inside curly braces. Trailing commas are optional and recommended.
 
@@ -302,7 +302,7 @@ let current_dir = Direction.North;
 
 // String enum interoperability
 let mode: DrawMode = DrawMode.Fill;
-let mode_str: String = DrawMode.Line;  // Compatible with string primitive
+let mode_str: String = DrawMode.Line;  // Compatible with strings
 
 // Comparison
 if status == HttpStatusCode.Ok {
@@ -669,3 +669,58 @@ func draw() {
   love.graphics.setColorRGBA(1.0, 0.0, 0.0);
 }
 ```
+
+## 12. Module system & encapsulation
+
+Sapphire provides a type-safe module system with explicit encapsulation.
+
+### A. Private by default
+All top-level declarations (`struct`, `enum`, `trait`, `func`, `let`, `var`) in a Sapphire source file are **module-private by default** and cannot be accessed outside their defining file unless explicitly listed in an `export` block.
+
+### B. Explicit export manifest (`export { ... };`)
+A module defines its public API using an `export` manifest block:
+* **Single-block Enforcement**: Exactly one `export { ... };` block is permitted per file.
+* **Top-level placement**: The `export` block can be placed anywhere at top-level scope (e.g., at the top of the file above symbol definitions for readability, or at the bottom). Forward references to symbols defined later in the file are fully supported.
+* **Aliasing & re-exporting**: Members can be exported under aliases using `as` (e.g. `new_image as create_image`), and imported module symbols can be re-exported via dot notation (e.g. `enums.DrawMode`).
+* **Trailing Commas**: Trailing commas inside `export { ... , }` are allowed and
+  recommended.
+
+```sapphire
+// lib/love2d/graphics.sp
+
+import lib.love2d.enums;
+
+export {
+  Image,
+  new_image,
+  new_image as create_image,
+  enums.DrawMode,
+};
+
+struct Image {
+  var handle: int;
+}
+
+func new_image(path: String): Image {
+  return Image { handle = 1 };
+}
+```
+
+### C. Module imports (`import`)
+Modules are imported using dot-separated identifier paths:
+
+```sapphire
+// Imports module namespace 'graphics'
+import lib.love2d.graphics;
+
+// Imports module namespace with custom alias 'gfx'
+import lib.love2d.graphics as gfx;
+
+// Member access via qualified dot notation
+let img = graphics.new_image("hero.png");
+```
+
+### D. Transpilation semantics
+* **Lua 5.1 target**: Module imports transpile to `local graphics = require("lib.love2d.graphics")`. Export manifests emit a module table `local _M = {}` populated with exported references and append `return _M`.
+* **Python target**: Module imports transpile to `import lib.love2d.graphics`. Export manifests emit `__all__ = ["Image", "new_image", "create_image", "DrawMode"]`.
+

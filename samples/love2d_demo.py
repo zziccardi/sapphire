@@ -1,6 +1,6 @@
 # Sapphire Runtime Header
 import copy
-from enum import IntEnum
+from enum import Enum, IntEnum
 
 class Arena:
   def __init__(self):
@@ -82,30 +82,43 @@ def _clone_helper(obj, init_fn=None, arena=None):
     init_fn(clone_obj)
   return clone_obj
 
+import lib.love2d.enums
+import lib.love2d.graphics
+import lib.love2d.love2d
 
+love = love2d.love
 
+hero_img
 
+hero_x = 100.0
 
+hero_y = 100.0
 
-class Player(object):
-  def __init__(self, *args, **kwargs):
-    for k, v in kwargs.items():
-      setattr(self, k, v)
-  def update(self, dt):
-    if LoveKeyboard.isDown(key="right"):
-      self.x += (self.speed * dt)
-    if LoveKeyboard.isDown(key="left"):
-      self.x -= (self.speed * dt)
-  def draw(self):
-    LoveGraphics.setColor(r=0.2, g=0.8, b=0.4)
-    LoveGraphics.rectangle(mode="fill", x=self.x, y=self.y, w=40.0, h=40.0)
+speed = 250.0
 
+def load():
+  love.graphics.setBackgroundColor(r=0.1, g=0.1, b=0.15)
+  hero_img = love.graphics.newImage("assets/hero.png")
 
-player = Player(x=100.0, y=100.0, speed=200.0)
+def update(dt):
+  if (love.keyboard.isDown("left") or love.keyboard.isDown("a")):
+    hero_x -= (speed * dt)
+  if (love.keyboard.isDown("right") or love.keyboard.isDown("d")):
+    hero_x += (speed * dt)
+  if (love.keyboard.isDown("up") or love.keyboard.isDown("w")):
+    hero_y -= (speed * dt)
+  if (love.keyboard.isDown("down") or love.keyboard.isDown("s")):
+    hero_y += (speed * dt)
 
-def game_update(dt):
-  player.update(dt)
-
-def game_draw():
-  LoveGraphics.clear(r=0.1, g=0.1, b=0.1)
-  player.draw()
+def draw():
+  love.graphics.clear(r=0.1, g=0.15, b=0.2)
+  love.graphics.setColor(0.2, 0.7, 0.5)
+  love.graphics.rectangle(mode=enums.DrawMode.Fill, x=50.0, y=50.0, width=300.0, height=150.0)
+  _val_img = hero_img
+  if _val_img is not None:
+    img = _val_img
+    love.graphics.setColor(1.0, 1.0, 1.0)
+    img.draw(x=hero_x, y=hero_y)
+  love.graphics.setColor(1.0, 1.0, 1.0)
+  fps_str = ("FPS: " + love.timer.getFPS())
+  love.graphics.print(text=fps_str, x=10.0, y=10.0)

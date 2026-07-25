@@ -46,6 +46,7 @@ def transpile_file(
     input_file: str,
     output_file: Optional[str] = None,
     target: str = "python",
+    visited: Optional[set] = None,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
@@ -54,6 +55,7 @@ def transpile_file(
     output_file: Optional output path for generated code (.py or .lua). If None,
       defaults to input_file with .py or .lua extension depending on target.
     target: Code generation target ("python" or "lua" / "lua5.1").
+    visited: Set of already processed file paths to prevent recursion loops.
 
   Returns:
     The path to the generated output file.
@@ -65,6 +67,14 @@ def transpile_file(
   if not output_file:
     base_path, _ = os.path.splitext(input_file)
     output_file = base_path + ext
+
+  if visited is None:
+    visited = set()
+
+  input_abs = os.path.abspath(input_file)
+  if input_abs in visited:
+    return output_file
+  visited.add(input_abs)
 
   print(f"Reading source file: {input_file}...")
 
@@ -102,14 +112,31 @@ def transpile_file(
 
   # 4. Semantic Analysis & Type Checking
   print("Running Semantic Analysis & Type Checker...")
-  checker = TypeChecker()
+  checker = TypeChecker(source_file_path=input_file)
   try:
     checker.check(ast)
   except SemanticError as e:
     print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
     sys.exit(1)
 
-  # 5. Transpile
+  # 5. Transitive Module Dependencies Transpilation
+  for imp in getattr(ast, "imports", []):
+    rel_path = imp.path.replace(".", "/") + ".sp"
+    possible_sources = [
+        rel_path,
+        os.path.join(os.path.dirname(input_file), rel_path),
+        os.path.join(os.getcwd(), rel_path),
+    ]
+    sub_source = None
+    for p in possible_sources:
+      if os.path.exists(p):
+        sub_source = p
+        break
+    if sub_source:
+      sub_output = os.path.splitext(sub_source)[0] + ext
+      transpile_file(sub_source, sub_output, target=target, visited=visited)
+
+  # 6. Transpile
   if target_lower in ("lua", "lua5.1"):
     print("Transpiling to Lua 5.1...")
     transpiler = LuaTranspiler()
