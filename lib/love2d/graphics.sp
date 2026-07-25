@@ -8,6 +8,7 @@ export {
   CanvasHandle,
   FontHandle,
   QuadHandle,
+  Graphics,
 };
 
 struct Color {

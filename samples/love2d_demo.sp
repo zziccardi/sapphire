@@ -1,90 +1,19 @@
 /*
  * Sample Sapphire program demonstrating Love2D game-engine interoperation.
  *
- * Demonstrates:
- * - Trait contracts for external API interfaces (`trait Graphics`,
-     `trait Keyboard`)
- * - Engine container struct (`struct LoveEngine`)
- * - External host variable binding (`@extern var love: LoveEngine;`)
- * - Exported global callbacks (`@export("love.update")`,
-     `@export("love.draw")`)
+ * Uses Sapphire's modular Love2D library (`lib.love2d.*`).
  */
 
-// ==========================================
-// 1. Enums
-// ==========================================
+import lib.love2d.enums;
+import lib.love2d.graphics;
+import lib.love2d.love2d;
 
-enum DrawMode {
-  Fill = "fill",
-  Line = "line",
-}
+let love = love2d.love;
 
-enum FilterMode {
-  Linear = "linear",
-  Nearest = "nearest",
-}
-
-// ==========================================
-// 2. Resource handles & subsystem traits
-// ==========================================
-
-// TODO: Rename to just `Image`?
-trait ImageHandle {
-  func draw(self, x: float, y: float);
-
-  @export("draw")
-  func drawTransformed(self, x: float, y: float, r: float = 0.0,
-                       sx: float = 1.0, sy: float = 1.0);
-
-  func getWidth(self): float;
-  func getHeight(self): float;
-  func getDimensions(self): float, float;
-}
-
-trait Graphics {
-  func clear(r: float = 0.0, g: float = 0.0, b: float = 0.0, a: float = 1.0);
-  func setBackgroundColor(r: float, g: float, b: float, a: float = 1.0);
-
-  @export("setColor")
-  func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
-
-  @export("rectangle")
-  func rectangle(mode: DrawMode, x: float, y: float,
-                 width: float, height: float);
-
-  func newImage(path: String): ImageHandle;
-  func print(text: String, x: float, y: float);
-}
-
-trait Keyboard {
-  func isDown(key: String): bool;
-}
-
-trait Timer {
-  func getFPS(): int;
-}
-
-// ===========================================
-// 3. Engine container & global binding
-// ===========================================
-
-struct LoveEngine {
-  var graphics: Graphics;
-  var keyboard: Keyboard;
-  var timer: Timer;
-}
-
-@extern
-var love: LoveEngine;
-
-// ==========================================
-// 4. Game logic & callbacks
-// ==========================================
-
-var hero_img: ImageHandle?;
+var hero_img: graphics.ImageHandle?;
 var hero_x: float = 100.0;
 var hero_y: float = 100.0;
-let speed:  float = 250.0;
+let speed: float = 250.0;
 
 @export("love.load")
 func load() {
@@ -114,7 +43,7 @@ func draw() {
 
   // Draw background shape
   love.graphics.setColorRGBA(0.2, 0.7, 0.5);
-  love.graphics.rectangle(mode = DrawMode.Fill, x = 50.0, y = 50.0,
+  love.graphics.rectangle(mode = enums.DrawMode.Fill, x = 50.0, y = 50.0,
                           width = 300.0, height = 150.0);
 
   // Draw hero handle

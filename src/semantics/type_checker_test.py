@@ -1817,6 +1817,26 @@ class TestTypeChecker(unittest.TestCase):
       checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
       checker2.check(ast2)
 
+  def test_import_module_without_export_block(self):
+    """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      no_exp = os.path.join(tmpdir, "no_exp.sp")
+      with open(no_exp, "w") as f:
+        f.write("struct CustomItem {}\n")
+
+      code = "import no_exp;\nvar item: no_exp.CustomItem;\n"
+      input_stream = InputStream(code)
+      lexer = SapphireLexer(input_stream)
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+      self.assertEqual(len(checker.errors), 0)
+
 
 if __name__ == "__main__":
   unittest.main()

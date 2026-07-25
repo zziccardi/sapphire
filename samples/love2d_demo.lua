@@ -109,38 +109,11 @@ _clone_helper = function(obj, init_fn, arena)
   return clone_obj
 end
 
+local enums = require("lib.love2d.enums")
+local graphics = require("lib.love2d.graphics")
+local love2d = require("lib.love2d.love2d")
 
-local DrawMode = {
-  Fill = "fill",
-  Line = "line"
-}
-
-
-local FilterMode = {
-  Linear = "linear",
-  Nearest = "nearest"
-}
-
-
-
-
-
-
-local LoveEngine = {}
-LoveEngine.__index = LoveEngine
-function LoveEngine.init(kwargs, proto)
-  kwargs = kwargs or {}
-  local self
-  self = setmetatable({}, LoveEngine)
-  if proto == nil then
-  end
-  for k, v in pairs(kwargs) do
-    self[k] = v
-  end
-  return self
-end
-
-
+local love = love2d.love
 
 local hero_img
 
@@ -175,7 +148,7 @@ end
 function love.draw()
   love.graphics.clear(0.1, 0.15, 0.2)
   love.graphics.setColor(0.2, 0.7, 0.5)
-  love.graphics.rectangle(DrawMode.Fill, 50.0, 50.0, 300.0, 150.0)
+  love.graphics.rectangle(enums.DrawMode.Fill, 50.0, 50.0, 300.0, 150.0)
   local _val_img = hero_img
   if _val_img ~= nil then
     local img = _val_img
