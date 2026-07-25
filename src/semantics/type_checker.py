@@ -299,11 +299,17 @@ class TypeChecker:
 
       elif isinstance(decl, VarDeclNode):
         if any(a.name == "extern" for a in decl.annotations):
+          if decl.exprs:
+            self.error("An '@extern' variable declaration cannot have an initializer expression.")
           for name, val_type_node in zip(decl.names, decl.val_types):
             if self.symbol_table.lookup_current_scope(name):
               self.error(f"Redefinition of identifier '{name}'.")
               continue
-            var_type = self._resolve_type_node(val_type_node) if val_type_node else PrimitiveType("none")
+            if not val_type_node:
+              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.")
+              var_type = PrimitiveType("none")
+            else:
+              var_type = self._resolve_type_node(val_type_node)
             self.symbol_table.define(name, VariableSymbol(name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:

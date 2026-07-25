@@ -66,8 +66,11 @@ enable the memory-safety features described in the spec.
 # Run a Sapphire script (transpiling to Python by default):
 sapphire samples/overview.sp
 
-# Transpile to Lua 5.1 (without running):
+# Transpile to Lua 5.1 (without running directly in the Lua interpreter):
 sapphire build samples/love2d_demo.sp -t lua -o main.lua
+
+# Run the transpiled game code in Love2D.
+love main.lua
 ```
 
 ## Repository structure

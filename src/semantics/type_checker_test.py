@@ -1440,6 +1440,24 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Redefinition of identifier 'love'.", str(context.exception))
 
+  def test_extern_var_invalid_declaration(self):
+    """Verifies semantic errors for @extern variable declarations with initializers or missing type annotations."""
+    code_init = """
+    @extern
+    let love = 123;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_init)
+    self.assertIn("An '@extern' variable declaration cannot have an initializer expression.", str(context.exception))
+
+    code_missing_type = """
+    @extern
+    var love;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_missing_type)
+    self.assertIn("An '@extern' variable declaration for 'love' requires an explicit type annotation.", str(context.exception))
+
   def test_multi_return_and_bindings_type_checking(self):
     """Verifies semantic type checking for multi-return functions, unpacking, and assignments."""
     valid_code = """
