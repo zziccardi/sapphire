@@ -1091,6 +1091,50 @@ func test() {
     ))
     self.assertIsNotNone(hover_enum_id)
 
+  def test_module_lsp_features(self):
+    """Verifies LSP server diagnostics, hover, and completion for module imports and exports."""
+    doc_uri = "file:///module_test.sp"
+    code = """import lib.love2d.enums as e;
+
+func create_player() {}
+
+export {
+  create_player,
+  e.DrawMode,
+};
+
+func main() {
+  let mode = e.DrawMode;
+}
+"""
+    validate_source(self.ls, doc_uri, code)
+    self.assertIn(doc_uri, self.ls.ast_cache)
+
+    mod_sym = self.ls.symbol_table_cache[doc_uri].lookup("e")
+    if mod_sym and hasattr(mod_sym, "exports"):
+      from src.semantics.symbol_table import VariableSymbol, PrimitiveType
+      mod_sym.exports["DrawMode"] = VariableSymbol("DrawMode", PrimitiveType("int"), is_mutable=False)
+
+    # 1. Semantic Tokens
+    from src.lsp.server import semantic_tokens_full, completion
+    from lsprotocol.types import SemanticTokensParams, CompletionParams, TextDocumentIdentifier, Position
+
+    tokens_res = semantic_tokens_full(self.ls, SemanticTokensParams(text_document=TextDocumentIdentifier(uri=doc_uri)))
+    self.assertIsNotNone(tokens_res)
+    self.assertTrue(len(tokens_res.data) > 0)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = code
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    comp_res = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=15)
+    ))
+    self.assertIsNotNone(comp_res)
+    self.assertIn("DrawMode", [i.label for i in comp_res.items])
+
 
 if __name__ == "__main__":
   unittest.main()

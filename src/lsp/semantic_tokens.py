@@ -10,11 +10,11 @@ from typing import List, Tuple, Optional
 try:
   from parser.ast import ASTNode
   from semantics.type_checker import TypeChecker
-  from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType
+  from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType, ModuleSymbol, ModuleType
 except ImportError:  # pragma: no cover
   from src.parser.ast import ASTNode
   from src.semantics.type_checker import TypeChecker
-  from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType
+  from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType, ModuleSymbol, ModuleType
 
 # Legend mappings for the LSP client
 TOKEN_TYPES = [
@@ -175,6 +175,34 @@ class SemanticTokensTypeChecker(TypeChecker):
     """Adds a raw semantic token if the positioning info is valid."""
     if line is not None and col is not None and length is not None and length > 0:
       self.raw_tokens.append((line, col, length, token_type, modifiers))
+
+  def visit_ProgramNode(self, node) -> None:
+    for imp in getattr(node, "imports", []):
+      self.visit(imp)
+    if getattr(node, "export_block", None):
+      self.visit(node.export_block)
+    super().visit_ProgramNode(node)
+
+  def visit_ImportStmtNode(self, node) -> None:
+    alias_name = node.alias if node.alias else node.path.split(".")[-1]
+    sym = self.symbol_table.lookup(alias_name)
+    if sym:
+      self.node_types[node] = sym.symbol_type
+
+  def visit_ExportStmtNode(self, node) -> None:
+    for spec in node.specifiers:
+      if spec.module_prefix:
+        mod_sym = self.symbol_table.lookup(spec.module_prefix)
+        if isinstance(mod_sym, ModuleSymbol):
+          exp_sym = mod_sym.lookup_export(spec.symbol)
+          if exp_sym is not None:
+            val_type = getattr(exp_sym, "symbol_type", exp_sym)
+            self.node_types[spec] = val_type
+      else:
+        sym = self.symbol_table.lookup(spec.symbol) or self.symbol_table.lookup_type(spec.symbol)
+        if sym is not None:
+          val_type = getattr(sym, "symbol_type", sym)
+          self.node_types[spec] = val_type
 
   def visit_StructDeclNode(self, node) -> None:
     # Struct name declaration

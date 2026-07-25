@@ -631,7 +631,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
   KEYWORDS = [
       "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else",
       "for", "in", "while", "return", "true", "false", "none", "const", "static",
-      "clone", "arena"
+      "clone", "arena", "import", "export", "as"
   ]
   for kw in KEYWORDS:
     add_item(kw, 14, f"(keyword) {kw}")
@@ -696,7 +696,7 @@ def completion(ls: SapphireLanguageServer,
     best_node = None
     min_dist = float('inf')
     for node in node_types.keys():
-      n_name = getattr(node, "name", None) or getattr(node, "let_name", None) or getattr(node, "loop_var", None)
+      n_name = getattr(node, "name", None) or getattr(node, "alias", None) or getattr(node, "let_name", None) or getattr(node, "loop_var", None)
       if n_name == receiver_name:
         s_line = getattr(node, "start_line", getattr(node, "name_line", None))
         dist = abs(s_line - line) if s_line else 0
@@ -715,6 +715,22 @@ def completion(ls: SapphireLanguageServer,
 
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
+
+    if type(receiver_type).__name__ == "ModuleType" or (uri in ls.symbol_table_cache and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__ == "ModuleSymbol"):
+      items = []
+      mod_sym = ls.symbol_table_cache[uri].lookup(receiver_name) if uri in ls.symbol_table_cache else None
+      exports = mod_sym.exports if mod_sym and hasattr(mod_sym, "exports") else {}
+      for exp_name, exp_val in exports.items():
+        type_str = str(exp_val.symbol_type) if hasattr(exp_val, "symbol_type") else str(exp_val)
+        items.append(
+            CompletionItem(
+                label=exp_name,
+                kind=6,  # Variable / Member
+                detail=f"(module export) {receiver_name}.{exp_name}: {type_str}",
+                insert_text=exp_name,
+            )
+        )
+      return CompletionList(is_incomplete=False, items=items)
 
     if hasattr(receiver_type, "variants"):
       items = []
