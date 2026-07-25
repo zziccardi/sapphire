@@ -47,15 +47,15 @@ trait Graphics {
   func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
 
   @export("rectangle")
-  func rectangle(mode: DrawMode, x: float, y: float,
+  func rectangle(mode: enums.DrawMode, x: float, y: float,
                  width: float, height: float);
 
   @export("rectangle")
-  func rectangleRounded(mode: DrawMode, x: float, y: float,
+  func rectangleRounded(mode: enums.DrawMode, x: float, y: float,
                         width: float, height: float,
                         rx: float, ry: float);
 
-  func circle(mode: DrawMode, x: float, y: float, radius: float);
+  func circle(mode: enums.DrawMode, x: float, y: float, radius: float);
   func line(x1: float, y1: float, x2: float, y2: float);
   func print(text: String, x: float, y: float);
 

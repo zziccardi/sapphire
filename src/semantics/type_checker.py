@@ -420,12 +420,6 @@ class TypeChecker:
           return EnumType(parts[1]) if ("Mode" in parts[1] or "Code" in parts[1]) else StructType(parts[1])
       resolved = self.symbol_table.lookup_type(node.name)
       if not resolved:
-        # Search imported modules for node.name
-        for sym in self.symbol_table.current_scope.symbols.values():
-          if isinstance(sym, ModuleSymbol):
-            exp_sym = sym.lookup_export(node.name)
-            if exp_sym:
-              return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
         self.error(f"Undefined type '{node.name}'.")
         return PrimitiveType("none")
       return resolved

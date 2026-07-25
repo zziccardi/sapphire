@@ -1708,6 +1708,41 @@ class TestTypeChecker(unittest.TestCase):
     checker.check(ast)
     self.assertEqual(len(checker.errors), 0)
 
+  def test_unqualified_module_type_rejected(self):
+    """Verifies that using an unqualified type from an imported module raises an error."""
+    code = """
+    import lib.love2d.enums;
+    func test(mode: DrawMode) {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    with self.assertRaises(SemanticError) as cm:
+      checker.check(ast)
+    self.assertIn("Undefined type 'DrawMode'", str(cm.exception))
+
+  def test_qualified_module_type_accepted(self):
+    """Verifies that using a dot-qualified type from an imported module succeeds."""
+    code = """
+    import lib.love2d.enums;
+    func test(mode: enums.DrawMode) {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(len(checker.errors), 0)
+
 
 if __name__ == "__main__":
   unittest.main()
