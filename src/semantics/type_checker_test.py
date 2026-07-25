@@ -1743,6 +1743,80 @@ class TestTypeChecker(unittest.TestCase):
     checker.check(ast)
     self.assertEqual(len(checker.errors), 0)
 
+  def test_reexport_module_specifier(self):
+    """Verifies re-exporting a symbol from an imported module."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      mod_a = os.path.join(tmpdir, "mod_a.sp")
+      with open(mod_a, "w") as f:
+        f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n};\n")
+
+      code = f"import mod_a;\n"
+      input_stream = InputStream(code)
+      lexer = SapphireLexer(input_stream)
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+      mod_a_sym = checker.symbol_table.lookup("mod_a")
+      self.assertIsNotNone(mod_a_sym)
+      self.assertIn("DrawMode", mod_a_sym.exports)
+
+  def test_qualified_type_fallback_struct(self):
+    """Verifies dot-qualified fallback to StructType when not ending in Mode or Code."""
+    code = """
+    import lib.love2d.enums;
+    func test(s: enums.CustomStruct) {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(len(checker.errors), 0)
+
+
+  def test_module_import_with_error(self):
+    """Verifies graceful handling when an imported module contains syntax or semantic errors."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      invalid_sp = os.path.join(tmpdir, "invalid.sp")
+      with open(invalid_sp, "w") as f:
+        f.write("let x: int = true;\n")
+
+      code = "import invalid;\n"
+      input_stream = InputStream(code)
+      lexer = SapphireLexer(input_stream)
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+
+      syntax_err_sp = os.path.join(tmpdir, "syntax_err.sp")
+      with open(syntax_err_sp, "w") as f:
+        f.write("func {\n")
+
+      code2 = "import syntax_err;\n"
+      input_stream2 = InputStream(code2)
+      lexer2 = SapphireLexer(input_stream2)
+      stream2 = CommonTokenStream(lexer2)
+      parser2 = SapphireParser(stream2)
+      tree2 = parser2.program()
+      ast2 = ASTBuilder().visit(tree2)
+
+      checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker2.check(ast2)
+
 
 if __name__ == "__main__":
   unittest.main()

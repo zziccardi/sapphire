@@ -130,11 +130,7 @@ class TypeChecker:
     self._register_impl_signatures(program)
 
     # Pass 4: Type-check top-level statements, functions, and structs
-    for decl in program.declarations:
-      self.visit(decl)
-
-    if program.export_block:
-      self.visit(program.export_block)
+    self.visit_ProgramNode(program)
 
     if self.errors:
       raise SemanticError("\n".join(self.errors))
