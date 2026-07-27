@@ -410,6 +410,13 @@ class PythonTranspiler:
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
     if any(a.name == "extern" for a in node.annotations):
       return
+    if node.exprs and len(node.exprs) == 1 and isinstance(node.exprs[0], MatchExprNode):
+      temp_var = self._emit_match_statement(node.exprs[0])
+      self.newline()
+      names_str = ", ".join(node.names)
+      self.emit(f"{names_str} = {temp_var}")
+      return
+
     self.newline()
     names_str = ", ".join(node.names)
     self.emit(f"{names_str}")
@@ -421,6 +428,16 @@ class PythonTranspiler:
         self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
+    if node.op == "=" and len(node.exprs) == 1 and isinstance(node.exprs[0], MatchExprNode):
+      temp_var = self._emit_match_statement(node.exprs[0])
+      self.newline()
+      for idx, target in enumerate(node.targets):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(target)
+      self.emit(f" = {temp_var}")
+      return
+
     self.newline()
     if node.op == "=":
       for idx, target in enumerate(node.targets):
@@ -439,10 +456,19 @@ class PythonTranspiler:
       self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
+    if isinstance(node.expr, MatchExprNode):
+      self._emit_match_statement(node.expr, target_var=None)
+      return
     self.newline()
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
+    if node.expressions and len(node.expressions) == 1 and isinstance(node.expressions[0], MatchExprNode):
+      temp_var = self._emit_match_statement(node.expressions[0])
+      self.newline()
+      self.emit(f"return {temp_var}")
+      return
+
     self.newline()
     if node.expressions:
       self.emit("return ")
@@ -452,6 +478,68 @@ class PythonTranspiler:
         self.visit(expr)
     else:
       self.emit("return")
+
+  def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
+    if target_var == "":
+      self._temp_match_count = getattr(self, "_temp_match_count", 0) + 1
+      target_var = f"_match_res_{self._temp_match_count}"
+      self.newline()
+      self.emit(f"{target_var} = None")
+
+    self.newline()
+    self.emit("match ")
+    self.visit(node.subject)
+    self.emit(":")
+    self.indent()
+
+    prev_target = getattr(self, "_current_match_target", None)
+    self._current_match_target = target_var
+
+    for case in node.cases:
+      self.newline()
+      if isinstance(case.pattern, EllipsisPatternNode):
+        self.emit("case _:")
+      elif isinstance(case.pattern, IdentifierNode) and case.pattern.name == "_":
+        self.emit("case _:")
+      else:
+        self.emit("case ")
+        self.visit(case.pattern)
+        self.emit(":")
+
+      self.indent()
+      if isinstance(case.body, BlockNode):
+        if not case.body.statements:
+          self.newline()
+          self.emit("pass")
+        else:
+          self.visit(case.body)
+      else:
+        self.newline()
+        if target_var:
+          self.emit(f"{target_var} = ")
+          self.visit(case.body)
+        else:
+          self.visit(case.body)
+      self.dedent()
+
+    self.dedent()
+    self._current_match_target = prev_target
+    return target_var or ""
+
+  def visit_YieldNode(self, node: YieldNode) -> None:
+    target = getattr(self, "_current_match_target", None)
+    self.newline()
+    if target:
+      self.emit(f"{target} = ")
+    self.visit(node.expr)
+
+  def visit_MatchExprNode(self, node: MatchExprNode) -> None:
+    temp_var = self._emit_match_statement(node)
+    if temp_var:
+      self.emit(temp_var)
+
+  def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
+    self.emit("_")
 
   def visit_IfNode(self, node: IfNode) -> None:
     self.newline()

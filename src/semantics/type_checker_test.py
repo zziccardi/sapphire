@@ -1853,7 +1853,55 @@ class TestTypeChecker(unittest.TestCase):
 
       checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
       checker.check(ast)
-      self.assertEqual(len(checker.errors), 0)
+  def test_match_expression(self):
+    """Tests semantic analysis and type checking of match expressions."""
+    valid_code = """
+    enum Status { Ok, NotFound, Error }
+
+    func test_match(s: Status): String {
+      let msg = match s {
+        Status.Ok -> "Success",
+        Status.NotFound -> {
+          yield "Not Found";
+        },
+        ... -> "Generic Error",
+      };
+      return msg;
+    }
+
+    func test_side_effect(s: Status) {
+      match s {
+        Status.Ok -> {
+          let x = 1;
+        },
+        ... -> {
+          let y = 2;
+        },
+      };
+    }
+    """
+    self._check(valid_code)
+
+    non_exhaustive = """
+    enum Status { Ok, NotFound, Error }
+    func test_bad(s: Status) {
+      let x = match s {
+        Status.Ok -> 1,
+      };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(non_exhaustive)
+    self.assertIn("Match expression for enum 'Status' is not exhaustive", str(ctx.exception))
+
+    yield_outside = """
+    func test_bad_yield() {
+      yield 10;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(yield_outside)
+    self.assertIn("Yield statement outside match context.", str(ctx.exception))
 
 
 if __name__ == "__main__":

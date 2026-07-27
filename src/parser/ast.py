@@ -413,6 +413,13 @@ class ReturnNode(StmtNode):
     return res
 
 
+class YieldNode(StmtNode):
+  """Represents a yield statement (e.g. 'yield "Success";')."""
+
+  def __init__(self, expr: ASTNode):
+    self.expr = expr
+
+
 class IfNode(StmtNode):
   """Represents an if/else conditional statement, supporting swift-style 'if let'."""
 
@@ -556,3 +563,24 @@ class StructInitializerNode(ExprNode):
     self.struct_name = struct_name
     self.fields = fields
     self.arena_expr = arena_expr
+
+
+class EllipsisPatternNode(ASTNode):
+  """Represents the '...' wildcard pattern in a match case."""
+  pass
+
+
+class MatchCaseNode(ASTNode):
+  """Represents a single case branch in a match expression."""
+
+  def __init__(self, pattern: ASTNode, body: Union[BlockNode, ASTNode]):
+    self.pattern = pattern
+    self.body = body  # BlockNode or single ExprNode
+
+
+class MatchExprNode(ExprNode):
+  """Represents a match expression (e.g. 'match status { HttpStatus.Ok -> "Success", ... -> "Error", }')."""
+
+  def __init__(self, subject: ASTNode, cases: List[MatchCaseNode]):
+    self.subject = subject
+    self.cases = cases

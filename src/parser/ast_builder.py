@@ -500,6 +500,8 @@ class ASTBuilder(SapphireVisitor):
       return self.visit(ctx.arrayLiteral())
     elif ctx.structInitializer():
       return self.visit(ctx.structInitializer())
+    elif ctx.matchExpression():
+      return self.visit(ctx.matchExpression())
     else:
       return self.visit(ctx.expression())
 
@@ -551,3 +553,25 @@ class ASTBuilder(SapphireVisitor):
     node.name_column = name_token.column
     node.name_length = len(name_token.text)
     return node
+
+  def visitYieldStatement(self, ctx: SapphireParser.YieldStatementContext) -> YieldNode:
+    expr = self.visit(ctx.expression())
+    return YieldNode(expr)
+
+  def visitMatchExpression(self, ctx: SapphireParser.MatchExpressionContext) -> MatchExprNode:
+    subject = self.visit(ctx.expression())
+    cases = [self.visit(case_ctx) for case_ctx in ctx.matchCase()]
+    return MatchExprNode(subject, cases)
+
+  def visitMatchCase(self, ctx: SapphireParser.MatchCaseContext) -> MatchCaseNode:
+    pattern = self.visit(ctx.matchPattern())
+    if ctx.block():
+      body = self.visit(ctx.block())
+    else:
+      body = self.visit(ctx.expression())
+    return MatchCaseNode(pattern, body)
+
+  def visitMatchPattern(self, ctx: SapphireParser.MatchPatternContext) -> ASTNode:
+    if ctx.ELLIPSIS():
+      return EllipsisPatternNode()
+    return self.visit(ctx.expression())
