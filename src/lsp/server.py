@@ -94,13 +94,20 @@ class ANTLRDiagnosticListener(ErrorListener):
         offendingSymbol.text):
       length = len(offendingSymbol.text)
 
+    try:
+      from code_gen.transpiler import format_syntax_error_message
+    except ImportError:  # pragma: no cover
+      from src.code_gen.transpiler import format_syntax_error_message
+
+    custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
+
     # LSP Diagnostic structure
     diag = Diagnostic(
         range=Range(
             start=Position(line=line - 1, character=column),
             end=Position(line=line - 1, character=column + length),
         ),
-        message=f"Syntax Error: {msg}",
+        message=f"Syntax Error: {custom_msg}",
         severity=DiagnosticSeverity.Error,
         source="sapphire-parser",
     )

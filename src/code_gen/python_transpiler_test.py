@@ -830,6 +830,37 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_match_res_1", "".join(pt.code))
 
 
+  def test_missing_semicolon_after_match_error_message(self):
+    """Verifies clear syntax error message when semicolon is omitted after match statement."""
+    import io, sys
+    bad_code = """
+    func main() {
+      match 1 {
+        1 -> { let a = 1; },
+        ... -> { let b = 2; },
+      }
+      let y = 10;
+    }
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".sp", delete=False) as f:
+      f.write(bad_code)
+      fname = f.name
+
+    captured_stderr = io.StringIO()
+    old_stderr = sys.stderr
+    try:
+      sys.stderr = captured_stderr
+      with self.assertRaises(SystemExit):
+        transpile_file(fname)
+    finally:
+      sys.stderr = old_stderr
+      if os.path.exists(fname):
+        os.remove(fname)
+
+    err_output = captured_stderr.getvalue()
+    self.assertIn("Missing semicolon ';' after closing brace '}' of match expression", err_output)
+
+
 if __name__ == "__main__":
   unittest.main()
 
