@@ -1894,14 +1894,103 @@ class TestTypeChecker(unittest.TestCase):
       self._check(non_exhaustive)
     self.assertIn("Match expression for enum 'Status' is not exhaustive", str(ctx.exception))
 
-    yield_outside = """
-    func test_bad_yield() {
-      yield 10;
-    }
-    """
+    # Bool exhaustiveness
+    self._check("func b(v: bool): int { return match v { true -> 1, false -> 0 }; }")
     with self.assertRaises(SemanticError) as ctx:
-      self._check(yield_outside)
-    self.assertIn("Yield statement outside match context.", str(ctx.exception))
+      self._check("func b(v: bool) { let x = match v { true -> 1 }; }")
+    self.assertIn("Match expression for bool is not exhaustive", str(ctx.exception))
+
+    # Optional exhaustiveness
+    self._check("func o(v: int?): int { return match v { none -> 0, ... -> 1 }; }")
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("func o(v: int?) { let x = match v { none -> 0 }; }")
+    self.assertIn("Match expression for optional", str(ctx.exception))
+
+    # Identifier catch-all pattern
+    self._check("func i(v: int): String { return match v { val -> \"ok\" }; }")
+
+    # Incompatible pattern type
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("func i(v: int) { let x = match v { \"bad\" -> 1, ... -> 0 }; }")
+    self.assertIn("Pattern type 'string' is incompatible with subject type 'int'", str(ctx.exception))
+
+    # Incompatible yield types
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("func i(v: int) { let x = match v { 1 -> { yield 10; yield \"str\"; }, ... -> 0 }; }")
+    self.assertIn("Incompatible yield types in match case", str(ctx.exception))
+
+    # Incompatible branch return types
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("func i(v: int) { let x = match v { 1 -> 10, ... -> \"str\" }; }")
+    self.assertIn("Incompatible return types in match branches", str(ctx.exception))
+
+    # Enum member access pattern
+    self._check("""
+    enum Status { Ok, NotFound }
+    func test_enum_pat(s: Status): int {
+      return match s {
+        Status.Ok -> 1,
+        Status.NotFound -> 2,
+      };
+    }
+    """)
+
+    # Struct member pattern type mismatch
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Item { var id: int; }
+      func test_item(i: Item) {
+        let x = match i {
+          i.id -> 1,
+          ... -> 0,
+        };
+      }
+      """)
+
+    # Non-literal/non-member pattern type mismatch
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test_bin_pat(n: int) {
+        let a = 1;
+        let b = 2;
+        let x = match n {
+          "invalid" -> 1,
+          ... -> 0,
+        };
+      }
+      """)
+
+    # Enum identifier pattern matching enum type name
+    self._check("""
+    enum Status { Status }
+    func test_enum_name(s: Status): int {
+      return match s {
+        Status -> 1,
+        ... -> 0,
+      };
+    }
+    """)
+
+    # Optional type wrapping fallback in match return
+    self._check("""
+    func test_opt_fall(n: int): int? {
+      return match n {
+        1 -> 10,
+        ... -> none,
+      };
+    }
+    """)
+
+    # Arena return escaping error
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Item {}
+      func test_arena_escape(): Item {
+        let a = Arena();
+        return Item {} in a;
+      }
+      """)
+    self.assertIn("Cannot return a reference to an object allocated in local arena", str(ctx.exception))
 
 
 if __name__ == "__main__":

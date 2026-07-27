@@ -751,6 +751,84 @@ class TestPythonTranspiler(unittest.TestCase):
     res3 = self._transpile_and_run(code, "get_code(Status.Error)")
     self.assertEqual(res3, 500)
 
+    # Match in assignment statement
+    assign_code = """
+    func test_assign(n: int): int {
+      var x = 0;
+      x = match n {
+        1 -> 10,
+        ... -> 20,
+      };
+      return x;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(assign_code, "test_assign(1)"), 10)
+
+    # Match in return statement
+    ret_code = """
+    func test_ret(n: int): int {
+      return match n {
+        1 -> 100,
+        ... -> 200,
+      };
+    }
+    """
+    self.assertEqual(self._transpile_and_run(ret_code, "test_ret(1)"), 100)
+
+    # Match in expression statement with empty block
+    stmt_code = """
+    func test_stmt(n: int) {
+      match n {
+        1 -> {},
+        ... -> {},
+      };
+    }
+    """
+    py_out = self._transpile(stmt_code)
+    self.assertIn("pass", py_out)
+
+    # Multi-target assignment with match
+    multi_code = """
+    func test_multi(n: int): int {
+      var a = 0;
+      var b = 0;
+      a, b = match n { 1 -> 10, ... -> 20 }, 30;
+      return a + b;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(multi_code, "test_multi(1)"), 40)
+
+    # Identifier wildcard _
+    wildcard_code = """
+    func test_wildcard(n: int): int {
+      return match n {
+        _ -> 999,
+      };
+    }
+    """
+    self.assertEqual(self._transpile_and_run(wildcard_code, "test_wildcard(5)"), 999)
+
+    # Compound assignment with match
+    comp_code = """
+    func test_comp(n: int): int {
+      var x = 1;
+      x += match n { 1 -> 2, ... -> 3 };
+      return x;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(comp_code, "test_comp(1)"), 3)
+
+    # Direct visitor calls
+    try:
+      from parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+    except ModuleNotFoundError:
+      from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+
+    pt = PythonTranspiler()
+    pt.visit(MatchExprNode(LiteralNode(1, "int"), [MatchCaseNode(EllipsisPatternNode(), LiteralNode(2, "int"))]))
+    pt.visit_EllipsisPatternNode(EllipsisPatternNode())
+    self.assertIn("_match_res_1", "".join(pt.code))
+
 
 if __name__ == "__main__":
   unittest.main()

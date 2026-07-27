@@ -410,12 +410,13 @@ class PythonTranspiler:
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
     if any(a.name == "extern" for a in node.annotations):
       return
-    if node.exprs and len(node.exprs) == 1 and isinstance(node.exprs[0], MatchExprNode):
-      temp_var = self._emit_match_statement(node.exprs[0])
-      self.newline()
-      names_str = ", ".join(node.names)
-      self.emit(f"{names_str} = {temp_var}")
-      return
+
+    expr_vars = []
+    for expr in node.exprs:
+      if isinstance(expr, MatchExprNode):
+        expr_vars.append(self._emit_match_statement(expr))
+      else:
+        expr_vars.append(None)
 
     self.newline()
     names_str = ", ".join(node.names)
@@ -425,18 +426,18 @@ class PythonTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        self.visit(expr)
+        if expr_vars[idx]:
+          self.emit(expr_vars[idx])
+        else:
+          self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
-    if node.op == "=" and len(node.exprs) == 1 and isinstance(node.exprs[0], MatchExprNode):
-      temp_var = self._emit_match_statement(node.exprs[0])
-      self.newline()
-      for idx, target in enumerate(node.targets):
-        if idx > 0:
-          self.emit(", ")
-        self.visit(target)
-      self.emit(f" = {temp_var}")
-      return
+    expr_vars = []
+    for expr in node.exprs:
+      if isinstance(expr, MatchExprNode):
+        expr_vars.append(self._emit_match_statement(expr))
+      else:
+        expr_vars.append(None)
 
     self.newline()
     if node.op == "=":
@@ -448,12 +449,18 @@ class PythonTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        self.visit(expr)
+        if expr_vars[idx]:
+          self.emit(expr_vars[idx])
+        else:
+          self.visit(expr)
     else:
       raw_op = node.op[:-1]
       self.visit(node.target)
       self.emit(f" {node.op} ")
-      self.visit(node.expr)
+      if expr_vars[0]:
+        self.emit(expr_vars[0])
+      else:
+        self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
@@ -463,11 +470,12 @@ class PythonTranspiler:
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
-    if node.expressions and len(node.expressions) == 1 and isinstance(node.expressions[0], MatchExprNode):
-      temp_var = self._emit_match_statement(node.expressions[0])
-      self.newline()
-      self.emit(f"return {temp_var}")
-      return
+    expr_vars = []
+    for expr in node.expressions:
+      if isinstance(expr, MatchExprNode):
+        expr_vars.append(self._emit_match_statement(expr))
+      else:
+        expr_vars.append(None)
 
     self.newline()
     if node.expressions:
@@ -475,7 +483,10 @@ class PythonTranspiler:
       for idx, expr in enumerate(node.expressions):
         if idx > 0:
           self.emit(", ")
-        self.visit(expr)
+        if expr_vars[idx]:
+          self.emit(expr_vars[idx])
+        else:
+          self.visit(expr)
     else:
       self.emit("return")
 
