@@ -18,6 +18,8 @@ class TestGenerateGrammar(unittest.TestCase):
     data = parse_antlr_grammar()
     self.assertIn("let", data["modifiers"])
     self.assertIn("struct", data["modifiers"])
+    self.assertIn("match", data["control"])
+    self.assertIn("yield", data["control"])
     self.assertIn("int", data["types"])
     self.assertIn("none", data["constants"])
 

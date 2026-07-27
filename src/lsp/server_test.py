@@ -504,6 +504,8 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("test_func", labels)
     self.assertIn("int", labels)
     self.assertIn("let", labels)
+    self.assertIn("match", labels)
+    self.assertIn("yield", labels)
 
     # Test Scope Completion inside if-let block (active variable)
     res_iflet = completion(self.ls, CompletionParams(
