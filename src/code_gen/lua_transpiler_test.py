@@ -587,5 +587,29 @@ class TestLuaTranspiler(unittest.TestCase):
       transpile_file("/non_existent_path_xyz_123.sp")
 
 
+  def test_lua_match_expression_transpilation(self):
+    """Verifies generated Lua code for match expressions."""
+    code = """
+    enum Status { Ok, NotFound, Error }
+
+    func get_code(s: Status): int {
+      let code = match s {
+        Status.Ok -> 200,
+        Status.NotFound -> {
+          yield 404;
+        },
+        ... -> 500,
+      };
+      return code;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("local _subj_", output)
+    self.assertIn("if _subj_", output)
+    self.assertIn("elseif _subj_", output)
+    self.assertIn("else", output)
+    self.assertIn("_match_res_", output)
+
+
 if __name__ == "__main__":
   unittest.main()

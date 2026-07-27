@@ -726,6 +726,32 @@ class TestPythonTranspiler(unittest.TestCase):
       self.assertTrue(os.path.exists(sub_py))
 
 
+  def test_match_expression_transpilation_and_execution(self):
+    """Verifies Python transpilation and execution of match expressions."""
+    code = """
+    enum Status { Ok, NotFound, Error }
+
+    func get_code(s: Status): int {
+      let code = match s {
+        Status.Ok -> 200,
+        Status.NotFound -> {
+          yield 404;
+        },
+        ... -> 500,
+      };
+      return code;
+    }
+    """
+    res1 = self._transpile_and_run(code, "get_code(Status.Ok)")
+    self.assertEqual(res1, 200)
+
+    res2 = self._transpile_and_run(code, "get_code(Status.NotFound)")
+    self.assertEqual(res2, 404)
+
+    res3 = self._transpile_and_run(code, "get_code(Status.Error)")
+    self.assertEqual(res3, 500)
+
+
 if __name__ == "__main__":
   unittest.main()
 
