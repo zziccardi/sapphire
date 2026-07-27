@@ -160,59 +160,63 @@ impl Love2D for GameEngine {
   func update(dt: float) {
     self.frame_count += 1;
 
-    // TODO: Add switch/match expressions.
-    if self.state == GameState.Playing {
-      self.player.update(dt);
+    match self.state {
+      GameState.Menu -> {
+        // Menu state logic (e.g., wait for user input to start game)
+      },
+      GameState.Playing -> {
+        self.player.update(dt);
 
-      // Swift-style safe optional unwrapping for active enemy
-      if let enemy = self.active_enemy {
-        enemy.update(dt);
+        // Swift-style safe optional unwrapping for active enemy
+        if let enemy = self.active_enemy {
+          enemy.update(dt);
 
-        // Check collision distance between player and enemy
-        let dist = self.player.position.get_distance_to(other = enemy.position);
+          // Check collision distance between player and enemy
+          let dist = self.player.position.get_distance_to(enemy.position);
 
-        if dist < 15.0 {
-          enemy.health -= 30;
-          self.score += 50;
+          if dist < 15.0 {
+            enemy.health -= 30;
+            self.score += 50;
 
-          if enemy.health <= 0 {
-            self.active_enemy = none;
-            self.state = GameState.GameOver;
+            if enemy.health <= 0 {
+              self.active_enemy = none;
+              self.state = GameState.GameOver;
+            }
           }
+        } else {
+          // Spawn next enemy wave when active enemy is defeated
+          self.active_enemy = clone self.base_enemy {
+            self.id = 102;
+            self.position = Vector2D { x = 120.0, y = 20.0 };
+            self.health = 50;
+          };
         }
-      } else {
-        // Spawn next enemy wave when active enemy is defeated
-        self.active_enemy = clone self.base_enemy {
-          self.id = 102;
-          self.position = Vector2D { x = 120.0, y = 20.0 };
-          self.health = 50;
-        };
-      }
-    } else if self.state == GameState.GameOver {
-      self.game_over_timer += dt;
+      },
+      GameState.GameOver -> {
+        self.game_over_timer += dt;
 
-      if self.game_over_timer >= 3.0 {
-        self.load();
-      }
-    }
+        if self.game_over_timer >= 3.0 {
+          self.load();
+        }
+      },
+    };
   }
 
   // Perform rendering calls for graphics and HUD UI.
   // This is called once per frame after the update step.
   // Simulates `love.draw()` in love2d.
   func draw() {
-    if self.state == GameState.Menu {
-      // Drawable main menu screen
-    } else if self.state == GameState.Playing {
-      // Render game objects
-      self.player.draw();
+    match self.state {
+      GameState.Playing -> {
+        self.player.draw();
 
-      if let enemy = self.active_enemy {
-        enemy.draw();
-      }
-    } else if self.state == GameState.GameOver {
-      // Drawable game over screen
-    }
+        if let enemy = self.active_enemy {
+          enemy.draw();
+        }
+      },
+      // In practice we'd render the main-menu and game-over screens here.
+      ... -> {},
+    };
   }
 }
 
