@@ -461,6 +461,13 @@ class LuaTranspiler:
       if is_arena and self.arena_stack:
         self.arena_stack[-1].append(node.names[0])
 
+    expr_vars = []
+    for expr in node.exprs:
+      if isinstance(expr, MatchExprNode):
+        expr_vars.append(self._emit_match_statement(expr))
+      else:
+        expr_vars.append(None)
+
     self.newline()
     names_str = ", ".join(node.names)
     self.emit(f"local {names_str}")
@@ -469,9 +476,19 @@ class LuaTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        self.visit(expr)
+        if expr_vars[idx]:
+          self.emit(expr_vars[idx])
+        else:
+          self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
+    expr_vars = []
+    for expr in node.exprs:
+      if isinstance(expr, MatchExprNode):
+        expr_vars.append(self._emit_match_statement(expr))
+      else:
+        expr_vars.append(None)
+
     self.newline()
     if node.op == "=":
       for idx, target in enumerate(node.targets):
@@ -482,17 +499,25 @@ class LuaTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        self.visit(expr)
+        if expr_vars[idx]:
+          self.emit(expr_vars[idx])
+        else:
+          self.visit(expr)
     else:
-      # Expand compound assignment (e.g. +=, -=, *=, /=) into binary operation
       raw_op = node.op[:-1]
       self.visit(node.target)
       self.emit(" = ")
       self.visit(node.target)
       self.emit(f" {raw_op} ")
-      self.visit(node.expr)
+      if expr_vars[0]:
+        self.emit(expr_vars[0])
+      else:
+        self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
+    if isinstance(node.expr, MatchExprNode):
+      self._emit_match_statement(node.expr, target_var=None)
+      return
     self.newline()
     self.visit(node.expr)
 
@@ -500,6 +525,13 @@ class LuaTranspiler:
     all_active_arenas = [
         a for frame in reversed(self.arena_stack) for a in reversed(frame)
     ]
+    expr_vars = []
+    for expr in node.expressions:
+      if isinstance(expr, MatchExprNode):
+        expr_vars.append(self._emit_match_statement(expr))
+      else:
+        expr_vars.append(None)
+
     for arena_name in all_active_arenas:
       self.newline()
       self.emit(f"{arena_name}:destroy()")
@@ -510,9 +542,77 @@ class LuaTranspiler:
       for idx, expr in enumerate(node.expressions):
         if idx > 0:
           self.emit(", ")
-        self.visit(expr)
+        if expr_vars[idx]:
+          self.emit(expr_vars[idx])
+        else:
+          self.visit(expr)
     else:
       self.emit("return")
+
+  def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
+    if target_var == "":
+      self._temp_match_count = getattr(self, "_temp_match_count", 0) + 1
+      target_var = f"_match_res_{self._temp_match_count}"
+      self.newline()
+      self.emit(f"local {target_var} = nil")
+
+    self._temp_subj_count = getattr(self, "_temp_subj_count", 0) + 1
+    subj_var = f"_subj_{self._temp_subj_count}"
+    self.newline()
+    self.emit(f"local {subj_var} = ")
+    self.visit(node.subject)
+
+    prev_target = getattr(self, "_current_match_target", None)
+    self._current_match_target = target_var
+
+    for idx, case in enumerate(node.cases):
+      self.newline()
+      if isinstance(case.pattern, EllipsisPatternNode) or (isinstance(case.pattern, IdentifierNode) and case.pattern.name == "_"):
+        if idx == 0:
+          self.emit("if true then")
+        else:
+          self.emit("else")
+      else:
+        if idx == 0:
+          self.emit(f"if {subj_var} == ")
+          self.visit(case.pattern)
+          self.emit(" then")
+        else:
+          self.emit(f"elseif {subj_var} == ")
+          self.visit(case.pattern)
+          self.emit(" then")
+
+      self.indent()
+      if isinstance(case.body, BlockNode):
+        self.visit(case.body)
+      else:
+        self.newline()
+        if target_var:
+          self.emit(f"{target_var} = ")
+          self.visit(case.body)
+        else:
+          self.visit(case.body)
+      self.dedent()
+
+    self.newline()
+    self.emit("end")
+    self._current_match_target = prev_target
+    return target_var or ""
+
+  def visit_YieldNode(self, node: YieldNode) -> None:
+    target = getattr(self, "_current_match_target", None)
+    self.newline()
+    if target:
+      self.emit(f"{target} = ")
+    self.visit(node.expr)
+
+  def visit_MatchExprNode(self, node: MatchExprNode) -> None:
+    temp_var = self._emit_match_statement(node)
+    if temp_var:
+      self.emit(temp_var)
+
+  def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
+    pass
 
   def visit_IfNode(self, node: IfNode) -> None:
     self.newline()

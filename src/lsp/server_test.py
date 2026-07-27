@@ -504,6 +504,8 @@ class TestLSPServer(unittest.TestCase):
     self.assertIn("test_func", labels)
     self.assertIn("int", labels)
     self.assertIn("let", labels)
+    self.assertIn("match", labels)
+    self.assertIn("yield", labels)
 
     # Test Scope Completion inside if-let block (active variable)
     res_iflet = completion(self.ls, CompletionParams(
@@ -1134,6 +1136,24 @@ func main() {
     ))
     self.assertIsNotNone(comp_res)
     self.assertIn("DrawMode", [i.label for i in comp_res.items])
+
+  def test_missing_semicolon_after_match_lsp_diagnostic(self):
+    """Verifies LSP diagnostics return helpful missing semicolon message for match statements."""
+    doc_uri = "file:///missing_semi.sp"
+    doc_text = """
+    func main() {
+      match 1 {
+        1 -> { let a = 1; },
+        ... -> { let b = 2; },
+      }
+      let y = 10;
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_text)
+    self.ls.text_document_publish_diagnostics.assert_called_once()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertTrue(len(call_arg.diagnostics) > 0)
+    self.assertIn("Missing semicolon ';' after closing brace '}' of match expression", call_arg.diagnostics[0].message)
 
 
 if __name__ == "__main__":

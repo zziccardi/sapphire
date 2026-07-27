@@ -30,6 +30,42 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.code_gen.lua_transpiler import LuaTranspiler
 
 
+def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
+  """Customizes ANTLR syntax error messages for better developer ergonomics."""
+  if recognizer and offendingSymbol and hasattr(offendingSymbol, "tokenIndex"):
+    try:
+      stream = recognizer.getTokenStream()
+      if stream:
+        idx = offendingSymbol.tokenIndex
+        prev_idx = idx - 1
+        while prev_idx >= 0 and stream.get(prev_idx).channel != 0:
+          prev_idx -= 1
+
+        if prev_idx >= 0 and stream.get(prev_idx).text == "}":
+          depth = 1
+          curr = prev_idx - 1
+          while curr >= 0 and depth > 0:
+            tok_text = stream.get(curr).text
+            if tok_text == "}":
+              depth += 1
+            elif tok_text == "{":
+              depth -= 1
+            curr -= 1
+
+          search_limit = max(0, curr - 30)
+          while curr >= search_limit:
+            tok = stream.get(curr)
+            if tok.text == "match":
+              return (
+                  f"Missing semicolon ';' after closing brace '}}' of match expression. "
+                  f"Match expressions used as statements must end with a semicolon ';' (e.g. 'match ... }};')."
+              )
+            curr -= 1
+    except Exception:
+      pass
+  return msg
+
+
 class CustomErrorListener(ErrorListener):
   """Custom ANTLR error listener to track and report syntax errors."""
 
@@ -39,7 +75,8 @@ class CustomErrorListener(ErrorListener):
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1
-    print(f"Syntax Error: Line {line}:{column} - {msg}", file=sys.stderr)
+    custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
+    print(f"Syntax Error: Line {line}:{column} - {custom_msg}", file=sys.stderr)
 
 
 def transpile_file(

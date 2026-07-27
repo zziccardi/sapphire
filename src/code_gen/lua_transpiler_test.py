@@ -587,5 +587,123 @@ class TestLuaTranspiler(unittest.TestCase):
       transpile_file("/non_existent_path_xyz_123.sp")
 
 
+  def test_lua_match_expression_transpilation(self):
+    """Verifies generated Lua code for match expressions."""
+    code = """
+    enum Status { Ok, NotFound, Error }
+
+    func get_code(s: Status): int {
+      let code = match s {
+        Status.Ok -> 200,
+        Status.NotFound -> {
+          yield 404;
+        },
+        ... -> 500,
+      };
+      return code;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("local _subj_", output)
+    self.assertIn("if _subj_", output)
+    self.assertIn("elseif _subj_", output)
+    self.assertIn("else", output)
+    self.assertIn("_match_res_", output)
+
+    # Match in assignment statement
+    assign_code = """
+    func test_assign(n: int): int {
+      var x = 0;
+      x = match n {
+        1 -> 10,
+        ... -> 20,
+      };
+      return x;
+    }
+    """
+    lua_out1 = self._transpile(assign_code)
+    self.assertIn("x = _match_res_", lua_out1)
+
+    # Match in return statement
+    ret_code = """
+    func test_ret(n: int): int {
+      return match n {
+        1 -> 100,
+        ... -> 200,
+      };
+    }
+    """
+    lua_out2 = self._transpile(ret_code)
+    self.assertIn("return _match_res_", lua_out2)
+
+    # Match in expression statement
+    stmt_code = """
+    func test_stmt(n: int) {
+      match n {
+        1 -> {},
+        ... -> {},
+      };
+    }
+    """
+    lua_out3 = self._transpile(stmt_code)
+    self.assertIn("if _subj_1 == 1 then", lua_out3)
+
+    # Multi-target assignment with match
+    multi_code = """
+    func test_multi(n: int): int {
+      var a = 0;
+      var b = 0;
+      a, b = match n { 1 -> 10, ... -> 20 }, 30;
+      return a + b;
+    }
+    """
+    lua_out4 = self._transpile(multi_code)
+    self.assertIn("_match_res_", lua_out4)
+
+    # Arena destruction inside match return
+    arena_ret = """
+    struct Item {}
+    func test_arena(): Item {
+      let a = Arena();
+      let item = Item {} in a;
+      return match 1 {
+        1 -> item,
+        ... -> item,
+      };
+    }
+    """
+    lua_out5 = self._transpile(arena_ret)
+    self.assertIn("a:destroy()", lua_out5)
+
+    # Identifier wildcard _
+    wild_code = "func test_w(n: int): int { return match n { _ -> 99 }; }"
+    lua_out6 = self._transpile(wild_code)
+    self.assertIn("if true then", lua_out6)
+
+    # Compound assignment with match
+    comp_code = """
+    func test_comp(n: int): int {
+      var x = 1;
+      x += match n { 1 -> 2, ... -> 3 };
+      return x;
+    }
+    """
+    lua_out7 = self._transpile(comp_code)
+    self.assertIn("x = x + _match_res_", lua_out7)
+
+    # Direct visitor calls
+    try:
+      from parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+      from code_gen.lua_transpiler import LuaTranspiler
+    except ModuleNotFoundError:
+      from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+      from src.code_gen.lua_transpiler import LuaTranspiler
+
+    lt = LuaTranspiler()
+    lt.visit(MatchExprNode(LiteralNode(1, "int"), [MatchCaseNode(EllipsisPatternNode(), LiteralNode(2, "int"))]))
+    lt.visit_EllipsisPatternNode(EllipsisPatternNode())
+    self.assertIn("_match_res_1", "".join(lt.code))
+
+
 if __name__ == "__main__":
   unittest.main()

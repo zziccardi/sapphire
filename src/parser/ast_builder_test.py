@@ -365,5 +365,37 @@ class TestASTBuilder(unittest.TestCase):
       """)
 
 
+  def test_match_expression_ast(self):
+    """Verifies AST construction for match expressions, match cases, yield statements, and ellipsis patterns."""
+    try:
+      from parser.ast import MatchExprNode, MatchCaseNode, YieldNode, EllipsisPatternNode
+    except ModuleNotFoundError:
+      from src.parser.ast import MatchExprNode, MatchCaseNode, YieldNode, EllipsisPatternNode
+
+    ast = self._get_ast("""
+    let res = match status {
+      HttpStatus.Ok -> "OK",
+      HttpStatus.NotFound -> {
+        log("Not found");
+        yield "Error";
+      },
+      ... -> "Fallback",
+    };
+    """)
+    decl = ast.declarations[0]
+    match_expr = decl.expr
+    self.assertIsInstance(match_expr, MatchExprNode)
+    self.assertEqual(len(match_expr.cases), 3)
+
+    # Case 0: single expression
+    self.assertIsInstance(match_expr.cases[0], MatchCaseNode)
+
+    # Case 1: multi-statement block with yield
+    self.assertIsInstance(match_expr.cases[1].body.statements[1], YieldNode)
+
+    # Case 2: ellipsis pattern
+    self.assertIsInstance(match_expr.cases[2].pattern, EllipsisPatternNode)
+
+
 if __name__ == "__main__":
   unittest.main()

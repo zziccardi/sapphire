@@ -122,7 +122,25 @@ statement
     | whileStatement
     | forStatement
     | returnStatement
+    | yieldStatement
     | expressionStatement
+    ;
+
+yieldStatement
+    : YIELD expression SEMICOLON
+    ;
+
+matchExpression
+    : MATCH expression LBRACE (matchCase COMMA)* matchCase? COMMA? RBRACE
+    ;
+
+matchCase
+    : matchPattern ARROW (block | expression)
+    ;
+
+matchPattern
+    : ELLIPSIS
+    | expression
     ;
 
 block
@@ -225,6 +243,7 @@ primaryExpression
     | arrayLiteral
     | LPAREN expression RPAREN
     | structInitializer
+    | matchExpression
     ;
 
 structInitializer
@@ -276,6 +295,8 @@ ELSE : 'else';
 WHILE : 'while';
 NONE : 'none';
 RETURN : 'return';
+MATCH : 'match';
+YIELD : 'yield';
 TRUE : 'true';
 FALSE : 'false';
 SELF : 'self';
@@ -307,6 +328,7 @@ SEMICOLON : ';';
 COMMA : ',';
 DOT : '.';
 OPT_DOT : '?.';
+ELLIPSIS : '...';
 
 EQ : '==';
 NEQ : '!=';

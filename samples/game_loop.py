@@ -164,39 +164,38 @@ class GameEngine(object):
     self.active_enemy = _clone_helper(self.base_enemy, lambda self: [setattr(self, 'id', 101), setattr(self, 'position', Vector2D(x=80.0, y=20.0))])
   def update(self, dt):
     self.frame_count += 1
-    if (self.state == GameState.Playing):
-      self.player.update(dt)
-      _val_enemy = self.active_enemy
-      if _val_enemy is not None:
-        enemy = _val_enemy
-        enemy.update(dt)
-        dist = self.player.position.get_distance_to(other=enemy.position)
-        if (dist < 15.0):
-          enemy.health -= 30
-          self.score += 50
-          if (enemy.health <= 0):
-            self.active_enemy = None
-            self.state = GameState.GameOver
-      else:
-        self.active_enemy = _clone_helper(self.base_enemy, lambda self: [setattr(self, 'id', 102), setattr(self, 'position', Vector2D(x=120.0, y=20.0)), setattr(self, 'health', 50)])
-    else:
-      if (self.state == GameState.GameOver):
+    match self.state:
+      case GameState.Menu:
+        pass
+      case GameState.Playing:
+        self.player.update(dt)
+        _val_enemy = self.active_enemy
+        if _val_enemy is not None:
+          enemy = _val_enemy
+          enemy.update(dt)
+          dist = self.player.position.get_distance_to(enemy.position)
+          if (dist < 15.0):
+            enemy.health -= 30
+            self.score += 50
+            if (enemy.health <= 0):
+              self.active_enemy = None
+              self.state = GameState.GameOver
+        else:
+          self.active_enemy = _clone_helper(self.base_enemy, lambda self: [setattr(self, 'id', 102), setattr(self, 'position', Vector2D(x=120.0, y=20.0)), setattr(self, 'health', 50)])
+      case GameState.GameOver:
         self.game_over_timer += dt
         if (self.game_over_timer >= 3.0):
           self.load()
   def draw(self):
-    if (self.state == GameState.Menu):
-      pass
-    else:
-      if (self.state == GameState.Playing):
+    match self.state:
+      case GameState.Playing:
         self.player.draw()
         _val_enemy = self.active_enemy
         if _val_enemy is not None:
           enemy = _val_enemy
           enemy.draw()
-      else:
-        if (self.state == GameState.GameOver):
-          pass
+      case _:
+        pass
 
 
 

@@ -558,7 +558,44 @@ if score >= 90 {
 }
 ```
 
-### E. Control-flow loops
+### E. Match expressions
+
+Sapphire provides a first-class `match` construct for pattern matching, supporting both safe value transformation (expressions) and side-effect control flow (statements).
+
+* **Syntax**: `match subject { pattern -> body, ... }`
+* **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
+* **Multi-statement blocks**: Cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Using `return` inside a match block returns from the *enclosing function*.
+* **Implicit `none` fallback**: Multi-statement blocks without a `yield` statement automatically evaluate to `none` (type `none`), enabling clean side-effect-only branching without boilerplate.
+* **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
+* **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
+* **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
+
+```sapphire
+// Expression mapping
+let label = match status {
+  HttpStatus.Ok -> "Success",
+  HttpStatus.NotFound -> {
+    log("Not found");
+    yield "Resource Missing";
+  },
+  ... -> "Unknown Error",
+};
+
+// Side-effect-only usage
+match direction {
+  Direction.North -> {
+    move_player(dx = 0, dy = -1);
+  },
+  Direction.South -> {
+    move_player(dx = 0, dy = 1);
+  },
+  ... -> {
+    log("Horizontal movement");
+  },
+};
+```
+
+### F. Control-flow loops
 
 Sapphire supports conditional iteration and collection traversal:
 

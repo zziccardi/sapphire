@@ -94,13 +94,20 @@ class ANTLRDiagnosticListener(ErrorListener):
         offendingSymbol.text):
       length = len(offendingSymbol.text)
 
+    try:
+      from code_gen.transpiler import format_syntax_error_message
+    except ImportError:  # pragma: no cover
+      from src.code_gen.transpiler import format_syntax_error_message
+
+    custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
+
     # LSP Diagnostic structure
     diag = Diagnostic(
         range=Range(
             start=Position(line=line - 1, character=column),
             end=Position(line=line - 1, character=column + length),
         ),
-        message=f"Syntax Error: {msg}",
+        message=f"Syntax Error: {custom_msg}",
         severity=DiagnosticSeverity.Error,
         source="sapphire-parser",
     )
@@ -630,7 +637,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
   # 3. Sapphire Keywords & Annotations
   KEYWORDS = [
       "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else",
-      "for", "in", "while", "return", "true", "false", "none", "const", "static",
+      "for", "in", "while", "return", "match", "yield", "true", "false", "none", "const", "static",
       "clone", "arena", "import", "export", "as"
   ]
   for kw in KEYWORDS:

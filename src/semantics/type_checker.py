@@ -78,6 +78,7 @@ class TypeChecker:
     self.initialized_fields: set = set()
     self.expected_type: Optional[Type] = None
     self.current_function_scope = None
+    self._match_stack: List[List[Type]] = []
 
   def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
     if isinstance(node, IdentifierNode):
@@ -796,6 +797,101 @@ class TypeChecker:
         if arena_sym and arena_sym.scope_defined and self.current_function_scope:
           if self._is_descendant_scope(arena_sym.scope_defined, self.current_function_scope):
             self.error(f"Cannot return a reference to an object allocated in local arena '{arena_name}'.")
+
+  def visit_YieldNode(self, node: YieldNode) -> None:
+    if not self._match_stack:
+      self.error("Yield statement outside match context.")
+      return
+    expr_type = self.visit(node.expr)
+    self._match_stack[-1].append(expr_type)
+
+  def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
+    subject_type = self.visit(node.subject)
+
+    seen_enum_variants = set()
+    seen_bool_true = False
+    seen_bool_false = False
+    seen_optional_none = False
+    seen_optional_some = False
+    has_ellipsis = False
+
+    case_types: List[Type] = []
+
+    for case in node.cases:
+      if isinstance(case.pattern, EllipsisPatternNode):
+        has_ellipsis = True
+      elif isinstance(case.pattern, IdentifierNode):
+        sym = self.symbol_table.lookup(case.pattern.name)
+        if isinstance(sym, EnumSymbol) and isinstance(subject_type, EnumType) and sym.name == subject_type.name:
+          pass
+        else:
+          has_ellipsis = True
+      elif isinstance(case.pattern, MemberAccessNode):
+        pat_type = self.visit(case.pattern)
+        if isinstance(subject_type, EnumType) and isinstance(pat_type, EnumType):
+          seen_enum_variants.add(case.pattern.member)
+        elif not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):
+          self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")
+      elif isinstance(case.pattern, LiteralNode):
+        if case.pattern.lit_type == "none":
+          seen_optional_none = True
+        elif case.pattern.lit_type == "bool":
+          if case.pattern.value is True:
+            seen_bool_true = True
+          elif case.pattern.value is False:
+            seen_bool_false = True
+        pat_type = self.visit(case.pattern)
+        if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):
+          self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")
+      else:
+        pat_type = self.visit(case.pattern)
+        if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):
+          self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")
+        seen_optional_some = True
+
+      self._match_stack.append([])
+      if isinstance(case.body, BlockNode):
+        self.visit(case.body)
+        yields = self._match_stack.pop()
+        if yields:
+          first_yield = yields[0]
+          for y in yields[1:]:
+            if not y.is_compatible(first_yield):
+              self.error(f"Incompatible yield types in match case: '{first_yield}' and '{y}'.")
+          case_types.append(first_yield)
+        else:
+          case_types.append(NoneType())
+      else:
+        self._match_stack.pop()
+        expr_type = self.visit(case.body)
+        case_types.append(expr_type)
+
+    if not has_ellipsis:
+      if isinstance(subject_type, EnumType):
+        all_variants = set(subject_type.variants.keys())
+        missing = all_variants - seen_enum_variants
+        if missing:
+          self.error(f"Match expression for enum '{subject_type.name}' is not exhaustive. Missing case: '{next(iter(missing))}'.")
+      elif isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
+        if not (seen_bool_true and seen_bool_false):
+          self.error("Match expression for bool is not exhaustive.")
+      elif isinstance(subject_type, OptionalType):
+        if not (seen_optional_none and (seen_optional_some or has_ellipsis)):
+          self.error(f"Match expression for optional '{subject_type}' is not exhaustive.")
+
+    non_none_types = [t for t in case_types if not isinstance(t, NoneType)]
+    if not non_none_types:
+      return NoneType()
+
+    first_type = non_none_types[0]
+    for t in non_none_types[1:]:
+      if not t.is_compatible(first_type) and not first_type.is_compatible(t):
+        self.error(f"Incompatible return types in match branches: '{first_type}' and '{t}'.")
+
+    has_none = any(isinstance(t, NoneType) for t in case_types)
+    if has_none or len(non_none_types) < len(case_types):
+      return OptionalType(first_type)
+    return first_type
 
   def visit_IfNode(self, node: IfNode) -> None:
     if node.is_if_let:
