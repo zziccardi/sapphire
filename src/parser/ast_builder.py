@@ -264,8 +264,10 @@ class ASTBuilder(SapphireVisitor):
       return OptionalTypeNode(self.visit(ctx.type_()) if ctx.type_() else self.visitChildren(ctx))
     elif ctx.baseType():
       return self.visit(ctx.baseType())
-    else:
+    elif ctx.functionType():
       return self.visit(ctx.functionType())
+    else:
+      return self.visit(ctx.type_())
 
   def visitBaseType(self, ctx: SapphireParser.BaseTypeContext) -> BasicTypeNode:
     node = BasicTypeNode(ctx.getText())

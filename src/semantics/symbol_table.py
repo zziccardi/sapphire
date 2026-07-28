@@ -386,9 +386,11 @@ class SymbolTable:
     self.current_scope.define_type("bool", PrimitiveType("bool"))
     self.current_scope.define_type("String", PrimitiveType("string"))
     self.current_scope.define_type("none", NoneType())
+    self.current_scope.define_type("void", NoneType())
     arena_t = ArenaType()
     self.current_scope.define_type("Arena", arena_t)
     self.current_scope.define("Arena", FunctionSymbol("Arena", FunctionType([], arena_t)))
+    self.current_scope.define("print", FunctionSymbol("print", FunctionType([PrimitiveType("string")], NoneType())))
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

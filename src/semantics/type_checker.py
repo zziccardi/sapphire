@@ -1321,16 +1321,24 @@ class TypeChecker:
   def visit_LambdaNode(self, node: LambdaNode) -> Type:
     self.symbol_table.enter_scope()
 
+    expected_func = self.expected_type
+    try:
+      from semantics.symbol_table import OptionalType
+    except ImportError:  # pragma: no cover
+      from src.semantics.symbol_table import OptionalType
+    if isinstance(expected_func, OptionalType):
+      expected_func = expected_func.base_type
+
     param_types = []
     for idx, p in enumerate(node.parameters):
       if p.param_type:
         ptype = self._resolve_type_node(p.param_type)
       elif (
-          self.expected_type
-          and isinstance(self.expected_type, FunctionType)
-          and idx < len(self.expected_type.param_types)
+          expected_func
+          and isinstance(expected_func, FunctionType)
+          and idx < len(expected_func.param_types)
       ):
-        ptype = self.expected_type.param_types[idx]
+        ptype = expected_func.param_types[idx]
       else:
         ptype = PrimitiveType("none")
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, is_mutable=False))
@@ -1343,10 +1351,10 @@ class TypeChecker:
     if node.return_type:
       ret_type = self._resolve_type_node(node.return_type)
     elif (
-        self.expected_type
-        and isinstance(self.expected_type, FunctionType)
+        expected_func
+        and isinstance(expected_func, FunctionType)
     ):
-      ret_type = self.expected_type.return_type
+      ret_type = expected_func.return_type
 
     self.symbol_table.exit_scope()
     return FunctionType(param_types, ret_type)
@@ -1404,8 +1412,14 @@ class TypeChecker:
         self.error(f"Field '{field_name}' is initialized multiple times in struct initializer.")
         continue
 
-      expr_type = self.visit(field_arg.expr)
       expected_type = struct_type.fields[field_name].field_type
+      old_expected = self.expected_type
+      self.expected_type = expected_type
+      try:
+        expr_type = self.visit(field_arg.expr)
+      finally:
+        self.expected_type = old_expected
+
       if not expr_type.is_compatible(expected_type):
         self.error(
             f"Field '{field_name}' in struct '{node.struct_name}' initializer "

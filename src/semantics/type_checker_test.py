@@ -2036,6 +2036,40 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot return a reference to an object allocated in local arena", str(ctx.exception))
 
+  def test_compiler_fixes_and_inference(self):
+    """Verifies parenthesized types, optional lambda parameter inference, and struct initializer context propagation."""
+    # 1. Parenthesized optional function types
+    self._check("""
+    func test_parenthesized_type(cb: ((int) -> void)?) {
+      let x: ((int) -> void)? = cb;
+    }
+    """)
+
+    # 2. Lambda parameter type inference when the expected type is an OptionalType(FunctionType)
+    self._check("""
+    struct Handler {
+      var callback: ((String) -> void)?;
+    }
+    func test_handler_infer() {
+      var h = Handler {
+        callback = button_id -> print(button_id),
+      };
+    }
+    """)
+
+    # 3. Lambda parameter type inference inside struct initializer fields
+    self._check("""
+    struct Target {
+      let operation: (int) -> int;
+    }
+    func test_struct_lambda() {
+      let t = Target {
+        operation = val -> val + 1,
+      };
+    }
+    """)
+
+
 
 if __name__ == "__main__":
   unittest.main()

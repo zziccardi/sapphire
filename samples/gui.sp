@@ -51,8 +51,10 @@ impl Button {
       return;
     }
 
-    // Safely invoke optional closure via optional chaining syntax
-    self.on_click?.(self.id);
+    // Safely invoke optional closure via optional unwrapping
+    if let cb ?= self.on_click {
+      cb(self.id);
+    }
   }
 }
 

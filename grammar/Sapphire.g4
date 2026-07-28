@@ -101,6 +101,7 @@ type
     : baseType
     | functionType
     | type QUESTION
+    | LPAREN type RPAREN
     ;
 
 baseType

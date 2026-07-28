@@ -167,7 +167,7 @@ impl Love2D for GameEngine {
       GameState.Playing -> {
         self.player.update(dt);
 
-        // Swift-style safe optional unwrapping for active enemy
+        // Safe optional unwrapping for active enemy
         if let enemy ?= self.active_enemy {
           enemy.update(dt);
 
