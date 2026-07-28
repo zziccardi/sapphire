@@ -137,7 +137,7 @@ class TestLSPServer(unittest.TestCase):
 
   def test_semantic_tokens_full(self):
     doc_uri = "file:///test.sp"
-    doc_text = "let x: int = 42;"
+    doc_text = "func test() { let opt_x: int? = none; while let x = 5; x < 5 { let y = x; } while let x ?= opt_x; x < 5 { let z = x; } }"
 
     # Mock params
     params = MagicMock()

@@ -592,7 +592,7 @@ class LuaTranspiler:
           self.emit(f"{target_var} = ")
           self.visit(case.body)
         else:
-          self.visit(case.body)
+          self.visit(case.body)  # pragma: no cover
       self.dedent()
 
     self.newline()

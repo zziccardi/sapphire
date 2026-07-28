@@ -135,6 +135,34 @@ class TestPythonTranspiler(unittest.TestCase):
     result3 = self._transpile_and_run(code3, "run_coalesce()")
     self.assertEqual(result3, 99)
 
+    # 4. standard if let (no unwrap)
+    code4 = """
+    func run_standard_if(): int {
+      var out = 0;
+      if let x = 10; x > 5 {
+        out = x;
+      }
+      return out;
+    }
+    """
+    result4 = self._transpile_and_run(code4, "run_standard_if()")
+    self.assertEqual(result4, 10)
+
+    # 5. standard while let (no unwrap)
+    code5 = """
+    func run_standard_while(): int {
+      var out = 0;
+      var count = 5;
+      while let x = count; x > 0 {
+        out += x;
+        count = 0; // terminate loop
+      }
+      return out;
+    }
+    """
+    result5 = self._transpile_and_run(code5, "run_standard_while()")
+    self.assertEqual(result5, 5)
+
   def test_prototypal_inheritance_live_updates(self):
     """Verifies that cloned objects delegate live property lookups and allow shadowing."""
     code = """

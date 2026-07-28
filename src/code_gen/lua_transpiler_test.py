@@ -227,6 +227,32 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_code3 = self._transpile(code3)
     self.assertIn("((function() local _v = opt_val; if _v ~= nil then return _v else return 99 end end)())", lua_code3)
 
+    # 4. standard if let (no unwrap)
+    code4 = """
+    func check_std_if() {
+      if let x = 10; x > 5 {
+        let y = x;
+      }
+    }
+    """
+    lua_code4 = self._transpile(code4)
+    self.assertIn("local x = 10", lua_code4)
+    self.assertIn("if (x > 5) then", lua_code4)
+
+    # 5. standard while let (no unwrap)
+    code5 = """
+    func check_std_while() {
+      var count = 5;
+      while let x = count; x > 0 {
+        count = 0;
+      }
+    }
+    """
+    lua_code5 = self._transpile(code5)
+    self.assertIn("while true do", lua_code5)
+    self.assertIn("local x = count", lua_code5)
+    self.assertIn("if not ((x > 0)) then", lua_code5)
+
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
     code = """

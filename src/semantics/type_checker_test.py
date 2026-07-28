@@ -2069,6 +2069,53 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+    # 4. Standard if let binding without condition (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        if let x = 42 { }
+      }
+      """)
+    self.assertIn("Init-statement in 'if' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
+
+    # 5. Unwrapping non-optional in while let (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        while let x ?= 42; x > 0 { }
+      }
+      """)
+    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(ctx.exception))
+
+    # 6. Non-boolean condition in while let (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        var opt_x: int? = none;
+        while let x ?= opt_x; 42 { }
+      }
+      """)
+    self.assertIn("While condition must resolve to 'bool'", str(ctx.exception))
+
+    # 7. Standard while let binding without condition (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        while let x = 42 { }
+      }
+      """)
+    self.assertIn("Init-statement in 'while' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
+
+    # 8. Left operand of ?? not optional (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let val = 42 ?? 99;
+      }
+      """)
+    self.assertIn("Left operand of '??' must be an optional type", str(ctx.exception))
+
+
 
 
 if __name__ == "__main__":

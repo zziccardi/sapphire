@@ -562,9 +562,10 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
               vtype = node_types.get(stmt)
               type_str = f": {vtype}" if vtype else ""
               add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
-          elif isinstance(stmt, IfNode) and getattr(stmt, "is_if_let", False):
+          elif type(stmt).__name__ in ("IfNode", "WhileNode") and getattr(stmt, "init_binding", None):
             if st_start is None or st_start <= line:
-              add_item(stmt.let_name, 6, f"(variable) {stmt.let_name}")
+              let_name = stmt.init_binding.let_name
+              add_item(let_name, 6, f"(variable) {let_name}")
           elif isinstance(stmt, ForNode):
             if st_start is None or st_start <= line:
               add_item(stmt.loop_var, 6, f"(variable) {stmt.loop_var}")
@@ -593,9 +594,10 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
                     vtype = node_types.get(stmt)
                     type_str = f": {vtype}" if vtype else ""
                     add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
-                elif isinstance(stmt, IfNode) and getattr(stmt, "is_if_let", False):
+                elif type(stmt).__name__ in ("IfNode", "WhileNode") and getattr(stmt, "init_binding", None):
                   if st_start is None or st_start <= line:
-                    add_item(stmt.let_name, 6, f"(variable) {stmt.let_name}")
+                    let_name = stmt.init_binding.let_name
+                    add_item(let_name, 6, f"(variable) {let_name}")
                 elif isinstance(stmt, ForNode):
                   if st_start is None or st_start <= line:
                     add_item(stmt.loop_var, 6, f"(variable) {stmt.loop_var}")
