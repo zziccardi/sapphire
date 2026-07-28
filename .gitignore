@@ -26,3 +26,8 @@ lib/love2d/*.py
 
 # Ignore the generated Lua file used for Love2D.
 main.lua
+
+# Ignore generated lua and python files in samples
+samples/*.lua
+samples/*.py
+
