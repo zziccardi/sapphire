@@ -92,11 +92,11 @@ let response = client.send_request(url = "/users/me");
 
 // Safe Optional Unwrapping & Enum Check
 if response.status_code == HttpStatusCode.Ok {
-  if let json_data = response.payload {
+  if let json_data ?= response.payload {
     print("Received payload successfully: " + json_data);
   }
 } else {
-  if let err = response.error_message {
+  if let err ?= response.error_message {
     print("API Error [" + response.status_code + "]: " + err);
   }
 }

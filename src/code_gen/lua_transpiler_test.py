@@ -173,12 +173,12 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("val = val + 5", lua_code)
     self.assertIn("val = val - 2", lua_code)
 
-  def test_swift_style_if_let(self):
-    """Verifies that swift-style optional unwrapping transpiles to Lua nil checks."""
+  def test_optional_unwrapping(self):
+    """Verifies that optional unwrapping transpiles to Lua nil checks."""
     code = """
     func check_opt() {
       var opt_val: int? = 42;
-      if let active = opt_val {
+      if let active ?= opt_val {
         let x = active;
       }
     }
@@ -187,6 +187,71 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local _val_active = opt_val", lua_code)
     self.assertIn("if _val_active ~= nil then", lua_code)
     self.assertIn("local active = _val_active", lua_code)
+
+  def test_init_statements_and_coalesce(self):
+    """Verifies Lua transpilation of init-statements and ?? coalescing."""
+    # 1. if let with condition
+    code1 = """
+    func check_if_cond() {
+      var opt_val: int? = 42;
+      if let active ?= opt_val; active > 40 {
+        let x = active;
+      }
+    }
+    """
+    lua_code1 = self._transpile(code1)
+    self.assertIn("local _val_active = opt_val", lua_code1)
+    self.assertIn("if _val_active ~= nil and (_val_active > 40) then", lua_code1)
+
+    # 2. while let loop
+    code2 = """
+    func check_while() {
+      var opt_val: int? = 5;
+      while let active ?= opt_val; active > 0 {
+        opt_val = none;
+      }
+    }
+    """
+    lua_code2 = self._transpile(code2)
+    self.assertIn("while true do", lua_code2)
+    self.assertIn("local _val_active = opt_val", lua_code2)
+    self.assertIn("if not (_val_active ~= nil and (_val_active > 0)) then", lua_code2)
+
+    # 3. ?? operator
+    code3 = """
+    func check_coalesce() {
+      var opt_val: int? = none;
+      let val = opt_val ?? 99;
+    }
+    """
+    lua_code3 = self._transpile(code3)
+    self.assertIn("((function() local _v = opt_val; if _v ~= nil then return _v else return 99 end end)())", lua_code3)
+
+    # 4. standard if let (no unwrap)
+    code4 = """
+    func check_std_if() {
+      if let x = 10; x > 5 {
+        let y = x;
+      }
+    }
+    """
+    lua_code4 = self._transpile(code4)
+    self.assertIn("local x = 10", lua_code4)
+    self.assertIn("if (x > 5) then", lua_code4)
+
+    # 5. standard while let (no unwrap)
+    code5 = """
+    func check_std_while() {
+      var count = 5;
+      while let x = count; x > 0 {
+        count = 0;
+      }
+    }
+    """
+    lua_code5 = self._transpile(code5)
+    self.assertIn("while true do", lua_code5)
+    self.assertIn("local x = count", lua_code5)
+    self.assertIn("if not ((x > 0)) then", lua_code5)
 
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""

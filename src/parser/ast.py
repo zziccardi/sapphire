@@ -420,21 +420,32 @@ class YieldNode(StmtNode):
     self.expr = expr
 
 
-class IfNode(StmtNode):
-  """Represents an if/else conditional statement, supporting swift-style 'if let'."""
+class HeaderBindingNode(ASTNode):
+  """Represents a variable binding inside control-flow headers (e.g. let x ?= y)."""
 
-  def __init__(self, condition_or_expr: ASTNode, then_block: BlockNode, else_block: Optional[Union[BlockNode, 'IfNode']] = None, is_if_let: bool = False, let_name: Optional[str] = None):
-    self.condition_or_expr = condition_or_expr
+  def __init__(self, is_mutable: bool, let_name: str, type_node: Optional[ASTNode], expr: ASTNode, is_unwrap: bool):
+    self.is_mutable = is_mutable
+    self.let_name = let_name
+    self.type_node = type_node
+    self.expr = expr
+    self.is_unwrap = is_unwrap
+
+
+class IfNode(StmtNode):
+  """Represents an if/else conditional statement, supporting init-statements."""
+
+  def __init__(self, init_binding: Optional[HeaderBindingNode], condition: Optional[ASTNode], then_block: BlockNode, else_block: Optional[Union[BlockNode, 'IfNode']] = None):
+    self.init_binding = init_binding
+    self.condition = condition
     self.then_block = then_block
     self.else_block = else_block
-    self.is_if_let = is_if_let
-    self.let_name = let_name
 
 
 class WhileNode(StmtNode):
-  """Represents a while loop."""
+  """Represents a while loop, supporting init-statements."""
 
-  def __init__(self, condition: ASTNode, block: BlockNode):
+  def __init__(self, init_binding: Optional[HeaderBindingNode], condition: Optional[ASTNode], block: BlockNode):
+    self.init_binding = init_binding
     self.condition = condition
     self.block = block
 

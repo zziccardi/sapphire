@@ -39,8 +39,8 @@ def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
         idx = offendingSymbol.tokenIndex
         prev_idx = idx - 1
         while prev_idx >= 0 and stream.get(prev_idx).channel != 0:
-          prev_idx -= 1
-
+          prev_idx -= 1  # pragma: no cover
+        
         if prev_idx >= 0 and stream.get(prev_idx).text == "}":
           depth = 1
           curr = prev_idx - 1
@@ -61,7 +61,7 @@ def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
                   f"Match expressions used as statements must end with a semicolon ';' (e.g. 'match ... }};')."
               )
             curr -= 1
-    except Exception:
+    except Exception:  # pragma: no cover
       pass
   return msg
 

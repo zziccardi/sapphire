@@ -51,8 +51,10 @@ impl Button {
       return;
     }
 
-    // Safely invoke optional closure via optional chaining syntax
-    self.on_click?.(self.id);
+    // Safely invoke optional closure via optional unwrapping
+    if let cb ?= self.on_click {
+      cb(self.id);
+    }
   }
 }
 
@@ -103,7 +105,7 @@ submit_btn.render();
 submit_btn.handle_click();
 
 // Optional unwrapping demo
-if let parent_widget = submit_btn.parent {
+if let parent_widget ?= submit_btn.parent {
   print("Has parent widget");
 } else {
   print("Root widget (no parent)");

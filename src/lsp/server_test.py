@@ -137,7 +137,7 @@ class TestLSPServer(unittest.TestCase):
 
   def test_semantic_tokens_full(self):
     doc_uri = "file:///test.sp"
-    doc_text = "let x: int = 42;"
+    doc_text = "func test() { let opt_x: int? = none; while let x = 5; x < 5 { let y = x; } while let x ?= opt_x; x < 5 { let z = x; } }"
 
     # Mock params
     params = MagicMock()
@@ -206,7 +206,7 @@ class TestLSPServer(unittest.TestCase):
       char.health = char.health - 10;
       
       let opt_char: Character? = char;
-      if let active = opt_char {
+      if let active ?= opt_char {
         let h: int = active.health;
       }
       
@@ -556,7 +556,7 @@ class TestLSPServer(unittest.TestCase):
       func test_method(var p: int) {
         let local_var: int = 1;
         let opt_d: Dummy? = self;
-        if let active_d = opt_d {
+        if let active_d ?= opt_d {
           let inner: int = 2;
         }
         let arr = [1, 2];
@@ -796,11 +796,12 @@ class TestLSPServer(unittest.TestCase):
 
       # Test visit_IfNode fallback when condition is not OptionalType
       mock_if_node = MagicMock()
-      mock_if_node.is_if_let = True
-      mock_if_node.let_name_line = 1
-      mock_if_node.let_name_column = 1
-      mock_if_node.let_name_length = 5
-      mock_if_node.condition_or_expr = MagicMock()
+      mock_if_node.init_binding = MagicMock()
+      mock_if_node.init_binding.is_unwrap = True
+      mock_if_node.init_binding.let_name_line = 1
+      mock_if_node.init_binding.let_name_column = 1
+      mock_if_node.init_binding.let_name_length = 5
+      mock_if_node.init_binding.expr = MagicMock()
       try:
         from lsp.semantic_tokens import SemanticTokensTypeChecker
       except ImportError:
@@ -810,7 +811,7 @@ class TestLSPServer(unittest.TestCase):
       with patch.object(checker, "visit", return_value=PrimitiveType("int")):
         with patch.object(checker, "symbol_table") as mock_st:
           checker.visit_IfNode(mock_if_node)
-          self.assertEqual(checker.node_types[mock_if_node], PrimitiveType("int"))
+          self.assertEqual(checker.node_types[mock_if_node.init_binding], PrimitiveType("int"))
 
       # Test visit_ForNode fallback when iterable is not ArrayType
       mock_for_node = MagicMock()

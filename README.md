@@ -36,7 +36,8 @@ enable the memory-safety features described in the spec.
 * Null-pointer errors are prevented at compile time.
 * Optionals are denoted by a `?` suffix (e.g., `Character?`).
 * Optionals can be chained safely (`let speed = target?.speed`).
-* Swift-style conditional unwrapping (`if let`) is supported.
+* Conditional unwrapping (`let x ?= optional`) and Go/C++17-style init statements within loop headers are supported.
+* Nil-coalescing fallback values are supported via the `??` operator.
 
 ### 3. Advanced parameter modes
 * Non-primitive types are passed by **constant reference** by default, avoiding

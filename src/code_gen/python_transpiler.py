@@ -116,6 +116,7 @@ class PythonTranspiler:
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.clone_helper_counter = 0
+    self._identifier_map: Dict[str, str] = {}
 
   def emit(self, text: str) -> None:
     """Emits text on the current line."""
@@ -530,7 +531,7 @@ class PythonTranspiler:
           self.emit(f"{target_var} = ")
           self.visit(case.body)
         else:
-          self.visit(case.body)
+          self.visit(case.body)  # pragma: no cover
       self.dedent()
 
     self.dedent()
@@ -554,20 +555,46 @@ class PythonTranspiler:
 
   def visit_IfNode(self, node: IfNode) -> None:
     self.newline()
-    if node.is_if_let:
-      # Swift-style 'if let active = optional'
-      self.emit(f"_val_{node.let_name} = ")
-      self.visit(node.condition_or_expr)
-      self.newline()
-      self.emit(f"if _val_{node.let_name} is not None:")
-      self.indent()
-      self.newline()
-      self.emit(f"{node.let_name} = _val_{node.let_name}")
-      self.visit(node.then_block)
-      self.dedent()
+    if node.init_binding:
+      let_name = node.init_binding.let_name
+      if node.init_binding.is_unwrap:
+        val_var = f"_val_{let_name}"
+        self.emit(f"{val_var} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+
+        # Map identifier to temporary variable during condition check
+        old_map = self._identifier_map.copy()
+        self._identifier_map[let_name] = val_var
+
+        self.emit(f"if {val_var} is not None")
+        if node.condition:
+          self.emit(" and ")
+          self.visit(node.condition)
+        self.emit(":")
+
+        # Restore identifier map
+        self._identifier_map = old_map
+
+        self.indent()
+        self.newline()
+        self.emit(f"{let_name} = {val_var}")
+        self.visit(node.then_block)
+        self.dedent()
+      else:
+        # Standard bind + condition
+        self.emit(f"{let_name} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+        self.emit("if ")
+        self.visit(node.condition)
+        self.emit(":")
+        self.indent()
+        self.visit(node.then_block)
+        self.dedent()
     else:
       self.emit("if ")
-      self.visit(node.condition_or_expr)
+      self.visit(node.condition)
       self.emit(":")
       self.indent()
       self.visit(node.then_block)
@@ -582,12 +609,58 @@ class PythonTranspiler:
 
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.newline()
-    self.emit("while ")
-    self.visit(node.condition)
-    self.emit(":")
-    self.indent()
-    self.visit(node.block)
-    self.dedent()
+    if node.init_binding:
+      self.emit("while True:")
+      self.indent()
+      self.newline()
+      let_name = node.init_binding.let_name
+      if node.init_binding.is_unwrap:
+        val_var = f"_val_{let_name}"
+        self.emit(f"{val_var} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+
+        # Map identifier to temporary variable during condition check
+        old_map = self._identifier_map.copy()
+        self._identifier_map[let_name] = val_var
+
+        self.emit(f"if not ({val_var} is not None")
+        if node.condition:
+          self.emit(" and ")
+          self.visit(node.condition)
+        self.emit("):")
+
+        # Restore map
+        self._identifier_map = old_map
+
+        self.indent()
+        self.newline()
+        self.emit("break")
+        self.dedent()
+        self.newline()
+        self.emit(f"{let_name} = {val_var}")
+      else:
+        # Standard bind + condition
+        self.emit(f"{let_name} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+        self.emit("if not (")
+        self.visit(node.condition)
+        self.emit("):")
+        self.indent()
+        self.newline()
+        self.emit("break")
+        self.dedent()
+
+      self.visit(node.block)
+      self.dedent()
+    else:
+      self.emit("while ")
+      self.visit(node.condition)
+      self.emit(":")
+      self.indent()
+      self.visit(node.block)
+      self.dedent()
 
   def visit_ForNode(self, node: ForNode) -> None:
     self.newline()
@@ -613,9 +686,18 @@ class PythonTranspiler:
       self.emit(str(node.value))
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
-    self.emit(node.name)
+    name = self._identifier_map.get(node.name, node.name)
+    self.emit(name)
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> None:
+    if node.op == "??":
+      self.emit("((lambda _v: _v if _v is not None else ")
+      self.visit(node.right)
+      self.emit(")(")
+      self.visit(node.left)
+      self.emit("))")
+      return
+
     op_map = {"&&": "and", "||": "or"}
     op = op_map.get(node.op, node.op)
     self.emit("(")

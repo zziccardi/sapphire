@@ -264,8 +264,10 @@ class ASTBuilder(SapphireVisitor):
       return OptionalTypeNode(self.visit(ctx.type_()) if ctx.type_() else self.visitChildren(ctx))
     elif ctx.baseType():
       return self.visit(ctx.baseType())
-    else:
+    elif ctx.functionType():
       return self.visit(ctx.functionType())
+    else:
+      return self.visit(ctx.type_())
 
   def visitBaseType(self, ctx: SapphireParser.BaseTypeContext) -> BasicTypeNode:
     node = BasicTypeNode(ctx.getText())
@@ -329,32 +331,48 @@ class ASTBuilder(SapphireVisitor):
     return ReturnNode(exprs)
 
   def visitIfStatement(self, ctx: SapphireParser.IfStatementContext) -> IfNode:
-    is_if_let = ctx.LET() is not None
     else_block = None
     if ctx.block(1):
       else_block = self.visit(ctx.block(1))
     elif ctx.ifStatement():
       else_block = self.visit(ctx.ifStatement())
 
-    if is_if_let:
-      let_name = ctx.IDENTIFIER().getText()
-      expr = self.visit(ctx.expression())
-      then_block = self.visit(ctx.block(0))
-      node = IfNode(expr, then_block, else_block, is_if_let=True, let_name=let_name)
-      let_token = ctx.IDENTIFIER().getSymbol()
-      node.let_name_line = let_token.line
-      node.let_name_column = let_token.column
-      node.let_name_length = len(let_token.text)
-    else:
-      expr = self.visit(ctx.expression())
-      then_block = self.visit(ctx.block(0))
-      node = IfNode(expr, then_block, else_block)
-    return node
+    init_binding = None
+    if ctx.letOrVarBinding():
+      init_binding = self.visit(ctx.letOrVarBinding())
+
+    condition = None
+    if ctx.expression():
+      condition = self.visit(ctx.expression())
+
+    then_block = self.visit(ctx.block(0))
+    return IfNode(init_binding, condition, then_block, else_block)
 
   def visitWhileStatement(self, ctx: SapphireParser.WhileStatementContext) -> WhileNode:
-    condition = self.visit(ctx.expression())
+    init_binding = None
+    if ctx.letOrVarBinding():
+      init_binding = self.visit(ctx.letOrVarBinding())
+
+    condition = None
+    if ctx.expression():
+      condition = self.visit(ctx.expression())
+
     block = self.visit(ctx.block())
-    return WhileNode(condition, block)
+    return WhileNode(init_binding, condition, block)
+
+  def visitLetOrVarBinding(self, ctx: SapphireParser.LetOrVarBindingContext) -> HeaderBindingNode:
+    is_mutable = ctx.VAR() is not None
+    let_name = ctx.IDENTIFIER().getText()
+    type_node = self.visit(ctx.type_()) if ctx.type_() else None
+    expr = self.visit(ctx.expression())
+    is_unwrap = ctx.UNWRAP_ASSIGN() is not None
+
+    node = HeaderBindingNode(is_mutable, let_name, type_node, expr, is_unwrap)
+    var_token = ctx.IDENTIFIER().getSymbol()
+    node.let_name_line = var_token.line
+    node.let_name_column = var_token.column
+    node.let_name_length = len(var_token.text)
+    return node
 
   def visitForStatement(self, ctx: SapphireParser.ForStatementContext) -> ForNode:
     is_mutable = ctx.VAR() is not None
@@ -399,6 +417,11 @@ class ASTBuilder(SapphireVisitor):
     left = self.visit(ctx.expression(0))
     right = self.visit(ctx.expression(1))
     return BinaryOpNode(left, "||", right)
+
+  def visitCoalesceExpr(self, ctx: SapphireParser.CoalesceExprContext) -> BinaryOpNode:
+    left = self.visit(ctx.expression(0))
+    right = self.visit(ctx.expression(1))
+    return BinaryOpNode(left, "??", right)
 
   def visitUnaryExpr(self, ctx: SapphireParser.UnaryExprContext) -> UnaryOpNode:
     op = ctx.getChild(0).getText()

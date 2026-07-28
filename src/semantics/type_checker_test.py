@@ -72,7 +72,7 @@ class TestTypeChecker(unittest.TestCase):
     code = """
     func test() {
       var opt_x: int? = none;
-      if let active_x = opt_x {
+      if let active_x ?= opt_x {
         let y: int = active_x;
       }
     }
@@ -84,14 +84,58 @@ class TestTypeChecker(unittest.TestCase):
     code = """
     func test() {
       let x: int = 10;
-      if let active_x = x {
+      if let active_x ?= x {
         let y = active_x;
       }
     }
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("Expression in 'if let' must resolve to an optional type", str(context.exception))
+    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(context.exception))
+
+  def test_init_statements_and_coalesce(self):
+    """Verifies init-statements in if/while loops and coalesce operator type-checking."""
+    # 1. if let with init-statement + condition
+    code1 = """
+    func test() {
+      var opt_x: int? = none;
+      if let x ?= opt_x; x > 10 {
+        let y: int = x;
+      }
+    }
+    """
+    self._check(code1)
+
+    # 2. while let with init-statement + condition
+    code2 = """
+    func test() {
+      var opt_x: int? = none;
+      while let x ?= opt_x; x < 5 {
+        let y: int = x;
+      }
+    }
+    """
+    self._check(code2)
+
+    # 3. ?? operator
+    code3 = """
+    func test() {
+      var opt_x: int? = none;
+      let val: int = opt_x ?? 42;
+    }
+    """
+    self._check(code3)
+
+    # 4. ?? incompatible fallback error
+    code4 = """
+    func test() {
+      var opt_x: int? = none;
+      let val: int = opt_x ?? "hello";
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code4)
+    self.assertIn("Fallback type 'string' is not compatible with the optional's base type 'int'", str(context.exception))
 
   def test_struct_constructor_field_initialization(self):
     """Verifies struct constructors require all fields to be initialized."""
@@ -1991,6 +2035,87 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot return a reference to an object allocated in local arena", str(ctx.exception))
+
+  def test_compiler_fixes_and_inference(self):
+    """Verifies parenthesized types, optional lambda parameter inference, and struct initializer context propagation."""
+    # 1. Parenthesized optional function types
+    self._check("""
+    func test_parenthesized_type(cb: ((int) -> void)?) {
+      let x: ((int) -> void)? = cb;
+    }
+    """)
+
+    # 2. Lambda parameter type inference when the expected type is an OptionalType(FunctionType)
+    self._check("""
+    struct Handler {
+      var callback: ((String) -> void)?;
+    }
+    func test_handler_infer() {
+      var h = Handler {
+        callback = button_id -> print(button_id),
+      };
+    }
+    """)
+
+    # 3. Lambda parameter type inference inside struct initializer fields
+    self._check("""
+    struct Target {
+      let operation: (int) -> int;
+    }
+    func test_struct_lambda() {
+      let t = Target {
+        operation = val -> val + 1,
+      };
+    }
+    """)
+
+    # 4. Standard if let binding without condition (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        if let x = 42 { }
+      }
+      """)
+    self.assertIn("Init-statement in 'if' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
+
+    # 5. Unwrapping non-optional in while let (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        while let x ?= 42; x > 0 { }
+      }
+      """)
+    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(ctx.exception))
+
+    # 6. Non-boolean condition in while let (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        var opt_x: int? = none;
+        while let x ?= opt_x; 42 { }
+      }
+      """)
+    self.assertIn("While condition must resolve to 'bool'", str(ctx.exception))
+
+    # 7. Standard while let binding without condition (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        while let x = 42 { }
+      }
+      """)
+    self.assertIn("Init-statement in 'while' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
+
+    # 8. Left operand of ?? not optional (should error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let val = 42 ?? 99;
+      }
+      """)
+    self.assertIn("Left operand of '??' must be an optional type", str(ctx.exception))
+
+
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) trav
   - Verifies that methods called on constant objects are marked `const`.
   - Inside the constructor `__init__`, enforces that all non-optional struct fields are explicitly initialized.
   - Verifies that mutable reference (`var`) parameters are only passed mutable lvalues.
-- **Optional Safety (`if let`)**: Validates Swift-style unwrapping where the unwrapped variable is registered inside the `then_block` scope as a non-optional type.
+- **Conditional Bindings & Optional Safety**: Validates unwrapping (`let x ?= optional`) and init statements where variables are registered inside the nested control-flow scope.
 - **Bidirectional Lambda Inference**: Resolves types of lambda parameters without annotations (e.g. `x -> x * 2`) by matching them against expected function types (like `(int) -> int`) in assignments or call sites.
 
 ## Stage 3: Code Generation (Transpilation)
@@ -68,14 +68,14 @@ Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), ma
 
 ### 1. Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
-- **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, and `if let` unwrapping to Python `None` checks.
+- **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, conditional bindings to `None` checks, and `??` to inline lambdas.
 - **Annotation Erasure**: Erases `@extern var` declarations and cleanly strips `@export` target strings so cross-backend compilation remains functional.
 
 ### 2. Lua 5.1 Target (`lua_transpiler.py`)
 - **Runtime Preamble**: Emits `Arena`, `_create_proto_object`, and `_clone_helper` using Lua's native `setmetatable` mechanism (`__index` fallback, `__proto`, `__shadow`).
 - **Array Indexing**: Maps Sapphire 0-based array indexing (`arr[i]`) to 1-based Lua table indexing (`arr[i + 1]`).
 - **Compound Assignment Expansion**: Expands compound assignment statements (`+=`, `-=`, `*=`, `/=`) into simple binary operation assignments (`x = x + y`).
-- **Optionals & Lambdas**: Translates optional unwrapping `if let` to safe Lua `nil` checks, and Sapphire lambdas to Lua anonymous functions `(function(...) ... end)`.
+- **Optionals & Lambdas**: Translates optional unwrapping bindings to safe Lua `nil` checks, `??` to anonymous-function coalescing, and Sapphire lambdas to Lua anonymous functions.
 - **Host Engine Interop (`@extern` & `@export`)**:
   - `@extern var` declarations omit `local` initializations, leaving variable names bound to host global scope (e.g. `love`).
   - `@export("path")` functions generate global Lua function definitions (e.g., `function love.update(dt) ... end`).
