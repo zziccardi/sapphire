@@ -137,7 +137,7 @@ func run_demo() {
   var target: Character? = none;
   target = goblin_1;
 
-  if let active_target = target {
+  if let active_target ?= target {
     // Unwrapped active_target is guaranteed non-optional inside this block
     let damage_dealt = execute_strike(attacker = hero,
                                       defender = active_target,

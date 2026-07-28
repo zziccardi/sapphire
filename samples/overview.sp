@@ -104,7 +104,7 @@ func run_demo() {
   var target_player: Character? = none;
   target_player = player_two;
 
-  if let active_target = target_player {
+  if let active_target ?= target_player {
     // active_target is unwrapped and guaranteed to be non-optional here
     let damage_dealt = execute_attack(attacker = player_one,
                                       defender = active_target,
@@ -122,7 +122,7 @@ func run_demo() {
   };
 
   // Inspecting prototype chain (__proto__ is read-only and type T?)
-  if let parent = active_clone.__proto__ {
+  if let parent ?= active_clone.__proto__ {
     let name_ref = parent.name;
   }
 

@@ -78,13 +78,13 @@ class TestPythonTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "z")
     self.assertEqual(result, 70)
 
-  def test_swift_style_if_let(self):
+  def test_optional_unwrapping(self):
     """Verifies that optional unwrapping block resolves and executes correctly."""
     code = """
     func run_if_let(): int {
       var opt_val: int? = 42;
       var out = 0;
-      if let active = opt_val {
+      if let active ?= opt_val {
         out = active;
       }
       return out;
@@ -92,6 +92,48 @@ class TestPythonTranspiler(unittest.TestCase):
     """
     result = self._transpile_and_run(code, "run_if_let()")
     self.assertEqual(result, 42)
+
+  def test_init_statements_and_coalesce(self):
+    """Verifies Python transpilation of init-statements and ?? coalescing."""
+    # 1. if let with condition
+    code1 = """
+    func run_if_let_cond(): int {
+      var opt_val: int? = 42;
+      var out = 0;
+      if let active ?= opt_val; active > 40 {
+        out = active;
+      }
+      return out;
+    }
+    """
+    result1 = self._transpile_and_run(code1, "run_if_let_cond()")
+    self.assertEqual(result1, 42)
+
+    # 2. while let loop
+    code2 = """
+    func run_while_let(): int {
+      var opt_val: int? = 5;
+      var out = 0;
+      while let active ?= opt_val; active > 0 {
+        out += active;
+        opt_val = none; // terminate loop
+      }
+      return out;
+    }
+    """
+    result2 = self._transpile_and_run(code2, "run_while_let()")
+    self.assertEqual(result2, 5)
+
+    # 3. ?? operator
+    code3 = """
+    func run_coalesce(): int {
+      var opt_val: int? = none;
+      let val = opt_val ?? 99;
+      return val;
+    }
+    """
+    result3 = self._transpile_and_run(code3, "run_coalesce()")
+    self.assertEqual(result3, 99)
 
   def test_prototypal_inheritance_live_updates(self):
     """Verifies that cloned objects delegate live property lookups and allow shadowing."""
@@ -264,7 +306,7 @@ class TestPythonTranspiler(unittest.TestCase):
       };
       var target: Base? = b2;
       var out = 0;
-      if let active = target {
+      if let active ?= target {
         out = active.x;
       } else {
         out = -1;

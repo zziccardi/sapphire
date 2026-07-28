@@ -268,9 +268,9 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   node_type = node_types.get(node)
   if not node_type:
     try:
-      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode
+      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode
     except ImportError:  # pragma: no cover
-      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode
+      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode
 
     if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
@@ -308,6 +308,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
         ImplBlockNode,
         BasicTypeNode,
         TraitMemberNode,
+        HeaderBindingNode,
     )
   except ImportError:  # pragma: no cover
     from src.parser.ast import (
@@ -326,6 +327,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
         ImplBlockNode,
         BasicTypeNode,
         TraitMemberNode,
+        HeaderBindingNode,
     )
 
   node_name = ""
@@ -416,7 +418,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     else:
       markdown_text = f"**({category})** `{node_name}`"
     return Hover(contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text))
-  elif isinstance(node, IfNode) and node.is_if_let:
+  elif isinstance(node, HeaderBindingNode):
     category = "variable"
     node_name = node.let_name
   elif isinstance(node, ForNode):

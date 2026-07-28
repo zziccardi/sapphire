@@ -372,23 +372,42 @@ class SemanticTokensTypeChecker(TypeChecker):
     super().visit_AssignmentNode(node)
 
   def visit_IfNode(self, node) -> None:
-    if node.is_if_let:
+    if node.init_binding:
       # Add semantic token for let_name
       mods = 1 | 4  # declaration | readonly
-      self.add_token(node.let_name_line, node.let_name_column, node.let_name_length, "variable", mods)
+      self.add_token(node.init_binding.let_name_line, node.init_binding.let_name_column, node.init_binding.let_name_length, "variable", mods)
       # Calculate unwrapped type for hover info
-      expr_type = self.visit(node.condition_or_expr)
+      expr_type = self.visit(node.init_binding.expr)
       try:
         from semantics.symbol_table import OptionalType
       except ImportError:  # pragma: no cover
         from src.semantics.symbol_table import OptionalType
-      if isinstance(expr_type, OptionalType):
+      if node.init_binding.is_unwrap and isinstance(expr_type, OptionalType):
         unwrapped_type = expr_type.base_type
       else:
         unwrapped_type = expr_type
-      self.node_types[node] = unwrapped_type
+      self.node_types[node.init_binding] = unwrapped_type
 
     super().visit_IfNode(node)
+
+  def visit_WhileNode(self, node) -> None:
+    if node.init_binding:
+      # Add semantic token for let_name
+      mods = 1 | 4  # declaration | readonly
+      self.add_token(node.init_binding.let_name_line, node.init_binding.let_name_column, node.init_binding.let_name_length, "variable", mods)
+      # Calculate unwrapped type for hover info
+      expr_type = self.visit(node.init_binding.expr)
+      try:
+        from semantics.symbol_table import OptionalType
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import OptionalType
+      if node.init_binding.is_unwrap and isinstance(expr_type, OptionalType):
+        unwrapped_type = expr_type.base_type
+      else:
+        unwrapped_type = expr_type
+      self.node_types[node.init_binding] = unwrapped_type
+
+    super().visit_WhileNode(node)
 
   def visit_ForNode(self, node) -> None:
     # Add semantic token for loop_var

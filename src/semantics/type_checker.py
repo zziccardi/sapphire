@@ -894,23 +894,35 @@ class TypeChecker:
     return first_type
 
   def visit_IfNode(self, node: IfNode) -> None:
-    if node.is_if_let:
-      # Optional unwrapping
-      expr_type = self.visit(node.condition_or_expr)
-      if not isinstance(expr_type, OptionalType):
-        self.error("Expression in 'if let' must resolve to an optional type.")
-        unwrapped_type = expr_type
-      else:
-        unwrapped_type = expr_type.base_type
-
-      # Unwrapped var scope
+    if node.init_binding:
       self.symbol_table.enter_scope()
-      # Unwrapped variables are immutable bindings in block
-      self.symbol_table.define(node.let_name, VariableSymbol(node.let_name, unwrapped_type, is_mutable=False))
+      expr_type = self.visit(node.init_binding.expr)
+      if node.init_binding.is_unwrap:
+        if not isinstance(expr_type, OptionalType):
+          self.error("Expression in optional unwrapping must resolve to an optional type.")
+          unwrapped_type = expr_type
+        else:
+          unwrapped_type = expr_type.base_type
+      else:
+        unwrapped_type = expr_type
+
+      self.symbol_table.define(
+          node.init_binding.let_name,
+          VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
+      )
+
+      if node.condition:
+        cond_type = self.visit(node.condition)
+        if cond_type != PrimitiveType("bool"):
+          self.error("If condition must resolve to 'bool'.")
+      else:
+        if not node.init_binding.is_unwrap:
+          self.error("Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='.")
+
       self.visit(node.then_block)
       self.symbol_table.exit_scope()
     else:
-      cond_type = self.visit(node.condition_or_expr)
+      cond_type = self.visit(node.condition)
       if cond_type != PrimitiveType("bool"):
         self.error("If condition must resolve to 'bool'.")
       self.visit(node.then_block)
@@ -919,10 +931,38 @@ class TypeChecker:
       self.visit(node.else_block)
 
   def visit_WhileNode(self, node: WhileNode) -> None:
-    cond_type = self.visit(node.condition)
-    if cond_type != PrimitiveType("bool"):
-      self.error("While condition must resolve to 'bool'.")
-    self.visit(node.block)
+    if node.init_binding:
+      self.symbol_table.enter_scope()
+      expr_type = self.visit(node.init_binding.expr)
+      if node.init_binding.is_unwrap:
+        if not isinstance(expr_type, OptionalType):
+          self.error("Expression in optional unwrapping must resolve to an optional type.")
+          unwrapped_type = expr_type
+        else:
+          unwrapped_type = expr_type.base_type
+      else:
+        unwrapped_type = expr_type
+
+      self.symbol_table.define(
+          node.init_binding.let_name,
+          VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
+      )
+
+      if node.condition:
+        cond_type = self.visit(node.condition)
+        if cond_type != PrimitiveType("bool"):
+          self.error("While condition must resolve to 'bool'.")
+      else:
+        if not node.init_binding.is_unwrap:
+          self.error("Init-statement in 'while' must be followed by a condition unless using optional unwrapping '?='.")
+
+      self.visit(node.block)
+      self.symbol_table.exit_scope()
+    else:
+      cond_type = self.visit(node.condition)
+      if cond_type != PrimitiveType("bool"):
+        self.error("While condition must resolve to 'bool'.")
+      self.visit(node.block)
 
   def visit_ForNode(self, node: ForNode) -> None:
     iter_type = self.visit(node.iterable)
@@ -962,6 +1002,16 @@ class TypeChecker:
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
     left = self.visit(node.left)
     right = self.visit(node.right)
+
+    # Coalescing operator
+    if node.op == "??":
+      if not isinstance(left, OptionalType):
+        self.error(f"Left operand of '??' must be an optional type, got '{left}'.")
+        return left
+      base_type = left.base_type
+      if not right.is_compatible(base_type) and not base_type.is_compatible(right):
+        self.error(f"Fallback type '{right}' is not compatible with the optional's base type '{base_type}'.")
+      return base_type
 
     # Boolean operators
     if node.op in ("&&", "||"):

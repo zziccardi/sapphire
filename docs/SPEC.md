@@ -57,19 +57,49 @@ health = 90;          // Valid mutation
 let x, y = 10.0, 20.0;  // Multi-variable declaration
 ```
 
-## 3. Optionals (null safety)
+## 3. Optionals (null safety) & conditional bindings
 
-The language completely forbids null pointers. Instead, it supports type-safe optionals utilizing a Swift-style syntax with an explicit `?` modifier and a `none` keyword representing the empty state.
+The language completely forbids null pointers. Instead, it supports type-safe
+optionals utilizing a `?` modifier and a `none` keyword representing the empty
+state.
+
+To unwrap optionals, Sapphire provides a conditional unwrapping operator `?=`
+used within conditional headers:
 
 ```
 var target: Enemy? = none;
 let damage: int? = 15;
 
-if let active_target = target {
+if let active_target ?= target {
   // active_target is guaranteed to be non-optional within this block
 } else {
   // Optionals also support standard fallback blocks via `else` or `else if`
 }
+```
+
+### Semicolon-separated init statements
+Both `if` and `while` statement headers support declaring an init statement
+before the condition, separated by a semicolon. This is useful for limiting the
+scope of helper variables or combining unwrapping with other checks:
+
+```
+if let active_target ?= target; active_target.health > 50 {
+  // `active_target` is unwrapped and its health is guaranteed > 50
+}
+
+while let score = get_score(); score < 100 {
+  // loops while score is less than 100
+}
+```
+
+### Nil-coalescing operator (`??`)
+Sapphire provides the binary coalescing operator `??` to supply a fallback value
+when unwrapping an optional:
+
+```
+let active_enemy = target ?? default_enemy;
+
+// `active_enemy` is guaranteed to be non-optional
 ```
 
 ## 4. Functions & parameter modes

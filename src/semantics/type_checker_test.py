@@ -72,7 +72,7 @@ class TestTypeChecker(unittest.TestCase):
     code = """
     func test() {
       var opt_x: int? = none;
-      if let active_x = opt_x {
+      if let active_x ?= opt_x {
         let y: int = active_x;
       }
     }
@@ -84,14 +84,58 @@ class TestTypeChecker(unittest.TestCase):
     code = """
     func test() {
       let x: int = 10;
-      if let active_x = x {
+      if let active_x ?= x {
         let y = active_x;
       }
     }
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("Expression in 'if let' must resolve to an optional type", str(context.exception))
+    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(context.exception))
+
+  def test_init_statements_and_coalesce(self):
+    """Verifies init-statements in if/while loops and coalesce operator type-checking."""
+    # 1. if let with init-statement + condition
+    code1 = """
+    func test() {
+      var opt_x: int? = none;
+      if let x ?= opt_x; x > 10 {
+        let y: int = x;
+      }
+    }
+    """
+    self._check(code1)
+
+    # 2. while let with init-statement + condition
+    code2 = """
+    func test() {
+      var opt_x: int? = none;
+      while let x ?= opt_x; x < 5 {
+        let y: int = x;
+      }
+    }
+    """
+    self._check(code2)
+
+    # 3. ?? operator
+    code3 = """
+    func test() {
+      var opt_x: int? = none;
+      let val: int = opt_x ?? 42;
+    }
+    """
+    self._check(code3)
+
+    # 4. ?? incompatible fallback error
+    code4 = """
+    func test() {
+      var opt_x: int? = none;
+      let val: int = opt_x ?? "hello";
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code4)
+    self.assertIn("Fallback type 'string' is not compatible with the optional's base type 'int'", str(context.exception))
 
   def test_struct_constructor_field_initialization(self):
     """Verifies struct constructors require all fields to be initialized."""

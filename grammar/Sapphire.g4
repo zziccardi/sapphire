@@ -181,11 +181,16 @@ returnStatement
 
 ifStatement
     : IF expression block (ELSE ifStatement | ELSE block)?
-    | IF LET IDENTIFIER ASSIGN expression block (ELSE ifStatement | ELSE block)?
+    | IF letOrVarBinding (SEMICOLON expression)? block (ELSE ifStatement | ELSE block)?
     ;
 
 whileStatement
     : WHILE expression block
+    | WHILE letOrVarBinding (SEMICOLON expression)? block
+    ;
+
+letOrVarBinding
+    : (LET | VAR) IDENTIFIER (COLON type)? (ASSIGN | UNWRAP_ASSIGN) expression
     ;
 
 forStatement
@@ -201,6 +206,7 @@ expression
     | expression (MUL | DIV | MOD) expression                     # MultiplicativeExpr
     | expression (ADD | SUB) expression                           # AdditiveExpr
     | expression (EQ | NEQ | LT | LE | GT | GE) expression        # CompareExpr
+    | expression COALESCE expression                              # CoalesceExpr
     | expression AND expression                                   # LogicalAndExpr
     | expression OR expression                                    # LogicalOrExpr
     | lambdaExpression                                            # LambdaExpr
@@ -315,6 +321,7 @@ BOOL_TYPE : 'bool';
 
 // Operators
 ASSIGN : '=';
+UNWRAP_ASSIGN : '?=';
 ADD_ASSIGN : '+=';
 SUB_ASSIGN : '-=';
 MUL_ASSIGN : '*=';
@@ -324,6 +331,7 @@ MOD_ASSIGN : '%=';
 ARROW : '->';
 COLON : ':';
 QUESTION : '?';
+COALESCE : '??';
 SEMICOLON : ';';
 COMMA : ',';
 DOT : '.';

@@ -153,6 +153,7 @@ class LuaTranspiler:
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
     self.arena_stack: List[List[str]] = []
+    self._identifier_map: Dict[str, str] = {}
 
   def emit(self, text: str) -> None:
     """Emits text on the current line."""
@@ -616,20 +617,46 @@ class LuaTranspiler:
 
   def visit_IfNode(self, node: IfNode) -> None:
     self.newline()
-    if node.is_if_let:
-      val_var = f"_val_{node.let_name}"
-      self.emit(f"local {val_var} = ")
-      self.visit(node.condition_or_expr)
-      self.newline()
-      self.emit(f"if {val_var} ~= nil then")
-      self.indent()
-      self.newline()
-      self.emit(f"local {node.let_name} = {val_var}")
-      self.visit(node.then_block)
-      self.dedent()
+    if node.init_binding:
+      let_name = node.init_binding.let_name
+      if node.init_binding.is_unwrap:
+        val_var = f"_val_{let_name}"
+        self.emit(f"local {val_var} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+
+        # Map identifier to temporary variable during condition check
+        old_map = self._identifier_map.copy()
+        self._identifier_map[let_name] = val_var
+
+        self.emit(f"if {val_var} ~= nil")
+        if node.condition:
+          self.emit(" and ")
+          self.visit(node.condition)
+        self.emit(" then")
+
+        # Restore identifier map
+        self._identifier_map = old_map
+
+        self.indent()
+        self.newline()
+        self.emit(f"local {let_name} = {val_var}")
+        self.visit(node.then_block)
+        self.dedent()
+      else:
+        # Standard bind + condition
+        self.emit(f"local {let_name} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+        self.emit("if ")
+        self.visit(node.condition)
+        self.emit(" then")
+        self.indent()
+        self.visit(node.then_block)
+        self.dedent()
     else:
       self.emit("if ")
-      self.visit(node.condition_or_expr)
+      self.visit(node.condition)
       self.emit(" then")
       self.indent()
       self.visit(node.then_block)
@@ -647,14 +674,66 @@ class LuaTranspiler:
 
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.newline()
-    self.emit("while ")
-    self.visit(node.condition)
-    self.emit(" do")
-    self.indent()
-    self.visit(node.block)
-    self.dedent()
-    self.newline()
-    self.emit("end")
+    if node.init_binding:
+      self.emit("while true do")
+      self.indent()
+      self.newline()
+      let_name = node.init_binding.let_name
+      if node.init_binding.is_unwrap:
+        val_var = f"_val_{let_name}"
+        self.emit(f"local {val_var} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+
+        # Map identifier to temporary variable during condition check
+        old_map = self._identifier_map.copy()
+        self._identifier_map[let_name] = val_var
+
+        self.emit(f"if not ({val_var} ~= nil")
+        if node.condition:
+          self.emit(" and ")
+          self.visit(node.condition)
+        self.emit(") then")
+
+        # Restore map
+        self._identifier_map = old_map
+
+        self.indent()
+        self.newline()
+        self.emit("break")
+        self.dedent()
+        self.newline()
+        self.emit("end")
+        self.newline()
+        self.emit(f"local {let_name} = {val_var}")
+      else:
+        # Standard bind + condition
+        self.emit(f"local {let_name} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+        self.emit("if not (")
+        self.visit(node.condition)
+        self.emit(") then")
+        self.indent()
+        self.newline()
+        self.emit("break")
+        self.dedent()
+        self.newline()
+        self.emit("end")
+
+      self.visit(node.block)
+      self.dedent()
+      self.newline()
+      self.emit("end")
+    else:
+      self.emit("while ")
+      self.visit(node.condition)
+      self.emit(" do")
+      self.indent()
+      self.visit(node.block)
+      self.dedent()
+      self.newline()
+      self.emit("end")
 
   def visit_ForNode(self, node: ForNode) -> None:
     self.newline()
@@ -685,9 +764,18 @@ class LuaTranspiler:
     if node.name == "Arena":
       self.emit("Arena.init")
     else:
-      self.emit(node.name)
+      name = self._identifier_map.get(node.name, node.name)
+      self.emit(name)
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> None:
+    if node.op == "??":
+      self.emit("((function() local _v = ")
+      self.visit(node.left)
+      self.emit("; if _v ~= nil then return _v else return ")
+      self.visit(node.right)
+      self.emit(" end end)())")
+      return
+
     op_map = {"&&": "and", "||": "or", "!=": "~="}
     op = op_map.get(node.op, node.op)
 
