@@ -20,7 +20,7 @@ importStatement
     ;
 
 exportStatement
-    : EXPORT LBRACE (exportSpecifier (COMMA exportSpecifier)* COMMA?)? RBRACE SEMICOLON
+    : EXPORT LBRACE (exportSpecifier (COMMA exportSpecifier)* COMMA?)? RBRACE
     ;
 
 exportSpecifier

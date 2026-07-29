@@ -2,7 +2,7 @@
 
 export {
   Timer,
-};
+}
 
 trait Timer {
   func getDelta(): float;

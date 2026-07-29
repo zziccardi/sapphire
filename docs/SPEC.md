@@ -744,9 +744,9 @@ Sapphire provides a type-safe module system with explicit encapsulation.
 ### A. Private by default
 All top-level declarations (`struct`, `enum`, `trait`, `func`, `let`, `var`) in a Sapphire source file are **module-private by default** and cannot be accessed outside their defining file unless explicitly listed in an `export` block.
 
-### B. Explicit export manifest (`export { ... };`)
+### B. Explicit export manifest (`export { ... }`)
 A module defines its public API using an `export` manifest block:
-* **Single-block Enforcement**: Exactly one `export { ... };` block is permitted per file.
+* **Single-block Enforcement**: Exactly one `export { ... }` block is permitted per file.
 * **Top-level placement**: The `export` block can be placed anywhere at top-level scope (e.g., at the top of the file above symbol definitions for readability, or at the bottom). Forward references to symbols defined later in the file are fully supported.
 * **Aliasing & re-exporting**: Members can be exported under aliases using `as` (e.g. `new_image as create_image`), and imported module symbols can be re-exported via dot notation (e.g. `enums.DrawMode`).
 * **Trailing Commas**: Trailing commas inside `export { ... , }` are allowed and
@@ -762,7 +762,7 @@ export {
   new_image,
   new_image as create_image,
   enums.DrawMode,
-};
+}
 
 struct Image {
   var handle: int;

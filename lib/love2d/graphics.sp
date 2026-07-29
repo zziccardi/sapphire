@@ -9,7 +9,7 @@ export {
   FontHandle,
   QuadHandle,
   Graphics,
-};
+}
 
 struct Color {
   var r: float;

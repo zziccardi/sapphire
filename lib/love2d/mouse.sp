@@ -3,7 +3,7 @@
 export {
   CursorHandle,
   Mouse,
-};
+}
 
 trait CursorHandle {
   func getType(self): String;
