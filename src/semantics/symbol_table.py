@@ -30,8 +30,6 @@ class Type:
       return True
     if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and self.value_type.lower() == other.name.lower():
       return True
-    if isinstance(self, PrimitiveType) and isinstance(other, EnumType) and self.name.lower() == other.value_type.lower():
-      return True
     return self == other
 
   def __eq__(self, other: object) -> bool:

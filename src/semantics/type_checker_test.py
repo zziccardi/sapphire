@@ -1599,8 +1599,24 @@ class TestTypeChecker(unittest.TestCase):
     res_types = tc._resolve_return_types(DummyWithReturnType())
     self.assertEqual(res_types, [PrimitiveType("int")])
 
-  def test_string_enum_type_checking(self):
+  def test_string_enum_type_checking_valid(self):
     """Verifies type compatibility for string-backed enums with string primitive values."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+
+    func main() {
+      let m: Mode = Mode.Fill;
+      let s: String = Mode.Line;
+    }
+    """
+    self._check(code)
+
+  def test_string_enum_type_checking_invalid(self):
+    """Verifies that passing a primitive to a function expecting an enum fails."""
     code = """
     enum Mode {
       Fill = "fill",
@@ -1611,12 +1627,12 @@ class TestTypeChecker(unittest.TestCase):
     func set_mode(m: Mode) {}
 
     func main() {
-      let m: Mode = Mode.Fill;
-      let s: String = Mode.Line;
       set_mode("fill");
     }
     """
-    self._check(code)
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Argument type mismatch at position 1. Expected 'Mode', got 'string'.", str(context.exception))
 
   def test_trait_self_parameter_type_checking(self):
     """Verifies argument checking for trait methods with explicit self parameters."""
