@@ -2,7 +2,7 @@
 
 This document establishes the foundational design, syntax rules, and architectural specifications for **Sapphire**, a new general-purpose programming language. Sapphire prioritizes predictability, type safety, explicit function signatures, and highly ergonomic prototypal inheritance without traditional class-based OOP boilerplate or virtual method table (vtable) performance penalties.
 
-## Design philosophy & value proposition
+## 1. Design philosophy & value proposition
 
 Sapphire occupies a unique niche in the language ecosystem: it combines the **safety and bare-metal performance of a systems language** (like Rust or C++) with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript or Lua) and the **expressive API clarity** of modern languages (like Swift).
 
@@ -11,7 +11,7 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself throu
 * **Reference semantics**: Non-primitive types are passed by constant reference by default. This eliminates the visual clutter of lifetime annotations and borrow operators while maintaining memory safety.
 * **Modern API ergonomics**: Native support for named and default parameters reduces constructor boilerplate and makes interfaces self-documenting.
 
-## 1. Style & formatting standards
+## 2. Style, formatting, & comments
 
 * **Line length**: Lines should be kept to a maximum of 80 characters.
 * **Indentation**:
@@ -32,12 +32,24 @@ either `snake_case` or `PascalCase` but should be consistent.
 * Comments on the same line as code should have two spaces before the `//`.
 * Constant params should precede mutable params in function definitions.
 
-## Program entry & top-level script execution
+### Comments
+
+Sapphire supports both single-line and multi-line block comments:
+
+```
+// This is a single-line comment
+
+/*
+ * This is a multi-line
+ * block comment.
+ */
+```
+
+## 3. Program entry & top-level script execution
 
 Sapphire supports top-level script-style execution. Programs do not require a mandatory `func main()` entry point. Top-level statements (variable initializations, function calls, conditional branches, and loops) are executed sequentially upon program execution. If a `func main()` function is defined, it will be automatically invoked after any top-level statements execute. Return statements (`return`) at top-level module scope are prohibited and produce a compile-time error.
 
-
-## 2. Variable declaration & memory semantics
+## 4. Variable declaration & memory semantics
 
 Variables are immutable constants by default to encourage safety. Mutability must be explicitly declared.
 
@@ -57,7 +69,130 @@ health = 90;          // Valid mutation
 let x, y = 10.0, 20.0;  // Multi-variable declaration
 ```
 
-## 3. Optionals (null safety) & conditional bindings
+## 5. Core operators & expressions
+
+This section outlines the basic syntax of Sapphire's core operators, expressions, and collection access.
+
+### Core operators
+
+Sapphire supports standard operator families with well-defined precedence (e.g., multiplicative operators bind tighter than additive operators):
+
+* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo).
+* **Unary**: `-` (negation/additive inverse), `+` (prefix positive), `!` (logical NOT).
+* **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
+* **Logical**: `&&` (logical AND), `||` (logical OR).
+* **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
+
+### Expressions & collection access
+
+* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed. Arrays are strongly typed and homogeneous; all elements must have compatible types:
+  ```
+  let numbers = [10, 20, 30,];
+  ```
+* **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
+  ```
+  let first = numbers[0];
+  ```
+* **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
+  ```
+  let name = target?.get_name();
+  ```
+
+## 6. Control flow & pattern matching
+
+Sapphire supports conditional execution, pattern matching, and iteration loops.
+
+### Conditionals (if/else)
+
+Sapphire supports standard conditional execution via `if`, `else if`, and `else` blocks. Parentheses around the condition are optional:
+
+```
+let score = 85;
+if score >= 90 {
+  print("Grade: A");
+} else if score >= 80 {
+  print("Grade: B");
+} else {
+  print("Grade: C");
+}
+```
+
+### Match expressions
+
+Sapphire provides a first-class `match` construct for pattern matching, supporting both safe value transformation (expressions) and side-effect control flow (statements).
+
+* **Syntax**: `match subject { pattern -> body, ... }`
+* **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
+* **Multi-statement blocks**: Cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Using `return` inside a match block returns from the *enclosing function*.
+* **Implicit `none` fallback**: Multi-statement blocks without a `yield` statement automatically evaluate to `none` (type `none`), enabling clean side-effect-only branching without boilerplate.
+* **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
+* **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
+* **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
+
+```sapphire
+// Expression mapping
+let label = match status {
+  HttpStatus.Ok -> "Success",
+  HttpStatus.NotFound -> {
+    log("Not found");
+    yield "Resource Missing";
+  },
+  ... -> "Unknown Error",
+};
+
+// Side-effect-only usage
+match direction {
+  Direction.North -> {
+    move_player(dx = 0, dy = -1);
+  },
+  Direction.South -> {
+    move_player(dx = 0, dy = 1);
+  },
+  ... -> {
+    log("Horizontal movement");
+  },
+};
+```
+
+### Control-flow loops
+
+Sapphire supports conditional iteration and collection traversal:
+
+#### `while` loop
+
+Executes a block of code as long as the condition evaluates to `true`. No parentheses are required around the condition:
+
+```
+var count = 5;
+while count > 0 {
+  print(count);
+  count -= 1;
+}
+```
+
+#### `for-in` loop
+
+Iterates over elements in a collection.
+
+* **Scoping & Mutability**: By default, the loop variable (e.g., `name`) is implicitly declared as an immutable constant (`let`) scoped strictly to the loop body block.
+* **Mutable Loop Variables**: To allow mutation of the loop variable within the block, it can be explicitly declared using the `var` keyword (`for var name in names`):
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+
+// Default: 'name' is an implicit constant scoped to the loop
+for name in names {
+  print(name);
+}
+
+// Mutable: 'var name' allows mutation of the loop variable
+for var name in names {
+  name = name.to_lowercase();
+  print(name);
+}
+```
+
+## 7. Optionals (null safety) & conditional bindings
 
 The language completely forbids null pointers. Instead, it supports type-safe
 optionals utilizing a `?` modifier and a `none` keyword representing the empty
@@ -102,7 +237,7 @@ let active_enemy = target ?? default_enemy;
 // `active_enemy` is guaranteed to be non-optional
 ```
 
-## 4. Functions & parameter modes
+## 8. Functions & closures
 
 Named functions must fully declare the types of all parameters and the explicit
 return value(s) using colon syntax.
@@ -167,7 +302,7 @@ execute_interaction(target = player, observer = player);
 player.mutate(other = player);
 ```
 
-## 5. First-class & anonymous functions
+### First-class functions
 
 Functions are first-class citizens. To avoid double-colon confusion, function type declarations isolate the return block via an arrow token (`->`).
 
@@ -207,7 +342,7 @@ let sum_of_even_squares = numbers
     .reduce(initial = 0, (acc, x) -> acc + x);
 ```
 
-## 6. Structs & the implementation block
+## 9. Structs & the implementation block
 
 The primary data layout tool is the `struct` keyword. To strictly separate data structures from behavior, all methods (including constructors) **must** be defined inside a Rust-style implementation (`impl`) block; defining method signatures or bodies inside the `struct` block itself is strictly forbidden.
 
@@ -274,7 +409,7 @@ let sword = Weapon(...);
 sword.use();
 ```
 
-## 7. Enums
+## 10. Enums
 
 Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
 
@@ -352,11 +487,11 @@ if status == HttpStatusCode.Ok {
 let dir_code: int = current_dir;
 ```
 
-## 8. Inheritance & polymorphism
+## 11. Inheritance & polymorphism
 
 Sapphire implements clean, type-safe inheritance divided into a compile-time mechanism and a runtime mechanism.
 
-### A. Static inheritance
+### Static inheritance
 
 Structures can inherit the field layout, methods, and default values of another structure at compile time using a colon syntax similar to that in C++.
 
@@ -395,7 +530,7 @@ This provides the ergonomic benefits of traditional inheritance while giving the
 
 To support data-oriented design and decouple behaviors from layout, Sapphire supports two primary alternatives:
 
-##### 1. Traits (compile-time monomorphization)
+##### Traits (compile-time monomorphization)
 Traits define behavioral contracts without prescribing physical memory layout.
 They are resolved entirely at compile time through monomorphization, ensuring
 zero runtime overhead.
@@ -432,7 +567,7 @@ impl Actor for Cat {
 }
 ```
 
-##### 2. Explicit composition (data-oriented design)
+##### Explicit composition (data-oriented design)
 Instead of physical inheritance, structs can explicitly compose other structures. This allows clear separation of data components, which is ideal for Entity-Component-System (ECS) architectures where systems process arrays of single components to maximize cache locality.
 
 ```
@@ -447,7 +582,7 @@ struct Player {
 }
 ```
 
-### B. Dynamic prototypal inheritance
+### Dynamic prototypal inheritance
 
 Prototypal inheritance allows objects to delegate state to other objects at runtime. Instead of defining a rigid class hierarchy or instantiating duplicate structures, one object can serve as an active prototype for another. The clone dynamically delegates field lookups to its prototype: changes made to the prototype propagate live to the cloned instance, while the clone can selectively shadow (override) specific values. This is highly valuable for rapid prototyping, template-based object creation (such as defining variations of a base enemy archetype in a game), and zero-boilerplate data sharing.
 
@@ -492,37 +627,18 @@ Every struct instance automatically exposes a built-in, compiler-generated `__pr
   * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
   * Since static inheritance is resolved at compile time via delegation, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
 
-## 9. Design decisions
-
-This section outlines the architectural decisions and design trade-offs made in Sapphire.
-
-### Avoiding virtual method tables (vtables)
-
-Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely:
-* Static polymorphism is resolved entirely at compile-time via monomorphized traits, generating direct function calls.
-* Dynamic behavior resolved via prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic-dispatch overhead.
-
-### Avoiding physical inheritance layouts
-
-While single, flat physical inheritance avoids vtable overhead by organizing memory contiguously, it introduces severe bottlenecks for performance-critical systems like game engines:
-* **Cache-line pollution**: Grouping parent and child fields together in a single contiguous block forces unrelated fields into CPU cache lines. In data-oriented design (like ECS), updates only needing a small subset of fields (e.g., `position` and `velocity`) are slowed down by reading unrelated fields.
-* **Layout rigidity**: A rigid inheritance hierarchy prevents the compiler from reordering fields across the entire structure to minimize padding bytes and reduce memory footprint.
-* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
-
-Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
-
-## 10. Compiler & runtime implementation
+## 12. Compiler & runtime implementation
 
 This section outlines how the Sapphire compiler and runtime optimize code execution and manage memory without sacrificing performance or safety.
 
-### A. Proto compilation
+### Proto compilation
 
 To preserve the zero-overhead promise of standard structures, the compiler does not generate any prototype lookup wrappers or metadata for standard `struct` declarations.
 1. **Standard Structs**: Standard structs compile directly to flat layouts. Field lookups (e.g. `t.field`) compile to direct offset/index accesses.
 2. **Proto structures**: Structures declared with the `proto` keyword compile to instances wrapping their properties in a lookup system containing `__proto__` and `__shadow__` tables.
 3. **Copy-on-Write (CoW) Wrapper**: Field writes targeting a nested reference field inside a cloned object trigger a copy-on-write intercept. The runtime duplicates the nested reference locally to isolate the cloned instance's mutations.
 
-### B. Arena-based memory management
+### Arena-based memory management
 
 All `proto` instances and their clones are automatically allocated on a managed arena. Additionally, standard `struct` instances can opt into arena allocation using the `in` suffix. Sapphire prohibits allocating `proto` instances or their clones on the call stack, eliminating LIFO stack escape issues.
 
@@ -540,154 +656,79 @@ references, the compiler statically enforces scope-bound escape rules:
    * **Function-return escape**: A function cannot return a reference to an
      object allocated in an arena local to the function scope.
 
-## 11. Core operators, expressions, & control flow
+## 13. Module system & encapsulation
 
-This section outlines the basic syntax of Sapphire's expressions, operators, conditionals, and control-flow loop constructs which are fully supported by the compiler and language grammar.
+Sapphire provides a type-safe module system with explicit encapsulation.
 
-### A. Comments
+### Private by default
+All top-level declarations (`struct`, `enum`, `trait`, `func`, `let`, `var`) in a Sapphire source file are **module-private by default** and cannot be accessed outside their defining file unless explicitly listed in an `export` block.
 
-Sapphire supports both single-line and multi-line block comments:
-
-```
-// This is a single-line comment
-
-/*
- * This is a multi-line
- * block comment.
- */
-```
-
-### B. Core operators
-
-Sapphire supports standard operator families with well-defined precedence (e.g., multiplicative operators bind tighter than additive operators):
-
-* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo).
-* **Unary**: `-` (negation/additive inverse), `+` (prefix positive), `!` (logical NOT).
-* **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
-* **Logical**: `&&` (logical AND), `||` (logical OR).
-* **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
-
-### C. Expressions & collection access
-
-* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed. Arrays are strongly typed and homogeneous; all elements must have compatible types:
-  ```
-  let numbers = [10, 20, 30,];
-  ```
-* **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
-  ```
-  let first = numbers[0];
-  ```
-* **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
-  ```
-  let name = target?.get_name();
-  ```
-
-### D. Conditionals (if/else)
-
-Sapphire supports standard conditional execution via `if`, `else if`, and `else` blocks. Parentheses around the condition are optional:
-
-```
-let score = 85;
-if score >= 90 {
-  print("Grade: A");
-} else if score >= 80 {
-  print("Grade: B");
-} else {
-  print("Grade: C");
-}
-```
-
-### E. Match expressions
-
-Sapphire provides a first-class `match` construct for pattern matching, supporting both safe value transformation (expressions) and side-effect control flow (statements).
-
-* **Syntax**: `match subject { pattern -> body, ... }`
-* **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
-* **Multi-statement blocks**: Cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Using `return` inside a match block returns from the *enclosing function*.
-* **Implicit `none` fallback**: Multi-statement blocks without a `yield` statement automatically evaluate to `none` (type `none`), enabling clean side-effect-only branching without boilerplate.
-* **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
-* **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
-* **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
+### Explicit export manifest (`export { ... }`)
+A module defines its public API using an `export` manifest block:
+* **Single-block Enforcement**: Exactly one `export { ... }` block is permitted per file.
+* **Top-level placement**: The `export` block can be placed anywhere at top-level scope (e.g., at the top of the file above symbol definitions for readability, or at the bottom). Forward references to symbols defined later in the file are fully supported.
+* **Aliasing & re-exporting**: Members can be exported under aliases using `as` (e.g. `new_image as create_image`), and imported module symbols can be re-exported via dot notation (e.g. `enums.DrawMode`).
+* **Trailing Commas**: Trailing commas inside `export { ... , }` are allowed and
+  recommended.
 
 ```sapphire
-// Expression mapping
-let label = match status {
-  HttpStatus.Ok -> "Success",
-  HttpStatus.NotFound -> {
-    log("Not found");
-    yield "Resource Missing";
-  },
-  ... -> "Unknown Error",
-};
+// lib/love2d/graphics.sp
 
-// Side-effect-only usage
-match direction {
-  Direction.North -> {
-    move_player(dx = 0, dy = -1);
-  },
-  Direction.South -> {
-    move_player(dx = 0, dy = 1);
-  },
-  ... -> {
-    log("Horizontal movement");
-  },
-};
-```
+import lib.love2d.enums;
 
-### F. Control-flow loops
+export {
+  Image,
+  new_image,
+  new_image as create_image,
+  enums.DrawMode,
+}
 
-Sapphire supports conditional iteration and collection traversal:
+struct Image {
+  var handle: int;
+}
 
-#### 1. `while` loop
-
-Executes a block of code as long as the condition evaluates to `true`. No parentheses are required around the condition:
-
-```
-var count = 5;
-while count > 0 {
-  print(count);
-  count -= 1;
+func new_image(path: String): Image {
+  return Image { handle = 1 };
 }
 ```
 
-#### 2. `for-in` loop
+### Module imports (`import`)
+Modules are imported using dot-separated identifier paths:
 
-Iterates over elements in a collection.
+```sapphire
+// Imports module namespace 'graphics'
+import lib.love2d.graphics;
 
-* **Scoping & Mutability**: By default, the loop variable (e.g., `name`) is implicitly declared as an immutable constant (`let`) scoped strictly to the loop body block.
-* **Mutable Loop Variables**: To allow mutation of the loop variable within the block, it can be explicitly declared using the `var` keyword (`for var name in names`):
+// Imports module namespace with custom alias 'gfx'
+import lib.love2d.graphics as gfx;
 
-```
-let names = ["Alice", "Bob", "Charlie"];
-
-// Default: 'name' is an implicit constant scoped to the loop
-for name in names {
-  print(name);
-}
-
-// Mutable: 'var name' allows mutation of the loop variable
-for var name in names {
-  name = name.to_lowercase();
-  print(name);
-}
+// Member access via qualified dot notation
+let img = graphics.new_image("hero.png");
 ```
 
-## 11. Host runtime interoperability & annotations
+### Transpilation semantics
+* **Lua 5.1 target**: Module imports transpile to `local graphics = require("lib.love2d.graphics")`. Export manifests emit a module table `local _M = {}` populated with exported references and append `return _M`.
+* **Python target**: Module imports transpile to `import lib.love2d.graphics`. Export manifests emit `__all__ = ["Image", "new_image", "create_image", "DrawMode"]`.
+
+## 14. Host runtime interoperability & annotations
 
 Sapphire supports native interoperability with third-party scripting host engines (such as **Love2D** in Lua 5.1 / LuaJIT environments) through single-purpose annotation decorators:
 
-### A. `@extern` (host variable binding)
+### `@extern` (host variable binding)
+
 The `@extern` annotation binds Sapphire variables to external host symbols
 provided at runtime.
 * **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is also named `identifier`).
 * **Runtime behavior**: Tells the transpiler to omit runtime variable initializations (`local name = ...`), permitting 100% type-safe access to host-provided engine modules.
 
-### B. `@export` (transpiled symbol renaming)
+### `@export` (transpiled symbol renaming)
+
 The `@export` annotation configures symbol renaming during transpilation.
 * **Global callback export**: `@export("love.update") func handler(...) { ... }`. In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
 * **Trait method aliasing**: `@export("native_name")` placed on a trait method signature configures the transpiler to emit `native_name` instead of the Sapphire method identifier (e.g. `@export("setColor") func setColorRGBA(r: float, g: float, b: float);`).
 
-### C. Trait-based host interfaces & resource handles
+### Trait-based host interfaces & resource handles
+
 External host–module contracts are defined cleanly using standard Sapphire `trait`s composed inside container `struct` types:
 
 * **Resource-handle traits**: Specifying an explicit first `self` parameter (e.g. `func draw(self, x: float, y: float)`) designates an instance method on a handle object, transpiling to Lua colon syntax (`handle:draw(x, y)`).
@@ -746,57 +787,21 @@ func draw() {
 }
 ```
 
-## 12. Module system & encapsulation
+## 15. Design decisions
 
-Sapphire provides a type-safe module system with explicit encapsulation.
+This section outlines the architectural decisions and design trade-offs made in Sapphire.
 
-### A. Private by default
-All top-level declarations (`struct`, `enum`, `trait`, `func`, `let`, `var`) in a Sapphire source file are **module-private by default** and cannot be accessed outside their defining file unless explicitly listed in an `export` block.
+### Avoiding virtual method tables (vtables)
 
-### B. Explicit export manifest (`export { ... }`)
-A module defines its public API using an `export` manifest block:
-* **Single-block Enforcement**: Exactly one `export { ... }` block is permitted per file.
-* **Top-level placement**: The `export` block can be placed anywhere at top-level scope (e.g., at the top of the file above symbol definitions for readability, or at the bottom). Forward references to symbols defined later in the file are fully supported.
-* **Aliasing & re-exporting**: Members can be exported under aliases using `as` (e.g. `new_image as create_image`), and imported module symbols can be re-exported via dot notation (e.g. `enums.DrawMode`).
-* **Trailing Commas**: Trailing commas inside `export { ... , }` are allowed and
-  recommended.
+Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely:
+* Static polymorphism is resolved entirely at compile-time via monomorphized traits, generating direct function calls.
+* Dynamic behavior resolved via prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic-dispatch overhead.
 
-```sapphire
-// lib/love2d/graphics.sp
+### Avoiding physical inheritance layouts
 
-import lib.love2d.enums;
+While single, flat physical inheritance avoids vtable overhead by organizing memory contiguously, it introduces severe bottlenecks for performance-critical systems like game engines:
+* **Cache-line pollution**: Grouping parent and child fields together in a single contiguous block forces unrelated fields into CPU cache lines. In data-oriented design (like ECS), updates only needing a small subset of fields (e.g., `position` and `velocity`) are slowed down by reading unrelated fields.
+* **Layout rigidity**: A rigid inheritance hierarchy prevents the compiler from reordering fields across the entire structure to minimize padding bytes and reduce memory footprint.
+* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
 
-export {
-  Image,
-  new_image,
-  new_image as create_image,
-  enums.DrawMode,
-}
-
-struct Image {
-  var handle: int;
-}
-
-func new_image(path: String): Image {
-  return Image { handle = 1 };
-}
-```
-
-### C. Module imports (`import`)
-Modules are imported using dot-separated identifier paths:
-
-```sapphire
-// Imports module namespace 'graphics'
-import lib.love2d.graphics;
-
-// Imports module namespace with custom alias 'gfx'
-import lib.love2d.graphics as gfx;
-
-// Member access via qualified dot notation
-let img = graphics.new_image("hero.png");
-```
-
-### D. Transpilation semantics
-* **Lua 5.1 target**: Module imports transpile to `local graphics = require("lib.love2d.graphics")`. Export manifests emit a module table `local _M = {}` populated with exported references and append `return _M`.
-* **Python target**: Module imports transpile to `import lib.love2d.graphics`. Export manifests emit `__all__ = ["Image", "new_image", "create_image", "DrawMode"]`.
-
+Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
