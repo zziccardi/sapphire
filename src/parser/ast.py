@@ -64,8 +64,12 @@ class OptionalTypeNode(TypeNode):
     self.base_type = base_type
 
 
-class FunctionTypeNode(TypeNode):
-  """Represents a function type signature (e.g. '(int, int) -> float')."""
+class ArrayTypeNode(TypeNode):
+  """Represents an array type wrapper (e.g. '[int]')."""
+
+  def __init__(self, element_type: TypeNode):
+    self.element_type = element_type
+
 
 class FunctionTypeNode(TypeNode):
   """Represents a function type signature (e.g. '(int, int) -> float' or '(int) -> (float, float)')."""

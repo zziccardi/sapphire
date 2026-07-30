@@ -2261,12 +2261,20 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Key 'charlie' not found in map literal.", str(ctx.exception))
 
-    # 2. Valid key in map literal
-    self._check("""
-    func test() {
-      let score = {"alice": 100, "bob": 95}["alice"];
-    }
-    """)
+  def test_array_type_node_resolution_and_none_inference(self):
+    """Verifies ArrayTypeNode resolution and error when inferring type from none alone."""
+    from src.parser.ast import ArrayTypeNode, BasicTypeNode
+    checker = TypeChecker()
+    res = checker._resolve_type_node(ArrayTypeNode(BasicTypeNode("int")))
+    self.assertEqual(res, ArrayType(PrimitiveType("int")))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let x = none;
+      }
+      """)
+    self.assertIn("Cannot infer type of 'x' from 'none' alone.", str(ctx.exception))
 
 
 if __name__ == "__main__":

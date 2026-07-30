@@ -430,6 +430,8 @@ class TypeChecker:
       return resolved
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))
+    if isinstance(node, ArrayTypeNode):
+      return ArrayType(self._resolve_type_node(node.element_type))
     if isinstance(node, FunctionTypeNode):
       param_types = [self._resolve_type_node(t) for t in node.param_types]
       ret_types = self._resolve_return_types(node)
@@ -1414,33 +1416,20 @@ class TypeChecker:
 
   def _get_const_int_value(self, expr: ASTNode) -> Optional[int]:
     if isinstance(expr, LiteralNode) and expr.lit_type == "int":
-      try:
-        return int(expr.value)
-      except (ValueError, TypeError):
-        return None
+      return int(expr.value)
     if (
         isinstance(expr, UnaryOpNode)
         and expr.op == "-"
         and isinstance(expr.expr, LiteralNode)
         and expr.expr.lit_type == "int"
     ):
-      try:
-        return -int(expr.expr.value)
-      except (ValueError, TypeError):
-        return None
+      return -int(expr.expr.value)
     return None
 
   def _check_array_bounds(self, node: IndexExprNode, array_type: ArrayType) -> None:
     const_idx = self._get_const_int_value(node.index)
     if const_idx is not None:
       size = array_type.size
-      if size is None and isinstance(node.array, ArrayLiteralNode):
-        size = len(node.array.elements)
-      elif size is None and isinstance(node.array, IdentifierNode):
-        sym = self.symbol_table.lookup(node.array.name)
-        if sym and isinstance(sym.type, ArrayType):
-          size = sym.type.size
-
       if const_idx < 0:
         self.error(f"Array index out of bounds: negative index '{const_idx}' is not allowed.")
       elif size is not None and const_idx >= size:

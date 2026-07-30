@@ -92,6 +92,8 @@ class TestSymbolTable(unittest.TestCase):
     self.assertNotEqual(arr_int, arr_int_size)
     self.assertTrue(arr_int_size.is_compatible(arr_int))
     self.assertTrue(arr_int.is_compatible(arr_int_size))
+    self.assertTrue(arr_int.is_compatible(OptionalType(arr_int)))
+    self.assertFalse(arr_int.is_compatible(self.int_type))
 
   def test_lexical_scoping(self):
     """Verifies that nested scopes resolve identifiers and support shadowing."""
