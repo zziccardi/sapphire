@@ -6,10 +6,25 @@ This document establishes the foundational design, syntax rules, and architectur
 
 Sapphire occupies a unique niche in the language ecosystem: it combines the **safety and bare-metal performance of a systems language** (like Rust or C++) with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript or Lua) and the **expressive API clarity** of modern languages (like Swift).
 
-Unlike other performance-oriented languages, Sapphire distinguishes itself through three key pillars:
-* **Dual-paradigm code reuse**: Combines compile-time monomorphized traits and zero-overhead syntactic delegation with opt-in runtime prototypal delegation (`clone`). This allows developers to use clean object-oriented syntax and construct runtime archetypes without physical memory layout rigidity or manual composition boilerplate.
-* **Reference semantics**: Non-primitive types are passed by constant reference by default. This eliminates the visual clutter of lifetime annotations and borrow operators while maintaining memory safety.
-* **Modern API ergonomics**: Native support for named and default parameters reduces constructor boilerplate and makes interfaces self-documenting.
+Unlike other performance-oriented languages, Sapphire distinguishes itself
+through four key pillars:
+* **Zero-overhead static & dynamic reuse**: Inheritance is treated as
+  compile-time syntactic delegation (composition and generated forwarding),
+  completely eliminating virtual-method tables (vtables), pointer chasing, and
+  object-slicing risks. Dynamic prototypal delegation is opt-in and data-only,
+  and uses copy-on-write (CoW) to protect prototypes.
+* **Scope-bound memory safety**: Non-primitive types are passed by constant
+  reference by default. Compile-time scope-bound aliasing rules guarantee
+  memory safety and reference validity without the visual noise of Rust-style
+  lifetime annotations or C++ pointer syntax.
+* **Deterministic lifecycle control**: Opt-in dynamic prototypal references
+  are allocated in managed, lexically scoped arenas. The compiler enforces
+  strict escape-checking to automatically tear down allocations at scope
+  boundaries.
+* **Modern API & host-environment ergonomics**: Native support for named
+  parameters and default values makes interfaces self-documenting. First-class
+  host annotations (`@extern`, `@export`) compile to zero-overhead bindings for
+  interoperability with scripting environments.
 
 ## 2. Style, formatting, & comments
 

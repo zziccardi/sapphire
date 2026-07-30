@@ -1,20 +1,24 @@
 # Sapphire programming language
 
 Sapphire is a statically typed general-purpose programming language that
-combines the **safety and performance** of systems languages with the
-**rapid-prototyping ergonomics** of dynamic languages and the
-**expressive API clarity** of modern languages like Swift.
+combines the **safety and performance** of modern systems languages with the
+**rapid-prototyping ergonomics** of dynamic languages.
+
+By resolving polymorphism at compile-time and restricting prototypal inheritance
+to be data-only, it enables runtime object modification without virtual-method
+tables, reference-cycle overhead, or lifetime annotations.
 
 This repository contains the ANTLR4 grammar, abstract syntax tree (AST) builder,
-semantic analyzer, type checker, transpilation backends that compile Sapphire source
-code (`.sp`) into executable Python or Lua 5.1, as well as a Language Server Protocol (LSP)
-server implementation and corresponding VS Code extension.
+semantic analyzer, type checker, transpilation backends that compile Sapphire
+source code (`.sp`) into executable Python or Lua 5.1, as well as a Language
+Server Protocol (LSP) server implementation and corresponding VS Code extension.
 
 The project is a **work in progress**. The [language spec](docs/SPEC.md) may
-change significantly over time. For now the transpiler toolchain targets Python and
-Lua 5.1 to facilitate rapid iteration and scripting engine integration; once the language
-design is finalized, I'd like to introduce a proper native compiler (likely built in Rust) to
-enable the memory-safety features described in the spec.
+change significantly over time. For now the transpiler toolchain targets Python
+and Lua 5.1 to facilitate rapid iteration and scripting-engine integration; once
+the language design is finalized, I'd like to introduce a proper native compiler
+(likely built in Rust) to enable the memory-safety the performance features
+described in the spec.
 
 ## Key features of Sapphire
 
