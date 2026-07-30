@@ -95,8 +95,8 @@ describe('extension.ts', () => {
     mockWorkspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
     activate({} as any);
     expect(clientInstance).not.toBeNull();
-    expect(clientInstance.serverOptions.command).toBe('pipenv');
-    expect(clientInstance.serverOptions.args).toEqual(['run', 'python', '/mock/workspace/src/lsp/server.py']);
+    expect(clientInstance.serverOptions.run.command).toBe('pipenv');
+    expect(clientInstance.serverOptions.run.args).toEqual(['run', 'python', '/mock/workspace/src/lsp/server.py']);
     expect(startCalled).toBe(true);
   });
 
@@ -106,8 +106,8 @@ describe('extension.ts', () => {
     mockConfig['lsp.serverPath'] = '/absolute/server.py';
     activate({} as any);
     expect(clientInstance).not.toBeNull();
-    expect(clientInstance.serverOptions.command).toBe('/usr/bin/python3');
-    expect(clientInstance.serverOptions.args).toEqual(['/absolute/server.py']);
+    expect(clientInstance.serverOptions.run.command).toBe('/usr/bin/python3');
+    expect(clientInstance.serverOptions.run.args).toEqual(['/absolute/server.py']);
   });
 
   it('should show error message if LanguageClient fails to start', async () => {

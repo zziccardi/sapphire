@@ -405,6 +405,26 @@ class TestASTBuilder(unittest.TestCase):
     # Case 2: ellipsis pattern
     self.assertIsInstance(match_expr.cases[2].pattern, EllipsisPatternNode)
 
+  def test_map_literal_parsing(self):
+    """Verifies AST construction for map literals with colons, commas, and trailing commas."""
+    try:
+      from parser.ast import MapLiteralNode, MapEntryNode, LiteralNode
+    except ModuleNotFoundError:
+      from src.parser.ast import MapLiteralNode, MapEntryNode, LiteralNode
+
+    ast = self._get_ast("""
+    let scores = {"alice": 100, "bob": 95,};
+    """)
+    decl = ast.declarations[0]
+    map_expr = decl.expr
+    self.assertIsInstance(map_expr, MapLiteralNode)
+    self.assertEqual(len(map_expr.entries), 2)
+    self.assertIsInstance(map_expr.entries[0], MapEntryNode)
+    self.assertEqual(map_expr.entries[0].key.value, "alice")
+    self.assertEqual(map_expr.entries[0].value.value, 100)
+    self.assertEqual(map_expr.entries[1].key.value, "bob")
+    self.assertEqual(map_expr.entries[1].value.value, 95)
+
 
 if __name__ == "__main__":
   unittest.main()

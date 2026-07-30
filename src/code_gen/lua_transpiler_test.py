@@ -769,6 +769,22 @@ class TestLuaTranspiler(unittest.TestCase):
     lt.visit_EllipsisPatternNode(EllipsisPatternNode())
     self.assertIn("_match_res_1", "".join(lt.code))
 
+  def test_lua_map_literal_transpilation(self):
+    """Verifies Lua transpilation for map literals and map indexing (without +1 offset)."""
+    code = """
+    func test() {
+      let scores = {"alice": 100, "bob": 95,};
+      let score = scores["alice"];
+      let arr = [10, 20];
+      let elem = arr[0];
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn('{["alice"] = 100, ["bob"] = 95}', lua_out)
+    self.assertIn('scores["alice"]', lua_out)
+    self.assertNotIn('scores["alice"] + 1', lua_out)
+    self.assertIn('arr[1]', lua_out)  # Array indexing still gets + 1!
+
 
 if __name__ == "__main__":
   unittest.main()

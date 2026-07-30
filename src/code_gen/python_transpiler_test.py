@@ -930,6 +930,17 @@ class TestPythonTranspiler(unittest.TestCase):
     err_output = captured_stderr.getvalue()
     self.assertIn("Missing semicolon ';' after closing brace '}' of match expression", err_output)
 
+  def test_map_literal_transpilation_and_execution(self):
+    """Verifies Python transpilation and execution of map literals and map indexing."""
+    code = """
+    func get_score(): int {
+      let scores = {"alice": 100, "bob": 95,};
+      return scores["alice"];
+    }
+    """
+    res = self._transpile_and_run(code, "get_score()")
+    self.assertEqual(res, 100)
+
 
 if __name__ == "__main__":
   unittest.main()

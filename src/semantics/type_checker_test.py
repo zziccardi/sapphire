@@ -2131,7 +2131,173 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Left operand of '??' must be an optional type", str(ctx.exception))
 
+  def test_map_literal_type_checking(self):
+    """Verifies type checking for map literals, key type restrictions, homogeneity, and indexing."""
+    # 1. Valid string, int, and enum keyed maps
+    self._check("""
+    enum Direction { North, South }
 
+    func test() {
+      let string_map = {"alice": 100, "bob": 95,};
+      let int_map = {1: "low", 2: "high"};
+      let enum_map = {Direction.North: 10, Direction.South: 20};
+
+      let score: int = string_map["alice"];
+      let level: String = int_map[1];
+      let speed: int = enum_map[Direction.North];
+    }
+    """)
+
+    # 2. Invalid key type (boolean key)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {true: 1};
+      }
+      """)
+    self.assertIn("Map key must be a string, int, or enum.", str(ctx.exception))
+
+    # 3. Inconsistent key types (mixed int and string keys)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {"alice": 100, 2: 95};
+      }
+      """)
+    self.assertIn("Inconsistent key types in map literal.", str(ctx.exception))
+
+    # 4. Inconsistent value types (mixed int and string values)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {"alice": 100, "bob": "95"};
+      }
+      """)
+    self.assertIn("Inconsistent value types in map literal.", str(ctx.exception))
+
+    # 5. Map index type mismatch
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let string_map = {"alice": 100};
+        let val = string_map[123];
+      }
+      """)
+    self.assertIn("Map index type 'int' is not compatible with key type 'string'.", str(ctx.exception))
+
+    # 6. Empty map literal
+    self._check("""
+    func test() {
+      let empty_map = {};
+    }
+    """)
+
+    # 7. Invalid key type on subsequent entry
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {"alice": 100, true: 200};
+      }
+      """)
+    self.assertIn("Map key must be a string, int, or enum.", str(ctx.exception))
+
+  def test_array_compile_time_bounds_checking(self):
+    """Verifies compile-time bounds checking for array indexing."""
+    # 1. Out of bounds index on array literal
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let x = [10, 20, 30][3];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 3 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 2. Negative index on array literal
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let x = [10, 20, 30][-1];
+      }
+      """)
+    self.assertIn("Array index out of bounds: negative index '-1' is not allowed.", str(ctx.exception))
+
+    # 3. Out of bounds index on array variable
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let arr = [10, 20];
+        let val = arr[5];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 5 is out of bounds for array of size 2.", str(ctx.exception))
+
+    # 4. Out of bounds assignment to array variable
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        var arr = [1, 2, 3];
+        arr[10] = 50;
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 10 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 5. Valid constant indexing
+    self._check("""
+    func test() {
+      let arr = [10, 20, 30];
+      let first = arr[0];
+      let last = arr[2];
+    }
+    """)
+
+  def test_map_compile_time_key_validation(self):
+    """Verifies compile-time key checking for map literals."""
+    # 1. Missing key in map literal
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let val = {"alice": 100, "bob": 95}["charlie"];
+      }
+      """)
+    self.assertIn("Key 'charlie' not found in map literal.", str(ctx.exception))
+
+    # 2. Valid key in map literal
+    self._check("""
+    func test() {
+      let score = {"alice": 100, "bob": 95}["alice"];
+    }
+    """)
+
+  def test_array_type_node_resolution_and_none_inference(self):
+    """Verifies ArrayTypeNode resolution and error when inferring type from none alone."""
+    try:
+      from parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
+      from semantics.symbol_table import ArrayType, PrimitiveType
+    except ModuleNotFoundError:
+      from src.parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
+      from src.semantics.symbol_table import ArrayType, PrimitiveType
+
+    checker = TypeChecker()
+    res = checker._resolve_type_node(ArrayTypeNode(BasicTypeNode("int")))
+    self.assertEqual(res, ArrayType(PrimitiveType("int")))
+
+    var_decl = VarDeclNode(
+        is_mutable=False,
+        names=["arr"],
+        val_types=[ArrayTypeNode(BasicTypeNode("int"))],
+        exprs=[ArrayLiteralNode([LiteralNode(10, "int"), LiteralNode(20, "int")])],
+    )
+    checker.visit_VarDeclNode(var_decl)
+    sym = checker.symbol_table.lookup("arr")
+    self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let x = none;
+      }
+      """)
+    self.assertIn("Cannot infer type of 'x' from 'none' alone.", str(ctx.exception))
 
 
 if __name__ == "__main__":

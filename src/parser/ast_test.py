@@ -36,6 +36,17 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node_dict["node_type"], "BasicTypeNode")
     self.assertEqual(node_dict["name"], "int")
 
+  def test_array_type_node(self):
+    try:
+      from parser.ast import ArrayTypeNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ArrayTypeNode
+    node = ArrayTypeNode(BasicTypeNode("int"))
+    self.assertEqual(node.element_type.name, "int")
+    node_dict = node.to_dict()
+    self.assertEqual(node_dict["node_type"], "ArrayTypeNode")
+    self.assertEqual(node_dict["element_type"]["name"], "int")
+
   def test_literal_node(self):
     """Verifies LiteralNode creation and conversion to dictionary."""
     node = LiteralNode(42, "int")

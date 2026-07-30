@@ -40,7 +40,7 @@ def main():
     input_file = sys.argv[1]
   else:
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    input_file = os.path.normpath(os.path.join(script_dir, "..", "sample.sp"))
+    input_file = os.path.normpath(os.path.join(script_dir, "..", "samples", "game_loop.sp"))
 
   print(f"Reading source file: {input_file}...")
 

@@ -84,9 +84,16 @@ class TestSymbolTable(unittest.TestCase):
     """Verifies assignment compatibility of array types."""
     arr_int = ArrayType(self.int_type)
     arr_float = ArrayType(self.float_type)
+    arr_int_size = ArrayType(self.int_type, size=3)
 
     self.assertEqual(arr_int, ArrayType(self.int_type))
     self.assertNotEqual(arr_int, arr_float)
+    self.assertEqual(arr_int_size, ArrayType(self.int_type, size=3))
+    self.assertNotEqual(arr_int, arr_int_size)
+    self.assertTrue(arr_int_size.is_compatible(arr_int))
+    self.assertTrue(arr_int.is_compatible(arr_int_size))
+    self.assertTrue(arr_int.is_compatible(OptionalType(arr_int)))
+    self.assertFalse(arr_int.is_compatible(self.int_type))
 
   def test_lexical_scoping(self):
     """Verifies that nested scopes resolve identifiers and support shadowing."""
@@ -161,6 +168,8 @@ class TestSymbolTable(unittest.TestCase):
     # ArrayType repr and non-equality
     arr = ArrayType(self.int_type)
     self.assertEqual(repr(arr), "[int]")
+    arr_sized = ArrayType(self.int_type, size=5)
+    self.assertEqual(repr(arr_sized), "[int; 5]")
     self.assertFalse(arr == self.int_type)
 
     # EnumType __eq__, __repr__, and compatibility
@@ -212,6 +221,26 @@ class TestSymbolTable(unittest.TestCase):
     mod_sym = ModuleSymbol("enums", "lib.love2d.enums", exports={"x": sym_x})
     self.assertEqual(mod_sym.lookup_export("x"), sym_x)
     self.assertIsNone(mod_sym.lookup_export("y"))
+
+  def test_map_type_methods(self):
+    """Verifies MapType __eq__, __repr__, and is_compatible methods."""
+    try:
+      from semantics.symbol_table import MapType, PrimitiveType, OptionalType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import MapType, PrimitiveType, OptionalType
+
+    m1 = MapType(PrimitiveType("string"), PrimitiveType("int"))
+    m2 = MapType(PrimitiveType("string"), PrimitiveType("int"))
+    m3 = MapType(PrimitiveType("int"), PrimitiveType("int"))
+
+    self.assertEqual(m1, m2)
+    self.assertNotEqual(m1, m3)
+    self.assertFalse(m1 == "not a MapType")
+    self.assertEqual(repr(m1), "[string: int]")
+
+    self.assertTrue(m1.is_compatible(m2))
+    self.assertTrue(m1.is_compatible(OptionalType(m2)))
+    self.assertFalse(m1.is_compatible(PrimitiveType("int")))
 
 
 if __name__ == "__main__":

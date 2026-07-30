@@ -791,6 +791,16 @@ class PythonTranspiler:
       self.visit(elem)
     self.emit("]")
 
+  def visit_MapLiteralNode(self, node: MapLiteralNode) -> None:
+    self.emit("{")
+    for idx, entry in enumerate(node.entries):
+      if idx > 0:
+        self.emit(", ")
+      self.visit(entry.key)
+      self.emit(": ")
+      self.visit(entry.value)
+    self.emit("}")
+
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
     self.visit(node.array)
     self.emit("[")

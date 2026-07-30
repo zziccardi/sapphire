@@ -23,6 +23,7 @@ try:
       EnumType,
       NoneType,
       ArrayType,
+      MapType,
       ArenaType,
       ModuleType,
       VariableSymbol,
@@ -48,6 +49,7 @@ except ModuleNotFoundError:  # pragma: no cover
       EnumType,
       NoneType,
       ArrayType,
+      MapType,
       ArenaType,
       ModuleType,
       VariableSymbol,
@@ -428,6 +430,8 @@ class TypeChecker:
       return resolved
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))
+    if isinstance(node, ArrayTypeNode):
+      return ArrayType(self._resolve_type_node(node.element_type))
     if isinstance(node, FunctionTypeNode):
       param_types = [self._resolve_type_node(t) for t in node.param_types]
       ret_types = self._resolve_return_types(node)
@@ -442,7 +446,10 @@ class TypeChecker:
     """Visit a node by dynamically calling its corresponding visit method."""
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
-    return visitor(node)
+    res = visitor(node)
+    if isinstance(node, ExprNode) and isinstance(res, Type):
+      node.inferred_type = res
+    return res
 
   def generic_visit(self, node: ASTNode) -> Any:
     """Default fallback when no specific visitor method is defined."""
@@ -646,6 +653,8 @@ class TypeChecker:
         if not expr_type.is_compatible(val_type):
           self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.")
         var_type = val_type
+        if isinstance(var_type, ArrayType) and isinstance(expr_type, ArrayType) and expr_type.size is not None and var_type.size is None:
+          var_type = ArrayType(var_type.element_type, size=expr_type.size)
       else:
         if isinstance(expr_type, NoneType):
           self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.")
@@ -761,6 +770,8 @@ class TypeChecker:
       index_type = self.visit(node.index)
       if index_type != PrimitiveType("int"):
         self.error("Array index must be of type 'int'.")
+
+      self._check_array_bounds(node, array_type)
 
       return array_type.element_type
 
@@ -1362,7 +1373,7 @@ class TypeChecker:
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:
       # Empty array defaults to [none] or [any] (we use NoneType)
-      return ArrayType(NoneType())
+      return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
     first_type = elem_types[0]
@@ -1370,20 +1381,85 @@ class TypeChecker:
       if not etype.is_compatible(first_type) and not first_type.is_compatible(etype):
         self.error("Inconsistent element types in array literal.")
         break
-    return ArrayType(first_type)
+    return ArrayType(first_type, size=len(node.elements))
+
+  def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
+    if not node.entries:
+      return MapType(NoneType(), NoneType())
+
+    first_key_type = self.visit(node.entries[0].key)
+    first_val_type = self.visit(node.entries[0].value)
+
+    def is_valid_key_type(ktype: Type) -> bool:
+      return (
+          (isinstance(ktype, PrimitiveType) and ktype.name in ("string", "int"))
+          or isinstance(ktype, EnumType)
+      )
+
+    if not is_valid_key_type(first_key_type):
+      self.error("Map key must be a string, int, or enum.")
+
+    for entry in node.entries[1:]:
+      ktype = self.visit(entry.key)
+      vtype = self.visit(entry.value)
+
+      if not is_valid_key_type(ktype):
+        self.error("Map key must be a string, int, or enum.")
+
+      if not ktype.is_compatible(first_key_type) and not first_key_type.is_compatible(ktype):
+        self.error("Inconsistent key types in map literal.")
+
+      if not vtype.is_compatible(first_val_type) and not first_val_type.is_compatible(vtype):
+        self.error("Inconsistent value types in map literal.")
+
+    return MapType(first_key_type, first_val_type)
+
+  def _get_const_int_value(self, expr: ASTNode) -> Optional[int]:
+    if isinstance(expr, LiteralNode) and expr.lit_type == "int":
+      return int(expr.value)
+    if (
+        isinstance(expr, UnaryOpNode)
+        and expr.op == "-"
+        and isinstance(expr.expr, LiteralNode)
+        and expr.expr.lit_type == "int"
+    ):
+      return -int(expr.expr.value)
+    return None
+
+  def _check_array_bounds(self, node: IndexExprNode, array_type: ArrayType) -> None:
+    const_idx = self._get_const_int_value(node.index)
+    if const_idx is not None:
+      size = array_type.size
+      if const_idx < 0:
+        self.error(f"Array index out of bounds: negative index '{const_idx}' is not allowed.")
+      elif size is not None and const_idx >= size:
+        self.error(f"Array index out of bounds: index {const_idx} is out of bounds for array of size {size}.")
+
+  def _check_map_literal_key(self, node: IndexExprNode) -> None:
+    if isinstance(node.array, MapLiteralNode) and isinstance(node.index, LiteralNode):
+      key_val = str(node.index.value)
+      for entry in node.array.entries:
+        if isinstance(entry.key, LiteralNode) and str(entry.key.value) == key_val:
+          return
+      self.error(f"Key '{key_val}' not found in map literal.")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> Type:
-    arr_type = self.visit(node.array)
+    container_type = self.visit(node.array)
     index_type = self.visit(node.index)
 
-    if not isinstance(arr_type, ArrayType):
+    if isinstance(container_type, ArrayType):
+      if index_type != PrimitiveType("int"):
+        self.error("Array index must be an 'int'.")
+      self._check_array_bounds(node, container_type)
+      return container_type.element_type
+    elif isinstance(container_type, MapType):
+      if not index_type.is_compatible(container_type.key_type) and not container_type.key_type.is_compatible(index_type):
+        self.error(f"Map index type '{index_type}' is not compatible with key type '{container_type.key_type}'.")
+      self._check_map_literal_key(node)
+      return container_type.value_type
+    else:
       self.error("Cannot index non-array type.")
       return PrimitiveType("none")
-
-    if index_type != PrimitiveType("int"):
-      self.error("Array index must be an 'int'.")
-
-    return arr_type.element_type
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:
     struct_type = self.symbol_table.lookup_type(node.struct_name)

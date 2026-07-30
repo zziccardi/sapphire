@@ -242,18 +242,51 @@ class NoneType(Type):
 
 
 class ArrayType(Type):
-  """Represents an array type (e.g. '[int]')."""
+  """Represents an array type (e.g. '[int]' or '[int; 3]')."""
 
-  def __init__(self, element_type: Type):
+  def __init__(self, element_type: Type, size: Optional[int] = None):
     self.element_type = element_type
+    self.size = size
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, ArrayType):
+      return self.element_type.is_compatible(other.element_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, ArrayType):
       return False
-    return self.element_type == other.element_type
+    return self.element_type == other.element_type and self.size == other.size
 
   def __repr__(self) -> str:
+    if self.size is not None:
+      return f"[{self.element_type}; {self.size}]"
     return f"[{self.element_type}]"
+
+
+class MapType(Type):
+  """Represents a map type (e.g. '[key_type: value_type]')."""
+
+  def __init__(self, key_type: Type, value_type: Type):
+    self.key_type = key_type
+    self.value_type = value_type
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, MapType):
+      return self.key_type.is_compatible(other.key_type) and self.value_type.is_compatible(other.value_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, MapType):
+      return False
+    return self.key_type == other.key_type and self.value_type == other.value_type
+
+  def __repr__(self) -> str:
+    return f"[{self.key_type}: {self.value_type}]"
 
 
 # ==========================================

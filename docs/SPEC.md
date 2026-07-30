@@ -108,6 +108,18 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
   ```
   let first = numbers[0];
   ```
+  * **Compile-time bounds-checking**: For arrays with compile-time known lengths (such as array literals or statically-initialized array variables), constant integer indices are checked at compile time. Negative indices (`index < 0`) or out-of-bounds indices (`index >= size`) produce a compile-time type-checking error.
+* **Map literals**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
+  ```
+  let scores = {"alice": 100, "bob": 95};
+  let config = {1: "low", 2: "high"};
+  let dir_speeds = {Direction.North: 10, Direction.South: 5};
+  ```
+* **Map indexing**: Values in a map are accessed by key using square brackets:
+  ```
+  let alice_score = scores["alice"];
+  ```
+  * **Compile-time key validation**: Indexing map literals directly with a constant literal key validates key existence at compile time; accessing a non-existent literal key emits a compile-time error.
 * **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
   ```
   let name = target?.get_name();

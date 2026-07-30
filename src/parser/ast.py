@@ -64,8 +64,12 @@ class OptionalTypeNode(TypeNode):
     self.base_type = base_type
 
 
-class FunctionTypeNode(TypeNode):
-  """Represents a function type signature (e.g. '(int, int) -> float')."""
+class ArrayTypeNode(TypeNode):
+  """Represents an array type wrapper (e.g. '[int]')."""
+
+  def __init__(self, element_type: TypeNode):
+    self.element_type = element_type
+
 
 class FunctionTypeNode(TypeNode):
   """Represents a function type signature (e.g. '(int, int) -> float' or '(int) -> (float, float)')."""
@@ -557,6 +561,21 @@ class ArrayLiteralNode(ExprNode):
 
   def __init__(self, elements: List[ASTNode]):
     self.elements = elements
+
+
+class MapEntryNode(ASTNode):
+  """Represents an entry in a map literal (key: value)."""
+
+  def __init__(self, key: ASTNode, value: ASTNode):
+    self.key = key
+    self.value = value
+
+
+class MapLiteralNode(ExprNode):
+  """Represents a map literal (e.g. '{"a": 1, "b": 2}')."""
+
+  def __init__(self, entries: List[MapEntryNode]):
+    self.entries = entries
 
 
 class IndexExprNode(ExprNode):
