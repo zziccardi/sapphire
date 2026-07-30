@@ -2131,7 +2131,59 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Left operand of '??' must be an optional type", str(ctx.exception))
 
+  def test_map_literal_type_checking(self):
+    """Verifies type checking for map literals, key type restrictions, homogeneity, and indexing."""
+    # 1. Valid string, int, and enum keyed maps
+    self._check("""
+    enum Direction { North, South }
 
+    func test() {
+      let string_map = {"alice": 100, "bob": 95,};
+      let int_map = {1: "low", 2: "high"};
+      let enum_map = {Direction.North: 10, Direction.South: 20};
+
+      let score: int = string_map["alice"];
+      let level: String = int_map[1];
+      let speed: int = enum_map[Direction.North];
+    }
+    """)
+
+    # 2. Invalid key type (boolean key)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {true: 1};
+      }
+      """)
+    self.assertIn("Map key must be a string, int, or enum.", str(ctx.exception))
+
+    # 3. Inconsistent key types (mixed int and string keys)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {"alice": 100, 2: 95};
+      }
+      """)
+    self.assertIn("Inconsistent key types in map literal.", str(ctx.exception))
+
+    # 4. Inconsistent value types (mixed int and string values)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {"alice": 100, "bob": "95"};
+      }
+      """)
+    self.assertIn("Inconsistent value types in map literal.", str(ctx.exception))
+
+    # 5. Map index type mismatch
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let string_map = {"alice": 100};
+        let val = string_map[123];
+      }
+      """)
+    self.assertIn("Map index type 'int' is not compatible with key type 'string'.", str(ctx.exception))
 
 
 if __name__ == "__main__":

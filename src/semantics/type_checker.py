@@ -23,6 +23,7 @@ try:
       EnumType,
       NoneType,
       ArrayType,
+      MapType,
       ArenaType,
       ModuleType,
       VariableSymbol,
@@ -48,6 +49,7 @@ except ModuleNotFoundError:  # pragma: no cover
       EnumType,
       NoneType,
       ArrayType,
+      MapType,
       ArenaType,
       ModuleType,
       VariableSymbol,
@@ -442,7 +444,10 @@ class TypeChecker:
     """Visit a node by dynamically calling its corresponding visit method."""
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
-    return visitor(node)
+    res = visitor(node)
+    if isinstance(node, ExprNode) and isinstance(res, Type):
+      node.inferred_type = res
+    return res
 
   def generic_visit(self, node: ASTNode) -> Any:
     """Default fallback when no specific visitor method is defined."""
@@ -1372,18 +1377,52 @@ class TypeChecker:
         break
     return ArrayType(first_type)
 
+  def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
+    if not node.entries:
+      return MapType(NoneType(), NoneType())
+
+    first_key_type = self.visit(node.entries[0].key)
+    first_val_type = self.visit(node.entries[0].value)
+
+    def is_valid_key_type(ktype: Type) -> bool:
+      return (
+          (isinstance(ktype, PrimitiveType) and ktype.name in ("string", "int"))
+          or isinstance(ktype, EnumType)
+      )
+
+    if not is_valid_key_type(first_key_type):
+      self.error("Map key must be a string, int, or enum.")
+
+    for entry in node.entries[1:]:
+      ktype = self.visit(entry.key)
+      vtype = self.visit(entry.value)
+
+      if not is_valid_key_type(ktype):
+        self.error("Map key must be a string, int, or enum.")
+
+      if not ktype.is_compatible(first_key_type) and not first_key_type.is_compatible(ktype):
+        self.error("Inconsistent key types in map literal.")
+
+      if not vtype.is_compatible(first_val_type) and not first_val_type.is_compatible(vtype):
+        self.error("Inconsistent value types in map literal.")
+
+    return MapType(first_key_type, first_val_type)
+
   def visit_IndexExprNode(self, node: IndexExprNode) -> Type:
-    arr_type = self.visit(node.array)
+    container_type = self.visit(node.array)
     index_type = self.visit(node.index)
 
-    if not isinstance(arr_type, ArrayType):
+    if isinstance(container_type, ArrayType):
+      if index_type != PrimitiveType("int"):
+        self.error("Array index must be an 'int'.")
+      return container_type.element_type
+    elif isinstance(container_type, MapType):
+      if not index_type.is_compatible(container_type.key_type) and not container_type.key_type.is_compatible(index_type):
+        self.error(f"Map index type '{index_type}' is not compatible with key type '{container_type.key_type}'.")
+      return container_type.value_type
+    else:
       self.error("Cannot index non-array type.")
       return PrimitiveType("none")
-
-    if index_type != PrimitiveType("int"):
-      self.error("Array index must be an 'int'.")
-
-    return arr_type.element_type
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:
     struct_type = self.symbol_table.lookup_type(node.struct_name)

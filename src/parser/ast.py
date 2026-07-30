@@ -559,6 +559,21 @@ class ArrayLiteralNode(ExprNode):
     self.elements = elements
 
 
+class MapEntryNode(ASTNode):
+  """Represents an entry in a map literal (key: value)."""
+
+  def __init__(self, key: ASTNode, value: ASTNode):
+    self.key = key
+    self.value = value
+
+
+class MapLiteralNode(ExprNode):
+  """Represents a map literal (e.g. '{"a": 1, "b": 2}')."""
+
+  def __init__(self, entries: List[MapEntryNode]):
+    self.entries = entries
+
+
 class IndexExprNode(ExprNode):
   """Represents an array indexing expression (e.g. 'arr[0]')."""
 

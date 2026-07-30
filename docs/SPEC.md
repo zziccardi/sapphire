@@ -108,6 +108,16 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
   ```
   let first = numbers[0];
   ```
+* **Map literals**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
+  ```
+  let scores = {"alice": 100, "bob": 95};
+  let config = {1: "low", 2: "high"};
+  let dir_speeds = {Direction.North: 10, Direction.South: 5};
+  ```
+* **Map indexing**: Values in a map are accessed by key using square brackets:
+  ```
+  let alice_score = scores["alice"];
+  ```
 * **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
   ```
   let name = target?.get_name();

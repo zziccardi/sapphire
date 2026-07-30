@@ -248,9 +248,18 @@ primaryExpression
     | IDENTIFIER
     | SELF
     | arrayLiteral
+    | mapLiteral
     | LPAREN expression RPAREN
     | structInitializer
     | matchExpression
+    ;
+
+mapLiteral
+    : LBRACE (mapEntry (COMMA mapEntry)* COMMA?)? RBRACE
+    ;
+
+mapEntry
+    : expression COLON expression
     ;
 
 structInitializer

@@ -18,12 +18,14 @@ try:
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
   from semantics.type_checker import TypeChecker, SemanticError
+  from semantics.symbol_table import MapType
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.semantics.type_checker import TypeChecker, SemanticError
+  from src.semantics.symbol_table import MapType
 
 
 # ==========================================
@@ -897,14 +899,29 @@ class LuaTranspiler:
       self.visit(elem)
     self.emit("}")
 
+  def visit_MapLiteralNode(self, node: MapLiteralNode) -> None:
+    self.emit("{")
+    for idx, entry in enumerate(node.entries):
+      if idx > 0:
+        self.emit(", ")
+      self.emit("[")
+      self.visit(entry.key)
+      self.emit("] = ")
+      self.visit(entry.value)
+    self.emit("}")
+
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
     self.visit(node.array)
     self.emit("[")
-    if isinstance(node.index, LiteralNode) and node.index.lit_type == "int":
-      self.emit(str(node.index.value + 1))
-    else:
+    is_map = isinstance(getattr(node.array, 'inferred_type', None), MapType)
+    if is_map:
       self.visit(node.index)
-      self.emit(" + 1")
+    else:
+      if isinstance(node.index, LiteralNode) and node.index.lit_type == "int":
+        self.emit(str(node.index.value + 1))
+      else:
+        self.visit(node.index)
+        self.emit(" + 1")
     self.emit("]")
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:

@@ -521,6 +521,8 @@ class ASTBuilder(SapphireVisitor):
       return node
     elif ctx.arrayLiteral():
       return self.visit(ctx.arrayLiteral())
+    elif ctx.mapLiteral():
+      return self.visit(ctx.mapLiteral())
     elif ctx.structInitializer():
       return self.visit(ctx.structInitializer())
     elif ctx.matchExpression():
@@ -546,6 +548,15 @@ class ASTBuilder(SapphireVisitor):
   def visitArrayLiteral(self, ctx: SapphireParser.ArrayLiteralContext) -> ArrayLiteralNode:
     elements = [self.visit(expr) for expr in ctx.expression()]
     return ArrayLiteralNode(elements)
+
+  def visitMapLiteral(self, ctx: SapphireParser.MapLiteralContext) -> MapLiteralNode:
+    entries = [self.visit(entry) for entry in ctx.mapEntry()] if ctx.mapEntry() else []
+    return MapLiteralNode(entries)
+
+  def visitMapEntry(self, ctx: SapphireParser.MapEntryContext) -> MapEntryNode:
+    key = self.visit(ctx.expression(0))
+    value = self.visit(ctx.expression(1))
+    return MapEntryNode(key, value)
 
   def visitStructInitializer(self, ctx: SapphireParser.StructInitializerContext) -> StructInitializerNode:
     struct_name = ctx.IDENTIFIER().getText()
