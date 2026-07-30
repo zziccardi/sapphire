@@ -2201,6 +2201,73 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Map key must be a string, int, or enum.", str(ctx.exception))
 
+  def test_array_compile_time_bounds_checking(self):
+    """Verifies compile-time bounds checking for array indexing."""
+    # 1. Out of bounds index on array literal
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let x = [10, 20, 30][3];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 3 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 2. Negative index on array literal
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let x = [10, 20, 30][-1];
+      }
+      """)
+    self.assertIn("Array index out of bounds: negative index '-1' is not allowed.", str(ctx.exception))
+
+    # 3. Out of bounds index on array variable
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let arr = [10, 20];
+        let val = arr[5];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 5 is out of bounds for array of size 2.", str(ctx.exception))
+
+    # 4. Out of bounds assignment to array variable
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        var arr = [1, 2, 3];
+        arr[10] = 50;
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 10 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 5. Valid constant indexing
+    self._check("""
+    func test() {
+      let arr = [10, 20, 30];
+      let first = arr[0];
+      let last = arr[2];
+    }
+    """)
+
+  def test_map_compile_time_key_validation(self):
+    """Verifies compile-time key checking for map literals."""
+    # 1. Missing key in map literal
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let val = {"alice": 100, "bob": 95}["charlie"];
+      }
+      """)
+    self.assertIn("Key 'charlie' not found in map literal.", str(ctx.exception))
+
+    # 2. Valid key in map literal
+    self._check("""
+    func test() {
+      let score = {"alice": 100, "bob": 95}["alice"];
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

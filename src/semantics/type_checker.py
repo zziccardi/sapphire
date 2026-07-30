@@ -651,6 +651,8 @@ class TypeChecker:
         if not expr_type.is_compatible(val_type):
           self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.")
         var_type = val_type
+        if isinstance(var_type, ArrayType) and isinstance(expr_type, ArrayType) and expr_type.size is not None and var_type.size is None:
+          var_type = ArrayType(var_type.element_type, size=expr_type.size)
       else:
         if isinstance(expr_type, NoneType):
           self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.")
@@ -766,6 +768,8 @@ class TypeChecker:
       index_type = self.visit(node.index)
       if index_type != PrimitiveType("int"):
         self.error("Array index must be of type 'int'.")
+
+      self._check_array_bounds(node, array_type)
 
       return array_type.element_type
 
@@ -1367,7 +1371,7 @@ class TypeChecker:
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:
       # Empty array defaults to [none] or [any] (we use NoneType)
-      return ArrayType(NoneType())
+      return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
     first_type = elem_types[0]
@@ -1375,7 +1379,7 @@ class TypeChecker:
       if not etype.is_compatible(first_type) and not first_type.is_compatible(etype):
         self.error("Inconsistent element types in array literal.")
         break
-    return ArrayType(first_type)
+    return ArrayType(first_type, size=len(node.elements))
 
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
     if not node.entries:
@@ -1408,6 +1412,51 @@ class TypeChecker:
 
     return MapType(first_key_type, first_val_type)
 
+  def _get_const_int_value(self, expr: ASTNode) -> Optional[int]:
+    if isinstance(expr, LiteralNode) and expr.lit_type == "int":
+      try:
+        return int(expr.value)
+      except (ValueError, TypeError):
+        return None
+    if (
+        isinstance(expr, UnaryOpNode)
+        and expr.op == "-"
+        and isinstance(expr.expr, LiteralNode)
+        and expr.expr.lit_type == "int"
+    ):
+      try:
+        return -int(expr.expr.value)
+      except (ValueError, TypeError):
+        return None
+    return None
+
+  def _check_array_bounds(self, node: IndexExprNode, array_type: ArrayType) -> None:
+    const_idx = self._get_const_int_value(node.index)
+    if const_idx is not None:
+      size = array_type.size
+      if size is None and isinstance(node.array, ArrayLiteralNode):
+        size = len(node.array.elements)
+      elif size is None and isinstance(node.array, IdentifierNode):
+        sym = self.symbol_table.lookup(node.array.name)
+        if sym and isinstance(sym.type, ArrayType):
+          size = sym.type.size
+
+      if const_idx < 0:
+        self.error(f"Array index out of bounds: negative index '{const_idx}' is not allowed.")
+      elif size is not None and const_idx >= size:
+        self.error(f"Array index out of bounds: index {const_idx} is out of bounds for array of size {size}.")
+
+  def _check_map_literal_key(self, node: IndexExprNode) -> None:
+    if isinstance(node.array, MapLiteralNode) and isinstance(node.index, LiteralNode):
+      key_val = str(node.index.value)
+      found = False
+      for entry in node.array.entries:
+        if isinstance(entry.key, LiteralNode) and str(entry.key.value) == key_val:
+          found = True
+          break
+      if not found:
+        self.error(f"Key '{key_val}' not found in map literal.")
+
   def visit_IndexExprNode(self, node: IndexExprNode) -> Type:
     container_type = self.visit(node.array)
     index_type = self.visit(node.index)
@@ -1415,10 +1464,12 @@ class TypeChecker:
     if isinstance(container_type, ArrayType):
       if index_type != PrimitiveType("int"):
         self.error("Array index must be an 'int'.")
+      self._check_array_bounds(node, container_type)
       return container_type.element_type
     elif isinstance(container_type, MapType):
       if not index_type.is_compatible(container_type.key_type) and not container_type.key_type.is_compatible(index_type):
         self.error(f"Map index type '{index_type}' is not compatible with key type '{container_type.key_type}'.")
+      self._check_map_literal_key(node)
       return container_type.value_type
     else:
       self.error("Cannot index non-array type.")

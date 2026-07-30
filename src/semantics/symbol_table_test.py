@@ -84,9 +84,14 @@ class TestSymbolTable(unittest.TestCase):
     """Verifies assignment compatibility of array types."""
     arr_int = ArrayType(self.int_type)
     arr_float = ArrayType(self.float_type)
+    arr_int_size = ArrayType(self.int_type, size=3)
 
     self.assertEqual(arr_int, ArrayType(self.int_type))
     self.assertNotEqual(arr_int, arr_float)
+    self.assertEqual(arr_int_size, ArrayType(self.int_type, size=3))
+    self.assertNotEqual(arr_int, arr_int_size)
+    self.assertTrue(arr_int_size.is_compatible(arr_int))
+    self.assertTrue(arr_int.is_compatible(arr_int_size))
 
   def test_lexical_scoping(self):
     """Verifies that nested scopes resolve identifiers and support shadowing."""
@@ -161,6 +166,8 @@ class TestSymbolTable(unittest.TestCase):
     # ArrayType repr and non-equality
     arr = ArrayType(self.int_type)
     self.assertEqual(repr(arr), "[int]")
+    arr_sized = ArrayType(self.int_type, size=5)
+    self.assertEqual(repr(arr_sized), "[int; 5]")
     self.assertFalse(arr == self.int_type)
 
     # EnumType __eq__, __repr__, and compatibility

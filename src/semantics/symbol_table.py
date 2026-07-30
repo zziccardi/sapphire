@@ -242,17 +242,27 @@ class NoneType(Type):
 
 
 class ArrayType(Type):
-  """Represents an array type (e.g. '[int]')."""
+  """Represents an array type (e.g. '[int]' or '[int; 3]')."""
 
-  def __init__(self, element_type: Type):
+  def __init__(self, element_type: Type, size: Optional[int] = None):
     self.element_type = element_type
+    self.size = size
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, ArrayType):
+      return self.element_type.is_compatible(other.element_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, ArrayType):
       return False
-    return self.element_type == other.element_type
+    return self.element_type == other.element_type and self.size == other.size
 
   def __repr__(self) -> str:
+    if self.size is not None:
+      return f"[{self.element_type}; {self.size}]"
     return f"[{self.element_type}]"
 
 
