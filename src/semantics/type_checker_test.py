@@ -2185,6 +2185,22 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Map index type 'int' is not compatible with key type 'string'.", str(ctx.exception))
 
+    # 6. Empty map literal
+    self._check("""
+    func test() {
+      let empty_map = {};
+    }
+    """)
+
+    # 7. Invalid key type on subsequent entry
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let bad_map = {"alice": 100, true: 200};
+      }
+      """)
+    self.assertIn("Map key must be a string, int, or enum.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

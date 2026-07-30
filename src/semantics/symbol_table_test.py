@@ -213,6 +213,26 @@ class TestSymbolTable(unittest.TestCase):
     self.assertEqual(mod_sym.lookup_export("x"), sym_x)
     self.assertIsNone(mod_sym.lookup_export("y"))
 
+  def test_map_type_methods(self):
+    """Verifies MapType __eq__, __repr__, and is_compatible methods."""
+    try:
+      from semantics.symbol_table import MapType, PrimitiveType, OptionalType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import MapType, PrimitiveType, OptionalType
+
+    m1 = MapType(PrimitiveType("string"), PrimitiveType("int"))
+    m2 = MapType(PrimitiveType("string"), PrimitiveType("int"))
+    m3 = MapType(PrimitiveType("int"), PrimitiveType("int"))
+
+    self.assertEqual(m1, m2)
+    self.assertNotEqual(m1, m3)
+    self.assertFalse(m1 == "not a MapType")
+    self.assertEqual(repr(m1), "[string: int]")
+
+    self.assertTrue(m1.is_compatible(m2))
+    self.assertTrue(m1.is_compatible(OptionalType(m2)))
+    self.assertFalse(m1.is_compatible(PrimitiveType("int")))
+
 
 if __name__ == "__main__":
   unittest.main()
