@@ -2261,18 +2261,35 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Key 'charlie' not found in map literal.", str(ctx.exception))
 
+    # 2. Valid key in map literal
+    self._check("""
+    func test() {
+      let score = {"alice": 100, "bob": 95}["alice"];
+    }
+    """)
+
   def test_array_type_node_resolution_and_none_inference(self):
     """Verifies ArrayTypeNode resolution and error when inferring type from none alone."""
     try:
-      from parser.ast import ArrayTypeNode, BasicTypeNode
+      from parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
       from semantics.symbol_table import ArrayType, PrimitiveType
     except ModuleNotFoundError:
-      from src.parser.ast import ArrayTypeNode, BasicTypeNode
+      from src.parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
       from src.semantics.symbol_table import ArrayType, PrimitiveType
 
     checker = TypeChecker()
     res = checker._resolve_type_node(ArrayTypeNode(BasicTypeNode("int")))
     self.assertEqual(res, ArrayType(PrimitiveType("int")))
+
+    var_decl = VarDeclNode(
+        is_mutable=False,
+        names=["arr"],
+        val_types=[ArrayTypeNode(BasicTypeNode("int"))],
+        exprs=[ArrayLiteralNode([LiteralNode(10, "int"), LiteralNode(20, "int")])],
+    )
+    checker.visit_VarDeclNode(var_decl)
+    sym = checker.symbol_table.lookup("arr")
+    self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2))
 
     with self.assertRaises(SemanticError) as ctx:
       self._check("""

@@ -1438,13 +1438,10 @@ class TypeChecker:
   def _check_map_literal_key(self, node: IndexExprNode) -> None:
     if isinstance(node.array, MapLiteralNode) and isinstance(node.index, LiteralNode):
       key_val = str(node.index.value)
-      found = False
       for entry in node.array.entries:
         if isinstance(entry.key, LiteralNode) and str(entry.key.value) == key_val:
-          found = True
-          break
-      if not found:
-        self.error(f"Key '{key_val}' not found in map literal.")
+          return
+      self.error(f"Key '{key_val}' not found in map literal.")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> Type:
     container_type = self.visit(node.array)
