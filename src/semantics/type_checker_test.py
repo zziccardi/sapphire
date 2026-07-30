@@ -2263,7 +2263,13 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_array_type_node_resolution_and_none_inference(self):
     """Verifies ArrayTypeNode resolution and error when inferring type from none alone."""
-    from src.parser.ast import ArrayTypeNode, BasicTypeNode
+    try:
+      from parser.ast import ArrayTypeNode, BasicTypeNode
+      from semantics.symbol_table import ArrayType, PrimitiveType
+    except ModuleNotFoundError:
+      from src.parser.ast import ArrayTypeNode, BasicTypeNode
+      from src.semantics.symbol_table import ArrayType, PrimitiveType
+
     checker = TypeChecker()
     res = checker._resolve_type_node(ArrayTypeNode(BasicTypeNode("int")))
     self.assertEqual(res, ArrayType(PrimitiveType("int")))
