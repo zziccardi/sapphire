@@ -9,7 +9,7 @@ import lib.love2d.timer;
 export {
   LoveEngine,
   love,
-};
+}
 
 struct LoveEngine {
   var graphics: graphics.Graphics;

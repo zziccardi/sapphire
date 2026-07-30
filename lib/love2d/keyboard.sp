@@ -2,7 +2,7 @@
 
 export {
   Keyboard,
-};
+}
 
 trait Keyboard {
   func isDown(key: String): bool;

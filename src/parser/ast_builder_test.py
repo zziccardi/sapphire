@@ -334,7 +334,7 @@ class TestASTBuilder(unittest.TestCase):
       Image,
       new_image as create_image,
       enums.DrawMode as mode,
-    };
+    }
 
     struct Image {
       var handle: int;
@@ -360,9 +360,18 @@ class TestASTBuilder(unittest.TestCase):
     """Verifies that multiple export blocks raise a SyntaxError."""
     with self.assertRaises(SyntaxError):
       self._get_ast("""
-      export { A };
-      export { B };
+      export { A }
+      export { B }
       """)
+
+  def test_export_semicolon_error(self):
+    """Verifies that an export block with a trailing semicolon causes a syntax error."""
+    input_stream = InputStream("export { A };")
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    parser.program()
+    self.assertGreater(parser.getNumberOfSyntaxErrors(), 0)
 
 
   def test_match_expression_ast(self):

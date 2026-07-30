@@ -170,7 +170,7 @@ class TestSymbolTable(unittest.TestCase):
     self.assertFalse(e1 == e2)
     self.assertFalse(e1 == "not an EnumType")
     self.assertEqual(repr(e1), "Color")
-    self.assertTrue(self.int_type.is_compatible(e1))
+    self.assertFalse(self.int_type.is_compatible(e1))
     self.assertTrue(e1.is_compatible(self.int_type))
 
   def test_multi_return_type_methods(self):

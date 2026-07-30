@@ -1,6 +1,5 @@
 // Sapphire Love2D bindings -- string enums
 
-// TODO: Determine if it makes sense for export blocks to require semicolons.
 export {
   DrawMode,
   FilterMode,
@@ -8,7 +7,7 @@ export {
   AlignMode,
   ArcMode,
   KeyCode,
-};
+}
 
 enum DrawMode {
   Fill = "fill",

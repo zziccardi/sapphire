@@ -1104,7 +1104,7 @@ func create_player() {}
 export {
   create_player,
   e.DrawMode,
-};
+}
 
 func main() {
   let mode = e.DrawMode;

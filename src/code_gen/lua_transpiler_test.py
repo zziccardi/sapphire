@@ -609,7 +609,7 @@ class TestLuaTranspiler(unittest.TestCase):
       Player,
       create_player,
       enums.DrawMode,
-    };
+    }
 
     struct Player {
       var name: String;
@@ -634,7 +634,7 @@ class TestLuaTranspiler(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       sub_sp = os.path.join(tmpdir, "sub.sp")
       with open(sub_sp, "w") as f:
-        f.write("import main;\nexport { item }; let item = 42;\n")
+        f.write("import main;\nexport { item } let item = 42;\n")
 
       main_sp = os.path.join(tmpdir, "main.sp")
       with open(main_sp, "w") as f:
