@@ -242,15 +242,17 @@ if let active_target ?= target {
 ### Semicolon-separated init statements
 Both `if` and `while` statement headers support declaring an init statement
 before the condition, separated by a semicolon. This is useful for limiting the
-scope of helper variables or combining unwrapping with other checks:
+scope of helper variables or combining unwrapping with other checks. The init
+statement evaluates **once** before entering the block or loop, while the loop
+condition to the right of the semicolon is re-evaluated on each iteration:
 
 ```
 if let active_target ?= target; active_target.health > 50 {
-  // `active_target` is unwrapped and its health is guaranteed > 50
+  // `active_target` is unwrapped once and its health is checked
 }
 
 while let score = get_score(); score < 100 {
-  // loops while score is less than 100
+  // `score` is initialized once; `score < 100` is re-evaluated ever iteration
 }
 ```
 
@@ -336,6 +338,7 @@ Functions are first-class citizens. To avoid double-colon confusion, function ty
 ```
 // Function type declaration
 var math_op: (int, int) -> int;
+var callback: (String) -> void;  // `void` is an alias for `none`
 ```
 
 ### Anonymous functions (lambdas)
@@ -562,14 +565,8 @@ Traits define behavioral contracts without prescribing physical memory layout.
 They are resolved entirely at compile time through monomorphization, ensuring
 zero runtime overhead.
 
-* **Explicit `self` for instance methods**: Trait method signatures can specify
-  an explicit first `self` parameter (which may be `var self` for mutable
-  access). The presence of `self` designates the method as an
-  **instance method**. This is mostly useful for interoperability with external
-  environments (e.g. transpiled using Lua colon syntax `:draw(x, y)`).
-* **Module / Static Functions**: Omitting `self` from a trait method signature
-  designates it as a **module or static function** (e.g. transpiled using Lua
-  dot syntax `.rectangle(...)`).
+* **Implicit and explicit `self` for instance methods**: Non-static trait methods implicitly operate on `self` when implemented. In standard Sapphire code, the explicit `self` parameter can be omitted in trait declarations. Specifying an explicit first `self` parameter (which may be `var self` for mutable access) is primarily used when creating bindings for external host libraries (like Love2D) to explicitly designate instance methods that transpile to colon syntax in Lua (e.g. `:draw(x, y)`).
+* **Module/static functions**: For external host bindings, omitting `self` from a trait method signature designates it as a module or static function (e.g. transpiling to Lua dot syntax `.rectangle(...)`).
 
 ```
 // Resource-handle trait (instance methods)

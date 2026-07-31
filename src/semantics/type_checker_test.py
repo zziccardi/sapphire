@@ -2299,6 +2299,21 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot infer type of 'x' from 'none' alone.", str(ctx.exception))
 
+  def test_clone_shadow_let_field(self):
+    self._check("""
+    proto Hero {
+      let id: int;
+      var hp: int;
+    }
+    func test() {
+      let base = Hero { id = 1, hp = 100 };
+      let cloned = clone base {
+        self.id = 2;
+        self.hp = 90;
+      };
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

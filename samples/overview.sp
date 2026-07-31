@@ -30,7 +30,8 @@ proto Entity {
   let id: int;
 }
 
-// Inherits Entity physical layout at compile-time
+// Inherits Entity fields and behavior via syntactic delegation at
+// compile-time
 proto Character: Entity {
   var health: int;
   var max_health: int;

@@ -249,9 +249,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code5 = self._transpile(code5)
-    self.assertIn("while true do", lua_code5)
     self.assertIn("local x = count", lua_code5)
-    self.assertIn("if not ((x > 0)) then", lua_code5)
+    self.assertIn("while (x > 0) do", lua_code5)
 
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
@@ -784,6 +783,19 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('scores["alice"]', lua_out)
     self.assertNotIn('scores["alice"] + 1', lua_out)
     self.assertIn('arr[1]', lua_out)  # Array indexing still gets + 1!
+
+  def test_lua_while_non_unwrap_init_statement(self):
+    """Verifies that Lua transpilation emits non-unwrapping while init-statements once before the loop."""
+    code = """
+    func test_while() {
+      while let x = count; count > 0 {
+        count = 0;
+      }
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("local x = count", lua_out)
+    self.assertIn("while (count > 0) do", lua_out)
 
 
 if __name__ == "__main__":

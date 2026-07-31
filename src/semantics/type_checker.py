@@ -77,6 +77,7 @@ class TypeChecker:
     self.current_function: Optional[FunctionType] = None
     self.current_struct: Optional[StructType] = None
     self.is_in_init: bool = False
+    self.is_in_clone_init: bool = False
     self.initialized_fields: set = set()
     self.expected_type: Optional[Type] = None
     self.current_function_scope = None
@@ -741,10 +742,10 @@ class TypeChecker:
         return PrimitiveType("none")
 
       # Check field mutability or constructor exemption
-      # Inside __init__, self fields are always assignable (even if immutable let fields)
+      # Inside __init__ or clone blocks, self fields are always assignable (even if immutable let fields)
       is_self = isinstance(node.receiver, IdentifierNode) and node.receiver.name == "self"
       if not field.is_mutable:
-        if not (self.is_in_init and is_self):
+        if not ((self.is_in_init or self.is_in_clone_init) and is_self):
           self.error(f"Cannot assign to constant field '{node.member}' of '{receiver_type.name}'.")
 
       # Verify self constness
@@ -1321,10 +1322,13 @@ class TypeChecker:
     # If immediate shadow block is defined, check statements
     if node.initializer_block:
       self.symbol_table.enter_scope()
+      old_clone_init = self.is_in_clone_init
+      self.is_in_clone_init = True
       # Define self inside block as mutable
       self.symbol_table.define("self", VariableSymbol("self", expr_type, is_mutable=True))
       for stmt in node.initializer_block:
         self.visit(stmt)
+      self.is_in_clone_init = old_clone_init
       self.symbol_table.exit_scope()
 
     return expr_type
