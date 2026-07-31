@@ -51,6 +51,94 @@ The `String` type represents textual data encoded in UTF-8.
 * **Immutability**: Strings in Sapphire are immutable once instantiated. String operations produce new string instances rather than mutating existing data.
 * **Enum interoperability**: Sapphire supports asymmetric string enum coercion. Any variant of a native `String` enum implicitly coerces to a `String` variable or parameter, whereas direct conversion from `String` to an enum variant is prohibited without explicit handling.
 
+#### Built-in methods
+
+Sapphire provides standard methods on `String` instances. Methods that do not find a match return `none` via optional types (`T?`) rather than throwing exceptions or returning sentinel values like `-1`.
+
+| Method signature | Description |
+| :--- | :--- |
+| `size(): int` | Returns the number of characters in the string. |
+| `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
+| `lower(): String` | Returns a new string with characters converted to lowercase. |
+| `upper(): String` | Returns a new string with characters converted to uppercase. |
+| `strip(chars: String? = none): String` | Returns a copy with leading & trailing whitespace (or characters in `chars`) removed. |
+| `split(sep: String? = none): [String]`  | Splits the string by `sep` delimiter into an array of substrings. |
+| `contains(sub: String): bool` | Returns `true` if `sub` is present within the string. |
+| `find(sub: String, start: int = 0, reverse: bool = false): int?` | Searches for `sub` and returns its index, or `none` if not found. |
+
+##### Detailed method behavior
+
+* **`size(): int`**
+
+  Returns the length of the string in characters (codepoints).
+  ```sapphire
+  let len = "Hello".size();  // 5
+  ```
+
+* **`empty(): bool`**
+
+  Returns `true` if the string length is zero (`size() == 0`).
+  ```sapphire
+  let is_blank = "".empty();  // true
+  ```
+
+* **`lower(): String`**
+
+  Returns a new string with all uppercase ASCII/Unicode characters converted to lowercase.
+  ```sapphire
+  let lower_str = "SAPPHIRE".lower();  // "sapphire"
+  ```
+
+* **`upper(): String`**
+
+  Returns a new string with all lowercase ASCII/Unicode characters converted to uppercase.
+  ```sapphire
+  let upper_str = "sapphire".upper();  // "SAPPHIRE"
+  ```
+
+* **`strip(chars: String? = none): String`**
+
+  Strips leading and trailing whitespace characters (`' '`, `'\t'`, `'\n'`, `'\r'`) when `chars` is `none`. If `chars` is specified, strips any characters listed in `chars` from both ends of the string.
+  ```sapphire
+  let clean = "  hello  ".strip();  // "hello"
+  let trimmed = "///path///".strip("/");  // "path"
+  ```
+
+* **`split(sep: String? = none): [String]`**
+
+  Splits the string into an array of substrings using `sep` as the delimiter.
+  * If `sep` is `none` (default), splits on runs of whitespace.
+  * If `sep` is `""`, splits the string into individual character substrings.
+  ```sapphire
+  // ["apple", "banana", "cherry"]
+  let parts = "apple,banana,cherry".split(",");
+
+  let words = "hello world".split();  // ["hello", "world"]
+  ```
+
+* **`contains(sub: String): bool`**
+
+  Returns `true` if `sub` exists as a substring anywhere within the string. An empty `sub` (`""`) always returns `true`.
+  ```sapphire
+  let has_word = "hello world".contains("world");  // true
+  ```
+
+* **`find(sub: String, start: int = 0, reverse: bool = false): int?`**
+
+  Searches for `sub` starting at index `start`.
+  * When `reverse` is `false` (default), searches forward from left to right.
+  * When `reverse` is `true`, searches backward from right to left.
+  * Returns the 0-based integer index if found; returns `none` if `sub` is not present.
+  ```sapphire
+  let text = "hello world";
+  if let pos ?= text.find("o") {
+    print("Found 'o' at index: " + pos);  // 4
+  }
+
+  let last_o = text.find("o", reverse = true);  // 7
+  let missing = text.find("xyz");  // none
+  ```
+
 #### Operations and capabilities
 
 | Operation | Syntax / example | Description |
@@ -73,6 +161,14 @@ let message = "System initialized";
 let full_log = "[" + prefix + "] " + message;
 
 print(full_log);
+
+// Using built-in string methods
+let raw_input = "  USER_NAME  ";
+let clean_name = raw_input.strip().lower();  // "user_name"
+
+if let index ?= clean_name.find("name") {
+  print("Found 'name' at index: " + index);
+}
 ```
 
 ### Array
