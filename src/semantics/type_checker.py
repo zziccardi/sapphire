@@ -547,7 +547,8 @@ class TypeChecker:
         return PrimitiveType("none")
       if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
         resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
-        return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
+        if not any(isinstance(t, GenericTypeParameter) for t in resolved_type_args):
+          return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
       return resolved
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))

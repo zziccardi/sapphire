@@ -10,6 +10,7 @@ try:
   from semantics.type_checker import TypeChecker, SemanticError
   from semantics.symbol_table import GenericTypeParameter, StructType, TraitType, PrimitiveType
   from code_gen.python_transpiler import PythonTranspiler
+  from code_gen.lua_transpiler import LuaTranspiler
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
@@ -17,6 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.semantics.type_checker import TypeChecker, SemanticError
   from src.semantics.symbol_table import GenericTypeParameter, StructType, TraitType, PrimitiveType
   from src.code_gen.python_transpiler import PythonTranspiler
+  from src.code_gen.lua_transpiler import LuaTranspiler
 
 
 class TestGenerics(unittest.TestCase):
@@ -53,9 +55,10 @@ class TestGenerics(unittest.TestCase):
     }
     """
     ast = self._check(code)
-    transpiler = PythonTranspiler()
-    py_code = transpiler.transpile(ast)
+    py_code = PythonTranspiler().transpile(ast)
     self.assertIn("class Box__int", py_code)
+    lua_code = LuaTranspiler().transpile(ast)
+    self.assertIn("Box__int", lua_code)
 
   def test_generic_function_inference(self):
     """Verifies contextual inference for generic function arguments."""
@@ -71,10 +74,12 @@ class TestGenerics(unittest.TestCase):
     }
     """
     ast = self._check(code)
-    transpiler = PythonTranspiler()
-    py_code = transpiler.transpile(ast)
+    py_code = PythonTranspiler().transpile(ast)
     self.assertIn("def identity__int", py_code)
     self.assertIn("def identity__float", py_code)
+    lua_code = LuaTranspiler().transpile(ast)
+    self.assertIn("function identity__int", lua_code)
+    self.assertIn("function identity__float", lua_code)
 
   def test_generic_struct_initializer(self):
     """Verifies struct initializers with generic type arguments."""
@@ -92,9 +97,10 @@ class TestGenerics(unittest.TestCase):
     }
     """
     ast = self._check(code)
-    transpiler = PythonTranspiler()
-    py_code = transpiler.transpile(ast)
+    py_code = PythonTranspiler().transpile(ast)
     self.assertIn("class Pair__string_int", py_code)
+    lua_code = LuaTranspiler().transpile(ast)
+    self.assertIn("Pair__string_int", lua_code)
 
   def test_generic_trait_declaration_and_impl_variations(self):
     """Verifies generic trait declarations and impl syntax variations."""
