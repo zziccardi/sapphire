@@ -153,7 +153,7 @@ class TestPythonTranspiler(unittest.TestCase):
     func run_standard_while(): int {
       var out = 0;
       var count = 5;
-      while let x = count; x > 0 {
+      while let x = count; count > 0 {
         out += x;
         count = 0; // terminate loop
       }
@@ -945,16 +945,19 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies that a while loop with a non-unwrapping init statement executes the init statement once before entering the loop."""
     code = """
     func test_while(): int {
-      var sum = 0;
-      while var i = 0; i < 3 {
-        sum += i;
-        i += 1;
+      var out = 0;
+      var count = 5;
+      while let x = count; count > 0 {
+        out += x;
+        count = 0;
       }
-      return sum;
+      return out;
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("i = 0\nwhile (i < 3):", py_code)
+    self.assertIn("x = count\nwhile (count > 0):", py_code)
+    res = self._transpile_and_run(code, "test_while()")
+    self.assertEqual(res, 5)
 
   def test_cow_live_prototype_update(self):
     """Verifies that reading a nested reference on a clone does not break live prototype delegation until a write occurs."""

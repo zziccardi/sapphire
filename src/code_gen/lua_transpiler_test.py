@@ -789,13 +789,13 @@ class TestLuaTranspiler(unittest.TestCase):
     """Verifies that Lua transpilation emits non-unwrapping while init-statements once before the loop."""
     code = """
     func test_while() {
-      while var i = 0; i < 3 {
-        i += 1;
+      while let x = count; count > 0 {
+        count = 0;
       }
     }
     """
     lua_out = self._transpile(code)
-    self.assertIn("local i = 0\nwhile i < 3 do", lua_out)
+    self.assertIn("local x = count\nwhile count > 0 do", lua_out)
 
 
 if __name__ == "__main__":

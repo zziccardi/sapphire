@@ -242,15 +242,17 @@ if let active_target ?= target {
 ### Semicolon-separated init statements
 Both `if` and `while` statement headers support declaring an init statement
 before the condition, separated by a semicolon. This is useful for limiting the
-scope of helper variables or combining unwrapping with other checks:
+scope of helper variables or combining unwrapping with other checks. The init
+statement evaluates **once** before entering the block or loop, while the loop
+condition to the right of the semicolon is re-evaluated on each iteration:
 
 ```
 if let active_target ?= target; active_target.health > 50 {
-  // `active_target` is unwrapped and its health is guaranteed > 50
+  // `active_target` is unwrapped once and its health is checked
 }
 
 while let score = get_score(); score < 100 {
-  // loops while score is less than 100
+  // `score` is initialized once; `score < 100` is re-evaluated ever iteration
 }
 ```
 
