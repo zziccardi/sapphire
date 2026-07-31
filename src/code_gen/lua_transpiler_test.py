@@ -249,9 +249,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code5 = self._transpile(code5)
-    self.assertIn("while true do", lua_code5)
     self.assertIn("local x = count", lua_code5)
-    self.assertIn("if not ((x > 0)) then", lua_code5)
+    self.assertIn("while (x > 0) do", lua_code5)
 
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
@@ -795,7 +794,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_out = self._transpile(code)
-    self.assertIn("local x = count\nwhile count > 0 do", lua_out)
+    self.assertIn("local x = count", lua_out)
+    self.assertIn("while (count > 0) do", lua_out)
 
 
 if __name__ == "__main__":

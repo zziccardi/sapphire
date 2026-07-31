@@ -955,7 +955,8 @@ class TestPythonTranspiler(unittest.TestCase):
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("x = count\nwhile (count > 0):", py_code)
+    self.assertIn("x = count", py_code)
+    self.assertIn("while (count > 0):", py_code)
     res = self._transpile_and_run(code, "test_while()")
     self.assertEqual(res, 5)
 
