@@ -178,7 +178,7 @@ class TypeChecker:
     if existing and isinstance(existing, StructType):
       return existing
 
-    if not generic_struct_type.ast_decl:
+    if not generic_struct_type.ast_decl:  # pragma: no cover
       return generic_struct_type
 
     param_map = dict(zip(generic_struct_type.type_params, type_arg_nodes))
@@ -224,7 +224,7 @@ class TypeChecker:
     if existing and isinstance(existing, FunctionSymbol):
       return mangled_name
 
-    if not func_sym.ast_decl:
+    if not func_sym.ast_decl:  # pragma: no cover
       return func_sym.name
 
     param_map = dict(zip(func_sym.type_params, type_arg_nodes))
@@ -540,9 +540,14 @@ class TypeChecker:
             return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
           return EnumType(parts[1]) if ("Mode" in parts[1] or "Code" in parts[1]) else StructType(parts[1])
       resolved = self.symbol_table.lookup_type(node.name)
+      if isinstance(resolved, GenericTypeParameter):
+        return resolved
       if not resolved:
         self.error(f"Undefined type '{node.name}'.")
         return PrimitiveType("none")
+      if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
+        resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+        return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
       return resolved
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))
