@@ -53,6 +53,72 @@ class Arena:
 
 _DEFAULT_ARENA = Arena()
 
+class _LazyCoWProxy:
+  def __init__(self, parent, name, target):
+    super().__setattr__('_parent', parent)
+    super().__setattr__('_name', name)
+    super().__setattr__('_target', target)
+
+  def _get_active(self):
+    parent = super().__getattribute__('_parent')
+    name = super().__getattribute__('_name')
+    if hasattr(parent, '__shadow__') and name in parent.__shadow__:
+      return parent.__shadow__[name]
+    return super().__getattribute__('_target')
+
+  def __getattr__(self, name):
+    active = self._get_active()
+    return getattr(active, name)
+
+  def __setattr__(self, name, value):
+    parent = super().__getattribute__('_parent')
+    attr_name = super().__getattribute__('_name')
+    if hasattr(parent, '__shadow__') and attr_name not in parent.__shadow__:
+      target = super().__getattribute__('_target')
+      if hasattr(target, 'clone'):
+        cow_val = target.clone()
+      else:
+        cow_val = copy.deepcopy(target)
+      parent.__shadow__[attr_name] = cow_val
+      target_obj = cow_val
+    else:
+      target_obj = parent.__shadow__[attr_name] if hasattr(parent, '__shadow__') else parent
+    setattr(target_obj, name, value)
+
+  def __getitem__(self, key):
+    active = self._get_active()
+    val = active[key]
+    if not isinstance(val, (int, float, bool, str, type(None))):
+      return _LazyCoWProxy(active, key, val)
+    return val
+
+  def __setitem__(self, key, value):
+    parent = super().__getattribute__('_parent')
+    attr_name = super().__getattribute__('_name')
+    if hasattr(parent, '__shadow__') and attr_name not in parent.__shadow__:
+      target = super().__getattribute__('_target')
+      if hasattr(target, 'clone'):
+        cow_val = target.clone()
+      else:
+        cow_val = copy.deepcopy(target)
+      parent.__shadow__[attr_name] = cow_val
+      target_obj = cow_val
+    else:
+      target_obj = parent.__shadow__[attr_name]
+    target_obj[key] = value
+
+  def __len__(self):
+    return len(self._get_active())
+
+  def __iter__(self):
+    return iter(self._get_active())
+
+  def __repr__(self):
+    return repr(self._get_active())
+
+  def __str__(self):
+    return str(self._get_active())
+
 class SapphireObject:
   def __init__(self, proto=None):
     super().__setattr__('__proto__', proto)
@@ -76,12 +142,7 @@ class SapphireObject:
     if self.__proto__ is not None:
       val = getattr(self.__proto__, name)
       if not isinstance(val, (int, float, bool, str, type(None))):
-        if hasattr(val, 'clone'):
-          cow_val = val.clone()
-        else:
-          cow_val = copy.deepcopy(val)
-        self.__shadow__[name] = cow_val
-        return cow_val
+        return _LazyCoWProxy(self, name, val)
       return val
     raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
 
@@ -610,11 +671,11 @@ class PythonTranspiler:
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.newline()
     if node.init_binding:
-      self.emit("while True:")
-      self.indent()
-      self.newline()
       let_name = node.init_binding.let_name
       if node.init_binding.is_unwrap:
+        self.emit("while True:")
+        self.indent()
+        self.newline()
         val_var = f"_val_{let_name}"
         self.emit(f"{val_var} = ")
         self.visit(node.init_binding.expr)
@@ -639,21 +700,19 @@ class PythonTranspiler:
         self.dedent()
         self.newline()
         self.emit(f"{let_name} = {val_var}")
+        self.visit(node.block)
+        self.dedent()
       else:
-        # Standard bind + condition
+        # Standard init-statement: execute once before loop begins
         self.emit(f"{let_name} = ")
         self.visit(node.init_binding.expr)
         self.newline()
-        self.emit("if not (")
+        self.emit("while ")
         self.visit(node.condition)
-        self.emit("):")
+        self.emit(":")
         self.indent()
-        self.newline()
-        self.emit("break")
+        self.visit(node.block)
         self.dedent()
-
-      self.visit(node.block)
-      self.dedent()
     else:
       self.emit("while ")
       self.visit(node.condition)

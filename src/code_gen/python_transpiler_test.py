@@ -941,6 +941,45 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "get_score()")
     self.assertEqual(res, 100)
 
+  def test_while_non_unwrap_init_statement(self):
+    """Verifies that a while loop with a non-unwrapping init statement executes the init statement once before entering the loop."""
+    code = """
+    func test_while(): int {
+      var sum = 0;
+      while var i = 0; i < 3 {
+        sum += i;
+        i += 1;
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("i = 0\nwhile (i < 3):", py_code)
+
+  def test_cow_live_prototype_update(self):
+    """Verifies that reading a nested reference on a clone does not break live prototype delegation until a write occurs."""
+    code = """
+    struct Vector {
+      var x: int;
+    }
+    proto Entity {
+      var pos: Vector;
+    }
+    func test_cow(): int {
+      var base = Entity { pos = Vector { x = 10 } };
+      let cloned = clone base;
+      let initial_read = cloned.pos.x;
+      base.pos.x = 20;
+      let live_read = cloned.pos.x;
+      cloned.pos.x = 99;
+      let after_write_clone = cloned.pos.x;
+      let after_write_base = base.pos.x;
+      return live_read + after_write_clone + after_write_base;
+    }
+    """
+    res = self._transpile_and_run(code, "test_cow()")
+    self.assertEqual(res, 20 + 99 + 20)
+
 
 if __name__ == "__main__":
   unittest.main()

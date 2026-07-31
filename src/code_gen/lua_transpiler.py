@@ -78,6 +78,32 @@ local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
 
+local _create_cow_proxy
+_create_cow_proxy = function(parent_shadow, parent_proto, key)
+  local proxy_meta = {}
+  proxy_meta.__index = function(tbl, sub_key)
+    if parent_shadow[key] ~= nil then
+      return parent_shadow[key][sub_key]
+    end
+    if parent_proto and parent_proto[key] ~= nil then
+      local val = parent_proto[key][sub_key]
+      if type(val) == "table" then
+        return _create_cow_proxy(parent_shadow, parent_proto[key], sub_key)
+      end
+      return val
+    end
+    return nil
+  end
+  proxy_meta.__newindex = function(tbl, sub_key, value)
+    if parent_shadow[key] == nil then
+      local target = parent_proto[key]
+      parent_shadow[key] = _clone_helper(target, nil, nil)
+    end
+    parent_shadow[key][sub_key] = value
+  end
+  return setmetatable({}, proxy_meta)
+end
+
 local function _create_proto_object(proto, class_tbl)
   local shadow = {}
   local meta = {}
@@ -92,9 +118,7 @@ local function _create_proto_object(proto, class_tbl)
       local val = proto[key]
       if val ~= nil then
         if type(val) == "table" then
-          local cow = _clone_helper(val, nil, nil)
-          shadow[key] = cow
-          return cow
+          return _create_cow_proxy(shadow, proto, key)
         end
         return val
       end
@@ -677,11 +701,11 @@ class LuaTranspiler:
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.newline()
     if node.init_binding:
-      self.emit("while true do")
-      self.indent()
-      self.newline()
       let_name = node.init_binding.let_name
       if node.init_binding.is_unwrap:
+        self.emit("while true do")
+        self.indent()
+        self.newline()
         val_var = f"_val_{let_name}"
         self.emit(f"local {val_var} = ")
         self.visit(node.init_binding.expr)
@@ -708,25 +732,23 @@ class LuaTranspiler:
         self.emit("end")
         self.newline()
         self.emit(f"local {let_name} = {val_var}")
-      else:
-        # Standard bind + condition
-        self.emit(f"local {let_name} = ")
-        self.visit(node.init_binding.expr)
-        self.newline()
-        self.emit("if not (")
-        self.visit(node.condition)
-        self.emit(") then")
-        self.indent()
-        self.newline()
-        self.emit("break")
+        self.visit(node.block)
         self.dedent()
         self.newline()
         self.emit("end")
-
-      self.visit(node.block)
-      self.dedent()
-      self.newline()
-      self.emit("end")
+      else:
+        # Standard init-statement: execute once before loop begins
+        self.emit(f"local {let_name} = ")
+        self.visit(node.init_binding.expr)
+        self.newline()
+        self.emit("while ")
+        self.visit(node.condition)
+        self.emit(" do")
+        self.indent()
+        self.visit(node.block)
+        self.dedent()
+        self.newline()
+        self.emit("end")
     else:
       self.emit("while ")
       self.visit(node.condition)

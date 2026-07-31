@@ -785,6 +785,18 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertNotIn('scores["alice"] + 1', lua_out)
     self.assertIn('arr[1]', lua_out)  # Array indexing still gets + 1!
 
+  def test_lua_while_non_unwrap_init_statement(self):
+    """Verifies that Lua transpilation emits non-unwrapping while init-statements once before the loop."""
+    code = """
+    func test_while() {
+      while var i = 0; i < 3 {
+        i += 1;
+      }
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("local i = 0\nwhile i < 3 do", lua_out)
+
 
 if __name__ == "__main__":
   unittest.main()
