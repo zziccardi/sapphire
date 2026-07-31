@@ -177,6 +177,7 @@ class ASTBuilder(SapphireVisitor):
     trait_name = ctx.traitName.text if ctx.traitName else None
     struct_name = ctx.structName.text
     type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
+
     type_args_list = ctx.typeArgumentList()
     trait_type_args = []
     struct_type_args = []
@@ -196,6 +197,14 @@ class ASTBuilder(SapphireVisitor):
         struct_type_args = self.visitTypeArgumentList(type_args_list[0])
 
     members = [self.visit(m) for m in ctx.implMember()]
+
+    # Infer type parameters from type arguments if not explicitly set via impl<T>
+    KNOWN_PRIMITIVES = {"int", "float", "string", "String", "bool", "none", "void"}
+    for arg in trait_type_args + struct_type_args:
+      if isinstance(arg, BasicTypeNode) and arg.name not in KNOWN_PRIMITIVES:
+        if arg.name not in type_params:
+          type_params.append(arg.name)
+
     node = ImplBlockNode(struct_name, trait_name, members, type_params=type_params, trait_type_args=trait_type_args, struct_type_args=struct_type_args)
     # Positioning for Language Server:
     struct_token = ctx.structName

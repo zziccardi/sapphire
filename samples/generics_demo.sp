@@ -11,7 +11,7 @@ struct Stack<T> {
 }
 
 // 2. Generic impl block for Stack<T>
-impl<T> Stack<T> {
+impl Stack<T> {
   func __init__(top: T) {
     self.top = top;
   }
@@ -27,7 +27,7 @@ struct Pair<K, V> {
   var value: V;
 }
 
-impl<K, V> Pair<K, V> {
+impl Pair<K, V> {
   func __init__(key: K, value: V) {
     self.key = key;
     self.value = value;

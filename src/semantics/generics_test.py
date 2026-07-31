@@ -43,7 +43,7 @@ class TestGenerics(unittest.TestCase):
       var val: T;
     }
 
-    impl<T> Box<T> {
+    impl Box<T> {
       func __init__(val: T) {
         self.val = val;
       }
@@ -117,19 +117,19 @@ class TestGenerics(unittest.TestCase):
       var count: int;
     }
 
-    impl<T> Container<T> for Item<T> {
+    impl Container<T> for Item<T> {
       func get(self): T {
         return self.val;
       }
     }
 
-    impl<T> Container<T> for Simple {
+    impl Container<T> for Simple {
       func get(self): T {
         return 0;
       }
     }
 
-    impl<T> Container for Item<T> {
+    impl Container for Item<T> {
       func get(self): int {
         return 1;
       }

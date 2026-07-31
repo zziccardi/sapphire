@@ -828,10 +828,16 @@ Sapphire supports zero-overhead parametric polymorphism (generics) for structure
     var value: V;
   }
   ```
-* **Generic implementation blocks**: Implementation blocks declare type parameters following `impl`:
+* **Generic implementation blocks**: Implementation blocks declare type parameters directly on the target struct or trait:
   ```sapphire
-  impl<T> Stack<T> {
+  impl Stack<T> {
     func push(item: T) {
+      // ...
+    }
+  }
+
+  impl Container<T> for Stack<T> {
+    func get(): T {
       // ...
     }
   }

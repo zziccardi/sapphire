@@ -202,6 +202,8 @@ class TypeChecker:
           cloned_impl = self._substitute_ast(decl, param_map)
           cloned_impl.struct_name = mangled_name
           cloned_impl.type_params = []
+          cloned_impl.struct_type_args = []
+          cloned_impl.trait_type_args = []
           for member in cloned_impl.members:
             func_decl = member.func_decl
             p_types = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
@@ -471,11 +473,14 @@ class TypeChecker:
     for s in structs_to_process:
       process_struct(s)
 
+  def _get_impl_type_params(self, decl: ImplBlockNode) -> List[str]:
+    return list(decl.type_params) if decl.type_params else []
+
   def _register_impl_signatures(self, program: ProgramNode) -> None:
     """Pre-pass to register methods defined inside impl blocks onto struct types."""
     for decl in program.declarations:
       if isinstance(decl, ImplBlockNode):
-        if decl.type_params:
+        if self._get_impl_type_params(decl):
           continue
         struct_type = self.symbol_table.lookup_type(decl.struct_name)
         if not struct_type or not isinstance(struct_type, StructType):
@@ -615,7 +620,7 @@ class TypeChecker:
     pass
 
   def visit_ImplBlockNode(self, node: ImplBlockNode) -> None:
-    if node.type_params:
+    if self._get_impl_type_params(node):
       return
     struct_type = self.symbol_table.lookup_type(node.struct_name)
     if not struct_type or not isinstance(struct_type, StructType):
