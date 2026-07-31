@@ -297,3 +297,34 @@ class TestSemanticTokens(unittest.TestCase):
     token_types = [t[3] for t in checker.raw_tokens]
     self.assertIn("enum", token_types)
     self.assertIn("enumMember", token_types)
+
+  def test_generics_semantic_tokens(self):
+    """Verifies semantic token extraction for generic struct initializers, generic function calls, and BasicTypeNode type_args."""
+    code = """
+    struct Box<T> {
+      var val: T;
+    }
+    func identity<T>(val: T): T {
+      return val;
+    }
+    func main() {
+      let b = Box<int> { val = 10 };
+      let x = identity<float>(3.14);
+      let b2: Box<int> = Box<int> { val = 20 };
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+
+    token_types = [t[3] for t in checker.raw_tokens]
+    self.assertIn("struct", token_types)
+    self.assertIn("function", token_types)
+    self.assertIn("type", token_types)

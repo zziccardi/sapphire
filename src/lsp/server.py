@@ -468,7 +468,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   elif isinstance(node_type, StructType) and category in ("struct", "proto"):
     kind = "proto" if node_type.is_prototype else "struct"
     inheritance = f" : {node_type.parent_name}" if node_type.parent_name else ""
-    markdown_text = f"**({kind})** `{node_type.name}{inheritance}`"
+    params_str = f"<{', '.join(node_type.type_params)}>" if getattr(node_type, "type_params", None) else ""
+    markdown_text = f"**({kind})** `{node_type.name}{params_str}{inheritance}`"
     if getattr(node_type, "comments", None):
       markdown_text += f"\n\n{node_type.comments}"
   elif isinstance(node_type, EnumType) and category == "enum":
@@ -479,7 +480,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     if getattr(node_type, "comments", None):
       markdown_text += f"\n\n{node_type.comments}"
   elif isinstance(node_type, TraitType) and category == "trait":
-    markdown_text = f"**(trait)** `{node_type.name}`"
+    params_str = f"<{', '.join(node_type.type_params)}>" if getattr(node_type, "type_params", None) else ""
+    markdown_text = f"**(trait)** `{node_type.name}{params_str}`"
     if getattr(node_type, "comments", None):
       markdown_text += f"\n\n{node_type.comments}"
   else:
