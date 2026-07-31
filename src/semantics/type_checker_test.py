@@ -2401,6 +2401,15 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot assign expression of type 'bool' to variable 'x' of type 'int'", str(ctx.exception))
 
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let s = "hello";
+        let res = s.contains();
+      }
+      """)
+    self.assertIn("Not enough arguments passed to call", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
