@@ -410,19 +410,31 @@ class SemanticTokensTypeChecker(TypeChecker):
     super().visit_WhileNode(node)
 
   def visit_ForNode(self, node) -> None:
-    # Add semantic token for loop_var
     mods = 1  # declaration
     if not node.is_mutable:
       mods |= 4  # readonly
-    self.add_token(node.loop_var_line, node.loop_var_column, node.loop_var_length, "variable", mods)
+
+    key_var = getattr(node, "key_var", None)
+    if isinstance(key_var, str):
+      self.add_token(node.key_var_line, node.key_var_column, node.key_var_length, "variable", mods)
+    val_var = getattr(node, "val_var", None)
+    line = getattr(node, "val_var_line", getattr(node, "loop_var_line", None))
+    if line is not None and not isinstance(line, type(node)):
+      col = getattr(node, "val_var_column", getattr(node, "loop_var_column", None))
+      length = getattr(node, "val_var_length", getattr(node, "loop_var_length", None))
+      if isinstance(line, int) and isinstance(col, int) and isinstance(length, int):
+        self.add_token(line, col, length, "variable", mods)
+
     # Calculate loop var element type for hover info
     iter_type = self.visit(node.iterable)
     try:
-      from semantics.symbol_table import ArrayType, PrimitiveType
+      from semantics.symbol_table import ArrayType, MapType, PrimitiveType
     except ImportError:  # pragma: no cover
-      from src.semantics.symbol_table import ArrayType, PrimitiveType
+      from src.semantics.symbol_table import ArrayType, MapType, PrimitiveType
     if isinstance(iter_type, ArrayType):
       elem_type = iter_type.element_type
+    elif isinstance(iter_type, MapType):
+      elem_type = iter_type.value_type
     else:
       elem_type = PrimitiveType("none")
     self.node_types[node] = elem_type

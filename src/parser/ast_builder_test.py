@@ -425,6 +425,61 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(map_expr.entries[1].key.value, "bob")
     self.assertEqual(map_expr.entries[1].value.value, 95)
 
+  def test_map_for_loop_parsing(self):
+    """Verifies AST construction for map for-in loop with key, val bindings."""
+    try:
+      from parser.ast import ForNode, FuncDeclNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ForNode, FuncDeclNode
+
+    ast = self._get_ast("""
+    func test() {
+      for k, v in my_map {
+        print(k);
+      }
+    }
+    """)
+    func_decl = ast.declarations[0]
+    self.assertIsInstance(func_decl, FuncDeclNode)
+    for_node = func_decl.body.statements[0]
+    self.assertIsInstance(for_node, ForNode)
+    self.assertEqual(for_node.key_var, "k")
+    self.assertEqual(for_node.val_var, "v")
+
+
+  def test_impl_block_generic_type_args(self):
+    """Verifies AST construction for generic impl blocks with various type arguments."""
+    try:
+      from parser.ast import ImplBlockNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ImplBlockNode
+
+    ast1 = self._get_ast("impl Trait<int> for Struct<float> {}")
+    impl1 = ast1.declarations[0]
+    self.assertIsInstance(impl1, ImplBlockNode)
+    self.assertEqual(len(impl1.trait_type_args), 1)
+    self.assertEqual(len(impl1.struct_type_args), 1)
+
+    ast2 = self._get_ast("impl Trait<int> for Struct {}")
+    impl2 = ast2.declarations[0]
+    self.assertIsInstance(impl2, ImplBlockNode)
+    self.assertEqual(len(impl2.trait_type_args), 1)
+
+    ast3 = self._get_ast("impl Trait for Struct<float> {}")
+    impl3 = ast3.declarations[0]
+    self.assertIsInstance(impl3, ImplBlockNode)
+    self.assertEqual(len(impl3.struct_type_args), 1)
+
+    ast4 = self._get_ast("impl Struct<int> {}")
+    impl4 = ast4.declarations[0]
+    self.assertIsInstance(impl4, ImplBlockNode)
+    self.assertEqual(len(impl4.struct_type_args), 1)
+
+    ast5 = self._get_ast("impl Trait<int, MyCustomArg> for Struct {}")
+    impl5 = ast5.declarations[0]
+    self.assertIsInstance(impl5, ImplBlockNode)
+    self.assertIn("MyCustomArg", impl5.type_params)
+
 
 if __name__ == "__main__":
   unittest.main()

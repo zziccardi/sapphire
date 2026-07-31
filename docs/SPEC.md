@@ -199,23 +199,32 @@ while count > 0 {
 
 #### `for-in` loop
 
-Iterates over elements in a collection.
+Iterates over elements in a collection (arrays or maps).
 
-* **Scoping & Mutability**: By default, the loop variable (e.g., `name`) is implicitly declared as an immutable constant (`let`) scoped strictly to the loop body block.
-* **Mutable Loop Variables**: To allow mutation of the loop variable within the block, it can be explicitly declared using the `var` keyword (`for var name in names`):
+* **Scoping & mutability**: By default, loop variables (e.g., `name`, or `key, val`) are implicitly declared as immutable constants (`let`) scoped strictly to the loop body block.
+* **Array iteration**: Uses a single loop variable to iterate over array elements (`for item in array`).
+* **Map Iteration**: Uses dual key-value loop variables (`for key, val in map`) to iterate over entries in a map.
+* **Mutable loop variables**: To allow mutation of loop variables within the block, they can be explicitly declared using the `var` keyword (`for var key, val in map`):
 
 ```
 let names = ["Alice", "Bob", "Charlie"];
 
-// Default: 'name' is an implicit constant scoped to the loop
+// Array iteration: single loop variable
 for name in names {
   print(name);
 }
 
-// Mutable: 'var name' allows mutation of the loop variable
-for var name in names {
-  name = name.to_lowercase();
-  print(name);
+let inventory = { "potions": 5, "elixirs": 2 };
+
+// Map iteration: dual key-value loop variables
+for key, val in inventory {
+  print(key + ": " + val);
+}
+
+// Mutable loop variables: `var` binding
+for var key, val in inventory {
+  val = val + 1;
+  print(key + ": " + val);
 }
 ```
 

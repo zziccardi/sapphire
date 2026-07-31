@@ -570,7 +570,10 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
               add_item(let_name, 6, f"(variable) {let_name}")
           elif isinstance(stmt, ForNode):
             if st_start is None or st_start <= line:
-              add_item(stmt.loop_var, 6, f"(variable) {stmt.loop_var}")
+              if getattr(stmt, "key_var", None):
+                add_item(stmt.key_var, 6, f"(variable) {stmt.key_var}")
+              val_var = getattr(stmt, "val_var", stmt.loop_var)
+              add_item(val_var, 6, f"(variable) {val_var}")
 
     elif isinstance(decl, ImplBlockNode):
       s_start = getattr(decl, "start_line", None)
@@ -602,7 +605,10 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
                     add_item(let_name, 6, f"(variable) {let_name}")
                 elif isinstance(stmt, ForNode):
                   if st_start is None or st_start <= line:
-                    add_item(stmt.loop_var, 6, f"(variable) {stmt.loop_var}")
+                    if getattr(stmt, "key_var", None):
+                      add_item(stmt.key_var, 6, f"(variable) {stmt.key_var}")
+                    val_var = getattr(stmt, "val_var", stmt.loop_var)
+                    add_item(val_var, 6, f"(variable) {val_var}")
 
   # 2. Symbols and Types from Symbol Table
   if uri in ls.symbol_table_cache:
@@ -709,7 +715,7 @@ def completion(ls: SapphireLanguageServer,
     best_node = None
     min_dist = float('inf')
     for node in node_types.keys():
-      n_name = getattr(node, "name", None) or getattr(node, "alias", None) or getattr(node, "let_name", None) or getattr(node, "loop_var", None)
+      n_name = getattr(node, "name", None) or getattr(node, "alias", None) or getattr(node, "let_name", None) or getattr(node, "key_var", None) or getattr(node, "val_var", None) or getattr(node, "loop_var", None)
       if n_name == receiver_name:
         s_line = getattr(node, "start_line", getattr(node, "name_line", None))
         dist = abs(s_line - line) if s_line else 0

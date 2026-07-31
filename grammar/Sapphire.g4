@@ -203,7 +203,7 @@ letOrVarBinding
     ;
 
 forStatement
-    : FOR VAR? IDENTIFIER IN expression block
+    : FOR VAR? IDENTIFIER (COMMA IDENTIFIER)? IN expression block
     ;
 
 expression

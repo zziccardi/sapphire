@@ -384,7 +384,46 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("For-in loop source must be an array type", str(context.exception))
+    self.assertIn("For-in loop source must be an array or map type", str(context.exception))
+
+  def test_for_map_iteration_valid(self):
+    """Verifies type checking for valid map iteration."""
+    code = """
+    func test() {
+      let m = {"a": 1, "b": 2};
+      for k, v in m {
+        let k_copy: String = k;
+        let v_copy: int = v;
+      }
+    }
+    """
+    self._check(code)
+
+  def test_for_map_iteration_single_var_error(self):
+    """Enforces that iterating over a map requires dual key-value loop variables."""
+    code = """
+    func test() {
+      let m = {"a": 1};
+      for item in m {
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Map iteration requires key and value loop variables", str(context.exception))
+
+  def test_for_array_iteration_dual_var_error(self):
+    """Enforces that iterating over an array prohibits dual key-value loop variables."""
+    code = """
+    func test() {
+      let arr = [1, 2, 3];
+      for k, v in arr {
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot iterate over an array with key-value syntax", str(context.exception))
 
 
   def test_binary_and_unary_ops(self):

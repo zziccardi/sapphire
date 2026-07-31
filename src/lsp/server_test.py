@@ -1156,6 +1156,54 @@ func main() {
     self.assertTrue(len(call_arg.diagnostics) > 0)
     self.assertIn("Missing semicolon ';' after closing brace '}' of match expression", call_arg.diagnostics[0].message)
 
+  def test_map_for_loop_lsp_completion(self):
+    """Verifies LSP completion for key_var and val_var inside map for loops."""
+    from lsprotocol.types import CompletionParams, Position, TextDocumentIdentifier
+    try:
+      from lsp.server import completion
+    except ImportError:
+      from src.lsp.server import completion
+
+    doc_uri = "file:///map_completion.sp"
+    doc_text = """
+    func main() {
+      let my_map = {"a": 1};
+      for map_k, map_v in my_map {
+        let x = 10;
+      }
+    }
+    struct TestStruct { var val: int; }
+    impl TestStruct {
+      func test_method() {
+        let m = {"a": 1};
+        for impl_k, impl_v in m {
+          let y = 20;
+        }
+      }
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_text)
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Completion inside top-level func map for loop
+    res_func = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=4, character=10)
+    ))
+    labels_func = {item.label for item in res_func.items}
+    self.assertIn("map_k", labels_func)
+
+    # Completion inside impl block method map for loop
+    res_impl = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=11, character=10)
+    ))
+    labels_impl = {item.label for item in res_impl.items}
+    self.assertIn("impl_k", labels_impl)
+
 
 if __name__ == "__main__":
   unittest.main()

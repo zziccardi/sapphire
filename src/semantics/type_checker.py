@@ -1108,14 +1108,26 @@ class TypeChecker:
 
   def visit_ForNode(self, node: ForNode) -> None:
     iter_type = self.visit(node.iterable)
-    if not isinstance(iter_type, ArrayType):
-      self.error("For-in loop source must be an array type.")
-      elem_type = PrimitiveType("none")
-    else:
-      elem_type = iter_type.element_type
-
     self.symbol_table.enter_scope()
-    self.symbol_table.define(node.loop_var, VariableSymbol(node.loop_var, elem_type, node.is_mutable))
+
+    if isinstance(iter_type, ArrayType):
+      if node.key_var is not None:
+        self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
+      elem_type = iter_type.element_type
+      self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, elem_type, node.is_mutable))
+    elif isinstance(iter_type, MapType):
+      if node.key_var is None:
+        self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
+        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
+      else:
+        self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable))
+        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
+    else:
+      self.error("For-in loop source must be an array or map type.")
+      if node.key_var is not None:
+        self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, PrimitiveType("none"), node.is_mutable))
+      self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("none"), node.is_mutable))
+
     self.visit(node.block)
     self.symbol_table.exit_scope()
 

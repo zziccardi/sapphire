@@ -328,3 +328,27 @@ class TestSemanticTokens(unittest.TestCase):
     self.assertIn("struct", token_types)
     self.assertIn("function", token_types)
     self.assertIn("type", token_types)
+
+  def test_map_for_loop_semantic_tokens(self):
+    """Verifies semantic token extraction for map for-loop with key and val variables."""
+    code = """
+    func main() {
+      let m = {"a": 1};
+      for k, v in m {
+        print(k);
+      }
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+
+    token_types = [t[3] for t in checker.raw_tokens]
+    self.assertIn("variable", token_types)
