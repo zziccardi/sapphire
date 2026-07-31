@@ -463,22 +463,37 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.add_token(node.member_line, node.member_column, node.member_length, token_type, mods)
     return super().visit_MemberAccessNode(node)
 
+  def visit_CallNode(self, node):
+    for arg in getattr(node, "type_args", []):
+      self.visit(arg)
+    return super().visit_CallNode(node)
+
   def visit_StructInitializerNode(self, node):
     # Struct initializer constructor name
     self.add_token(node.name_line, node.name_column, node.name_length, "struct")
+    for arg in getattr(node, "type_args", []):
+      self.visit(arg)
     return super().visit_StructInitializerNode(node)
 
   def visit_BasicTypeNode(self, node):
     # Type reference
     if node.name not in ("int", "float", "bool", "string", "none", "void"):
-      from semantics.symbol_table import TraitType
+      try:
+        from semantics.symbol_table import TraitType, GenericTypeParameter
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import TraitType, GenericTypeParameter
       resolved = self.symbol_table.lookup_type(node.name)
       if resolved and isinstance(resolved, TraitType):
         self.add_token(node.name_line, node.name_column, node.name_length, "interface")
+      elif resolved and isinstance(resolved, GenericTypeParameter):
+        self.add_token(node.name_line, node.name_column, node.name_length, "type")
       else:
         self.add_token(node.name_line, node.name_column, node.name_length, "struct")
     else:
       self.add_token(node.name_line, node.name_column, node.name_length, "type")
+
+    for arg in getattr(node, "type_args", []):  # pragma: no cover
+      self.visit(arg)
     return None
 
 

@@ -110,12 +110,19 @@ class ASTBuilder(SapphireVisitor):
       node.end_column = rparen.column + 1
     return node
 
+  def visitTypeParamList(self, ctx: SapphireParser.TypeParamListContext) -> List[str]:
+    return [id_token.getText() for id_token in ctx.IDENTIFIER()]
+
+  def visitTypeArgumentList(self, ctx: SapphireParser.TypeArgumentListContext) -> List[TypeNode]:
+    return [self.visit(t) for t in ctx.type_()]
+
   def visitStructDeclaration(self, ctx: SapphireParser.StructDeclarationContext) -> StructDeclNode:
     name = ctx.IDENTIFIER(0).getText()
     parent_name = ctx.IDENTIFIER(1).getText() if len(ctx.IDENTIFIER()) > 1 else None
+    type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     fields = [self.visit(field) for field in ctx.structField()] if ctx.structField() else []
     is_prototype = ctx.PROTO_KEYWORD() is not None
-    node = StructDeclNode(name, parent_name, fields, is_prototype)
+    node = StructDeclNode(name, parent_name, fields, is_prototype, type_params=type_params)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER(0).getSymbol()
     node.name_line = name_token.line
@@ -169,8 +176,36 @@ class ASTBuilder(SapphireVisitor):
   def visitImplBlock(self, ctx: SapphireParser.ImplBlockContext) -> ImplBlockNode:
     trait_name = ctx.traitName.text if ctx.traitName else None
     struct_name = ctx.structName.text
+    type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
+
+    type_args_list = ctx.typeArgumentList()
+    trait_type_args = []
+    struct_type_args = []
+    if ctx.traitName and ctx.FOR():
+      if len(type_args_list) == 2:
+        trait_type_args = self.visitTypeArgumentList(type_args_list[0])
+        struct_type_args = self.visitTypeArgumentList(type_args_list[1])
+      elif len(type_args_list) == 1:
+        for_start = ctx.FOR().getSymbol().tokenIndex
+        arg_start = type_args_list[0].start.tokenIndex
+        if arg_start < for_start:
+          trait_type_args = self.visitTypeArgumentList(type_args_list[0])
+        else:
+          struct_type_args = self.visitTypeArgumentList(type_args_list[0])
+    else:
+      if len(type_args_list) == 1:
+        struct_type_args = self.visitTypeArgumentList(type_args_list[0])
+
     members = [self.visit(m) for m in ctx.implMember()]
-    node = ImplBlockNode(struct_name, trait_name, members)
+
+    # Infer type parameters from type arguments if not explicitly set via impl<T>
+    KNOWN_PRIMITIVES = {"int", "float", "string", "String", "bool", "none", "void"}
+    for arg in trait_type_args + struct_type_args:
+      if isinstance(arg, BasicTypeNode) and arg.name not in KNOWN_PRIMITIVES:
+        if arg.name not in type_params:
+          type_params.append(arg.name)
+
+    node = ImplBlockNode(struct_name, trait_name, members, type_params=type_params, trait_type_args=trait_type_args, struct_type_args=struct_type_args)
     # Positioning for Language Server:
     struct_token = ctx.structName
     node.struct_name_line = struct_token.line
@@ -194,8 +229,9 @@ class ASTBuilder(SapphireVisitor):
 
   def visitTraitDeclaration(self, ctx: SapphireParser.TraitDeclarationContext) -> TraitDeclNode:
     name = ctx.IDENTIFIER().getText()
+    type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     members = [self.visit(m) for m in ctx.traitMember()]
-    node = TraitDeclNode(name, members)
+    node = TraitDeclNode(name, members, type_params=type_params)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
@@ -214,9 +250,10 @@ class ASTBuilder(SapphireVisitor):
     elif ctx.CONST():
       modifier = "const"
     name = ctx.IDENTIFIER().getText()
+    type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
-    node = TraitMemberNode(name, params, return_types, modifier=modifier, annotations=annotations)
+    node = TraitMemberNode(name, params, return_types, modifier=modifier, annotations=annotations, type_params=type_params)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
@@ -227,10 +264,12 @@ class ASTBuilder(SapphireVisitor):
   def visitFunctionDeclaration(self, ctx: SapphireParser.FunctionDeclarationContext) -> FuncDeclNode:
     annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.functionName().getText()
+    tp_ctx = ctx.tp1 if ctx.tp1 else ctx.tp2
+    type_params = self.visitTypeParamList(tp_ctx) if tp_ctx else []
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
     body = self.visit(ctx.block()) if ctx.block() else None
-    node = FuncDeclNode(name, params, return_types, body, annotations=annotations)
+    node = FuncDeclNode(name, params, return_types, body, annotations=annotations, type_params=type_params)
     # Positioning for Language Server:
     name_token = ctx.functionName().IDENTIFIER().getSymbol() if ctx.functionName().IDENTIFIER() else ctx.functionName().INIT().getSymbol()
     node.name_line = name_token.line
@@ -270,7 +309,9 @@ class ASTBuilder(SapphireVisitor):
       return self.visit(ctx.type_())
 
   def visitBaseType(self, ctx: SapphireParser.BaseTypeContext) -> BasicTypeNode:
-    node = BasicTypeNode(ctx.getText())
+    type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []
+    name = ctx.identifierPath().getText() if ctx.identifierPath() else ctx.getText()
+    node = BasicTypeNode(name, type_args=type_args)
     # Positioning for Language Server:
     token = ctx.start
     node.name_line = token.line
@@ -445,8 +486,9 @@ class ASTBuilder(SapphireVisitor):
 
   def visitCallExpr(self, ctx: SapphireParser.CallExprContext) -> CallNode:
     callee = self.visit(ctx.expression())
+    type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []
     args = self.visit(ctx.argumentList()) if ctx.argumentList() else []
-    return CallNode(callee, args)
+    return CallNode(callee, args, type_args=type_args)
 
   def visitArgumentList(self, ctx: SapphireParser.ArgumentListContext) -> List[ArgumentNode]:
     return [self.visit(arg) for arg in ctx.argument()]
@@ -560,13 +602,14 @@ class ASTBuilder(SapphireVisitor):
 
   def visitStructInitializer(self, ctx: SapphireParser.StructInitializerContext) -> StructInitializerNode:
     struct_name = ctx.IDENTIFIER().getText()
+    type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []
     fields = []
     if ctx.structInitFieldList():
       fields = self.visit(ctx.structInitFieldList())
     arena_expr = None
     if ctx.IN() is not None:
       arena_expr = self.visit(ctx.expression())
-    node = StructInitializerNode(struct_name, fields, arena_expr)
+    node = StructInitializerNode(struct_name, fields, arena_expr, type_args=type_args)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line

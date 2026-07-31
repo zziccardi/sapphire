@@ -288,7 +288,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("local Item = {}", lua_code)
+    self.assertIn("Item = {}", lua_code)
     self.assertIn("function Item.init(kwargs, proto)", lua_code)
     self.assertIn("Item._init_sapphire", lua_code)
     self.assertIn("Item.init({[1] = 100})", lua_code)
@@ -512,7 +512,8 @@ class TestLuaTranspiler(unittest.TestCase):
     a, b = get_pos();
     """
     output = self._transpile(code)
-    self.assertIn("local function get_pos()", output)
+    self.assertIn("local get_pos", output)
+    self.assertIn("function get_pos()", output)
     self.assertIn("return 10.0, 20.0", output)
     self.assertIn("local x, y = get_pos()", output)
     self.assertIn("local a, b = 1.0, 2.0", output)

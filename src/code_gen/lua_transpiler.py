@@ -214,6 +214,8 @@ class LuaTranspiler:
 
     # 2. Collect known struct names and impl block methods
     for decl in program.declarations:
+      if getattr(decl, "type_params", None):
+        continue
       if isinstance(decl, StructDeclNode):
         self.known_structs.add(decl.name)
       elif isinstance(decl, ImplBlockNode):
@@ -221,22 +223,39 @@ class LuaTranspiler:
           self.struct_methods[decl.struct_name] = []
         self.struct_methods[decl.struct_name].extend(decl.members)
 
-    top_level_decls = []
+    struct_decls = []
+    func_decls = []
     executable_stmts = []
     has_main = False
 
     for decl in program.declarations:
+      if getattr(decl, "type_params", None):
+        continue
       if isinstance(decl, ImplBlockNode):
         continue
       elif isinstance(decl, FuncDeclNode):
         if decl.name == "main":
           has_main = True
-        top_level_decls.append(decl)
+        func_decls.append(decl)
       elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode,
                              VarDeclNode)):
-        top_level_decls.append(decl)
+        struct_decls.append(decl)
       else:
         executable_stmts.append(decl)
+
+    forward_names = []
+    for decl in struct_decls:
+      if isinstance(decl, StructDeclNode):
+        forward_names.append(decl.name)
+    for decl in func_decls:
+      if not any(a.name == "export" for a in getattr(decl, "annotations", [])):
+        forward_names.append(decl.name)
+
+    if forward_names:
+      self.emit(f"local {', '.join(forward_names)}")
+      self.newline()
+
+    top_level_decls = struct_decls + func_decls
 
     # 3. Transpile all top-level declarations (types, functions, global variables)
     for decl in top_level_decls:
@@ -328,7 +347,7 @@ class LuaTranspiler:
     methods = self.struct_methods.get(struct_name, [])
 
     self.newline()
-    self.emit(f"local {struct_name} = {{}}")
+    self.emit(f"{struct_name} = {{}}")
     self.newline()
     self.emit(f"{struct_name}.__index = {struct_name}")
     self.newline()
@@ -438,7 +457,7 @@ class LuaTranspiler:
       target_path = export_ann.arg if export_ann.arg else node.name
       self.emit(f"function {target_path}({', '.join(params)})")
     else:
-      self.emit(f"local function {node.name}({', '.join(params)})")
+      self.emit(f"function {node.name}({', '.join(params)})")
 
     self.indent()
     # Check default parameters
