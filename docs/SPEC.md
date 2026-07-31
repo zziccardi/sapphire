@@ -811,7 +811,64 @@ func draw() {
 }
 ```
 
-## 15. Design decisions
+## 15. Generics & parametric polymorphism
+
+Sapphire supports zero-overhead parametric polymorphism (generics) for structures, implementation blocks, traits, and functions using angle bracket parameter syntax (`<T, U>`).
+
+### Declaration syntax
+
+* **Generic structs**: Structs can declare one or more type parameters:
+  ```sapphire
+  struct Stack<T> {
+    var items: Array<T>;
+  }
+
+  struct Pair<K, V> {
+    var key: K;
+    var value: V;
+  }
+  ```
+* **Generic implementation blocks**: Implementation blocks declare type parameters following `impl`:
+  ```sapphire
+  impl<T> Stack<T> {
+    func push(item: T) {
+      // ...
+    }
+  }
+  ```
+* **Generic traits**: Traits specify type parameters for generic interface contracts:
+  ```sapphire
+  trait Container<T> {
+    func get(): T;
+  }
+  ```
+* **Generic functions**: Functions declare type parameters after the function name:
+  ```sapphire
+  func identity<T>(item: T): T {
+    return item;
+  }
+  ```
+
+### Call-site type inference & explicit arguments
+
+* **Type-argument inference**: When invoking generic functions, type arguments are contextually inferred from argument types by default:
+  ```sapphire
+  let x = identity(42);  // Inferred as identity<int>(42)
+  ```
+* **Explicit type arguments**: Type arguments can be explicitly specified at call sites or struct initializations:
+  ```sapphire
+  let s = Stack<int> { items = [10, 20] };
+  let y = identity<float>(3.14);
+  ```
+
+### Compile-time monomorphization
+
+In accordance with Sapphire's zero-overhead design, generics do not incur any runtime performance or dynamic-dispatch penalty. During compilation:
+1. The semantic analyzer tracks all concrete type argument combinations used in the codebase.
+2. The compiler monomorphizes generic template AST nodes into specialized concrete structures (e.g. `Stack<int>` becomes `Stack__int`).
+3. The transpiler emits direct, un-boxed concrete definitions for each monomorphized type and function.
+
+## 16. Design decisions
 
 This section outlines the architectural decisions and design trade-offs made in Sapphire.
 

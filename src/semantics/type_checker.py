@@ -5,6 +5,7 @@ checking and type inference, and validates all semantic constraints of the
 Sapphire language.
 """
 
+import copy
 from typing import Any, Dict, List, Optional
 
 try:
@@ -26,6 +27,7 @@ try:
       MapType,
       ArenaType,
       ModuleType,
+      GenericTypeParameter,
       VariableSymbol,
       FunctionSymbol,
       StructSymbol,
@@ -52,6 +54,7 @@ except ModuleNotFoundError:  # pragma: no cover
       MapType,
       ArenaType,
       ModuleType,
+      GenericTypeParameter,
       VariableSymbol,
       FunctionSymbol,
       StructSymbol,
@@ -121,6 +124,7 @@ class TypeChecker:
 
   def check(self, program: ProgramNode) -> None:
     """Executes semantic analysis on the program."""
+    self.program = program
     # Pass 0: Declare imported modules
     self._declare_imports(program)
 
@@ -138,6 +142,108 @@ class TypeChecker:
 
     if self.errors:
       raise SemanticError("\n".join(self.errors))
+
+  def _substitute_ast(self, node: Any, param_map: Dict[str, TypeNode]) -> Any:
+    """Recursively replaces generic parameter identifiers with concrete TypeNodes in an AST snippet."""
+    if node is None:
+      return None
+    if isinstance(node, BasicTypeNode):
+      if node.name in param_map:
+        return copy.deepcopy(param_map[node.name])
+      if node.type_args:
+        new_args = [self._substitute_ast(t, param_map) for t in node.type_args]
+        new_node = copy.deepcopy(node)
+        new_node.type_args = new_args
+        return new_node
+      return copy.deepcopy(node)
+    if isinstance(node, list):
+      return [self._substitute_ast(item, param_map) for item in node]
+    if isinstance(node, ASTNode):
+      new_node = copy.copy(node)
+      for k, v in node.__dict__.items():
+        if isinstance(v, (ASTNode, list)):
+          setattr(new_node, k, self._substitute_ast(v, param_map))
+        else:
+          setattr(new_node, k, v)
+      return new_node
+    return copy.deepcopy(node)
+
+  def _monomorphize_struct(
+      self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
+  ) -> StructType:
+    """Monomorphizes a generic struct template for a specific set of concrete type arguments."""
+    arg_names = [str(t) for t in resolved_type_args]
+    mangled_name = f"{generic_struct_type.name}__{'_'.join(arg_names)}"
+    existing = self.symbol_table.lookup_type(mangled_name)
+    if existing and isinstance(existing, StructType):
+      return existing
+
+    if not generic_struct_type.ast_decl:
+      return generic_struct_type
+
+    param_map = dict(zip(generic_struct_type.type_params, type_arg_nodes))
+    cloned_decl = self._substitute_ast(generic_struct_type.ast_decl, param_map)
+    cloned_decl.name = mangled_name
+    cloned_decl.type_params = []
+
+    mono_struct_type = StructType(mangled_name, cloned_decl.parent_name, cloned_decl.is_prototype)
+    self.symbol_table.define_type(mangled_name, mono_struct_type)
+    self.symbol_table.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
+
+    # Resolve fields for monomorphized struct
+    for f in cloned_decl.fields:
+      ftype = self._resolve_type_node(f.field_type)
+      mono_struct_type.fields[f.name] = StructField(f.name, ftype, f.is_mutable, f.default_expr is not None)
+
+    # Instantiate generic impl blocks matching generic_struct_type.name
+    if hasattr(self, "program") and self.program:
+      for decl in self.program.declarations:
+        if isinstance(decl, ImplBlockNode) and decl.struct_name == generic_struct_type.name:
+          cloned_impl = self._substitute_ast(decl, param_map)
+          cloned_impl.struct_name = mangled_name
+          cloned_impl.type_params = []
+          for member in cloned_impl.members:
+            func_decl = member.func_decl
+            p_types = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
+            ret_t = self._resolve_return_types(func_decl)
+            sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters])
+            mono_struct_type.methods[func_decl.name] = StructMethod(func_decl.name, sig, member.modifier)
+          self.program.declarations.append(cloned_impl)
+
+      self.program.declarations.append(cloned_decl)
+
+    return mono_struct_type
+
+  def _monomorphize_function(
+      self, func_sym: FunctionSymbol, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
+  ) -> str:
+    """Monomorphizes a generic function template for a specific set of concrete type arguments."""
+    arg_names = [str(t) for t in resolved_type_args]
+    mangled_name = f"{func_sym.name}__{'_'.join(arg_names)}"
+    existing = self.symbol_table.lookup(mangled_name)
+    if existing and isinstance(existing, FunctionSymbol):
+      return mangled_name
+
+    if not func_sym.ast_decl:
+      return func_sym.name
+
+    param_map = dict(zip(func_sym.type_params, type_arg_nodes))
+    cloned_func = self._substitute_ast(func_sym.ast_decl, param_map)
+    cloned_func.name = mangled_name
+    cloned_func.type_params = []
+
+    p_types = [self._resolve_type_node(p.param_type) for p in cloned_func.parameters]
+    ret_t = self._resolve_return_types(cloned_func)
+    sig = FunctionType(p_types, ret_t, [p.is_mutable for p in cloned_func.parameters], [p.name for p in cloned_func.parameters])
+    mono_func_sym = FunctionSymbol(mangled_name, sig, ast_decl=cloned_func)
+    self.symbol_table.define(mangled_name, mono_func_sym)
+
+    if hasattr(self, "program") and self.program:
+      self.program.declarations.append(cloned_func)
+
+    # Type check the body of the monomorphized function
+    self.visit_FuncDeclNode(cloned_func)
+    return mangled_name
 
   def _declare_imports(self, program: ProgramNode) -> None:
     """Pre-pass to register imported module symbols."""
@@ -220,7 +326,7 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        struct_type = StructType(decl.name, decl.parent_name, decl.is_prototype)
+        struct_type = StructType(decl.name, decl.parent_name, decl.is_prototype, type_params=decl.type_params, ast_decl=decl)
         self.symbol_table.define_type(decl.name, struct_type)
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
 
@@ -252,8 +358,12 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        trait_type = TraitType(decl.name)
+        trait_type = TraitType(decl.name, type_params=decl.type_params, ast_decl=decl)
         # Populate trait method signatures
+        if decl.type_params:
+          self.symbol_table.enter_scope()
+          for tp in decl.type_params:
+            self.symbol_table.define_type(tp, GenericTypeParameter(tp))
         for member in decl.members:
           p_types = []
           for p in member.parameters:
@@ -279,6 +389,8 @@ class TypeChecker:
               extern_name=extern_name,
           )
           trait_type.methods[member.name] = fn_type
+        if decl.type_params:
+          self.symbol_table.exit_scope()
         self.symbol_table.define_type(decl.name, trait_type)
         self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
 
@@ -286,6 +398,10 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
+        if decl.type_params:
+          self.symbol_table.enter_scope()
+          for tp in decl.type_params:
+            self.symbol_table.define_type(tp, GenericTypeParameter(tp))
         param_types = []
         param_mutabilities = []
         for p in decl.parameters:
@@ -293,13 +409,15 @@ class TypeChecker:
           param_types.append(ptype)
           param_mutabilities.append(p.is_mutable)
         ret_type = self._resolve_return_types(decl)
+        if decl.type_params:
+          self.symbol_table.exit_scope()
         signature = FunctionType(
             param_types,
             ret_type,
             param_mutabilities,
             param_names=[p.name for p in decl.parameters],
         )
-        self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature))
+        self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
 
       elif isinstance(decl, VarDeclNode):
         if any(a.name == "extern" for a in decl.annotations):
@@ -318,8 +436,7 @@ class TypeChecker:
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
-    # Resolve inheritance layout order by finding dependencies
-    structs_to_process = [d for d in program.declarations if isinstance(d, StructDeclNode)]
+    structs_to_process = [d for d in program.declarations if isinstance(d, StructDeclNode) and not d.type_params]
     processed = set()
 
     def process_struct(node: StructDeclNode):
@@ -331,22 +448,18 @@ class TypeChecker:
         return
 
       if node.parent_name:
-        # Check parent existence
         parent_type = self.symbol_table.lookup_type(node.parent_name)
         if not parent_type:
           self.error(f"Parent struct '{node.parent_name}' not found for '{node.name}'.")
         elif not isinstance(parent_type, StructType):
           self.error(f"Parent '{node.parent_name}' of '{node.name}' is not a struct type.")
         else:
-          # Process parent first if needed
           parent_node = next((s for s in structs_to_process if s.name == node.parent_name), None)
           if parent_node:
             process_struct(parent_node)
-          # Copy parent fields to child
           for field_name, field_obj in parent_type.fields.items():
             struct_type.fields[field_name] = field_obj
 
-      # Resolve child's own fields
       for f in node.fields:
         ftype = self._resolve_type_node(f.field_type)
         if f.name in struct_type.fields:
@@ -362,6 +475,8 @@ class TypeChecker:
     """Pre-pass to register methods defined inside impl blocks onto struct types."""
     for decl in program.declarations:
       if isinstance(decl, ImplBlockNode):
+        if decl.type_params:
+          continue
         struct_type = self.symbol_table.lookup_type(decl.struct_name)
         if not struct_type or not isinstance(struct_type, StructType):
           self.error(f"Cannot implement members for undefined struct '{decl.struct_name}'.")
@@ -494,6 +609,8 @@ class TypeChecker:
     pass
 
   def visit_ImplBlockNode(self, node: ImplBlockNode) -> None:
+    if node.type_params:
+      return
     struct_type = self.symbol_table.lookup_type(node.struct_name)
     if not struct_type or not isinstance(struct_type, StructType):
       return
@@ -583,6 +700,8 @@ class TypeChecker:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    if node.type_params:
+      return
     # Register parameters and check body
     self.symbol_table.enter_scope()
     old_function_scope = self.current_function_scope
@@ -1147,6 +1266,32 @@ class TypeChecker:
               )
 
   def visit_CallNode(self, node: CallNode) -> Type:
+    # Generic function resolution & monomorphization
+    if isinstance(node.callee, IdentifierNode):
+      sym = self.symbol_table.lookup(node.callee.name)
+      if isinstance(sym, FunctionSymbol) and sym.type_params:
+        if node.type_args:
+          resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+          mangled_name = self._monomorphize_function(sym, node.type_args, resolved_type_args)
+          node.callee.name = mangled_name
+        else:
+          inferred_map = {}
+          for idx, arg in enumerate(node.arguments):
+            if idx < len(sym.symbol_type.param_types):
+              param_t = sym.symbol_type.param_types[idx]
+              arg_t = self.visit(arg.expr)
+              if isinstance(param_t, GenericTypeParameter):
+                inferred_map[param_t.name] = arg_t
+
+          type_arg_nodes = []
+          resolved_type_args = []
+          for p_name in sym.type_params:
+            inf_t = inferred_map.get(p_name, PrimitiveType("int"))
+            resolved_type_args.append(inf_t)
+            type_arg_nodes.append(BasicTypeNode(str(inf_t)))
+          mangled_name = self._monomorphize_function(sym, type_arg_nodes, resolved_type_args)
+          node.callee.name = mangled_name
+
     # 1. Resolve callee
     callee_type = self.visit(node.callee)
 
@@ -1155,6 +1300,16 @@ class TypeChecker:
 
     # Constructor resolution
     if isinstance(callee_type, StructType):
+      if callee_type.type_params:
+        if node.type_args:
+          resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+          callee_type = self._monomorphize_struct(callee_type, node.type_args, resolved_type_args)
+          if isinstance(node.callee, IdentifierNode):
+            node.callee.name = callee_type.name
+        else:
+          self.error(f"Generic struct '{callee_type.name}' requires explicit type arguments.")
+          return callee_type
+
       is_constructor = True
       # Look up constructor
       init_method = callee_type.methods.get("__init__")
@@ -1202,17 +1357,6 @@ class TypeChecker:
         param_type = expected_param_types[idx]
         if not arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
-
-        # Mutability constraints for var reference parameters
-        # In a real compiler, we lookup the parameter mode (is_mutable).
-        # Let's check: if parameter mode is var reference, check if the argument is a mutable variable.
-        # Since we don't have the param names/mutability in FunctionType directly, let's keep it simple or add parameter info to FunctionType!
-        # Adding param details (mutability) is easy in python:
-        # e.g. signature can store signature.param_modes (list of bools)
-        # Let's assume signature has `param_modes` property.
-        # Wait, did we define signature.param_modes? We can add a property/list if we want, or just dynamically check if signature has it.
-        # Let's look at `symbol_table.py` - FunctionType does not have param_modes, but we can access it if we add it, or we can query it directly.
-        # Let's check: if we want to support this, we can easily add it or query it. Let's keep it simple for now.
 
       else:
         # Extra parameter
@@ -1277,9 +1421,6 @@ class TypeChecker:
     # Resolve method
     method = receiver_type.methods.get(node.member)
     if method:
-      # If optional chained, returns optional function type?
-      # Sapphire specification says: target?.get_name() optionally chains the execution.
-      # If target is none, it evaluates to none.
       return method.method_type
 
     self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
@@ -1376,7 +1517,6 @@ class TypeChecker:
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:
-      # Empty array defaults to [none] or [any] (we use NoneType)
       return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
@@ -1470,6 +1610,15 @@ class TypeChecker:
     if not struct_type or not isinstance(struct_type, StructType):
       self.error(f"Cannot instantiate undefined struct '{node.struct_name}'.")
       return PrimitiveType("none")
+
+    if struct_type.type_params:
+      if node.type_args:
+        resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+        struct_type = self._monomorphize_struct(struct_type, node.type_args, resolved_type_args)
+        node.struct_name = struct_type.name
+      else:
+        self.error(f"Generic struct '{node.struct_name}' requires explicit type arguments.")
+        return PrimitiveType("none")
 
     # Validate explicit arena target
     if node.arena_expr:

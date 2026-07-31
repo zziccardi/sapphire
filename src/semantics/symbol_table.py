@@ -159,10 +159,28 @@ class StructMethod:
     self.modifier = modifier  # 'static', 'const', or None
 
 
+class GenericTypeParameter(Type):
+  """Represents a generic type parameter (e.g., 'T', 'K', 'V')."""
+
+  def __init__(self, name: str):
+    self.name = name
+
+  def is_compatible(self, other: "Type") -> bool:
+    return self == other or isinstance(other, GenericTypeParameter)
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, GenericTypeParameter):
+      return False
+    return self.name == other.name
+
+  def __repr__(self) -> str:
+    return self.name
+
+
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False, comments: Optional[str] = None):
+  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False, comments: Optional[str] = None, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None):
     self.name = name
     self.parent_name = parent_name
     self.fields: Dict[str, StructField] = {}
@@ -170,6 +188,8 @@ class StructType(Type):
     self.is_cloned = False  # Set during clone-tracking analysis
     self.is_prototype = is_prototype
     self.comments = comments or ""
+    self.type_params = type_params or []
+    self.ast_decl = ast_decl
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):
@@ -178,16 +198,20 @@ class StructType(Type):
     return self.name == other.name
 
   def __repr__(self) -> str:
+    if self.type_params:
+      return f"{self.name}<{', '.join(self.type_params)}>"
     return self.name
 
 
 class TraitType(Type):
   """Represents a user-defined trait type."""
 
-  def __init__(self, name: str, comments: Optional[str] = None):
+  def __init__(self, name: str, comments: Optional[str] = None, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
     self.comments = comments or ""
+    self.type_params = type_params or []
+    self.ast_decl = ast_decl
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, TraitType):
@@ -195,6 +219,8 @@ class TraitType(Type):
     return self.name == other.name
 
   def __repr__(self) -> str:
+    if self.type_params:
+      return f"trait {self.name}<{', '.join(self.type_params)}>"
     return f"trait {self.name}"
 
 
@@ -317,8 +343,10 @@ class VariableSymbol(Symbol):
 class FunctionSymbol(Symbol):
   """Represents functions and methods."""
 
-  def __init__(self, name: str, signature: FunctionType):
+  def __init__(self, name: str, signature: FunctionType, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None):
     super().__init__(name, signature)
+    self.type_params = type_params or []
+    self.ast_decl = ast_decl
 
 
 class StructSymbol(Symbol):

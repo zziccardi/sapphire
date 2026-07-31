@@ -52,8 +52,16 @@ enumMember
     : IDENTIFIER (ASSIGN (INT_LIT | STRING_LIT))?
     ;
 
+typeParamList
+    : LT IDENTIFIER (COMMA IDENTIFIER)* GT
+    ;
+
+typeArgumentList
+    : LT type (COMMA type)* GT
+    ;
+
 structDeclaration
-    : (STRUCT | PROTO_KEYWORD) IDENTIFIER (COLON IDENTIFIER)? LBRACE structField* RBRACE
+    : (STRUCT | PROTO_KEYWORD) IDENTIFIER typeParamList? (COLON IDENTIFIER)? LBRACE structField* RBRACE
     ;
 
 structField
@@ -61,7 +69,7 @@ structField
     ;
 
 implBlock
-    : IMPL (traitName=IDENTIFIER FOR)? structName=IDENTIFIER LBRACE implMember* RBRACE
+    : IMPL typeParamList? (traitName=IDENTIFIER typeArgumentList? FOR)? structName=IDENTIFIER typeArgumentList? LBRACE implMember* RBRACE
     ;
 
 implMember
@@ -69,7 +77,7 @@ implMember
     ;
 
 traitDeclaration
-    : TRAIT IDENTIFIER LBRACE traitMember* RBRACE
+    : TRAIT IDENTIFIER typeParamList? LBRACE traitMember* RBRACE
     ;
 
 returnTypeList
@@ -77,11 +85,11 @@ returnTypeList
     ;
 
 traitMember
-    : annotation* (STATIC | CONST)? FUNC IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
+    : annotation* (STATIC | CONST)? FUNC typeParamList? IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
     ;
 
 functionDeclaration
-    : annotation* FUNC functionName LPAREN parameterList? RPAREN (COLON returnTypeList)? block
+    : annotation* FUNC tp1=typeParamList? functionName tp2=typeParamList? LPAREN parameterList? RPAREN (COLON returnTypeList)? block
     ;
 
 functionName
@@ -108,7 +116,7 @@ baseType
     : INT_TYPE
     | FLOAT_TYPE
     | BOOL_TYPE
-    | identifierPath
+    | identifierPath typeArgumentList?
     ;
 
 functionType
@@ -200,7 +208,7 @@ forStatement
 
 expression
     : expression LBRACKET expression RBRACKET                     # IndexExpr
-    | expression LPAREN argumentList? RPAREN                      # CallExpr
+    | expression typeArgumentList? LPAREN argumentList? RPAREN    # CallExpr
     | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
     | (SUB | ADD | NOT) expression                                # UnaryExpr
     | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
@@ -263,7 +271,7 @@ mapEntry
     ;
 
 structInitializer
-    : IDENTIFIER LBRACE structInitFieldList? RBRACE (IN expression)?
+    : IDENTIFIER typeArgumentList? LBRACE structInitFieldList? RBRACE (IN expression)?
     ;
 
 structInitFieldList

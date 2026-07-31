@@ -219,6 +219,8 @@ class PythonTranspiler:
 
     # 2. Collect impl block methods to attach to class definitions
     for decl in program.declarations:
+      if getattr(decl, "type_params", None):
+        continue
       if isinstance(decl, ImplBlockNode):
         if decl.struct_name not in self.struct_methods:
           self.struct_methods[decl.struct_name] = []
@@ -229,6 +231,8 @@ class PythonTranspiler:
     has_main = False
 
     for decl in program.declarations:
+      if getattr(decl, "type_params", None):
+        continue
       if isinstance(decl, ImplBlockNode):
         continue
       elif isinstance(decl, FuncDeclNode):

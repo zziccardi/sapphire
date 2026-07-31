@@ -51,10 +51,11 @@ class TypeNode(ASTNode):
 
 
 class BasicTypeNode(TypeNode):
-  """Represents a basic type (e.g. 'int', 'float', 'bool', or a struct name)."""
+  """Represents a basic type (e.g. 'int', 'float', 'bool', or a struct name like 'Stack<int>')."""
 
-  def __init__(self, name: str):
+  def __init__(self, name: str, type_args: Optional[List[TypeNode]] = None):
     self.name = name
+    self.type_args = type_args or []
 
 
 class OptionalTypeNode(TypeNode):
@@ -158,11 +159,12 @@ class AnnotationNode(ASTNode):
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
-  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False):
+  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False, type_params: Optional[List[str]] = None):
     self.name = name
     self.parent_name = parent_name
     self.fields = fields
     self.is_prototype = is_prototype
+    self.type_params = type_params or []
 
 
 class EnumMemberNode(ASTNode):
@@ -194,7 +196,7 @@ class ParameterNode(ASTNode):
 class FuncDeclNode(DeclNode):
   """Represents a function declaration, supporting single or multiple return types."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None, return_type: Optional[TypeNode] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None, return_type: Optional[TypeNode] = None, type_params: Optional[List[str]] = None):
     self.name = name
     self.parameters = parameters
     if return_types is not None:
@@ -208,6 +210,7 @@ class FuncDeclNode(DeclNode):
       self.return_types = []
     self.body = body
     self.annotations = annotations or []
+    self.type_params = type_params or []
 
   @property
   def return_type(self) -> Optional[TypeNode]:
@@ -225,16 +228,19 @@ class ImplMemberNode(ASTNode):
 class ImplBlockNode(DeclNode):
   """Represents a Rust-style implementation block."""
 
-  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode]):
+  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode], type_params: Optional[List[str]] = None, trait_type_args: Optional[List[TypeNode]] = None, struct_type_args: Optional[List[TypeNode]] = None):
     self.struct_name = struct_name
     self.trait_name = trait_name
     self.members = members
+    self.type_params = type_params or []
+    self.trait_type_args = trait_type_args or []
+    self.struct_type_args = struct_type_args or []
 
 
 class TraitMemberNode(ASTNode):
   """Represents a method signature inside a trait declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, modifier: Optional[str] = None, return_type: Optional[TypeNode] = None, annotations: Optional[List[AnnotationNode]] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, modifier: Optional[str] = None, return_type: Optional[TypeNode] = None, annotations: Optional[List[AnnotationNode]] = None, type_params: Optional[List[str]] = None):
     self.name = name
     self.parameters = parameters
     if return_types is not None:
@@ -248,6 +254,7 @@ class TraitMemberNode(ASTNode):
       self.return_types = []
     self.modifier = modifier
     self.annotations = annotations or []
+    self.type_params = type_params or []
 
   @property
   def return_type(self) -> Optional[TypeNode]:
@@ -257,9 +264,10 @@ class TraitMemberNode(ASTNode):
 class TraitDeclNode(DeclNode):
   """Represents a trait declaration."""
 
-  def __init__(self, name: str, members: List[TraitMemberNode]):
+  def __init__(self, name: str, members: List[TraitMemberNode], type_params: Optional[List[str]] = None):
     self.name = name
     self.members = members
+    self.type_params = type_params or []
 
 
 # ==========================================
@@ -516,9 +524,10 @@ class ArgumentNode(ASTNode):
 class CallNode(ExprNode):
   """Represents a function or method call."""
 
-  def __init__(self, callee: ASTNode, arguments: List[ArgumentNode]):
+  def __init__(self, callee: ASTNode, arguments: List[ArgumentNode], type_args: Optional[List[TypeNode]] = None):
     self.callee = callee
     self.arguments = arguments
+    self.type_args = type_args or []
 
 
 class MemberAccessNode(ExprNode):
@@ -589,10 +598,11 @@ class IndexExprNode(ExprNode):
 class StructInitializerNode(ExprNode):
   """Represents a curly-brace struct initializer expression (e.g. 'Weapon { damage = 10 }')."""
 
-  def __init__(self, struct_name: str, fields: List[ArgumentNode], arena_expr: Optional[ASTNode] = None):
+  def __init__(self, struct_name: str, fields: List[ArgumentNode], arena_expr: Optional[ASTNode] = None, type_args: Optional[List[TypeNode]] = None):
     self.struct_name = struct_name
     self.fields = fields
     self.arena_expr = arena_expr
+    self.type_args = type_args or []
 
 
 class EllipsisPatternNode(ASTNode):
