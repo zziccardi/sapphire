@@ -1071,7 +1071,10 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
 
     # 12. Direct test for _is_reference_type with NoneType (edge case coverage)
-    from semantics.symbol_table import NoneType
+    try:
+      from semantics.symbol_table import NoneType
+    except ImportError:
+      from src.semantics.symbol_table import NoneType
     checker = TypeChecker()
     self.assertFalse(checker._is_reference_type(NoneType()))
 
@@ -1363,8 +1366,12 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Variable 'out' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
 
     # 8. Programmatic test for VarDeclNode arena escape (covers type_checker.py line 418)
-    from parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
-    from semantics.symbol_table import VariableSymbol, StructType, ArenaType
+    try:
+      from parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
+      from semantics.symbol_table import VariableSymbol, StructType, ArenaType
+    except ImportError:
+      from src.parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
+      from src.semantics.symbol_table import VariableSymbol, StructType, ArenaType
     
     checker = TypeChecker()
     # Define parent and nested scopes
@@ -2352,6 +2359,47 @@ class TestTypeChecker(unittest.TestCase):
       };
     }
     """)
+
+
+  def test_string_methods_valid(self):
+    """Verifies that all built-in String instance methods type-check correctly."""
+    self._check("""
+    func test() {
+      let s = " Hello World ";
+      let sz: int = s.size();
+      let emp: bool = s.empty();
+      let low: String = s.lower();
+      let up: String = s.upper();
+      let strp: String = s.strip();
+      let strp_custom: String = s.strip("/");
+      let parts = s.split(",");
+      let parts_ws = s.split();
+      let has: bool = s.contains("World");
+      let idx: int? = s.find("World");
+      let idx_rev: int? = s.find("World", reverse = true);
+      let idx_start: int? = s.find("World", start = 2, reverse = false);
+    }
+    """)
+
+  def test_string_methods_invalid(self):
+    """Enforces type safety on String method calls."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let s = "hello";
+        let res = s.invalid_method();
+      }
+      """)
+    self.assertIn("String has no method 'invalid_method'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let s = "hello";
+        let x: int = s.contains("h");
+      }
+      """)
+    self.assertIn("Cannot assign expression of type 'bool' to variable 'x' of type 'int'", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ class PrimitiveType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, PrimitiveType):
       return False
-    return self.name == other.name
+    return self.name.lower() == other.name.lower()
 
   def __repr__(self) -> str:
     return self.name
@@ -94,6 +94,7 @@ class FunctionType(Type):
       param_names: Optional[List[str]] = None,
       has_self: bool = False,
       extern_name: Optional[str] = None,
+      num_defaults: int = 0,
   ):
     self.param_types = param_types
     if isinstance(return_type, list):
@@ -109,6 +110,7 @@ class FunctionType(Type):
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
     self.has_self = has_self or (bool(self.param_names) and self.param_names[0] == "self")
     self.extern_name = extern_name
+    self.num_defaults = num_defaults
 
   @property
   def return_types(self) -> List[Type]:
@@ -313,6 +315,66 @@ class MapType(Type):
 
   def __repr__(self) -> str:
     return f"[{self.key_type}: {self.value_type}]"
+
+
+STRING_METHODS: Dict[str, FunctionType] = {
+    "size": FunctionType(
+        [PrimitiveType("string")],
+        PrimitiveType("int"),
+        param_names=["self"],
+        has_self=True,
+    ),
+    "empty": FunctionType(
+        [PrimitiveType("string")],
+        PrimitiveType("bool"),
+        param_names=["self"],
+        has_self=True,
+    ),
+    "lower": FunctionType(
+        [PrimitiveType("string")],
+        PrimitiveType("string"),
+        param_names=["self"],
+        has_self=True,
+    ),
+    "upper": FunctionType(
+        [PrimitiveType("string")],
+        PrimitiveType("string"),
+        param_names=["self"],
+        has_self=True,
+    ),
+    "strip": FunctionType(
+        [PrimitiveType("string"), OptionalType(PrimitiveType("string"))],
+        PrimitiveType("string"),
+        param_names=["self", "chars"],
+        has_self=True,
+        num_defaults=1,
+    ),
+    "split": FunctionType(
+        [PrimitiveType("string"), OptionalType(PrimitiveType("string"))],
+        ArrayType(PrimitiveType("string")),
+        param_names=["self", "sep"],
+        has_self=True,
+        num_defaults=1,
+    ),
+    "contains": FunctionType(
+        [PrimitiveType("string"), PrimitiveType("string")],
+        PrimitiveType("bool"),
+        param_names=["self", "sub"],
+        has_self=True,
+    ),
+    "find": FunctionType(
+        [
+            PrimitiveType("string"),
+            PrimitiveType("string"),
+            PrimitiveType("int"),
+            PrimitiveType("bool"),
+        ],
+        OptionalType(PrimitiveType("int")),
+        param_names=["self", "start", "reverse"] if False else ["self", "sub", "start", "reverse"],
+        has_self=True,
+        num_defaults=2,
+    ),
+}
 
 
 # ==========================================

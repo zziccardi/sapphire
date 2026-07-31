@@ -812,5 +812,31 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("for k, v in pairs(m) do", lua_out)
 
 
+  def test_lua_string_methods(self):
+    """Verifies Lua transpilation of String methods."""
+    code = """
+    func test_str() {
+      let s = "  hello world  ";
+      let sz = s.size();
+      let emp = s.empty();
+      let clean = s.strip();
+      let low = clean.lower();
+      let up = clean.upper();
+      let has = clean.contains("world");
+      let pos = clean.find("o", reverse = true);
+      let parts = clean.split(",");
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("local sz = (#s)", lua_out)
+    self.assertIn("local emp = (#s == 0)", lua_out)
+    self.assertIn("local clean = _sapphire_string_strip(s)", lua_out)
+    self.assertIn("local low = string.lower(clean)", lua_out)
+    self.assertIn("local up = string.upper(clean)", lua_out)
+    self.assertIn('local has = (string.find(clean, "world", 1, true) ~= nil)', lua_out)
+    self.assertIn('local pos = _sapphire_string_find(clean, "o", nil, true)', lua_out)
+    self.assertIn('local parts = _sapphire_string_split(clean, ",")', lua_out)
+
+
 if __name__ == "__main__":
   unittest.main()
