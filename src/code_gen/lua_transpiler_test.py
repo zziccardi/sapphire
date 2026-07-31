@@ -798,6 +798,19 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local x = count", lua_out)
     self.assertIn("while (count > 0) do", lua_out)
 
+  def test_lua_map_for_loop(self):
+    """Verifies that Lua transpilation converts map for-loops to pairs()."""
+    code = """
+    func test_map_for() {
+      let m = {"a": 1, "b": 2};
+      for k, v in m {
+        print(k);
+      }
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("for k, v in pairs(m) do", lua_out)
+
 
 if __name__ == "__main__":
   unittest.main()

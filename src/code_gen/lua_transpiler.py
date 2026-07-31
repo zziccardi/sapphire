@@ -780,9 +780,14 @@ class LuaTranspiler:
 
   def visit_ForNode(self, node: ForNode) -> None:
     self.newline()
-    self.emit(f"for _, {node.loop_var} in ipairs(")
-    self.visit(node.iterable)
-    self.emit(") do")
+    if node.key_var is not None:
+      self.emit(f"for {node.key_var}, {node.val_var} in pairs(")
+      self.visit(node.iterable)
+      self.emit(") do")
+    else:
+      self.emit(f"for _, {node.val_var} in ipairs(")
+      self.visit(node.iterable)
+      self.emit(") do")
     self.indent()
     self.visit(node.block)
     self.dedent()

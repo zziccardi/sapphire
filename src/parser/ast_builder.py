@@ -176,7 +176,11 @@ class ASTBuilder(SapphireVisitor):
   def visitImplBlock(self, ctx: SapphireParser.ImplBlockContext) -> ImplBlockNode:
     trait_name = ctx.traitName.text if ctx.traitName else None
     struct_name = ctx.structName.text
-    type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
+    tpl = ctx.typeParamList()
+    if tpl:
+      type_params = self.visitTypeParamList(tpl[0] if isinstance(tpl, list) else tpl)
+    else:
+      type_params = []
 
     type_args_list = ctx.typeArgumentList()
     trait_type_args = []
@@ -417,11 +421,33 @@ class ASTBuilder(SapphireVisitor):
 
   def visitForStatement(self, ctx: SapphireParser.ForStatementContext) -> ForNode:
     is_mutable = ctx.VAR() is not None
-    loop_var = ctx.IDENTIFIER().getText()
+    id_nodes = ctx.IDENTIFIER()
+    if len(id_nodes) == 2:
+      key_token = id_nodes[0].getSymbol()
+      val_token = id_nodes[1].getSymbol()
+      key_var = key_token.text
+      val_var = val_token.text
+      loop_var = key_var
+    else:
+      key_token = None
+      val_token = id_nodes[0].getSymbol()
+      key_var = None
+      val_var = val_token.text
+      loop_var = val_var
+
     iterable = self.visit(ctx.expression())
     block = self.visit(ctx.block())
-    node = ForNode(is_mutable, loop_var, iterable, block)
-    var_token = ctx.IDENTIFIER().getSymbol()
+    node = ForNode(is_mutable, loop_var, iterable, block, key_var=key_var, val_var=val_var)
+    if key_token:
+      node.key_var_line = key_token.line
+      node.key_var_column = key_token.column
+      node.key_var_length = len(key_token.text)
+    if val_token:
+      node.val_var_line = val_token.line
+      node.val_var_column = val_token.column
+      node.val_var_length = len(val_token.text)
+
+    var_token = key_token or val_token
     node.loop_var_line = var_token.line
     node.loop_var_column = var_token.column
     node.loop_var_length = len(var_token.text)

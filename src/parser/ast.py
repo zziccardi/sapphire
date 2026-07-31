@@ -465,11 +465,21 @@ class WhileNode(StmtNode):
 class ForNode(StmtNode):
   """Represents a for-in loop."""
 
-  def __init__(self, is_mutable: bool, loop_var: str, iterable: ASTNode, block: BlockNode):
+  def __init__(
+      self,
+      is_mutable: bool,
+      loop_var: str,
+      iterable: ASTNode,
+      block: BlockNode,
+      key_var: Optional[str] = None,
+      val_var: Optional[str] = None,
+  ):
     self.is_mutable = is_mutable
     self.loop_var = loop_var
     self.iterable = iterable
     self.block = block
+    self.key_var = key_var
+    self.val_var = val_var if val_var is not None else loop_var
 
 
 # ==========================================

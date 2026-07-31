@@ -984,6 +984,21 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_cow()")
     self.assertEqual(res, 20 + 99 + 20)
 
+  def test_map_iteration_python(self):
+    """Verifies Python transpilation and execution for map iteration."""
+    code = """
+    func test_map(): int {
+      let m = {"a": 10, "b": 20};
+      var sum = 0;
+      for k, v in m {
+        sum = sum + v;
+      }
+      return sum;
+    }
+    """
+    res = self._transpile_and_run(code, "test_map()")
+    self.assertEqual(res, 30)
+
 
 if __name__ == "__main__":
   unittest.main()

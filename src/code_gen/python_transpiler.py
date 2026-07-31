@@ -727,9 +727,14 @@ class PythonTranspiler:
 
   def visit_ForNode(self, node: ForNode) -> None:
     self.newline()
-    self.emit(f"for {node.loop_var} in ")
-    self.visit(node.iterable)
-    self.emit(":")
+    if node.key_var is not None:
+      self.emit(f"for {node.key_var}, {node.val_var} in ")
+      self.visit(node.iterable)
+      self.emit(".items():")
+    else:
+      self.emit(f"for {node.val_var} in ")
+      self.visit(node.iterable)
+      self.emit(":")
     self.indent()
     self.visit(node.block)
     self.dedent()

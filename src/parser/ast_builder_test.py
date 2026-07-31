@@ -425,6 +425,27 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(map_expr.entries[1].key.value, "bob")
     self.assertEqual(map_expr.entries[1].value.value, 95)
 
+  def test_map_for_loop_parsing(self):
+    """Verifies AST construction for map for-in loop with key, val bindings."""
+    try:
+      from parser.ast import ForNode, FuncDeclNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ForNode, FuncDeclNode
+
+    ast = self._get_ast("""
+    func test() {
+      for k, v in my_map {
+        print(k);
+      }
+    }
+    """)
+    func_decl = ast.declarations[0]
+    self.assertIsInstance(func_decl, FuncDeclNode)
+    for_node = func_decl.body.statements[0]
+    self.assertIsInstance(for_node, ForNode)
+    self.assertEqual(for_node.key_var, "k")
+    self.assertEqual(for_node.val_var, "v")
+
 
 if __name__ == "__main__":
   unittest.main()

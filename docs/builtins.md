@@ -142,6 +142,7 @@ Maps in Sapphire are strongly typed, key–value associative arrays.
 | **Map literal** | `let map = { "a": 1, "b": 2 };` | Instantiates a map with key-value pairs separated by colons. Supports trailing commas. |
 | **Key access** | `let val = map["a"];` | Accesses the value associated with the specified key using square-bracket indexing. |
 | **Key insertion / update**| `map["c"] = 3;` | Inserts or updates the key-value pair on mutable map instances (`var`). |
+| **Iteration** | `for key, val in map { ... }` | Iterates over key-value entries in the map using dual loop variables. |
 
 #### Code example
 
@@ -166,6 +167,11 @@ let status_codes = {
 
 let admin_role: String = user_roles["admin"];
 let active_code: int = status_codes[Status.Active];
+
+// Iterating over key-value pairs
+for role, title in user_roles {
+  print(role + ": " + title);
+}
 ```
 
 ### Arena
