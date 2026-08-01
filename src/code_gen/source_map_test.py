@@ -63,6 +63,24 @@ class TestSourceMap(unittest.TestCase):
     self.assertIn('[10] = { file = "main.sp", line = 1, col = 0, text = "let x = 10;" }', lua_table)
     self.assertIn('[11] = { file = "main.sp", line = 2, col = 0, text = "let y = 20;" }', lua_table)
 
+  def test_symbol_name_mapping(self):
+    """Tests mappings containing symbol names."""
+    builder = SourceMapBuilder("main.sp", "func foo() {}")
+    builder.add_mapping(
+        gen_line=1, gen_col=0, source_file="main.sp", orig_line=1, orig_col=0, symbol_name="foo"
+    )
+    v3_dict = builder.to_v3_dict("main.lua")
+    self.assertEqual(v3_dict["names"], ["foo"])
+    self.assertTrue(len(v3_dict["mappings"]) > 0)
+
+  def test_add_source_and_content(self):
+    """Tests adding additional source files and contents dynamically."""
+    builder = SourceMapBuilder("main.sp", "let x = 1;")
+    idx = builder.add_source("helper.sp", "let y = 2;")
+    self.assertEqual(idx, 1)
+    self.assertEqual(builder.sources, ["main.sp", "helper.sp"])
+    self.assertEqual(builder.sources_content["helper.sp"], "let y = 2;")
+
 
 if __name__ == "__main__":
   unittest.main()

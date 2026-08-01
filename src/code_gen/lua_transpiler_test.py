@@ -35,6 +35,7 @@ try:
   from parser.ast_builder import ASTBuilder
   from code_gen.lua_transpiler import LuaTranspiler
   from code_gen.transpiler import transpile_file
+  from code_gen.source_map import SourceMapBuilder
   from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
   from src.parser.ast import (
@@ -59,6 +60,7 @@ except ModuleNotFoundError:
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.lua_transpiler import LuaTranspiler
   from src.code_gen.transpiler import transpile_file
+  from src.code_gen.source_map import SourceMapBuilder
   from src.semantics.type_checker import TypeChecker
 
 
@@ -840,6 +842,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('local pos_fwd = _sapphire_string_find(clean, "o")', lua_out)
     self.assertIn('local pos = _sapphire_string_find(clean, "o", nil, true)', lua_out)
     self.assertIn('local parts = _sapphire_string_split(clean, ",")', lua_out)
+
+  def test_transpile_with_explicit_args(self):
+    """Verifies passing source_file and source_map_builder directly to transpile method."""
+    input_stream = InputStream("let x = 10;")
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    transpiler = LuaTranspiler()
+    sm_builder = SourceMapBuilder("direct.sp")
+    lua_out = transpiler.transpile(ast, source_file="direct.sp", source_map_builder=sm_builder)
+    self.assertEqual(transpiler.source_file, "direct.sp")
+    self.assertEqual(transpiler.source_map_builder, sm_builder)
 
 
 if __name__ == "__main__":
