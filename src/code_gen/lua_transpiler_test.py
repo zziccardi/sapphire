@@ -859,6 +859,30 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertEqual(transpiler.source_file, "direct.sp")
     self.assertEqual(transpiler.source_map_builder, sm_builder)
 
+  def test_casting_and_conversions_lua(self):
+    """Verifies Lua transpilation of casting (as) and String conversions."""
+    code = """
+    func test_conv() {
+      let f = 10 as float;
+      let i = 3.14 as int;
+      let s1 = String.from(42);
+      let s2 = String.from(true);
+
+      let p_int = "123".to_int();
+      let p_hex = "FF".to_int(radix = 16);
+      let p_float = "3.14".to_float();
+      let p_bool = "true".to_bool();
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("tonumber(10)", lua)
+    self.assertIn("math.floor(tonumber(3.14))", lua)
+    self.assertIn("tostring(42)", lua)
+    self.assertIn("tostring(true)", lua)
+    self.assertIn("_sapphire_string_to_int(", lua)
+    self.assertIn("_sapphire_string_to_float(", lua)
+    self.assertIn("_sapphire_string_to_bool(", lua)
+
 
 if __name__ == "__main__":
   unittest.main()

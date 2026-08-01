@@ -97,6 +97,7 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
 * **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
 * **Logical**: `&&` (logical AND), `||` (logical OR).
 * **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
+* **Type casting**: `as` (infallible static type conversion, e.g. `x as float`).
 
 ### Expressions & collection access
 

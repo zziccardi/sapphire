@@ -374,6 +374,25 @@ STRING_METHODS: Dict[str, FunctionType] = {
         has_self=True,
         num_defaults=2,
     ),
+    "to_int": FunctionType(
+        [PrimitiveType("string"), PrimitiveType("int")],
+        OptionalType(PrimitiveType("int")),
+        param_names=["self", "radix"],
+        has_self=True,
+        num_defaults=1,
+    ),
+    "to_float": FunctionType(
+        [PrimitiveType("string")],
+        OptionalType(PrimitiveType("float")),
+        param_names=["self"],
+        has_self=True,
+    ),
+    "to_bool": FunctionType(
+        [PrimitiveType("string")],
+        OptionalType(PrimitiveType("bool")),
+        param_names=["self"],
+        has_self=True,
+    ),
 }
 
 

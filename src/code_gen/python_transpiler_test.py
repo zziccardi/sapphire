@@ -1027,6 +1027,29 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_str()")
     self.assertTrue(res)
 
+  def test_casting_and_conversions_python(self):
+    """Verifies Python transpilation and execution of casting (as) and String conversions."""
+    code = """
+    func test_conv(): bool {
+      let f = 10 as float;
+      let i = 3.14 as int;
+      let s1 = String.from(42);
+      let s2 = String.from(true);
+
+      let p_int = "123".to_int();
+      let p_hex = "FF".to_int(radix = 16);
+      let p_float = "3.14".to_float();
+      let p_bool = "true".to_bool();
+      let bad_int = "abc".to_int();
+
+      let cond1 = f == 10.0 && i == 3 && s1 == "42" && s2 == "true";
+      let cond2 = p_int == 123 && p_hex == 255 && p_float == 3.14 && p_bool == true && bad_int == none;
+      return cond1 && cond2;
+    }
+    """
+    res = self._transpile_and_run(code, "test_conv()")
+    self.assertTrue(res)
+
 
 if __name__ == "__main__":
   unittest.main()

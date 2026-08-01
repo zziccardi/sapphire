@@ -57,6 +57,7 @@ Sapphire provides standard methods on `String` instances. Methods that do not fi
 
 | Method signature | Description |
 | :--- | :--- |
+| `String.from(val: <primitive>): String` | Static constructor intrinsic that converts any primitive (`int`, `float`, `bool`) or `enum` to a `String`. |
 | `size(): int` | Returns the number of characters in the string. |
 | `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
 | `lower(): String` | Returns a new string with characters converted to lowercase. |
@@ -65,6 +66,9 @@ Sapphire provides standard methods on `String` instances. Methods that do not fi
 | `split(sep: String? = none): [String]`  | Splits the string by `sep` delimiter into an array of substrings. |
 | `contains(sub: String): bool` | Returns `true` if `sub` is present within the string. |
 | `find(sub: String, start: int = 0, reverse: bool = false): int?` | Searches for `sub` and returns its index, or `none` if not found. |
+| `to_int(radix: int = 10): int?` | Parses the string as an integer with optional `radix`. Returns `none` if parsing fails. |
+| `to_float(): float?` | Parses the string as a floating-point number. Returns `none` if parsing fails. |
+| `to_bool(): bool?` | Parses `"true"` or `"false"` (case-insensitive) as a boolean. Returns `none` if parsing fails. |
 
 ##### Detailed method behavior
 

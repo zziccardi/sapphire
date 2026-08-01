@@ -2410,6 +2410,39 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Not enough arguments passed to call", str(ctx.exception))
 
+  def test_casting_and_conversion_methods(self):
+    """Verifies type casting (as) and String.from / str.to_int/float/bool conversion methods."""
+    # 1. Valid static casts and string conversions
+    self._check("""
+    enum Status { Active = 1 }
+
+    func test() {
+      let f: float = 10 as float;
+      let i: int = 3.14 as int;
+      let b: int = true as int;
+      let code: int = Status.Active as int;
+
+      let s1: String = String.from(42);
+      let s2: String = String.from(3.14);
+      let s3: String = String.from(true);
+      let s4: String = String.from(Status.Active);
+
+      let parsed_int: int? = "123".to_int();
+      let parsed_hex: int? = "FF".to_int(radix = 16);
+      let parsed_float: float? = "3.14".to_float();
+      let parsed_bool: bool? = "true".to_bool();
+    }
+    """)
+
+    # 2. String to int via 'as' (should error and suggest .to_int())
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let i = "123" as int;
+      }
+      """)
+    self.assertIn("Cannot cast 'string' to 'int' using 'as'", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

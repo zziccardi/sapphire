@@ -233,6 +233,29 @@ local _sapphire_string_find = function(s, sub, start_idx, reverse)
     return nil
   end
 end
+
+local _sapphire_string_to_int = function(s, radix)
+  if s == nil then return nil end
+  local r = radix or 10
+  local num = tonumber(s, r)
+  if num then
+    return math.floor(num)
+  end
+  return nil
+end
+
+local _sapphire_string_to_float = function(s)
+  if s == nil then return nil end
+  return tonumber(s)
+end
+
+local _sapphire_string_to_bool = function(s)
+  if type(s) ~= "string" then return nil end
+  local clean = s:match("^%s*(.-)%s*$"):lower()
+  if clean == "true" then return true end
+  if clean == "false" then return false end
+  return nil
+end
 """
 
 
@@ -1004,7 +1027,34 @@ class LuaTranspiler:
     self.visit(node.expr)
     self.emit(")")
 
+  def visit_CastExprNode(self, node: CastExprNode) -> None:
+    target = node.target_type.name if hasattr(node.target_type, "name") else str(node.target_type)
+    if target == "float":
+      self.emit("tonumber(")
+      self.visit(node.expr)
+      self.emit(")")
+    elif target == "int":
+      self.emit("math.floor(tonumber(")
+      self.visit(node.expr)
+      self.emit("))")
+    elif target == "bool":
+      self.emit("(not not ")
+      self.visit(node.expr)
+      self.emit(")")
+    elif target in ("string", "String"):
+      self.emit("tostring(")
+      self.visit(node.expr)
+      self.emit(")")
+    else:
+      self.visit(node.expr)
+
   def visit_CallNode(self, node: CallNode) -> None:
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_from", False):
+      self.emit("tostring(")
+      self.visit(node.arguments[0].expr)
+      self.emit(")")
+      return
+
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_method", False):
       method = node.callee.member
       receiver = node.callee.receiver
@@ -1072,6 +1122,25 @@ class LuaTranspiler:
             self.emit("nil")
           else:
             self.visit(p_expr)
+        self.emit(")")
+        return
+      elif method == "to_int":
+        self.emit("_sapphire_string_to_int(")
+        self.visit(receiver)
+        if node.arguments:
+          for arg in node.arguments:
+            self.emit(", ")
+            self.visit(arg.expr)
+        self.emit(")")
+        return
+      elif method == "to_float":
+        self.emit("_sapphire_string_to_float(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "to_bool":
+        self.emit("_sapphire_string_to_bool(")
+        self.visit(receiver)
         self.emit(")")
         return
 

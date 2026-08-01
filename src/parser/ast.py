@@ -523,6 +523,14 @@ class UnaryOpNode(ExprNode):
     self.expr = expr
 
 
+class CastExprNode(ExprNode):
+  """Represents an explicit type cast expression (e.g. 'x as float')."""
+
+  def __init__(self, expr: ASTNode, target_type: TypeNode):
+    self.expr = expr
+    self.target_type = target_type
+
+
 class ArgumentNode(ASTNode):
   """Represents an argument passed to a function call, potentially named (e.g. 'x = 5')."""
 

@@ -179,6 +179,39 @@ def _sapphire_string_find(s, sub, start=0, reverse=False):
   else:
     res = s.find(sub, start)
   return None if res == -1 else res
+
+def _sapphire_string_to_int(s, radix=10):
+  if s is None:
+    return None
+  try:
+    return int(s, radix)
+  except (ValueError, TypeError):
+    return None
+
+def _sapphire_string_to_float(s):
+  if s is None:
+    return None
+  try:
+    return float(s)
+  except (ValueError, TypeError):
+    return None
+
+def _sapphire_string_to_bool(s):
+  if not isinstance(s, str):
+    return None
+  val = s.strip().lower()
+  if val == "true":
+    return True
+  if val == "false":
+    return False
+  return None
+
+def _sapphire_string_from(val):
+  if val is True:
+    return "true"
+  if val is False:
+    return "false"
+  return str(val)
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
@@ -805,7 +838,34 @@ class PythonTranspiler:
     self.visit(node.expr)
     self.emit(")")
 
+  def visit_CastExprNode(self, node: CastExprNode) -> None:
+    target = node.target_type.name if hasattr(node.target_type, "name") else str(node.target_type)
+    if target == "float":
+      self.emit("float(")
+      self.visit(node.expr)
+      self.emit(")")
+    elif target == "int":
+      self.emit("int(")
+      self.visit(node.expr)
+      self.emit(")")
+    elif target == "bool":
+      self.emit("bool(")
+      self.visit(node.expr)
+      self.emit(")")
+    elif target in ("string", "String"):
+      self.emit("str(")
+      self.visit(node.expr)
+      self.emit(")")
+    else:
+      self.visit(node.expr)
+
   def visit_CallNode(self, node: CallNode) -> None:
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_from", False):
+      self.emit("_sapphire_string_from(")
+      self.visit(node.arguments[0].expr)
+      self.emit(")")
+      return
+
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_method", False):
       method = node.callee.member
       receiver = node.callee.receiver
@@ -857,6 +917,27 @@ class PythonTranspiler:
           if arg.name:
             self.emit(f"{arg.name}=")
           self.visit(arg.expr)
+        self.emit(")")
+        return
+      elif method == "to_int":
+        self.emit("_sapphire_string_to_int(")
+        self.visit(receiver)
+        if node.arguments:
+          for arg in node.arguments:
+            self.emit(", ")
+            if arg.name:
+              self.emit(f"{arg.name}=")
+            self.visit(arg.expr)
+        self.emit(")")
+        return
+      elif method == "to_float":
+        self.emit("_sapphire_string_to_float(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "to_bool":
+        self.emit("_sapphire_string_to_bool(")
+        self.visit(receiver)
         self.emit(")")
         return
 
