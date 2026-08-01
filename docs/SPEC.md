@@ -979,3 +979,23 @@ While single, flat physical inheritance avoids vtable overhead by organizing mem
 * **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
 
 Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+
+### Avoiding throwable exceptions
+
+Traditional exception mechanisms (`try`/`catch`/`throw`) introduce hidden
+control-flow jumps and expensive runtime stack-unwinding overhead. Sapphire
+intentionally omits throwable exceptions in favor of explicit, type-safe error
+handling:
+* **No hidden control flow**: Functions clearly express fallibility in their
+  signatures (e.g., returning optional types `T?` or multiple return values
+  `T, bool`). Callers are forced to handle error paths explicitly at call
+  sites.
+* **Deterministic performance**: Eliminating exception unwinding runtime
+  machinery ensures predictable CPU execution paths and simplified
+  transpilation targets across scripting host engines.
+* **Exhaustive error handling**: Combining enums with `match` expressions
+  allows the compiler to statically enforce that all error variants are
+  handled.
+* **Resource safety without `finally`**: Lexical RAII and arena destruction
+  guarantee that allocations and resources are automatically torn down upon
+  scope exit, eliminating the need for exception cleanup blocks.
