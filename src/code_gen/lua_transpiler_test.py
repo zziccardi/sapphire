@@ -901,6 +901,18 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_enum_from(Status", lua)
     self.assertIn("_sapphire_enum_from(LogLevel", lua)
 
+  def test_interpolated_string(self):
+    """Verifies transpilation of f-strings to Lua string concatenation."""
+    code = """
+    func main() {
+      let name = "Hero";
+      let count = 42;
+      let msg = f"Hello {name}, count: {count}!";
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn('("Hello " .. tostring(name) .. ", count: " .. tostring(count) .. "!")', lua)
+
 
 if __name__ == "__main__":
   unittest.main()

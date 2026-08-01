@@ -2497,6 +2497,32 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot convert type 'bool' to Enum 'Status' using .from()", str(ctx.exception))
 
+  def test_interpolated_string_type_checking(self):
+    """Verifies type checking of valid f-strings with primitives, enums, none."""
+    self._check("""
+    enum Direction { North = "North" }
+    func test() {
+      let name: String = "Hero";
+      let count: int = 10;
+      let dir: Direction = Direction.North;
+      let msg: String = f"Hello {name}, dir: {dir}, count: {count + 1}, none: {none}";
+    }
+    """)
+
+  def test_interpolated_string_struct_error(self):
+    """Verifies that interpolating a struct directly triggers a type error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Player {
+        var name: String;
+      }
+      func test() {
+        var p: Player = Player { name = "Hero" };
+        let msg = f"Player: {p}";
+      }
+      """)
+    self.assertIn("Cannot interpolate struct type 'Player' directly into string", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

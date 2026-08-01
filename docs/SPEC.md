@@ -76,13 +76,26 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 
 ```
 let speed: int = 60;
-let name = "Hero";    // Type inferred as String
+let name = "Hero";  // Type inferred as String
+
+// Python-style string interpolation
+let msg = f"Hello {name}, speed: {speed}!";
 
 var health = 100;
-health = 90;          // Valid mutation
+health = 90;  // Valid mutation
 
 let x, y = 10.0, 20.0;  // Multi-variable declaration
 ```
+
+### String interpolation
+
+Sapphire supports Python-style string interpolation using the `f"..."` prefix:
+
+* **Syntax**: `f"literal {expression} literal"`
+* **Nested quotes**: Expressions inside interpolation braces support nested quotes (e.g. `f"Hello {user.get("name")}"`).
+* **Brace escaping**: Double curly braces `{{` and `}}` within an f-string evaluate to literal `{` and `}` characters.
+* **Automatic type coercion**: Primitive types (`int`, `float`, `bool`), `none`, and `enum` variants are automatically coerced to strings inside `{expression}`.
+* **Structs**: User-defined `struct` types cannot be interpolated directly and cause a compile-time error; explicit conversion methods (e.g. `{player.to_string()}`) must be called.
 
 ## 5. Core operators & expressions
 

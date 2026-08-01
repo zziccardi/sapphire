@@ -501,6 +501,13 @@ class LiteralNode(ExprNode):
     self.lit_type = lit_type  # 'int', 'float', 'string', 'bool', 'none'
 
 
+class InterpolatedStringNode(ExprNode):
+  """Represents an interpolated string (f"Hello {name}")."""
+
+  def __init__(self, parts: List[ASTNode]):
+    self.parts = parts  # Sequence of LiteralNode('string') and ExprNode
+
+
 class IdentifierNode(ExprNode):
   """Represents an identifier/variable reference."""
 

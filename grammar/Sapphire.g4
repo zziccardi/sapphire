@@ -288,6 +288,7 @@ literal
     : INT_LIT
     | FLOAT_LIT
     | STRING_LIT
+    | INTERPOLATED_STRING_LIT
     | TRUE
     | FALSE
     | NONE
@@ -389,6 +390,7 @@ IDENTIFIER : [a-zA-Z_][a-zA-Z0-9_]*;
 INT_LIT : [0-9]+;
 FLOAT_LIT : [0-9]+ '.' [0-9]+;
 STRING_LIT : '"' (~["\\] | '\\' .)* '"';
+INTERPOLATED_STRING_LIT : 'f"' ( '\\' . | '"' (~["\\] | '\\' .)* '"' | ~["\\] )* '"';
 
 // Whitespace and Comments
 WS : [ \t\r\n]+ -> skip;

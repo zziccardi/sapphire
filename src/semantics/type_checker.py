@@ -1148,6 +1148,16 @@ class TypeChecker:
       return PrimitiveType("string")
     return NoneType()
 
+  def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> Type:
+    for part in node.parts:
+      t = self.visit(part)
+      if isinstance(t, StructType):
+        self.error(
+            f"Cannot interpolate struct type '{t.name}' directly into string."
+            " Call a string conversion method explicitly."
+        )
+    return PrimitiveType("string")
+
   def visit_IdentifierNode(self, node: IdentifierNode) -> Type:
     sym = self.symbol_table.lookup(node.name)
     if not sym:

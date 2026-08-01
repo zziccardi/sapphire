@@ -996,6 +996,35 @@ class LuaTranspiler:
     else:
       self.emit(str(node.value))
 
+  def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> None:
+    if not node.parts:
+      self.emit('""')
+      return
+
+    if len(node.parts) == 1:
+      part = node.parts[0]
+      if isinstance(part, LiteralNode) and part.lit_type == "string":
+        escaped_val = part.value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        self.emit(f'"{escaped_val}"')
+      else:
+        self.emit("tostring(")
+        self.visit(part)
+        self.emit(")")
+      return
+
+    self.emit("(")
+    for idx, part in enumerate(node.parts):
+      if idx > 0:
+        self.emit(" .. ")
+      if isinstance(part, LiteralNode) and part.lit_type == "string":
+        escaped_val = part.value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        self.emit(f'"{escaped_val}"')
+      else:
+        self.emit("tostring(")
+        self.visit(part)
+        self.emit(")")
+    self.emit(")")
+
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
     if node.name == "Arena":
       self.emit("Arena.init")
