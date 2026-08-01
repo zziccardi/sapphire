@@ -166,6 +166,71 @@ _clone_helper = function(obj, init_fn, arena)
   end
   return clone_obj
 end
+
+local _sapphire_string_strip = function(s, chars)
+  if s == nil then return "" end
+  if chars == nil or chars == "" then
+    return s:match("^%s*(.-)%s*$") or ""
+  end
+  local escaped = chars:gsub("(%W)", "%%%1")
+  local pattern = "^[" .. escaped .. "]*(.-)[" .. escaped .. "]*$"
+  return s:match(pattern) or ""
+end
+
+local _sapphire_string_split = function(s, sep)
+  if s == nil then return {} end
+  local res = {}
+  if sep == "" then
+    for i = 1, #s do
+      table.insert(res, s:sub(i, i))
+    end
+    return res
+  end
+  if sep == nil then
+    for w in s:gmatch("%S+") do
+      table.insert(res, w)
+    end
+    return res
+  end
+  local start = 1
+  while true do
+    local p_start, p_end = s:find(sep, start, true)
+    if not p_start then
+      table.insert(res, s:sub(start))
+      break
+    end
+    table.insert(res, s:sub(start, p_start - 1))
+    start = p_end + 1
+  end
+  return res
+end
+
+local _sapphire_string_find = function(s, sub, start_idx, reverse)
+  if s == nil or sub == nil then return nil end
+  local s_len = #s
+  local start_0 = start_idx or 0
+  if reverse then
+    local last_pos = nil
+    local curr = 1
+    while curr <= s_len do
+      local p_start = s:find(sub, curr, true)
+      if not p_start then break end
+      local idx_0 = p_start - 1
+      if idx_0 >= start_0 then
+        last_pos = idx_0
+      end
+      curr = p_start + 1
+    end
+    return last_pos
+  else
+    local start_1 = start_0 + 1
+    local p_start = s:find(sub, start_1, true)
+    if p_start then
+      return p_start - 1
+    end
+    return nil
+  end
+end
 """
 
 
@@ -827,7 +892,6 @@ class LuaTranspiler:
     op_map = {"&&": "and", "||": "or", "!=": "~="}
     op = op_map.get(node.op, node.op)
 
-    # Convert '+' for strings to '..' string concatenation in Lua
     if op == "+":
       if getattr(node, "is_string_concat", False) or (isinstance(node.left, LiteralNode) and node.left.lit_type == "string") or (isinstance(node.right, LiteralNode) and node.right.lit_type == "string"):
         op = ".."
@@ -851,6 +915,76 @@ class LuaTranspiler:
     self.emit(")")
 
   def visit_CallNode(self, node: CallNode) -> None:
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_method", False):
+      method = node.callee.member
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("(#")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("(#")
+        self.visit(receiver)
+        self.emit(" == 0)")
+        return
+      elif method == "lower":
+        self.emit("string.lower(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "upper":
+        self.emit("string.upper(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "strip":
+        self.emit("_sapphire_string_strip(")
+        self.visit(receiver)
+        if node.arguments:
+          self.emit(", ")
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "split":
+        self.emit("_sapphire_string_split(")
+        self.visit(receiver)
+        if node.arguments:
+          self.emit(", ")
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("(string.find(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(", 1, true) ~= nil)")
+        return
+      elif method == "find":
+        self.emit("_sapphire_string_find(")
+        self.visit(receiver)
+        args_by_param = [None, None, None]  # sub, start, reverse
+        param_names = ["sub", "start", "reverse"]
+        for idx, arg in enumerate(node.arguments):
+          if arg.name and arg.name in param_names:
+            p_idx = param_names.index(arg.name)
+            args_by_param[p_idx] = arg.expr
+          elif idx < 3:
+            args_by_param[idx] = arg.expr
+
+        while args_by_param and args_by_param[-1] is None:
+          args_by_param.pop()
+
+        for p_expr in args_by_param:
+          self.emit(", ")
+          if p_expr is None:
+            self.emit("nil")
+          else:
+            self.visit(p_expr)
+        self.emit(")")
+        return
+
     # Check if this call is calling a struct constructor, e.g. Weapon(...)
     if (isinstance(node.callee, IdentifierNode) and
         node.callee.name in self.known_structs):

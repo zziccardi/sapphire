@@ -332,11 +332,14 @@ class ASTBuilder(SapphireVisitor):
       return_types = [self.visit(ctx.type_()[-1])]
     return FunctionTypeNode(param_types, return_types)
 
-  def visitStatement(self, ctx: SapphireParser.StatementContext) -> StmtNode:
-    return self.visit(ctx.getChild(0))
+  def visitStatement(self, ctx: SapphireParser.StatementContext) -> Optional[StmtNode]:
+    if ctx and ctx.getChildCount() > 0 and ctx.getChild(0) is not None:
+      return self.visit(ctx.getChild(0))
+    return None
 
   def visitBlock(self, ctx: SapphireParser.BlockContext) -> BlockNode:
-    statements = [self.visit(s) for s in ctx.statement()]
+    statements = [self.visit(s) for s in ctx.statement() if s is not None]
+    statements = [s for s in statements if s is not None]
     return BlockNode(statements)
 
   def visitVarBinding(self, ctx: SapphireParser.VarBindingContext):

@@ -34,6 +34,7 @@ try:
       TraitSymbol,
       EnumSymbol,
       ModuleSymbol,
+      STRING_METHODS,
   )
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
@@ -61,6 +62,7 @@ except ModuleNotFoundError:  # pragma: no cover
       TraitSymbol,
       EnumSymbol,
       ModuleSymbol,
+      STRING_METHODS,
   )
 
 
@@ -1361,26 +1363,36 @@ class TypeChecker:
   def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False, callee_node: Optional[ASTNode] = None) -> None:
     """Helper to match argument lists against signatures (including parameter modes)."""
     expected_param_types = signature.param_types
+    expected_param_names = signature.param_names or []
     if getattr(signature, "has_self", False) and isinstance(callee_node, MemberAccessNode):
       expected_param_types = signature.param_types[1:]
+      expected_param_names = signature.param_names[1:] if signature.param_names else []
+
+    num_defaults = getattr(signature, "num_defaults", 0)
+    min_required = max(0, len(expected_param_types) - num_defaults)
+    if len(arguments) < min_required:
+      self.error(f"Not enough arguments passed to call. Expected at least {min_required}, got {len(arguments)}.")
+      return
 
     for idx, arg in enumerate(arguments):
       # Pass expected parameter type for lambda type inference
       old_expected = self.expected_type
-      if idx < len(expected_param_types):
-        self.expected_type = expected_param_types[idx]
+      param_idx = idx
+      if arg.name and expected_param_names and arg.name in expected_param_names:
+        param_idx = expected_param_names.index(arg.name)
+
+      if param_idx < len(expected_param_types):
+        self.expected_type = expected_param_types[param_idx]
       else:
         self.expected_type = None
 
       arg_type = self.visit(arg.expr)
       self.expected_type = old_expected
 
-      # Check positional constraints (since this is basic subset)
-      if idx < len(expected_param_types):
-        param_type = expected_param_types[idx]
+      if param_idx < len(expected_param_types):
+        param_type = expected_param_types[param_idx]
         if not arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
-
       else:
         # Extra parameter
         if not is_constructor:
@@ -1399,6 +1411,14 @@ class TypeChecker:
       if isinstance(receiver_type, OptionalType):
         self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
         return PrimitiveType("none")
+
+    if isinstance(receiver_type, PrimitiveType) and receiver_type.name.lower() in ("string", "pascal_string"):
+      method = STRING_METHODS.get(node.member)
+      if method:
+        node.is_string_method = True
+        return method
+      self.error(f"String has no method '{node.member}'.")
+      return PrimitiveType("none")
 
     if isinstance(receiver_type, ModuleType):
       if isinstance(node.receiver, IdentifierNode):

@@ -163,6 +163,22 @@ def _clone_helper(obj, init_fn=None, arena=None):
   if init_fn:
     init_fn(clone_obj)
   return clone_obj
+
+def _sapphire_string_split(s, sep=None):
+  if s is None:
+    return []
+  if sep == "":
+    return list(s)
+  return s.split(sep)
+
+def _sapphire_string_find(s, sub, start=0, reverse=False):
+  if s is None or sub is None:
+    return None
+  if reverse:
+    res = s.rfind(sub, start)
+  else:
+    res = s.find(sub, start)
+  return None if res == -1 else res
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
@@ -758,6 +774,14 @@ class PythonTranspiler:
     self.emit(name)
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> None:
+    if node.op == "+" and getattr(node, "is_string_concat", False):
+      self.emit("(str(")
+      self.visit(node.left)
+      self.emit(") + str(")
+      self.visit(node.right)
+      self.emit("))")
+      return
+
     if node.op == "??":
       self.emit("((lambda _v: _v if _v is not None else ")
       self.visit(node.right)
@@ -782,6 +806,60 @@ class PythonTranspiler:
     self.emit(")")
 
   def visit_CallNode(self, node: CallNode) -> None:
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_method", False):
+      method = node.callee.member
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("len(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("(len(")
+        self.visit(receiver)
+        self.emit(") == 0)")
+        return
+      elif method == "lower":
+        self.visit(receiver)
+        self.emit(".lower()")
+        return
+      elif method == "upper":
+        self.visit(receiver)
+        self.emit(".upper()")
+        return
+      elif method == "strip":
+        self.visit(receiver)
+        self.emit(".strip(")
+        if node.arguments:
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "split":
+        self.emit("_sapphire_string_split(")
+        self.visit(receiver)
+        if node.arguments:
+          self.emit(", ")
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("(")
+        self.visit(node.arguments[0].expr)
+        self.emit(" in ")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "find":
+        self.emit("_sapphire_string_find(")
+        self.visit(receiver)
+        for arg in node.arguments:
+          self.emit(", ")
+          if arg.name:
+            self.emit(f"{arg.name}=")
+          self.visit(arg.expr)
+        self.emit(")")
+        return
+
     self.visit(node.callee)
     self.emit("(")
     args = []

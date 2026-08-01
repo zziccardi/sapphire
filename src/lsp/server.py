@@ -735,6 +735,23 @@ def completion(ls: SapphireLanguageServer,
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
 
+    if type(receiver_type).__name__ == "PrimitiveType" and getattr(receiver_type, "name", "").lower() in ("string", "pascal_string"):
+      try:
+        from semantics.symbol_table import STRING_METHODS
+      except ImportError:  # pragma: no cover
+        from src.semantics.symbol_table import STRING_METHODS
+      items = []
+      for m_name, sig in STRING_METHODS.items():
+        items.append(
+            CompletionItem(
+                label=m_name,
+                kind=2,  # Method
+                detail=f"(string method) {m_name}{sig}",
+                insert_text=m_name,
+            )
+        )
+      return CompletionList(is_incomplete=False, items=items)
+
     if type(receiver_type).__name__ == "ModuleType" or (uri in ls.symbol_table_cache and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__ == "ModuleSymbol"):
       items = []
       mod_sym = ls.symbol_table_cache[uri].lookup(receiver_name) if uri in ls.symbol_table_cache else None

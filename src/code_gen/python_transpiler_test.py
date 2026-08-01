@@ -1000,6 +1000,34 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertEqual(res, 30)
 
 
+  def test_string_methods_python(self):
+    """Verifies Python transpilation and execution of all String instance methods."""
+    code = """
+    func test_str(): bool {
+      let s = "  hello world  ";
+      let sz = s.size();
+      let emp = s.empty();
+      let clean = s.strip();
+      let slash_stripped = "///path///".strip("/");
+      let low = clean.lower();
+      let up = clean.upper();
+      let has = clean.contains("world");
+      let first_o = clean.find("o");
+      let last_o = clean.find("o", reverse = true);
+      let parts = clean.split();
+      let csv_parts = "a,b,c".split(",");
+      let concat_var = "Result: " + clean;
+      
+      let cond1 = sz == 15 && emp == false && clean == "hello world" && slash_stripped == "path";
+      let cond2 = low == "hello world" && up == "HELLO WORLD" && has == true && csv_parts[0] == "a";
+      let cond3 = first_o == 4 && last_o == 7 && parts[0] == "hello" && parts[1] == "world" && concat_var == "Result: hello world";
+      return cond1 && cond2 && cond3;
+    }
+    """
+    res = self._transpile_and_run(code, "test_str()")
+    self.assertTrue(res)
+
+
 if __name__ == "__main__":
   unittest.main()
 

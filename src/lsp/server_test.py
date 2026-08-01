@@ -856,6 +856,27 @@ class TestLSPServer(unittest.TestCase):
       self.assertEqual(len(res_comp.items), 2) # f1 and m1, __init__ skipped
       self.assertIsNone(next((item for item in res_comp.items if item.label == "__init__"), None))
 
+      # Test String method completion items
+      from semantics.symbol_table import PrimitiveType, VariableSymbol
+      sym_str = VariableSymbol("str_var", PrimitiveType("string"), is_mutable=False)
+      sym_table.current_scope.symbols["str_var"] = sym_str
+
+      mock_doc_comp_str = MagicMock()
+      mock_doc_comp_str.uri = doc_uri
+      mock_doc_comp_str.source = "    let y = str_var.\n"
+      self.ls.workspace.get_text_document.return_value = mock_doc_comp_str
+
+      params_comp_str = CompletionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=0, character=20)
+      )
+      res_comp_str = completion(self.ls, params_comp_str)
+      self.assertIsNotNone(res_comp_str)
+      labels = [item.label for item in res_comp_str.items]
+      self.assertIn("lower", labels)
+      self.assertIn("split", labels)
+      self.assertIn("find", labels)
+
       # Completion on receiver with no resolved type (falls back to scope completion)
       ident_node_y = IdentifierNode("y")
       ident_node_y.start_line = 5
