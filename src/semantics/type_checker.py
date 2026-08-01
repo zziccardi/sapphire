@@ -1204,6 +1204,39 @@ class TypeChecker:
 
     return PrimitiveType("none")
 
+  def visit_TernaryExprNode(self, node: TernaryExprNode) -> Type:
+    # Enforce mandatory parentheses on nested ternary expressions
+    for branch_node in (node.condition, node.true_expr, node.false_expr):
+      if isinstance(branch_node, TernaryExprNode) and not getattr(branch_node, "is_parenthesized", False):
+        self.error("Nested ternary expressions must be explicitly enclosed in parentheses.")
+
+    cond_type = self.visit(node.condition)
+    if cond_type != PrimitiveType("bool"):
+      self.error(f"Ternary condition must be of type 'bool', got '{cond_type}'.")
+
+    true_type = self.visit(node.true_expr)
+    false_type = self.visit(node.false_expr)
+
+    # Check type compatibility between true and false branches
+    if isinstance(true_type, NoneType) and isinstance(false_type, NoneType):
+      return NoneType()
+    if isinstance(true_type, NoneType):
+      return OptionalType(false_type) if not isinstance(false_type, OptionalType) else false_type
+    if isinstance(false_type, NoneType):
+      return OptionalType(true_type) if not isinstance(true_type, OptionalType) else true_type
+
+    if true_type.is_compatible(false_type):
+      if isinstance(true_type, PrimitiveType) and true_type.name == "int" and isinstance(false_type, PrimitiveType) and false_type.name == "float":
+        return PrimitiveType("float")
+      return false_type if not false_type.is_compatible(true_type) else true_type
+    elif false_type.is_compatible(true_type):
+      if isinstance(false_type, PrimitiveType) and false_type.name == "int" and isinstance(true_type, PrimitiveType) and true_type.name == "float":
+        return PrimitiveType("float")
+      return true_type
+
+    self.error(f"Incompatible types in ternary branches: '{true_type}' and '{false_type}'.")
+    return true_type
+
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
     expr_type = self.visit(node.expr)
     if node.op == "!":

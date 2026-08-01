@@ -488,6 +488,12 @@ class ASTBuilder(SapphireVisitor):
     right = self.visit(ctx.expression(1))
     return BinaryOpNode(left, "||", right)
 
+  def visitTernaryExpr(self, ctx: SapphireParser.TernaryExprContext) -> TernaryExprNode:
+    condition = self.visit(ctx.expression(0))
+    true_expr = self.visit(ctx.expression(1))
+    false_expr = self.visit(ctx.expression(2))
+    return TernaryExprNode(condition, true_expr, false_expr)
+
   def visitCoalesceExpr(self, ctx: SapphireParser.CoalesceExprContext) -> BinaryOpNode:
     left = self.visit(ctx.expression(0))
     right = self.visit(ctx.expression(1))
@@ -604,7 +610,10 @@ class ASTBuilder(SapphireVisitor):
     elif ctx.matchExpression():
       return self.visit(ctx.matchExpression())
     else:
-      return self.visit(ctx.expression())
+      node = self.visit(ctx.expression())
+      if isinstance(node, ASTNode):
+        node.is_parenthesized = True
+      return node
 
   def visitLiteral(self, ctx: SapphireParser.LiteralContext) -> LiteralNode:
     if ctx.INT_LIT():

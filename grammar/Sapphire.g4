@@ -219,6 +219,7 @@ expression
     | expression COALESCE expression                              # CoalesceExpr
     | expression AND expression                                   # LogicalAndExpr
     | expression OR expression                                    # LogicalOrExpr
+    | <assoc=right> expression QUESTION expression COLON expression # TernaryExpr
     | lambdaExpression                                            # LambdaExpr
     | primaryExpression                                           # PrimaryExpr
     ;

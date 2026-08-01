@@ -1025,6 +1025,15 @@ class LuaTranspiler:
     self.visit(node.right)
     self.emit(")")
 
+  def visit_TernaryExprNode(self, node: TernaryExprNode) -> None:
+    self.emit("((function() if ")
+    self.visit(node.condition)
+    self.emit(" then return ")
+    self.visit(node.true_expr)
+    self.emit(" else return ")
+    self.visit(node.false_expr)
+    self.emit(" end end)())")
+
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> None:
     if node.op == "+":
       self.emit("(")

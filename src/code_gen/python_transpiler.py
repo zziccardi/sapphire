@@ -844,6 +844,15 @@ class PythonTranspiler:
     self.visit(node.right)
     self.emit(")")
 
+  def visit_TernaryExprNode(self, node: TernaryExprNode) -> None:
+    self.emit("(")
+    self.visit(node.true_expr)
+    self.emit(" if ")
+    self.visit(node.condition)
+    self.emit(" else ")
+    self.visit(node.false_expr)
+    self.emit(")")
+
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> None:
     op_map = {"!": "not "}
     op = op_map.get(node.op, node.op)
