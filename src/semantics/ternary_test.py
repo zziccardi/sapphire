@@ -42,6 +42,38 @@ class TernaryOperatorTest(unittest.TestCase):
     ast, checker = parse_and_check(code)
     self.assertEqual(len(checker.errors), 0)
 
+  def test_type_widening_float_to_int(self):
+    code = """
+    let is_high = true;
+    let val: float = is_high ? 2.5 : 10;
+    """
+    ast, checker = parse_and_check(code)
+    self.assertEqual(len(checker.errors), 0)
+
+  def test_both_none_branches(self):
+    code = """
+    let active = true;
+    let num: int? = active ? none : none;
+    """
+    ast, checker = parse_and_check(code)
+    self.assertEqual(len(checker.errors), 0)
+
+  def test_none_true_optional_false(self):
+    code = """
+    let active = true;
+    let num: int? = active ? none : (active ? 42 : none);
+    """
+    ast, checker = parse_and_check(code)
+    self.assertEqual(len(checker.errors), 0)
+
+  def test_optional_true_non_optional_false(self):
+    code = """
+    let active = true;
+    let num: int? = active ? (active ? 42 : none) : 10;
+    """
+    ast, checker = parse_and_check(code)
+    self.assertEqual(len(checker.errors), 0)
+
   def test_optional_branch(self):
     code = """
     let active = true;
