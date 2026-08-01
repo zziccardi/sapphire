@@ -49,7 +49,7 @@ The `String` type represents textual data encoded in UTF-8.
 
 * **Reference type**: Unlike primitive numeric types (`int`, `float`) and `bool` which have value semantics, `String` is a reference-passed type subject to Sapphire's borrow-checking rules.
 * **Immutability**: Strings in Sapphire are immutable once instantiated. String operations produce new string instances rather than mutating existing data.
-* **Enum interoperability**: Sapphire supports asymmetric string enum coercion. Any variant of a native `String` enum implicitly coerces to a `String` variable or parameter, whereas direct conversion from `String` to an enum variant is prohibited without explicit handling.
+* **Enum interoperability**: Sapphire supports asymmetric string enum coercion. Any variant of a native `String` enum implicitly coerces to a `String` variable or parameter, whereas converting from `String` to an enum variant requires explicit fallible parsing via `EnumName.from(val)`.
 
 #### Built-in methods
 
@@ -95,6 +95,56 @@ if let d ?= Direction.from("South") {
 }
 
 let invalid = Direction.from(99);  // none
+```
+
+#### Conversions and casting for string-based enums
+
+String-based enums in Sapphire (enums whose variants are assigned string values) support both infallible static coercion to strings and fallible runtime parsing back into enum variants.
+
+##### 1. Infallible coercion to `String`
+
+Any variant of a string-based enum implicitly coerces to `String` where a string is expected (such as string concatenation, function parameters, or variable assignments). Explicit casting via `as String` or `String.from(variant)` is also supported and guaranteed:
+
+```sapphire
+enum LogLevel {
+  Info = "INFO",
+  Warn = "WARN",
+  Error = "ERROR",
+}
+
+let level: LogLevel = LogLevel.Info;
+
+// Implicit coercion to String
+let msg: String = "Level: " + level;  // "Level: INFO"
+
+// Explicit static cast via `as`
+let raw_str: String = level as String;  // "INFO"
+
+// Conversion via String.from
+let str_val: String = String.from(level);  // "INFO"
+```
+
+##### 2. Fallible parsing from `String` (`EnumName.from`)
+
+Directly casting a string to an enum variant using `as` is prohibited (e.g. `"INFO" as LogLevel` results in a compile error) because string parsing is inherently fallible. Parsing a string into a string-based enum value is accomplished via `EnumName.from(val: String)`, which performs a two-stage evaluation:
+
+1. **Value lookup**: Evaluates whether `val` matches the assigned string value of any variant (e.g., `"INFO"` -> `LogLevel.Info`).
+2. **Name lookup**: If no string value matches, evaluates whether `val` matches the identifier name of any variant (e.g., `"Info"` -> `LogLevel.Info`).
+3. If neither lookup succeeds, `EnumName.from` returns `none`.
+
+```sapphire
+// Stage 1: Value lookup (matches variant value "INFO")
+if let level ?= LogLevel.from("INFO") {
+  // level is LogLevel.Info
+}
+
+// Stage 2: Name lookup (matches variant name "Info")
+if let level ?= LogLevel.from("Info") {
+  // level is LogLevel.Info
+}
+
+// Unmatched string returns none
+let unknown = LogLevel.from("DEBUG");  // none
 ```
 
 ##### Detailed method behavior
