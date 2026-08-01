@@ -99,6 +99,27 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
 * **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
 * **Type casting**: `as` (infallible static type conversion, e.g. `x as float`).
 
+### Type casting (the `as` operator)
+
+The `as` operator is used for infallible, compile-time guaranteed static type conversions:
+
+* **Numeric conversions**: Widening and narrowing between numeric types (`int as float`, `float as int` which truncates decimals, `bool as int` where `true` -> 1 and `false` -> 0).
+* **Enum conversions**: Static conversion from an enum variant to its underlying primitive representation (`enum_variant as int` or `enum_variant as String`).
+
+```sapphire
+let f: float = 10 as float;  // 10.0
+let i: int = 3.14 as int;    // 3 (truncated)
+let b: int = true as int;    // 1
+
+let dir_code: int = Direction.North as int;       // 1
+let dir_str: String = Direction.North as String;  // "North"
+```
+
+#### Prohibited conversions with the `as` operator
+
+1. **Fallible string parsing**: Parsing strings into primitive types (e.g. `"123" as int`) or enum variants (e.g. `"North" as Direction`) using `as` is prohibited at compile-time. Fallible parsing must use instance methods (`"123".to_int()`, `"3.14".to_float()`, `"true".to_bool()`) or static associated functions (`Direction.from("North")`).
+2. **Struct up-casting**: Up-casting child struct instances to parent struct types (e.g. `cat as Animal`) is strictly prohibited to eliminate object slicing and method-dispatch ambiguities.
+
 ### Expressions & collection access
 
 * **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed. Arrays are strongly typed and homogeneous; all elements must have compatible types:
@@ -518,13 +539,22 @@ let mode_str: String = DrawMode.Line;
 // Compile error: Cannot assign String to DrawMode
 // let invalid: DrawMode = "fill";
 
+// Fallible conversion from String or int via EnumName.from
+if let mode ?= DrawMode.from("line") {
+  // mode is DrawMode.Line
+}
+
+if let code ?= HttpStatusCode.from(200) {
+  // code is HttpStatusCode.Ok
+}
+
 // Comparison
 if status == HttpStatusCode.Ok {
   let is_ok = true;
 }
 
-// Integer conversion
-let dir_code: int = current_dir;
+// Infallible static integer conversion
+let dir_code: int = current_dir as int;
 ```
 
 ## 11. Inheritance & polymorphism
