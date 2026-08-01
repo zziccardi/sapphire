@@ -96,8 +96,33 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
 * **Unary**: `-` (negation/additive inverse), `+` (prefix positive), `!` (logical NOT).
 * **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
 * **Logical**: `&&` (logical AND), `||` (logical OR).
+* **Ternary**: `condition ? true_expr : false_expr`.
 * **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
 * **Type casting**: `as` (infallible static type conversion, e.g. `x as float`).
+
+### Ternary expressions (the `? :` operator)
+
+Sapphire supports C-style inline conditional expressions using the `? :` ternary operator:
+
+* **Syntax**: `condition ? true_expr : false_expr`
+* **Expression context only**: The ternary operator is scoped strictly to expression contexts, avoiding any syntactic or parsing ambiguity with optional type annotations (`int?`).
+* **Condition type safety**: The condition must evaluate to a boolean expression (`bool`).
+* **Branch compatibility & type inference**: The true and false branches must have compatible types. Widening (e.g., `int` and `float` coercing to `float`) and optional wrapping (e.g., `int` and `none` producing `int?`) are handled automatically by the compiler.
+* **Mandatory parentheses for nested ternaries**: Unparenthesized nested ternary expressions (e.g., `a ? b : c ? d : e`) are strictly forbidden and produce a compile-time error. Nested ternary expressions must be explicitly enclosed in parentheses: `a ? b : (c ? d : e)`.
+
+```sapphire
+let age = 20;
+let status = age >= 18 ? "Adult" : "Minor";
+
+// Numeric widening (int 10 and float 2.5 produce float)
+let val: float = is_high ? 10 : 2.5;
+
+// Optional wrapping (int 42 and none produce int?)
+let num: int? = active ? 42 : none;
+
+// Nested ternary with mandatory parentheses
+let grade = score >= 90 ? "A" : (score >= 80 ? "B" : "C");
+```
 
 ### Type casting (the `as` operator)
 
