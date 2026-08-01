@@ -2432,6 +2432,9 @@ class TestTypeChecker(unittest.TestCase):
       let parsed_hex: int? = "FF".to_int(radix = 16);
       let parsed_float: float? = "3.14".to_float();
       let parsed_bool: bool? = "true".to_bool();
+
+      let e1: Status? = Status.from(1);
+      let e2: Status? = Status.from("Active");
     }
     """)
 
@@ -2474,6 +2477,25 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot convert type 'Point' to String using String.from()", str(ctx.exception))
+
+    # 6. Enum.from error cases
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Active = 1 }
+      func test() {
+        let e = Status.from();
+      }
+      """)
+    self.assertIn("Status.from() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Active = 1 }
+      func test() {
+        let e = Status.from(true);
+      }
+      """)
+    self.assertIn("Cannot convert type 'bool' to Enum 'Status' using .from()", str(ctx.exception))
 
 
 if __name__ == "__main__":

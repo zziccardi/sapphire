@@ -70,6 +70,33 @@ Sapphire provides standard methods on `String` instances. Methods that do not fi
 | `to_float(): float?` | Parses the string as a floating-point number. Returns `none` if parsing fails. |
 | `to_bool(): bool?` | Parses `"true"` or `"false"` (case-insensitive) as a boolean. Returns `none` if parsing fails. |
 
+### Enum associated methods
+
+Every custom `enum` type implicitly provides a static associated function for fallible conversion from integer discriminators or string variant names into enum values:
+
+| Method signature | Description |
+| :--- | :--- |
+| `EnumName.from(val: int \| String): EnumName?` | Converts an integer discriminator or string variant name into an `EnumName?`. Returns `none` if no variant matches. |
+
+#### Usage example
+
+```sapphire
+enum Direction {
+  North = 1,
+  South = 2,
+}
+
+if let d ?= Direction.from(1) {
+  // d is Direction.North
+}
+
+if let d ?= Direction.from("South") {
+  // d is Direction.South
+}
+
+let invalid = Direction.from(99);  // none
+```
+
 ##### Detailed method behavior
 
 * **`size(): int`**

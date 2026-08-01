@@ -1359,6 +1359,19 @@ class TypeChecker:
         self.error(f"Cannot convert type '{arg_t}' to String using String.from().")
       return PrimitiveType("string")
 
+    if getattr(node.callee, "is_enum_from", False):
+      enum_t = getattr(node.callee, "enum_type", PrimitiveType("none"))
+      if len(node.arguments) != 1:
+        self.error(f"{getattr(enum_t, 'name', 'Enum')}.from() requires exactly 1 argument.")
+        return OptionalType(enum_t)
+      arg_t = self.visit(node.arguments[0].expr)
+      is_valid = (
+          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "string", "pascal_string")
+      )
+      if not is_valid:
+        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or string.")
+      return OptionalType(enum_t)
+
     signature = None
     is_constructor = False
 
@@ -1472,6 +1485,10 @@ class TypeChecker:
       return PrimitiveType("none")
 
     if isinstance(receiver_type, EnumType):
+      if node.member == "from":
+        node.is_enum_from = True
+        node.enum_type = receiver_type
+        return FunctionType([PrimitiveType("string")], OptionalType(receiver_type))
       if node.member in receiver_type.variants:
         return receiver_type
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")

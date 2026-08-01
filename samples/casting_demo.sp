@@ -5,6 +5,12 @@ enum Direction {
   South = 2,
 }
 
+enum LogLevel {
+  Info = "INFO",
+  Warn = "WARN",
+  Error = "ERROR",
+}
+
 // 1. Guaranteed Static Type Casting (`as` operator)
 let raw_int: int = 42;
 let as_float: float = raw_int as float;
@@ -64,4 +70,28 @@ if let active ?= "true".to_bool() {
 let invalid_num = "not_a_number".to_int();
 if invalid_num == none {
   print("Invalid number string correctly evaluated to none!");
+}
+
+
+// 4. Fallible Enum Conversions (`EnumName.from(val)`)
+print("\n--- 4. Fallible Enum Conversions (`EnumName.from`) ---");
+
+if let d1 ?= Direction.from(1) {
+  print("Direction.from(1): " + String.from(d1));
+}
+
+if let d2 ?= Direction.from("South") {
+  print("Direction.from(\"South\"): " + String.from(d2));
+}
+
+if let l1 ?= LogLevel.from("INFO") {
+  print("LogLevel.from(\"INFO\"): " + l1);
+}
+
+if let l2 ?= LogLevel.from("Warn") {
+  print("LogLevel.from(\"Warn\"): " + l2);
+}
+
+if Direction.from(999) == none {
+  print("Direction.from(999) correctly evaluated to none!");
 }

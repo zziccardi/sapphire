@@ -212,6 +212,19 @@ def _sapphire_string_from(val):
   if val is False:
     return "false"
   return str(val)
+
+def _sapphire_enum_from(enum_cls, val):
+  if val is None:
+    return None
+  try:
+    return enum_cls(val)
+  except ValueError:
+    if isinstance(val, str):
+      try:
+        return enum_cls[val]
+      except KeyError:
+        return None
+    return None
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
@@ -862,6 +875,14 @@ class PythonTranspiler:
   def visit_CallNode(self, node: CallNode) -> None:
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_from", False):
       self.emit("_sapphire_string_from(")
+      self.visit(node.arguments[0].expr)
+      self.emit(")")
+      return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_enum_from", False):
+      self.emit("_sapphire_enum_from(")
+      self.visit(node.callee.receiver)
+      self.emit(", ")
       self.visit(node.arguments[0].expr)
       self.emit(")")
       return

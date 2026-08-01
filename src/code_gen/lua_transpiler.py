@@ -256,6 +256,16 @@ local _sapphire_string_to_bool = function(s)
   if clean == "false" then return false end
   return nil
 end
+
+local _sapphire_enum_from = function(enum_tbl, val)
+  if val == nil or enum_tbl == nil then return nil end
+  for name, value in pairs(enum_tbl) do
+    if value == val or name == val then
+      return value
+    end
+  end
+  return nil
+end
 """
 
 
@@ -1051,6 +1061,14 @@ class LuaTranspiler:
   def visit_CallNode(self, node: CallNode) -> None:
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_from", False):
       self.emit("tostring(")
+      self.visit(node.arguments[0].expr)
+      self.emit(")")
+      return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_enum_from", False):
+      self.emit("_sapphire_enum_from(")
+      self.visit(node.callee.receiver)
+      self.emit(", ")
       self.visit(node.arguments[0].expr)
       self.emit(")")
       return

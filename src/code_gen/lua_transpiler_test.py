@@ -862,6 +862,9 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_casting_and_conversions_lua(self):
     """Verifies Lua transpilation of casting (as) and String conversions."""
     code = """
+    enum Status { Active = 1 }
+    enum LogLevel { Info = "INFO" }
+
     struct Parent { var hp: int; }
     struct Child: Parent { var mp: int; }
 
@@ -878,6 +881,9 @@ class TestLuaTranspiler(unittest.TestCase):
       let p_float = "3.14".to_float();
       let p_bool = "true".to_bool();
 
+      let e1 = Status.from(1);
+      let l1 = LogLevel.from("INFO");
+
       let c = Child { hp = 100, mp = 50 };
       let parent_cast = c as Parent;
     }
@@ -892,6 +898,8 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_string_to_int(", lua)
     self.assertIn("_sapphire_string_to_float(", lua)
     self.assertIn("_sapphire_string_to_bool(", lua)
+    self.assertIn("_sapphire_enum_from(Status", lua)
+    self.assertIn("_sapphire_enum_from(LogLevel", lua)
 
 
 if __name__ == "__main__":
