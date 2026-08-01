@@ -19,6 +19,7 @@ try:
   from parser.ast_builder import ASTBuilder
   from semantics.type_checker import TypeChecker, SemanticError
   from semantics.symbol_table import MapType
+  from code_gen.source_map import SourceMapBuilder
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -26,6 +27,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast_builder import ASTBuilder
   from src.semantics.type_checker import TypeChecker, SemanticError
   from src.semantics.symbol_table import MapType
+  from src.code_gen.source_map import SourceMapBuilder
 
 
 # ==========================================
@@ -234,12 +236,63 @@ end
 """
 
 
+LUA_SOURCEMAP_DEMANGLER = """-- Sapphire Lua Runtime Source Map Demangler & Love2D Error Handler Hook
+local function _sapphire_demangle_traceback(msg)
+  local err_msg = tostring(msg or "Runtime Error")
+  local traceback = debug.traceback("", 2)
+  local demangled_lines = {}
+  local full_text = err_msg .. "\\n" .. traceback
+  
+  for line in full_text:gmatch("[^\\r\\n]+") do
+    local cur_line = line
+    local lua_file, line_num = cur_line:match("([^:%s]+%.lua):(%d+):")
+    if not line_num then
+      lua_file, line_num = cur_line:match("([^:%s]+):(%d+):")
+    end
+    if line_num then
+      local n = tonumber(line_num)
+      if _SP_LINE_MAP and _SP_LINE_MAP[n] then
+        local info = _SP_LINE_MAP[n]
+        local sp_info = string.format("%s:%d: (at %s:%d)", info.file, info.line, lua_file or "lua", n)
+        if info.text and info.text ~= "" then
+          sp_info = sp_info .. " -> `" .. info.text .. "`"
+        end
+        cur_line = cur_line:gsub("([^:%s]+%.?l?u?a?):" .. line_num .. ":", sp_info)
+      end
+    end
+    table.insert(demangled_lines, cur_line)
+  end
+  return table.concat(demangled_lines, "\\n")
+end
+
+if love and love.errorhandler then
+  local original_errorhandler = love.errorhandler
+  love.errorhandler = function(msg)
+    local demangled = _sapphire_demangle_traceback(msg)
+    print("========================================")
+    print("SAPPHIRE RUNTIME ERROR (Love2D)")
+    print(demangled)
+    print("========================================")
+    return original_errorhandler(demangled)
+  end
+end
+"""
+
+
 class LuaTranspiler:
   """AST visitor to transpile Sapphire code to Lua 5.1."""
 
-  def __init__(self):
+  def __init__(
+      self,
+      source_file: Optional[str] = None,
+      source_map_builder: Optional[SourceMapBuilder] = None,
+  ):
     self.code: List[str] = []
     self.indent_level = 0
+    self.current_line = 1
+    self.current_column = 0
+    self.source_file = source_file
+    self.source_map_builder = source_map_builder
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
@@ -247,12 +300,21 @@ class LuaTranspiler:
     self._identifier_map: Dict[str, str] = {}
 
   def emit(self, text: str) -> None:
-    """Emits text on the current line."""
+    """Emits text on the current line and updates line/column numbers."""
+    lines = text.split("\n")
+    if len(lines) == 1:
+      self.current_column += len(text)
+    else:
+      self.current_line += len(lines) - 1
+      self.current_column = len(lines[-1])
     self.code.append(text)
 
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
-    self.code.append("\n" + "  " * self.indent_level)
+    indent_str = "  " * self.indent_level
+    self.code.append("\n" + indent_str)
+    self.current_line += 1
+    self.current_column = len(indent_str)
 
   def indent(self) -> None:
     """Increments the indentation level."""
@@ -267,8 +329,18 @@ class LuaTranspiler:
     """Returns the final generated Lua 5.1 source code string."""
     return "".join(self.code)
 
-  def transpile(self, program: ProgramNode) -> str:
+  def transpile(
+      self,
+      program: ProgramNode,
+      source_file: Optional[str] = None,
+      source_map_builder: Optional[SourceMapBuilder] = None,
+  ) -> str:
     """Main entry point to transpile a Sapphire ProgramNode to Lua 5.1."""
+    if source_file:
+      self.source_file = source_file
+    if source_map_builder:
+      self.source_map_builder = source_map_builder
+
     # 1. Output runtime preamble
     self.emit(LUA_RUNTIME_PREAMBLE)
     self.newline()
@@ -340,6 +412,14 @@ class LuaTranspiler:
     if getattr(program, "export_block", None):
       self.visit(program.export_block)
 
+    # 6. Append inline source map table and Love2D error demangler if sourcemap builder present
+    if self.source_map_builder and self.source_map_builder.mappings:
+      self.newline()
+      self.emit(self.source_map_builder.to_lua_line_map_table())
+      self.newline()
+      self.emit(LUA_SOURCEMAP_DEMANGLER)
+      self.newline()
+
     return self.get_output()
 
   # ==========================================
@@ -348,6 +428,16 @@ class LuaTranspiler:
 
   def visit(self, node: ASTNode) -> None:
     """Visit an AST node and emit its corresponding Lua code."""
+    if self.source_map_builder and getattr(node, "start_line", None) is not None:
+      src = getattr(node, "source_file", None) or self.source_file
+      if src:
+        self.source_map_builder.add_mapping(
+            gen_line=self.current_line,
+            gen_col=self.current_column,
+            source_file=src,
+            orig_line=node.start_line,
+            orig_col=node.start_column or 0,
+        )
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
     visitor(node)

@@ -689,6 +689,15 @@ references, the compiler statically enforces scope-bound escape rules:
    * **Function-return escape**: A function cannot return a reference to an
      object allocated in an arena local to the function scope.
 
+### Source map generation & runtime stack trace demangling
+
+When transpiling Sapphire (`.sp`) code to target environments (such as Lua 5.1 / Love2D), the compiler tracks AST node position metadata (`start_line`, `start_column`) to generate source-map sidecars and runtime demanglers:
+
+1. **Standard V3 source maps (`.lua.map`)**: Generated automatically during compilation using Base64 [VLQ](https://en.wikipedia.org/wiki/Variable-length_quantity) encoding. Sidecar files include embedded `sourcesContent` strings to support offline IDE debugging (such as setting breakpoints in VS Code).
+2. **Runtime stack-trace demangling**: Embedded `_SP_LINE_MAP` lookup tables pair generated line numbers with original Sapphire source lines and snippets.
+3. **Love2D error-handler hook**: Intercepts uncaught runtime errors (asset-loading failures, out-of-bounds dynamic indices, or failed optional unwrapping) and translates Lua call stack frames into original `.sp` filenames and line numbers on both terminal logs and Love2D's graphical crash screen.
+4. **CLI control**: Source maps are enabled by default and can be disabled using the `--no_sourcemap` flag.
+
 ## 13. Module system & encapsulation
 
 Sapphire provides a type-safe module system with explicit encapsulation.

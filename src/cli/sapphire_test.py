@@ -29,10 +29,21 @@ class SapphireCLITest(unittest.TestCase):
 
   def test_build_subcommand_lua(self):
     lua_file = os.path.join(self.temp_dir.name, "output.lua")
+    map_file = lua_file + ".map"
     test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file]
     with patch.object(sys, "argv", test_args):
       main()
     self.assertTrue(os.path.exists(lua_file))
+    self.assertTrue(os.path.exists(map_file))
+
+  def test_build_subcommand_lua_no_sourcemap(self):
+    lua_file = os.path.join(self.temp_dir.name, "output_nosm.lua")
+    map_file = lua_file + ".map"
+    test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file, "--no_sourcemap"]
+    with patch.object(sys, "argv", test_args):
+      main()
+    self.assertTrue(os.path.exists(lua_file))
+    self.assertFalse(os.path.exists(map_file))
 
   def test_build_file_not_found(self):
     non_existent = os.path.join(self.temp_dir.name, "does_not_exist.sp")
