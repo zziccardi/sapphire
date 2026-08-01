@@ -2421,6 +2421,7 @@ class TestTypeChecker(unittest.TestCase):
       let i: int = 3.14 as int;
       let b: int = true as int;
       let code: int = Status.Active as int;
+      let enum_str: String = Status.Active as String;
 
       let s1: String = String.from(42);
       let s2: String = String.from(3.14);
@@ -2442,6 +2443,37 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot cast 'string' to 'int' using 'as'", str(ctx.exception))
+
+    # 3. Invalid cast between incompatible types (e.g. struct to float)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point { var x: float; }
+      func test() {
+        let p = Point { x = 1.0 };
+        let f = p as float;
+      }
+      """)
+    self.assertIn("Cannot cast type 'Point' to 'float'", str(ctx.exception))
+
+    # 4. String.from with wrong argument count
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let s = String.from();
+      }
+      """)
+    self.assertIn("String.from() requires exactly 1 argument", str(ctx.exception))
+
+    # 5. String.from with non-primitive argument
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point { var x: float; }
+      func test() {
+        let p = Point { x = 1.0 };
+        let s = String.from(p);
+      }
+      """)
+    self.assertIn("Cannot convert type 'Point' to String using String.from()", str(ctx.exception))
 
 
 if __name__ == "__main__":

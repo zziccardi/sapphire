@@ -862,9 +862,14 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_casting_and_conversions_lua(self):
     """Verifies Lua transpilation of casting (as) and String conversions."""
     code = """
+    struct Parent { var hp: int; }
+    struct Child: Parent { var mp: int; }
+
     func test_conv() {
       let f = 10 as float;
       let i = 3.14 as int;
+      let b = 1 as bool;
+      let str_cast = 10 as String;
       let s1 = String.from(42);
       let s2 = String.from(true);
 
@@ -872,11 +877,16 @@ class TestLuaTranspiler(unittest.TestCase):
       let p_hex = "FF".to_int(radix = 16);
       let p_float = "3.14".to_float();
       let p_bool = "true".to_bool();
+
+      let c = Child { hp = 100, mp = 50 };
+      let parent_cast = c as Parent;
     }
     """
     lua = self._transpile(code)
     self.assertIn("tonumber(10)", lua)
     self.assertIn("math.floor(tonumber(3.14))", lua)
+    self.assertIn("(not not 1)", lua)
+    self.assertIn("tostring(10)", lua)
     self.assertIn("tostring(42)", lua)
     self.assertIn("tostring(true)", lua)
     self.assertIn("_sapphire_string_to_int(", lua)

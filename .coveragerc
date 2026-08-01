@@ -1,11 +1,13 @@
 [run]
 omit =
     src/parser/gen/*
+    src/run_*.py
     *__init__.py
     *_test.py
 
 [report]
 omit =
     src/parser/gen/*
+    src/run_*.py
     *__init__.py
     *_test.py
