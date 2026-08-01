@@ -488,6 +488,12 @@ class ASTBuilder(SapphireVisitor):
     right = self.visit(ctx.expression(1))
     return BinaryOpNode(left, "||", right)
 
+  def visitTernaryExpr(self, ctx: SapphireParser.TernaryExprContext) -> TernaryExprNode:
+    condition = self.visit(ctx.expression(0))
+    true_expr = self.visit(ctx.expression(1))
+    false_expr = self.visit(ctx.expression(2))
+    return TernaryExprNode(condition, true_expr, false_expr)
+
   def visitCoalesceExpr(self, ctx: SapphireParser.CoalesceExprContext) -> BinaryOpNode:
     left = self.visit(ctx.expression(0))
     right = self.visit(ctx.expression(1))
@@ -604,9 +610,12 @@ class ASTBuilder(SapphireVisitor):
     elif ctx.matchExpression():
       return self.visit(ctx.matchExpression())
     else:
-      return self.visit(ctx.expression())
+      node = self.visit(ctx.expression())
+      if isinstance(node, ASTNode):
+        node.is_parenthesized = True
+      return node
 
-  def visitLiteral(self, ctx: SapphireParser.LiteralContext) -> LiteralNode:
+  def visitLiteral(self, ctx: SapphireParser.LiteralContext) -> ASTNode:
     if ctx.INT_LIT():
       return LiteralNode(int(ctx.INT_LIT().getText()), "int")
     elif ctx.FLOAT_LIT():
@@ -614,12 +623,110 @@ class ASTBuilder(SapphireVisitor):
     elif ctx.STRING_LIT():
       val = ctx.STRING_LIT().getText()[1:-1]
       return LiteralNode(val, "string")
+    elif ctx.INTERPOLATED_STRING_LIT():
+      raw_text = ctx.INTERPOLATED_STRING_LIT().getText()[2:-1]
+      return self._parse_interpolated_string(raw_text)
     elif ctx.TRUE():
       return LiteralNode(True, "bool")
     elif ctx.FALSE():
       return LiteralNode(False, "bool")
     else:
       return LiteralNode(None, "none")
+
+  def _parse_interpolated_string(self, raw_text: str) -> InterpolatedStringNode:
+    try:
+      from antlr4 import InputStream, CommonTokenStream
+      from src.parser.gen.SapphireLexer import SapphireLexer
+      from src.parser.gen.SapphireParser import SapphireParser
+    except ModuleNotFoundError:  # pragma: no cover
+      from antlr4 import InputStream, CommonTokenStream
+      from parser.gen.SapphireLexer import SapphireLexer
+      from parser.gen.SapphireParser import SapphireParser
+
+    parts = []
+    current_lit = []
+    i = 0
+    n = len(raw_text)
+
+    while i < n:
+      ch = raw_text[i]
+      if ch == '{':
+        if i + 1 < n and raw_text[i + 1] == '{':
+          current_lit.append('{')
+          i += 2
+          continue
+        if current_lit:
+          parts.append(LiteralNode("".join(current_lit), "string"))
+          current_lit = []
+        i += 1
+        start_expr = i
+        brace_depth = 1
+        in_quote = False
+        quote_char = None
+
+        while i < n and brace_depth > 0:
+          c = raw_text[i]
+          if c == '\\':
+            i += 2
+            continue
+          if in_quote:
+            if c == quote_char:
+              in_quote = False
+              quote_char = None
+          else:
+            if c in ('"', "'"):
+              in_quote = True
+              quote_char = c
+            elif c == '{':
+              brace_depth += 1
+            elif c == '}':
+              brace_depth -= 1
+          if brace_depth > 0:
+            i += 1
+
+        expr_str = raw_text[start_expr:i]
+        i += 1  # Skip closing '}'
+
+        lexer = SapphireLexer(InputStream(expr_str))
+        tokens = CommonTokenStream(lexer)
+        parser = SapphireParser(tokens)
+        expr_tree = parser.expression()
+        expr_ast = self.visit(expr_tree)
+        parts.append(expr_ast)
+
+      elif ch == '}':
+        if i + 1 < n and raw_text[i + 1] == '}':
+          current_lit.append('}')
+          i += 2
+          continue
+        else:
+          current_lit.append(ch)
+          i += 1
+      elif ch == '\\':
+        if i + 1 < n:
+          next_ch = raw_text[i + 1]
+          if next_ch == 'n':
+            current_lit.append('\n')
+          elif next_ch == 't':
+            current_lit.append('\t')
+          elif next_ch == 'r':
+            current_lit.append('\r')
+          elif next_ch in ('"', '\\', '{', '}'):
+            current_lit.append(next_ch)
+          else:
+            current_lit.append('\\' + next_ch)
+          i += 2
+        else:
+          current_lit.append(ch)
+          i += 1
+      else:
+        current_lit.append(ch)
+        i += 1
+
+    if current_lit:
+      parts.append(LiteralNode("".join(current_lit), "string"))
+
+    return InterpolatedStringNode(parts)
 
   def visitArrayLiteral(self, ctx: SapphireParser.ArrayLiteralContext) -> ArrayLiteralNode:
     elements = [self.visit(expr) for expr in ctx.expression()]

@@ -22,6 +22,8 @@ try:
       StructDeclNode,
       StructInitializerNode,
       CloneNode,
+      InterpolatedStringNode,
+      IdentifierNode,
   )
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -38,6 +40,8 @@ except ModuleNotFoundError:
       StructDeclNode,
       StructInitializerNode,
       CloneNode,
+      InterpolatedStringNode,
+      IdentifierNode,
   )
 
 
@@ -492,6 +496,54 @@ class TestASTBuilder(unittest.TestCase):
     impl5 = ast5.declarations[0]
     self.assertIsInstance(impl5, ImplBlockNode)
     self.assertIn("MyCustomArg", impl5.type_params)
+
+  def test_interpolated_string(self):
+    """Verifies parsing of Python-style f-strings."""
+    ast = self._get_ast('let s = f"Hello {name}!";')
+    var_decl = ast.declarations[0]
+    self.assertIsInstance(var_decl.exprs[0], InterpolatedStringNode)
+    parts = var_decl.exprs[0].parts
+    self.assertEqual(len(parts), 3)
+    self.assertIsInstance(parts[0], LiteralNode)
+    self.assertEqual(parts[0].value, "Hello ")
+    self.assertIsInstance(parts[1], IdentifierNode)
+    self.assertEqual(parts[1].name, "name")
+    self.assertIsInstance(parts[2], LiteralNode)
+    self.assertEqual(parts[2].value, "!")
+
+  def test_interpolated_string_escaped_braces_and_nested_quotes(self):
+    """Verifies parsing of f-strings with escaped braces and nested quotes."""
+    ast = self._get_ast('let s = f"Val: {{lit}} {user.get("id")}";')
+    var_decl = ast.declarations[0]
+    self.assertIsInstance(var_decl.exprs[0], InterpolatedStringNode)
+    parts = var_decl.exprs[0].parts
+    self.assertEqual(len(parts), 2)
+    self.assertEqual(parts[0].value, "Val: {lit} ")
+
+  def test_interpolated_string_escapes_and_branches(self):
+    """Verifies parsing of empty f-string, escape sequences, single brace, and nested expr braces."""
+    # Empty
+    ast_empty = self._get_ast('let s = f"";')
+    self.assertEqual(len(ast_empty.declarations[0].exprs[0].parts), 0)
+
+    # Escape sequences \n \t \r \" \\ \{ \} \x
+    ast_esc = self._get_ast('let s = f"a\\nb\\tc\\rd\\"e\\\\f\\{g\\}h\\x";')
+    parts = ast_esc.declarations[0].exprs[0].parts
+    self.assertEqual(parts[0].value, "a\nb\tc\rd\"e\\f{g}h\\x")
+
+    # Unescaped single closing brace & nested brace in expression
+    ast_brace = self._get_ast('let s = f"a}b { {1: 2}[1] }";')
+    parts2 = ast_brace.declarations[0].exprs[0].parts
+    self.assertEqual(parts2[0].value, "a}b ")
+
+    # Escaped backslash inside expression quotes
+    ast_expr_esc = self._get_ast('let s = f" { "\\"hello\\" "} ";')
+    parts3 = ast_expr_esc.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts3), 3)
+
+    # Direct parse with trailing backslash
+    node_trailing = ASTBuilder()._parse_interpolated_string("hello\\")
+    self.assertEqual(node_trailing.parts[0].value, "hello\\")
 
 
 if __name__ == "__main__":

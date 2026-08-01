@@ -76,13 +76,26 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 
 ```
 let speed: int = 60;
-let name = "Hero";    // Type inferred as String
+let name = "Hero";  // Type inferred as String
+
+// Python-style string interpolation
+let msg = f"Hello {name}, speed: {speed}!";
 
 var health = 100;
-health = 90;          // Valid mutation
+health = 90;  // Valid mutation
 
 let x, y = 10.0, 20.0;  // Multi-variable declaration
 ```
+
+### String interpolation
+
+Sapphire supports Python-style string interpolation using the `f"..."` prefix:
+
+* **Syntax**: `f"literal {expression} literal"`
+* **Nested quotes**: Expressions inside interpolation braces support nested quotes (e.g. `f"Hello {user.get("name")}"`).
+* **Brace escaping**: Double curly braces `{{` and `}}` within an f-string evaluate to literal `{` and `}` characters.
+* **Automatic type coercion**: Primitive types (`int`, `float`, `bool`), `none`, and `enum` variants are automatically coerced to strings inside `{expression}`.
+* **Structs**: User-defined `struct` types cannot be interpolated directly and cause a compile-time error; explicit conversion methods (e.g. `{player.to_string()}`) must be called.
 
 ## 5. Core operators & expressions
 
@@ -96,8 +109,33 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
 * **Unary**: `-` (negation/additive inverse), `+` (prefix positive), `!` (logical NOT).
 * **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
 * **Logical**: `&&` (logical AND), `||` (logical OR).
+* **Ternary**: `condition ? true_expr : false_expr`.
 * **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
 * **Type casting**: `as` (infallible static type conversion, e.g. `x as float`).
+
+### Ternary expressions (the `? :` operator)
+
+Sapphire supports C-style inline conditional expressions using the `? :` ternary operator:
+
+* **Syntax**: `condition ? true_expr : false_expr`
+* **Expression context only**: The ternary operator is scoped strictly to expression contexts, avoiding any syntactic or parsing ambiguity with optional type annotations (`int?`).
+* **Condition type safety**: The condition must evaluate to a boolean expression (`bool`).
+* **Branch compatibility & type inference**: The true and false branches must have compatible types. Widening (e.g., `int` and `float` coercing to `float`) and optional wrapping (e.g., `int` and `none` producing `int?`) are handled automatically by the compiler.
+* **Mandatory parentheses for nested ternaries**: Unparenthesized nested ternary expressions (e.g., `a ? b : c ? d : e`) are strictly forbidden and produce a compile-time error. Nested ternary expressions must be explicitly enclosed in parentheses: `a ? b : (c ? d : e)`.
+
+```sapphire
+let age = 20;
+let status = age >= 18 ? "Adult" : "Minor";
+
+// Numeric widening (int 10 and float 2.5 produce float)
+let val: float = is_high ? 10 : 2.5;
+
+// Optional wrapping (int 42 and none produce int?)
+let num: int? = active ? 42 : none;
+
+// Nested ternary with mandatory parentheses
+let grade = score >= 90 ? "A" : (score >= 80 ? "B" : "C");
+```
 
 ### Type casting (the `as` operator)
 
@@ -941,3 +979,23 @@ While single, flat physical inheritance avoids vtable overhead by organizing mem
 * **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
 
 Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+
+### Avoiding throwable exceptions
+
+Traditional exception mechanisms (`try`/`catch`/`throw`) introduce hidden
+control-flow jumps and expensive runtime stack-unwinding overhead. Sapphire
+intentionally omits throwable exceptions in favor of explicit, type-safe error
+handling:
+* **No hidden control flow**: Functions clearly express fallibility in their
+  signatures (e.g., returning optional types `T?` or multiple return values
+  `T, bool`). Callers are forced to handle error paths explicitly at call
+  sites.
+* **Deterministic performance**: Eliminating exception unwinding runtime
+  machinery ensures predictable CPU execution paths and simplified
+  transpilation targets across scripting host engines.
+* **Exhaustive error handling**: Combining enums with `match` expressions
+  allows the compiler to statically enforce that all error variants are
+  handled.
+* **Resource safety without `finally`**: Lexical RAII and arena destruction
+  guarantee that allocations and resources are automatically torn down upon
+  scope exit, eliminating the need for exception cleanup blocks.

@@ -815,6 +815,31 @@ class PythonTranspiler:
     else:
       self.emit(str(node.value))
 
+  def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> None:
+    if not node.parts:
+      self.emit('""')
+      return
+
+    def _emit_part_str(part):
+      if isinstance(part, LiteralNode) and part.lit_type == "string":
+        escaped_val = part.value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        self.emit(f'"{escaped_val}"')
+      else:
+        self.emit("(lambda x: x.value if hasattr(x, 'value') else str(x))(")
+        self.visit(part)
+        self.emit(")")
+
+    if len(node.parts) == 1:
+      _emit_part_str(node.parts[0])
+      return
+
+    self.emit("(")
+    for idx, part in enumerate(node.parts):
+      if idx > 0:
+        self.emit(" + ")
+      _emit_part_str(part)
+    self.emit(")")
+
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
     name = self._identifier_map.get(node.name, node.name)
     self.emit(name)
@@ -842,6 +867,15 @@ class PythonTranspiler:
     self.visit(node.left)
     self.emit(f" {op} ")
     self.visit(node.right)
+    self.emit(")")
+
+  def visit_TernaryExprNode(self, node: TernaryExprNode) -> None:
+    self.emit("(")
+    self.visit(node.true_expr)
+    self.emit(" if ")
+    self.visit(node.condition)
+    self.emit(" else ")
+    self.visit(node.false_expr)
     self.emit(")")
 
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> None:

@@ -1070,6 +1070,24 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_conv()")
     self.assertTrue(res)
 
+  def test_interpolated_string_python(self):
+    """Verifies Python transpilation and execution of f-strings."""
+    code = """
+    enum FStringStatus { Active = "active" }
+
+    func test_fstring(): String {
+      let name = "Hero";
+      let count = 42;
+      let status = FStringStatus.Active;
+      let empty_s = f"";
+      let single_l = f"just text";
+      let single_e = f"{count}";
+      return f"Hello {name}, status: {status}, count: {count + 1}, none: {none}";
+    }
+    """
+    res = self._transpile_and_run(code, "test_fstring()")
+    self.assertEqual(res, "Hello Hero, status: active, count: 43, none: None")
+
 
 if __name__ == "__main__":
   unittest.main()

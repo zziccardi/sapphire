@@ -219,6 +219,7 @@ expression
     | expression COALESCE expression                              # CoalesceExpr
     | expression AND expression                                   # LogicalAndExpr
     | expression OR expression                                    # LogicalOrExpr
+    | <assoc=right> expression QUESTION expression COLON expression # TernaryExpr
     | lambdaExpression                                            # LambdaExpr
     | primaryExpression                                           # PrimaryExpr
     ;
@@ -287,6 +288,7 @@ literal
     : INT_LIT
     | FLOAT_LIT
     | STRING_LIT
+    | INTERPOLATED_STRING_LIT
     | TRUE
     | FALSE
     | NONE
@@ -388,6 +390,7 @@ IDENTIFIER : [a-zA-Z_][a-zA-Z0-9_]*;
 INT_LIT : [0-9]+;
 FLOAT_LIT : [0-9]+ '.' [0-9]+;
 STRING_LIT : '"' (~["\\] | '\\' .)* '"';
+INTERPOLATED_STRING_LIT : 'f"' ( '\\' . | '{' ( '\\' . | '"' (~["\\] | '\\' .)* '"' | ~["\\}] )* '}' | ~["\\{] )* '"';
 
 // Whitespace and Comments
 WS : [ \t\r\n]+ -> skip;

@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional, Union
 class ASTNode:
   """Base class for all AST nodes."""
 
+  is_parenthesized: bool = False
+
   # The following position attributes are only needed for editor integrations
   # (Language Server Protocol) and are not used by the compiler transpiler.
   start_line: Optional[int] = None
@@ -499,6 +501,13 @@ class LiteralNode(ExprNode):
     self.lit_type = lit_type  # 'int', 'float', 'string', 'bool', 'none'
 
 
+class InterpolatedStringNode(ExprNode):
+  """Represents an interpolated string (f"Hello {name}")."""
+
+  def __init__(self, parts: List[ASTNode]):
+    self.parts = parts  # Sequence of LiteralNode('string') and ExprNode
+
+
 class IdentifierNode(ExprNode):
   """Represents an identifier/variable reference."""
 
@@ -513,6 +522,15 @@ class BinaryOpNode(ExprNode):
     self.left = left
     self.op = op
     self.right = right
+
+
+class TernaryExprNode(ExprNode):
+  """Represents a ternary conditional expression (e.g. 'condition ? true_expr : false_expr')."""
+
+  def __init__(self, condition: ASTNode, true_expr: ASTNode, false_expr: ASTNode):
+    self.condition = condition
+    self.true_expr = true_expr
+    self.false_expr = false_expr
 
 
 class UnaryOpNode(ExprNode):
