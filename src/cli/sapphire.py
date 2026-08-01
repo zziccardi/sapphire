@@ -33,7 +33,8 @@ def run_command(args):
   target = getattr(args, "target", "python").lower()
   ext = ".lua" if target in ("lua", "lua5.1") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
-  out_path = transpile_file(source_file, output_file, target=target)
+  sourcemap = not getattr(args, "no_sourcemap", False)
+  out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap)
 
   print("\n--- Executing Sapphire Program ---")
   if target in ("lua", "lua5.1"):
@@ -62,7 +63,8 @@ def build_command(args):
   target = getattr(args, "target", "python").lower()
   ext = ".lua" if target in ("lua", "lua5.1") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
-  transpile_file(source_file, output_file, target=target)
+  sourcemap = not getattr(args, "no_sourcemap", False)
+  transpile_file(source_file, output_file, target=target, sourcemap=sourcemap)
 
 
 def main():
@@ -81,6 +83,9 @@ def main():
   build_parser.add_argument(
       "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
       help="Code generation target (default: python)")
+  build_parser.add_argument(
+      "--no_sourcemap", action="store_true",
+      help="Disable source map generation (.lua.map) for Lua targets")
   build_parser.set_defaults(func=build_command)
 
   # `run` subcommand
@@ -92,6 +97,9 @@ def main():
   run_parser.add_argument(
       "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
       help="Code generation target (default: python)")
+  run_parser.add_argument(
+      "--no_sourcemap", action="store_true",
+      help="Disable source map generation (.lua.map) for Lua targets")
   run_parser.set_defaults(func=run_command)
 
   # Handle shortcut invocation: if first argument is a file (e.g.

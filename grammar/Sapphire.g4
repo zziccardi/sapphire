@@ -212,6 +212,7 @@ expression
     | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
     | (SUB | ADD | NOT) expression                                # UnaryExpr
     | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
+    | expression AS type                                          # CastExpr
     | expression (MUL | DIV | MOD) expression                     # MultiplicativeExpr
     | expression (ADD | SUB) expression                           # AdditiveExpr
     | expression (EQ | NEQ | LT | LE | GT | GE) expression        # CompareExpr

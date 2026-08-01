@@ -62,17 +62,22 @@ described in the spec.
 
 ### 6. Host engine & third-party interoperability
 * Native interoperation with host runtimes (such as **Love2D** in Lua 5.1 / LuaJIT environments).
-* `@extern("love") var love: LoveEngine;` binds host runtime global variables with 100% type safety.
+* `@extern var love: LoveEngine;` binds host runtime global variables with 100% type safety.
 * `@export("love.update") func update(dt: float)` exposes functions directly as global engine callbacks (`function love.update(dt)`).
 * Combines Sapphire `trait`s and `struct`s to model external host APIs without runtime performance penalties.
+* **Source maps & Love2D error demangling**: Automatically generates standard [source map v3](https://tc39.es/ecma426/) files (`.lua.map`) and embeds runtime stack-trace demanglers. When a runtime error occurs in Love2D, both the terminal and Love2D error screen display original Sapphire `.sp` filenames, line numbers, and source line snippets.
 
 ## CLI overview
 ```bash
 # Run a Sapphire script (transpiling to Python by default):
 sapphire samples/overview.sp
 
-# Transpile to Lua 5.1 (without running directly in the Lua interpreter):
+# Transpile to Lua 5.1 (generating both main.lua and main.lua.map source maps by
+# default):
 sapphire build samples/love2d_demo.sp -t lua -o main.lua
+
+# Build for release without source-map sidecars or runtime demanglers:
+sapphire build samples/love2d_demo.sp -t lua -o main.lua --no_sourcemap
 
 # Run transpiled game in Love2D (pass the directory containing `main.lua`):
 love .

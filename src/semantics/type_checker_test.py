@@ -2410,6 +2410,93 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Not enough arguments passed to call", str(ctx.exception))
 
+  def test_casting_and_conversion_methods(self):
+    """Verifies type casting (as) and String.from / str.to_int/float/bool conversion methods."""
+    # 1. Valid static casts and string conversions
+    self._check("""
+    enum Status { Active = 1 }
+
+    func test() {
+      let f: float = 10 as float;
+      let i: int = 3.14 as int;
+      let b: int = true as int;
+      let code: int = Status.Active as int;
+      let enum_str: String = Status.Active as String;
+
+      let s1: String = String.from(42);
+      let s2: String = String.from(3.14);
+      let s3: String = String.from(true);
+      let s4: String = String.from(Status.Active);
+
+      let parsed_int: int? = "123".to_int();
+      let parsed_hex: int? = "FF".to_int(radix = 16);
+      let parsed_float: float? = "3.14".to_float();
+      let parsed_bool: bool? = "true".to_bool();
+
+      let e1: Status? = Status.from(1);
+      let e2: Status? = Status.from("Active");
+    }
+    """)
+
+    # 2. String to int via 'as' (should error and suggest .to_int())
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let i = "123" as int;
+      }
+      """)
+    self.assertIn("Cannot cast 'string' to 'int' using 'as'", str(ctx.exception))
+
+    # 3. Invalid cast between incompatible types (e.g. struct to float)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point { var x: float; }
+      func test() {
+        let p = Point { x = 1.0 };
+        let f = p as float;
+      }
+      """)
+    self.assertIn("Cannot cast type 'Point' to 'float'", str(ctx.exception))
+
+    # 4. String.from with wrong argument count
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let s = String.from();
+      }
+      """)
+    self.assertIn("String.from() requires exactly 1 argument", str(ctx.exception))
+
+    # 5. String.from with non-primitive argument
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point { var x: float; }
+      func test() {
+        let p = Point { x = 1.0 };
+        let s = String.from(p);
+      }
+      """)
+    self.assertIn("Cannot convert type 'Point' to String using String.from()", str(ctx.exception))
+
+    # 6. Enum.from error cases
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Active = 1 }
+      func test() {
+        let e = Status.from();
+      }
+      """)
+    self.assertIn("Status.from() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Active = 1 }
+      func test() {
+        let e = Status.from(true);
+      }
+      """)
+    self.assertIn("Cannot convert type 'bool' to Enum 'Status' using .from()", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

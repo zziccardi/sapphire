@@ -1027,6 +1027,49 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_str()")
     self.assertTrue(res)
 
+  def test_casting_and_conversions_python(self):
+    """Verifies Python transpilation and execution of casting (as) and String conversions."""
+    code = """
+    enum Status { Active = 1, Inactive = 2 }
+    enum LogLevel { Info = "INFO", Warn = "WARN" }
+
+    struct Parent { var hp: int; }
+    struct Child: Parent { var mp: int; }
+
+    func test_conv(): bool {
+      let f = 10 as float;
+      let i = 3.14 as int;
+      let b = 1 as bool;
+      let str_cast = 10 as String;
+      let s1 = String.from(42);
+      let s2 = String.from(true);
+
+      let p_int = "123".to_int();
+      let p_hex = "FF".to_int(radix = 16);
+      let p_float = "3.14".to_float();
+      let p_bool = "true".to_bool();
+      let bad_int = "abc".to_int();
+
+      let e1 = Status.from(1);
+      let e2 = Status.from("Active");
+      let e_bad = Status.from(999);
+
+      let l1 = LogLevel.from("INFO");
+      let l2 = LogLevel.from("Warn");
+      let l_bad = LogLevel.from("DEBUG");
+
+      let c = Child { hp = 100, mp = 50 };
+      let parent_cast = c as Parent;
+
+      let cond1 = f == 10.0 && i == 3 && b == true && str_cast == "10" && s1 == "42" && s2 == "true";
+      let cond2 = p_int == 123 && p_hex == 255 && p_float == 3.14 && p_bool == true && bad_int == none && parent_cast.hp == 100;
+      let cond3 = e1 == Status.Active && e2 == Status.Active && e_bad == none && l1 == LogLevel.Info && l2 == LogLevel.Warn && l_bad == none;
+      return cond1 && cond2 && cond3;
+    }
+    """
+    res = self._transpile_and_run(code, "test_conv()")
+    self.assertTrue(res)
+
 
 if __name__ == "__main__":
   unittest.main()

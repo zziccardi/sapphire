@@ -498,6 +498,11 @@ class ASTBuilder(SapphireVisitor):
     expr = self.visit(ctx.expression())
     return UnaryOpNode(op, expr)
 
+  def visitCastExpr(self, ctx: SapphireParser.CastExprContext) -> CastExprNode:
+    expr = self.visit(ctx.expression())
+    target_type = self.visit(ctx.type_())
+    return CastExprNode(expr, target_type)
+
   def visitCloneExpr(self, ctx: SapphireParser.CloneExprContext) -> CloneNode:
     expr = self.visit(ctx.expression(0))
     initializer_block = None

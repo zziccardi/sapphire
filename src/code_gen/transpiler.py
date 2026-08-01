@@ -20,6 +20,7 @@ try:
   from semantics.type_checker import TypeChecker, SemanticError
   from code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
   from code_gen.lua_transpiler import LuaTranspiler
+  from code_gen.source_map import SourceMapBuilder
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -28,6 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.semantics.type_checker import TypeChecker, SemanticError
   from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
   from src.code_gen.lua_transpiler import LuaTranspiler
+  from src.code_gen.source_map import SourceMapBuilder
 
 
 def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
@@ -84,6 +86,7 @@ def transpile_file(
     output_file: Optional[str] = None,
     target: str = "python",
     visited: Optional[set] = None,
+    sourcemap: bool = True,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
@@ -93,6 +96,7 @@ def transpile_file(
       defaults to input_file with .py or .lua extension depending on target.
     target: Code generation target ("python" or "lua" / "lua5.1").
     visited: Set of already processed file paths to prevent recursion loops.
+    sourcemap: Whether to generate source map (.lua.map) for Lua target.
 
   Returns:
     The path to the generated output file.
@@ -171,12 +175,17 @@ def transpile_file(
         break
     if sub_source:
       sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(sub_source, sub_output, target=target, visited=visited)
+      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap)
 
   # 6. Transpile
+  sm_builder = None
   if target_lower in ("lua", "lua5.1"):
     print("Transpiling to Lua 5.1...")
-    transpiler = LuaTranspiler()
+    src_filename = os.path.basename(input_file)
+    src_content = str(input_stream)
+    if sourcemap:
+      sm_builder = SourceMapBuilder(src_filename, src_content)
+    transpiler = LuaTranspiler(source_file=src_filename, source_map_builder=sm_builder)
     generated_code = transpiler.transpile(ast)
     target_name = "Lua 5.1"
   else:
@@ -189,6 +198,13 @@ def transpile_file(
   try:
     with open(output_file, "w", encoding="utf-8") as f:
       f.write(generated_code)
+
+    if sm_builder and sourcemap:
+      map_output_file = output_file + ".map"
+      with open(map_output_file, "w", encoding="utf-8") as f:
+        f.write(sm_builder.to_v3_json(os.path.basename(output_file)))
+      print(f"Source map generated at: {map_output_file}")
+
     print(f"\nCompilation successful! {target_name} output written to:\n"
           f"{output_file}")
     return output_file

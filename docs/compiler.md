@@ -81,6 +81,18 @@ Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), ma
   - `@export("path")` functions generate global Lua function definitions (e.g., `function love.update(dt) ... end`).
   - Calls on host trait fields (e.g. `love.graphics.rectangle(...)`) transpile using dot notation (`.`) rather than colon (`:`) syntax.
 
-### 3. High-Level compiler driver API (`transpile_file`)
-The high-level compilation driver function `transpile_file(input_file, output_file, target="python")` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full 5-stage compilation pipeline and dispatches AST code generation to either Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
+### 3. High-Level Compiler Driver API (`transpile_file`)
+The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full compilation pipeline and dispatches AST code generation to either Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
 
+## Stage 4: Source Map Generation & Love2D Debugging
+
+When targeting Lua/Love2D, Sapphire generates v3 source maps (`.lua.map`) and embeds runtime stack-trace demanglers.
+
+### 1. Source Map Builder (`source_map.py`)
+- **V3 JSON Specification**: Implements Base64 VLQ (Variable-Length Quantity) encoding to format standard Source Map V3 JSON files containing `version`, `sources`, `sourcesContent`, and `mappings`.
+- **Offline & IDE Debugging**: `.lua.map` sidecar files allow IDEs (such as VS Code) to set breakpoints and map runtime Lua execution back to Sapphire `.sp` source files without affecting game load times or RAM.
+
+### 2. Runtime Stack-Trace Demangler & Love2D Error Screen
+- **Inline Line Mapping Table**: Transpiled Lua code includes a compact `_SP_LINE_MAP` lookup table mapping generated Lua line numbers to original `.sp` files, line numbers, and source line snippets.
+- **Love2D Crash Overlay Hook**: Overrides `love.errorhandler` and intercepts stack trace strings. When a runtime crash occurs in Love2D (e.g. missing asset, out-of-bounds index, or failed unwrap), both the terminal logs and Love2D's graphical error screen display demangled Sapphire `.sp` filenames, line numbers, and source code line snippets.
+- **CLI Options**: Enabled by default for Lua transpilation. Can be disabled for production release builds using the `--no_sourcemap` CLI flag.

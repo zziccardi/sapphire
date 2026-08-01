@@ -35,6 +35,7 @@ try:
   from parser.ast_builder import ASTBuilder
   from code_gen.lua_transpiler import LuaTranspiler
   from code_gen.transpiler import transpile_file
+  from code_gen.source_map import SourceMapBuilder
   from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
   from src.parser.ast import (
@@ -59,6 +60,7 @@ except ModuleNotFoundError:
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.lua_transpiler import LuaTranspiler
   from src.code_gen.transpiler import transpile_file
+  from src.code_gen.source_map import SourceMapBuilder
   from src.semantics.type_checker import TypeChecker
 
 
@@ -840,6 +842,64 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('local pos_fwd = _sapphire_string_find(clean, "o")', lua_out)
     self.assertIn('local pos = _sapphire_string_find(clean, "o", nil, true)', lua_out)
     self.assertIn('local parts = _sapphire_string_split(clean, ",")', lua_out)
+
+  def test_transpile_with_explicit_args(self):
+    """Verifies passing source_file and source_map_builder directly to transpile method."""
+    input_stream = InputStream("let x = 10;")
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    transpiler = LuaTranspiler()
+    sm_builder = SourceMapBuilder("direct.sp")
+    lua_out = transpiler.transpile(ast, source_file="direct.sp", source_map_builder=sm_builder)
+    self.assertEqual(transpiler.source_file, "direct.sp")
+    self.assertEqual(transpiler.source_map_builder, sm_builder)
+
+  def test_casting_and_conversions_lua(self):
+    """Verifies Lua transpilation of casting (as) and String conversions."""
+    code = """
+    enum Status { Active = 1 }
+    enum LogLevel { Info = "INFO" }
+
+    struct Parent { var hp: int; }
+    struct Child: Parent { var mp: int; }
+
+    func test_conv() {
+      let f = 10 as float;
+      let i = 3.14 as int;
+      let b = 1 as bool;
+      let str_cast = 10 as String;
+      let s1 = String.from(42);
+      let s2 = String.from(true);
+
+      let p_int = "123".to_int();
+      let p_hex = "FF".to_int(radix = 16);
+      let p_float = "3.14".to_float();
+      let p_bool = "true".to_bool();
+
+      let e1 = Status.from(1);
+      let l1 = LogLevel.from("INFO");
+
+      let c = Child { hp = 100, mp = 50 };
+      let parent_cast = c as Parent;
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("tonumber(10)", lua)
+    self.assertIn("math.floor(tonumber(3.14))", lua)
+    self.assertIn("(not not 1)", lua)
+    self.assertIn("tostring(10)", lua)
+    self.assertIn("tostring(42)", lua)
+    self.assertIn("tostring(true)", lua)
+    self.assertIn("_sapphire_string_to_int(", lua)
+    self.assertIn("_sapphire_string_to_float(", lua)
+    self.assertIn("_sapphire_string_to_bool(", lua)
+    self.assertIn("_sapphire_enum_from(Status", lua)
+    self.assertIn("_sapphire_enum_from(LogLevel", lua)
 
 
 if __name__ == "__main__":

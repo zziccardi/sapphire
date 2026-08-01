@@ -97,6 +97,28 @@ Sapphire supports standard operator families with well-defined precedence (e.g.,
 * **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
 * **Logical**: `&&` (logical AND), `||` (logical OR).
 * **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
+* **Type casting**: `as` (infallible static type conversion, e.g. `x as float`).
+
+### Type casting (the `as` operator)
+
+The `as` operator is used for infallible, compile-time guaranteed static type conversions:
+
+* **Numeric conversions**: Widening and narrowing between numeric types (`int as float`, `float as int` which truncates decimals, `bool as int` where `true` -> 1 and `false` -> 0).
+* **Enum conversions**: Static conversion from an enum variant to its underlying primitive representation (`enum_variant as int` or `enum_variant as String`).
+
+```sapphire
+let f: float = 10 as float;  // 10.0
+let i: int = 3.14 as int;    // 3 (truncated)
+let b: int = true as int;    // 1
+
+let dir_code: int = Direction.North as int;       // 1
+let dir_str: String = Direction.North as String;  // "North"
+```
+
+#### Prohibited conversions with the `as` operator
+
+1. **Fallible string parsing**: Parsing strings into primitive types (e.g. `"123" as int`) or enum variants (e.g. `"North" as Direction`) using `as` is prohibited at compile-time. Fallible parsing must use instance methods (`"123".to_int()`, `"3.14".to_float()`, `"true".to_bool()`) or static associated functions (`Direction.from("North")`).
+2. **Struct up-casting**: Up-casting child struct instances to parent struct types (e.g. `cat as Animal`) is strictly prohibited to eliminate object slicing and method-dispatch ambiguities.
 
 ### Expressions & collection access
 
@@ -517,13 +539,22 @@ let mode_str: String = DrawMode.Line;
 // Compile error: Cannot assign String to DrawMode
 // let invalid: DrawMode = "fill";
 
+// Fallible conversion from String or int via EnumName.from
+if let mode ?= DrawMode.from("line") {
+  // mode is DrawMode.Line
+}
+
+if let code ?= HttpStatusCode.from(200) {
+  // code is HttpStatusCode.Ok
+}
+
 // Comparison
 if status == HttpStatusCode.Ok {
   let is_ok = true;
 }
 
-// Integer conversion
-let dir_code: int = current_dir;
+// Infallible static integer conversion
+let dir_code: int = current_dir as int;
 ```
 
 ## 11. Inheritance & polymorphism
@@ -688,6 +719,15 @@ references, the compiler statically enforces scope-bound escape rules:
      nested/inner arena.
    * **Function-return escape**: A function cannot return a reference to an
      object allocated in an arena local to the function scope.
+
+### Source map generation & runtime stack trace demangling
+
+When transpiling Sapphire (`.sp`) code to target environments (such as Lua 5.1 / Love2D), the compiler tracks AST node position metadata (`start_line`, `start_column`) to generate source-map sidecars and runtime demanglers:
+
+1. **Standard V3 source maps (`.lua.map`)**: Generated automatically during compilation using Base64 [VLQ](https://en.wikipedia.org/wiki/Variable-length_quantity) encoding. Sidecar files include embedded `sourcesContent` strings to support offline IDE debugging (such as setting breakpoints in VS Code).
+2. **Runtime stack-trace demangling**: Embedded `_SP_LINE_MAP` lookup tables pair generated line numbers with original Sapphire source lines and snippets.
+3. **Love2D error-handler hook**: Intercepts uncaught runtime errors (asset-loading failures, out-of-bounds dynamic indices, or failed optional unwrapping) and translates Lua call stack frames into original `.sp` filenames and line numbers on both terminal logs and Love2D's graphical crash screen.
+4. **CLI control**: Source maps are enabled by default and can be disabled using the `--no_sourcemap` flag.
 
 ## 13. Module system & encapsulation
 

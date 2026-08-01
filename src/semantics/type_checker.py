@@ -1151,6 +1151,9 @@ class TypeChecker:
   def visit_IdentifierNode(self, node: IdentifierNode) -> Type:
     sym = self.symbol_table.lookup(node.name)
     if not sym:
+      type_sym = self.symbol_table.lookup_type(node.name)
+      if type_sym:
+        return type_sym
       self.error(f"Undefined identifier '{node.name}'.")
       return PrimitiveType("none")
     return sym.symbol_type
@@ -1213,6 +1216,29 @@ class TypeChecker:
         self.error(f"Numeric operator '{node.op}' requires a numeric expression.")
       return expr_type
     return PrimitiveType("none")
+
+  def visit_CastExprNode(self, node: CastExprNode) -> Type:
+    expr_type = self.visit(node.expr)
+    target_type = self._resolve_type_node(node.target_type)
+
+    if expr_type.is_compatible(target_type):
+      return target_type
+
+    is_expr_num = isinstance(expr_type, PrimitiveType) and expr_type.name in ("int", "float", "bool")
+    is_target_num = isinstance(target_type, PrimitiveType) and target_type.name in ("int", "float", "bool")
+    if is_expr_num and is_target_num:
+      return target_type
+
+    if isinstance(expr_type, EnumType) and isinstance(target_type, PrimitiveType) and target_type.name in ("int", "string"):
+      return target_type
+
+    if isinstance(expr_type, PrimitiveType) and expr_type.name in ("string", "pascal_string"):
+      if isinstance(target_type, PrimitiveType) and target_type.name in ("int", "float", "bool"):
+        self.error(f"Cannot cast 'string' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
+        return target_type
+
+    self.error(f"Cannot cast type '{expr_type}' to '{target_type}'.")
+    return target_type
 
   def _get_lvalue_path(self, node: ASTNode) -> Optional[tuple[str, List[str]]]:
     """Resolves an AST node to its root variable name and field path if it is an lvalue."""
@@ -1320,6 +1346,32 @@ class TypeChecker:
     # 1. Resolve callee
     callee_type = self.visit(node.callee)
 
+    if getattr(node.callee, "is_string_from", False):
+      if len(node.arguments) != 1:
+        self.error("String.from() requires exactly 1 argument.")
+        return PrimitiveType("string")
+      arg_t = self.visit(node.arguments[0].expr)
+      is_valid = (
+          (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool", "string", "pascal_string"))
+          or isinstance(arg_t, EnumType)
+      )
+      if not is_valid:
+        self.error(f"Cannot convert type '{arg_t}' to String using String.from().")
+      return PrimitiveType("string")
+
+    if getattr(node.callee, "is_enum_from", False):
+      enum_t = getattr(node.callee, "enum_type", PrimitiveType("none"))
+      if len(node.arguments) != 1:
+        self.error(f"{getattr(enum_t, 'name', 'Enum')}.from() requires exactly 1 argument.")
+        return OptionalType(enum_t)
+      arg_t = self.visit(node.arguments[0].expr)
+      is_valid = (
+          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "string", "pascal_string")
+      )
+      if not is_valid:
+        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or string.")
+      return OptionalType(enum_t)
+
     signature = None
     is_constructor = False
 
@@ -1413,6 +1465,9 @@ class TypeChecker:
         return PrimitiveType("none")
 
     if isinstance(receiver_type, PrimitiveType) and receiver_type.name.lower() in ("string", "pascal_string"):
+      if node.member == "from":
+        node.is_string_from = True
+        return FunctionType([PrimitiveType("string")], PrimitiveType("string"))
       method = STRING_METHODS.get(node.member)
       if method:
         node.is_string_method = True
@@ -1430,6 +1485,10 @@ class TypeChecker:
       return PrimitiveType("none")
 
     if isinstance(receiver_type, EnumType):
+      if node.member == "from":
+        node.is_enum_from = True
+        node.enum_type = receiver_type
+        return FunctionType([PrimitiveType("string")], OptionalType(receiver_type))
       if node.member in receiver_type.variants:
         return receiver_type
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")

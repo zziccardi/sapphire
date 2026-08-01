@@ -17,6 +17,7 @@ try:
       LiteralNode,
       BasicTypeNode,
       BinaryOpNode,
+      CastExprNode,
       IfNode,
       StructDeclNode,
       StructInitializerNode,
@@ -32,6 +33,7 @@ except ModuleNotFoundError:
       LiteralNode,
       BasicTypeNode,
       BinaryOpNode,
+      CastExprNode,
       IfNode,
       StructDeclNode,
       StructInitializerNode,
@@ -104,6 +106,17 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(expr.right.op, "*")
     self.assertEqual(expr.right.left.value, 20)
     self.assertEqual(expr.right.right.value, 30)
+
+  def test_cast_expression(self):
+    """Verifies type cast expressions ('expr as type') are built into CastExprNode."""
+    ast = self._get_ast("let f = 10 as float;")
+    stmt = ast.declarations[0]
+    self.assertIsInstance(stmt, VarDeclNode)
+    expr = stmt.exprs[0]
+    self.assertIsInstance(expr, CastExprNode)
+    self.assertIsInstance(expr.expr, LiteralNode)
+    self.assertEqual(expr.expr.value, 10)
+    self.assertEqual(expr.target_type.name, "float")
 
   def test_struct_declaration(self):
     """Verifies struct declarations are parsed with correct field attributes."""
