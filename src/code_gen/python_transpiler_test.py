@@ -1073,12 +1073,15 @@ class TestPythonTranspiler(unittest.TestCase):
   def test_interpolated_string_python(self):
     """Verifies Python transpilation and execution of f-strings."""
     code = """
-    enum Status { Active = "active" }
+    enum FStringStatus { Active = "active" }
 
     func test_fstring(): String {
       let name = "Hero";
       let count = 42;
-      let status = Status.Active;
+      let status = FStringStatus.Active;
+      let empty_s = f"";
+      let single_l = f"just text";
+      let single_e = f"{count}";
       return f"Hello {name}, status: {status}, count: {count + 1}, none: {none}";
     }
     """

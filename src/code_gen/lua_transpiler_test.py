@@ -908,10 +908,16 @@ class TestLuaTranspiler(unittest.TestCase):
       let name = "Hero";
       let count = 42;
       let msg = f"Hello {name}, count: {count}!";
+      let empty_str = f"";
+      let single_lit = f"just text";
+      let single_expr = f"{count}";
     }
     """
     lua = self._transpile(code)
     self.assertIn('("Hello " .. tostring(name) .. ", count: " .. tostring(count) .. "!")', lua)
+    self.assertIn('local empty_str = ""', lua)
+    self.assertIn('local single_lit = "just text"', lua)
+    self.assertIn('local single_expr = tostring(count)', lua)
 
 
 if __name__ == "__main__":

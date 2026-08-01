@@ -520,6 +520,31 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(len(parts), 2)
     self.assertEqual(parts[0].value, "Val: {lit} ")
 
+  def test_interpolated_string_escapes_and_branches(self):
+    """Verifies parsing of empty f-string, escape sequences, single brace, and nested expr braces."""
+    # Empty
+    ast_empty = self._get_ast('let s = f"";')
+    self.assertEqual(len(ast_empty.declarations[0].exprs[0].parts), 0)
+
+    # Escape sequences \n \t \r \" \\ \{ \} \x
+    ast_esc = self._get_ast('let s = f"a\\nb\\tc\\rd\\"e\\\\f\\{g\\}h\\x";')
+    parts = ast_esc.declarations[0].exprs[0].parts
+    self.assertEqual(parts[0].value, "a\nb\tc\rd\"e\\f{g}h\\x")
+
+    # Unescaped single closing brace & nested brace in expression
+    ast_brace = self._get_ast('let s = f"a}b { {1: 2}[1] }";')
+    parts2 = ast_brace.declarations[0].exprs[0].parts
+    self.assertEqual(parts2[0].value, "a}b ")
+
+    # Escaped backslash inside expression quotes
+    ast_expr_esc = self._get_ast('let s = f" { "\\"hello\\" "} ";')
+    parts3 = ast_expr_esc.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts3), 3)
+
+    # Direct parse with trailing backslash
+    node_trailing = ASTBuilder()._parse_interpolated_string("hello\\")
+    self.assertEqual(node_trailing.parts[0].value, "hello\\")
+
 
 if __name__ == "__main__":
   unittest.main()
