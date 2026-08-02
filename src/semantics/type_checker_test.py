@@ -2392,6 +2392,26 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Inconsistent value types in map literal", str(ctx2.exception))
 
+  def test_constructor_default_parameters(self):
+    """Verifies that calling a constructor or function with default arguments allows omitting those parameters."""
+    self._check("""
+    struct Character {
+      let id: int;
+      let name: String;
+      let max_hp: int;
+    }
+    impl Character {
+      func __init__(id: int, name: String, max_hp: int = 100) {
+        self.id = id;
+        self.name = name;
+        self.max_hp = max_hp;
+      }
+    }
+    func test() {
+      let player = Character(id = 1, name = "Galahad");
+    }
+    """)
+
   def test_clone_shadow_let_field(self):
     self._check("""
     proto Hero {

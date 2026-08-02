@@ -231,7 +231,8 @@ class TypeChecker:
             func_decl = member.func_decl
             p_types = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
             ret_t = self._resolve_return_types(func_decl)
-            sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters])
+            num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
+            sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters], num_defaults=num_defaults)
             mono_struct_type.methods[func_decl.name] = StructMethod(func_decl.name, sig, member.modifier)
           self.program.declarations.append(cloned_impl)
 
@@ -413,6 +414,7 @@ class TypeChecker:
             if ann.name == "export" and ann.arg:
               extern_name = ann.arg
               break
+          num_defaults = sum(1 for p in member.parameters if getattr(p, "default_expr", None) is not None)
           fn_type = FunctionType(
               p_types,
               ret_t,
@@ -420,6 +422,7 @@ class TypeChecker:
               param_names=param_names,
               has_self=has_self,
               extern_name=extern_name,
+              num_defaults=num_defaults,
           )
           trait_type.methods[member.name] = fn_type
         if decl.type_params:
@@ -444,11 +447,13 @@ class TypeChecker:
         ret_type = self._resolve_return_types(decl)
         if decl.type_params:
           self.symbol_table.exit_scope()
+        num_defaults = sum(1 for p in decl.parameters if getattr(p, "default_expr", None) is not None)
         signature = FunctionType(
             param_types,
             ret_type,
             param_mutabilities,
             param_names=[p.name for p in decl.parameters],
+            num_defaults=num_defaults,
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
 
@@ -536,11 +541,13 @@ class TypeChecker:
             param_types.append(ptype)
             param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_return_types(func_decl)
+          num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
           signature = FunctionType(
               param_types,
               ret_type,
               param_mutabilities,
               param_names=[p.name for p in func_decl.parameters],
+              num_defaults=num_defaults,
           )
 
           method = StructMethod(func_decl.name, signature, member.modifier)
@@ -719,11 +726,13 @@ class TypeChecker:
     resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
     param_mutabilities = [p.is_mutable for p in func_decl.parameters]
     ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
+    num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
     self.current_function = FunctionType(
         resolved_params,
         ret_type,
         param_mutabilities,
         param_names=[p.name for p in func_decl.parameters],
+        num_defaults=num_defaults,
     )
 
     # Visit body
@@ -762,7 +771,14 @@ class TypeChecker:
     resolved_params = [self._resolve_type_node(p.param_type) for p in node.parameters]
     param_mutabilities = [p.is_mutable for p in node.parameters]
     ret_types = self._resolve_return_types(node)
-    self.current_function = FunctionType(resolved_params, ret_types, param_mutabilities)
+    num_defaults = sum(1 for p in node.parameters if getattr(p, "default_expr", None) is not None)
+    self.current_function = FunctionType(
+        resolved_params,
+        ret_types,
+        param_mutabilities,
+        param_names=[p.name for p in node.parameters],
+        num_defaults=num_defaults,
+    )
 
     self.visit(node.body)
 
