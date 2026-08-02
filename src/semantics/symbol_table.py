@@ -4,7 +4,7 @@ This module defines classes for representing Sapphire types, symbols, scopes,
 and the symbol table used to resolve and validate identifiers during type-checking.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 
 
 # ==========================================
@@ -18,6 +18,8 @@ class Type:
     """Returns True if self is compatible with other (e.g. for assignment)."""
     if isinstance(self, NoneType) and isinstance(other, OptionalType):
       return True
+    if isinstance(self, OptionalType) and isinstance(other, OptionalType):
+      return self.base_type.is_compatible(other.base_type)
     if isinstance(other, OptionalType) and not isinstance(self, OptionalType):
       # Safe assignment of T to T?
       return self.is_compatible(other.base_type)
@@ -30,6 +32,8 @@ class Type:
       return True
     if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and self.value_type.lower() == other.name.lower():
       return True
+    if isinstance(other, TraitType) and isinstance(self, StructType):
+      return self.implements_trait(other)
     return self == other
 
   def __eq__(self, other: object) -> bool:
@@ -187,11 +191,23 @@ class StructType(Type):
     self.parent_name = parent_name
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
+    self.implemented_traits: Set[str] = set()
     self.is_cloned = False  # Set during clone-tracking analysis
     self.is_prototype = is_prototype
     self.comments = comments or ""
     self.type_params = type_params or []
     self.ast_decl = ast_decl
+
+  def implements_trait(self, trait: "TraitType") -> bool:
+    """Returns True if this struct implements the given trait (nominally or structurally)."""
+    if trait.name in self.implemented_traits:
+      return True
+    if trait.methods:
+      for m_name in trait.methods:
+        if m_name not in self.methods:
+          return False
+      return True
+    return False
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):

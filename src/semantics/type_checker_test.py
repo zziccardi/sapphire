@@ -2634,9 +2634,86 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("'continue' statement outside of loop.", str(ctx.exception))
 
+  def test_implicit_trait_subtyping(self):
+    """Verifies that structs implementing a trait are assignable to trait parameters and return types."""
+    # 1. Valid trait subtyping for parameters and return types
+    code_valid = """
+    trait Printable {
+      func print_self();
+    }
+
+    struct Point {
+      var x: int;
+    }
+
+    impl Printable for Point {
+      func print_self() {}
+    }
+
+    func display(p: Printable) : Printable {
+      p.print_self();
+      return p;
+    }
+
+    func main() {
+      let pt = Point { x = 10 };
+      let res = display(pt);
+    }
+    """
+    self._check(code_valid)
+
+    # 2. Invalid trait subtyping (struct does not implement trait)
+    code_invalid = """
+    trait Printable {
+      func print_self();
+    }
+
+    struct NonPrintable {
+      var x: int;
+    }
+
+    func display(p: Printable) {
+      p.print_self();
+    }
+
+    func main() {
+      let np = NonPrintable { x = 5 };
+      display(np);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid)
+    self.assertIn("Argument type mismatch at position 1. Expected 'trait Printable', got 'NonPrintable'.", str(ctx.exception))
+
+    # 3. Optional trait subtyping
+    code_optional = """
+    trait Describable {
+      func describe();
+    }
+
+    struct Item {
+      var id: int;
+    }
+
+    impl Describable for Item {
+      func describe() {}
+    }
+
+    func process(item: Describable?) : Describable? {
+      return item;
+    }
+
+    func main() {
+      let it: Item? = Item { id = 1 };
+      let res = process(it);
+    }
+    """
+    self._check(code_optional)
+
 
 if __name__ == "__main__":
   unittest.main()
+
 
 
 

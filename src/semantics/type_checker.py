@@ -531,6 +531,7 @@ class TypeChecker:
           if not trait_type or not isinstance(trait_type, TraitType):
             self.error(f"Cannot implement undefined trait '{decl.trait_name}'.")
             continue
+          struct_type.implemented_traits.add(trait_type.name)
 
         for member in decl.members:
           func_decl = member.func_decl
