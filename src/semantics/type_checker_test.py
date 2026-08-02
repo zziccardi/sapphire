@@ -2365,6 +2365,33 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_collection_type_inference(self):
+    """Verifies type inference for implicit array/map literals, empty literals, and type mismatch errors."""
+    self._check("""
+    func test() {
+      let numbers = [1, 2, 3];
+      let counts = {"a": 1, "b": 2};
+      let empty_arr: [int] = [];
+      let empty_map: [String: float] = {};
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let arr = [10, "string"];
+      }
+      """)
+    self.assertIn("Inconsistent element types in array literal", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      func test() {
+        let m = {"a": 10, "b": "string"};
+      }
+      """)
+    self.assertIn("Inconsistent value types in map literal", str(ctx2.exception))
+
   def test_clone_shadow_let_field(self):
     self._check("""
     proto Hero {

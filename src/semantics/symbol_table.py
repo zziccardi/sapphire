@@ -278,6 +278,8 @@ class ArrayType(Type):
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, ArrayType):
+      if isinstance(self.element_type, NoneType) or isinstance(other.element_type, NoneType):
+        return True
       return self.element_type.is_compatible(other.element_type)
     if isinstance(other, OptionalType):
       return self.is_compatible(other.base_type)
@@ -303,7 +305,17 @@ class MapType(Type):
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, MapType):
-      return self.key_type.is_compatible(other.key_type) and self.value_type.is_compatible(other.value_type)
+      key_ok = (
+          isinstance(self.key_type, NoneType)
+          or isinstance(other.key_type, NoneType)
+          or self.key_type.is_compatible(other.key_type)
+      )
+      val_ok = (
+          isinstance(self.value_type, NoneType)
+          or isinstance(other.value_type, NoneType)
+          or self.value_type.is_compatible(other.value_type)
+      )
+      return key_ok and val_ok
     if isinstance(other, OptionalType):
       return self.is_compatible(other.base_type)
     return super().is_compatible(other)

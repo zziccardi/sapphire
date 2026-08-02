@@ -1698,6 +1698,8 @@ class TypeChecker:
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:
+      if isinstance(self.expected_type, ArrayType):
+        return ArrayType(self.expected_type.element_type, size=0)
       return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
@@ -1710,6 +1712,8 @@ class TypeChecker:
 
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
     if not node.entries:
+      if isinstance(self.expected_type, MapType):
+        return MapType(self.expected_type.key_type, self.expected_type.value_type)
       return MapType(NoneType(), NoneType())
 
     first_key_type = self.visit(node.entries[0].key)
