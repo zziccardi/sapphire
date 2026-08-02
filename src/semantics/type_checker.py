@@ -567,6 +567,10 @@ class TypeChecker:
     if not node:
       return PrimitiveType("none")
     if isinstance(node, BasicTypeNode):
+      if node.name == "Array" and node.type_args:
+        return ArrayType(self._resolve_type_node(node.type_args[0]))
+      if node.name == "Map" and len(node.type_args) >= 2:
+        return MapType(self._resolve_type_node(node.type_args[0]), self._resolve_type_node(node.type_args[1]))
       if "." in node.name:
         parts = node.name.split(".")
         mod_sym = self.symbol_table.lookup(parts[0])
@@ -590,6 +594,8 @@ class TypeChecker:
       return OptionalType(self._resolve_type_node(node.base_type))
     if isinstance(node, ArrayTypeNode):
       return ArrayType(self._resolve_type_node(node.element_type))
+    if isinstance(node, MapTypeNode):
+      return MapType(self._resolve_type_node(node.key_type), self._resolve_type_node(node.val_type))
     if isinstance(node, FunctionTypeNode):
       param_types = [self._resolve_type_node(t) for t in node.param_types]
       ret_types = self._resolve_return_types(node)

@@ -311,8 +311,19 @@ class ASTBuilder(SapphireVisitor):
       return self.visit(ctx.baseType())
     elif ctx.functionType():
       return self.visit(ctx.functionType())
+    elif ctx.collectionType():
+      return self.visit(ctx.collectionType())
     else:
       return self.visit(ctx.type_())
+
+  def visitCollectionType(self, ctx: SapphireParser.CollectionTypeContext) -> TypeNode:
+    key_type = self.visit(ctx.keyType)
+    if ctx.valType:
+      val_type = self.visit(ctx.valType)
+      return MapTypeNode(key_type, val_type)
+    else:
+      return ArrayTypeNode(key_type)
+
 
   def visitBaseType(self, ctx: SapphireParser.BaseTypeContext) -> BasicTypeNode:
     type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []

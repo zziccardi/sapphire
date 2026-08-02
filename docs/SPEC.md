@@ -160,23 +160,28 @@ let dir_str: String = Direction.North as String;  // "North"
 
 ### Expressions & collection access
 
-* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed. Arrays are strongly typed and homogeneous; all elements must have compatible types:
-  ```
-  let numbers = [10, 20, 30,];
+* **Array literals & type syntax**: Arrays are defined as comma-separated values inside square brackets. Array types are annotated using `[T]` (or `Array<T>`). Trailing commas in literals are optional and recommended for multi-line literals. Arrays are strongly typed and homogeneous; all elements must have compatible types:
+  ```sapphire
+  let numbers = [10, 20, 30];  // Inferred as `[int]`
   ```
 * **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
-  ```
+  ```sapphire
   let first = numbers[0];
   ```
   * **Compile-time bounds-checking**: For arrays with compile-time known lengths (such as array literals or statically-initialized array variables), constant integer indices are checked at compile time. Negative indices (`index < 0`) or out-of-bounds indices (`index >= size`) produce a compile-time type-checking error.
-* **Map literals**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
-  ```
-  let scores = {"alice": 100, "bob": 95};
-  let config = {1: "low", 2: "high"};
-  let dir_speeds = {Direction.North: 10, Direction.South: 5};
+* **Map literals & type syntax**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Map types are annotated using `[K: V]` (or `Map<K, V>`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
+  ```sapphire
+  let scores = {"alice": 100, "bob": 95};  // [String: int]
+  let config = {1: "low", 2: "high"};      // [int: String]
+
+  // [Direction: int]
+  let dir_speeds = {
+      Direction.North: 10,
+      Direction.South: 5,
+  };
   ```
 * **Map indexing**: Values in a map are accessed by key using square brackets:
-  ```
+  ```sapphire
   let alice_score = scores["alice"];
   ```
   * **Compile-time key validation**: Indexing map literals directly with a constant literal key validates key existence at compile time; accessing a non-existent literal key emits a compile-time error.
@@ -918,7 +923,7 @@ Sapphire supports zero-overhead parametric polymorphism (generics) for structure
 * **Generic structs**: Structs can declare one or more type parameters:
   ```sapphire
   struct Stack<T> {
-    var items: Array<T>;
+    var items: [T];
   }
 
   struct Pair<K, V> {

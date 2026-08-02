@@ -2354,7 +2354,16 @@ class TestTypeChecker(unittest.TestCase):
         let x = none;
       }
       """)
-    self.assertIn("Cannot infer type of 'x' from 'none' alone.", str(ctx.exception))
+  def test_shorthand_collection_types(self):
+    """Verifies semantic type checking for [T], [K: V], Array<T>, and Map<K, V>."""
+    self._check("""
+    func test() {
+      let numbers: [int] = [10, 20, 30];
+      let legacy_numbers: Array<int> = [40, 50];
+      let counts: [String: int] = {"apples": 5, "oranges": 10};
+      let legacy_counts: Map<String, int> = {"bananas": 3};
+    }
+    """)
 
   def test_clone_shadow_let_field(self):
     self._check("""

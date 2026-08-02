@@ -108,8 +108,13 @@ parameter
 type
     : baseType
     | functionType
+    | collectionType
     | type QUESTION
     | LPAREN type RPAREN
+    ;
+
+collectionType
+    : LBRACKET keyType=type (COLON valType=type)? RBRACKET
     ;
 
 baseType

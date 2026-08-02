@@ -24,6 +24,8 @@ try:
       CloneNode,
       InterpolatedStringNode,
       IdentifierNode,
+      ArrayTypeNode,
+      MapTypeNode,
   )
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -42,6 +44,8 @@ except ModuleNotFoundError:
       CloneNode,
       InterpolatedStringNode,
       IdentifierNode,
+      ArrayTypeNode,
+      MapTypeNode,
   )
 
 
@@ -557,5 +561,20 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIn("must be assigned an expression using '='", str(ctx.exception))
 
 
+  def test_collection_type_annotations(self):
+    """Verifies parsing of array [T] and map [K: V] type annotations."""
+    ast_arr = self._get_ast('let arr: [int] = [1, 2];')
+    decl_arr = ast_arr.declarations[0]
+    self.assertIsInstance(decl_arr.val_types[0], ArrayTypeNode)
+    self.assertEqual(decl_arr.val_types[0].element_type.name, "int")
+
+    ast_map = self._get_ast('let m: [String: int] = {"a": 1};')
+    decl_map = ast_map.declarations[0]
+    self.assertIsInstance(decl_map.val_types[0], MapTypeNode)
+    self.assertEqual(decl_map.val_types[0].key_type.name, "String")
+    self.assertEqual(decl_map.val_types[0].val_type.name, "int")
+
+
 if __name__ == "__main__":
   unittest.main()
+
