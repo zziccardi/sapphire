@@ -1017,7 +1017,6 @@ class TestPythonTranspiler(unittest.TestCase):
       let parts = clean.split();
       let csv_parts = "a,b,c".split(",");
       let concat_var = "Result: " + clean;
-      
       let cond1 = sz == 15 && emp == false && clean == "hello world" && slash_stripped == "path";
       let cond2 = low == "hello world" && up == "HELLO WORLD" && has == true && csv_parts[0] == "a";
       let cond3 = first_o == 4 && last_o == 7 && parts[0] == "hello" && parts[1] == "world" && concat_var == "Result: hello world";
@@ -1087,6 +1086,54 @@ class TestPythonTranspiler(unittest.TestCase):
     """
     res = self._transpile_and_run(code, "test_fstring()")
     self.assertEqual(res, "Hello Hero, status: active, count: 43, none: None")
+
+  def test_nested_match_expression_transpilation_and_execution(self):
+    """Verifies Python transpilation and execution of match expressions used inline within sub-expressions."""
+    code = """
+    func test_nested_match(val: int): int {
+      let x = (match val { 1 -> 10, ... -> 20 }) + 5;
+      return x;
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_nested_match(1)")
+    res2 = self._transpile_and_run(code, "test_nested_match(2)")
+    self.assertEqual(res1, 15)
+    self.assertEqual(res2, 25)
+
+  def test_generic_struct_optional_mangling(self):
+    """Verifies that generic structs instantiated with optional types generate valid mangled Python identifiers."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func test_opt_box(): int {
+      let b = Box<int?> { item = none };
+      if let val ?= b.item {
+        return val;
+      }
+      return -1;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Box__Opt_int", py_code)
+    res = self._transpile_and_run(code, "test_opt_box()")
+    self.assertEqual(res, -1)
+
+  def test_cow_proxy_operators_and_methods(self):
+    """Verifies Python runtime _LazyCoWProxy supports arithmetic operators and compound assignments."""
+    code = """
+    proto Container {
+      var count: int;
+    }
+    func test_proxy_ops(): int {
+      let base = Container { count = 10 };
+      let c = clone base;
+      c.count += 5;
+      return c.count + base.count;
+    }
+    """
+    res = self._transpile_and_run(code, "test_proxy_ops()")
+    self.assertEqual(res, 15 + 10)
 
 
 if __name__ == "__main__":

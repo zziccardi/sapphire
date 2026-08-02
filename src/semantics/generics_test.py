@@ -216,3 +216,26 @@ class TestGenerics(unittest.TestCase):
     btn = BasicTypeNode("int")
     sub = tc._substitute_ast(btn, {})
     self.assertEqual(sub.name, "int")
+
+  def test_complex_generic_monomorphization(self):
+    """Verifies monomorphization for generic structs with optional and primitive types."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func main() {
+      let b1 = Box<int?> { item = none };
+      let b2 = Box<String> { item = "hello" };
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertIsNotNone(checker.symbol_table.lookup_type("Box__Opt_int"))
+    self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))

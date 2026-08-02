@@ -48,12 +48,14 @@ class ASTBuilder(SapphireVisitor):
         if export_block is not None:
           raise SyntaxError("Only a single export block is allowed per file.")
         export_block = node
-      else:
+      elif node is not None:
         declarations.append(node)
     return ProgramNode(declarations, imports=imports, export_block=export_block)
 
-  def visitTopLevelItem(self, ctx: SapphireParser.TopLevelItemContext) -> ASTNode:
-    return self.visit(ctx.getChild(0))
+  def visitTopLevelItem(self, ctx: SapphireParser.TopLevelItemContext) -> Optional[ASTNode]:
+    if ctx and ctx.children:
+      return self.visit(ctx.getChild(0))
+    return None
 
   def visitImportStatement(self, ctx: SapphireParser.ImportStatementContext) -> ImportStmtNode:
     path = ctx.identifierPath().getText()
@@ -763,7 +765,10 @@ class ASTBuilder(SapphireVisitor):
 
   def visitStructInitField(self, ctx: SapphireParser.StructInitFieldContext) -> ArgumentNode:
     name = ctx.IDENTIFIER().getText()
-    expr = self.visit(ctx.expression())
+    expr_ctx = ctx.expression()
+    if expr_ctx is None:
+      raise SyntaxError(f"Field '{name}' in struct initializer must be assigned an expression using '='.")
+    expr = self.visit(expr_ctx)
     node = ArgumentNode(name, expr)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()

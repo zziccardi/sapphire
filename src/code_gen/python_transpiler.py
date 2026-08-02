@@ -59,52 +59,67 @@ class _LazyCoWProxy:
     super().__setattr__('_name', name)
     super().__setattr__('_target', target)
 
+  def _get_parent_obj(self):
+    p = super().__getattribute__('_parent')
+    if isinstance(p, _LazyCoWProxy):
+      return p._get_active()
+    return p
+
   def _get_active(self):
-    parent = super().__getattribute__('_parent')
+    parent = self._get_parent_obj()
     name = super().__getattribute__('_name')
+    if isinstance(parent, dict):
+      return parent[name] if name in parent else super().__getattribute__('_target')
     if hasattr(parent, '__shadow__') and name in parent.__shadow__:
       return parent.__shadow__[name]
     return super().__getattribute__('_target')
 
+  def _ensure_cow(self):
+    p = super().__getattribute__('_parent')
+    attr_name = super().__getattribute__('_name')
+    if isinstance(p, _LazyCoWProxy):
+      parent_obj = p._ensure_cow()
+    else:
+      parent_obj = p
+
+    if isinstance(parent_obj, dict):
+      return parent_obj
+    if hasattr(parent_obj, '__shadow__'):
+      if attr_name not in parent_obj.__shadow__:
+        target = super().__getattribute__('_target')
+        if hasattr(target, 'clone'):
+          cow_val = target.clone()
+        else:
+          cow_val = copy.deepcopy(target)
+        parent_obj.__shadow__[attr_name] = cow_val
+        return cow_val
+      return parent_obj.__shadow__[attr_name]
+    return parent_obj
+
   def __getattr__(self, name):
-    active = self._get_active()
-    return getattr(active, name)
+    if name.startswith('_'):
+      return super().__getattribute__(name)
+    val = getattr(self._get_active(), name)
+    if not isinstance(val, (int, float, bool, str, type(None))):
+      return _LazyCoWProxy(self, name, val)
+    return val
 
   def __setattr__(self, name, value):
-    parent = super().__getattribute__('_parent')
-    attr_name = super().__getattribute__('_name')
-    if hasattr(parent, '__shadow__') and attr_name not in parent.__shadow__:
-      target = super().__getattribute__('_target')
-      if hasattr(target, 'clone'):
-        cow_val = target.clone()
-      else:
-        cow_val = copy.deepcopy(target)
-      parent.__shadow__[attr_name] = cow_val
-      target_obj = cow_val
-    else:
-      target_obj = parent.__shadow__[attr_name] if hasattr(parent, '__shadow__') else parent
+    if name.startswith('_'):
+      super().__setattr__(name, value)
+      return
+    target_obj = self._ensure_cow()
     setattr(target_obj, name, value)
 
   def __getitem__(self, key):
     active = self._get_active()
     val = active[key]
     if not isinstance(val, (int, float, bool, str, type(None))):
-      return _LazyCoWProxy(active, key, val)
+      return _LazyCoWProxy(self, key, val)
     return val
 
   def __setitem__(self, key, value):
-    parent = super().__getattribute__('_parent')
-    attr_name = super().__getattribute__('_name')
-    if hasattr(parent, '__shadow__') and attr_name not in parent.__shadow__:
-      target = super().__getattribute__('_target')
-      if hasattr(target, 'clone'):
-        cow_val = target.clone()
-      else:
-        cow_val = copy.deepcopy(target)
-      parent.__shadow__[attr_name] = cow_val
-      target_obj = cow_val
-    else:
-      target_obj = parent.__shadow__[attr_name]
+    target_obj = self._ensure_cow()
     target_obj[key] = value
 
   def __len__(self):
@@ -118,6 +133,90 @@ class _LazyCoWProxy:
 
   def __str__(self):
     return str(self._get_active())
+
+  def __bool__(self):
+    return bool(self._get_active())
+
+  def __call__(self, *args, **kwargs):
+    return self._get_active()(*args, **kwargs)
+
+  def __contains__(self, item):
+    return item in self._get_active()
+
+  def __eq__(self, other):
+    return self._get_active() == (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __ne__(self, other):
+    return not (self == other)
+
+  def __lt__(self, other):
+    return self._get_active() < (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __le__(self, other):
+    return self._get_active() <= (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __gt__(self, other):
+    return self._get_active() > (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __ge__(self, other):
+    return self._get_active() >= (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __add__(self, other):
+    return self._get_active() + (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __radd__(self, other):
+    return (other._get_active() if isinstance(other, _LazyCoWProxy) else other) + self._get_active()
+
+  def __iadd__(self, other):
+    target_obj = self._ensure_cow()
+    val = (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+    target_obj += val
+    return self
+
+  def __sub__(self, other):
+    return self._get_active() - (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __rsub__(self, other):
+    return (other._get_active() if isinstance(other, _LazyCoWProxy) else other) - self._get_active()
+
+  def __isub__(self, other):
+    target_obj = self._ensure_cow()
+    val = (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+    target_obj -= val
+    return self
+
+  def __mul__(self, other):
+    return self._get_active() * (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __rmul__(self, other):
+    return (other._get_active() if isinstance(other, _LazyCoWProxy) else other) * self._get_active()
+
+  def __imul__(self, other):
+    target_obj = self._ensure_cow()
+    val = (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+    target_obj *= val
+    return self
+
+  def __truediv__(self, other):
+    return self._get_active() / (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __itruediv__(self, other):
+    target_obj = self._ensure_cow()
+    val = (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+    target_obj /= val
+    return self
+
+  def __floordiv__(self, other):
+    return self._get_active() // (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __mod__(self, other):
+    return self._get_active() % (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+
+  def __imod__(self, other):
+    target_obj = self._ensure_cow()
+    val = (other._get_active() if isinstance(other, _LazyCoWProxy) else other)
+    target_obj %= val
+    return self
 
 class SapphireObject:
   def __init__(self, proto=None):
@@ -535,16 +634,31 @@ class PythonTranspiler:
     else:
       self._visit_statements(node.statements)
 
+  def _lift_match_expressions(self, node: Any) -> None:
+    """Finds all MatchExprNode in the AST subtree and emits their match statement blocks first."""
+    if node is None:
+      return
+    if isinstance(node, MatchExprNode):
+      if not getattr(node, "_is_lifted", False):
+        node._is_lifted = True
+        for case in node.cases:
+          self._lift_match_expressions(case.body)
+        node._lifted_var = self._emit_match_statement(node)
+      return
+    if isinstance(node, list):
+      for item in node:
+        self._lift_match_expressions(item)
+      return
+    if isinstance(node, ASTNode):
+      for v in node.__dict__.values():
+        if isinstance(v, (ASTNode, list)):
+          self._lift_match_expressions(v)
+
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
     if any(a.name == "extern" for a in node.annotations):
       return
 
-    expr_vars = []
-    for expr in node.exprs:
-      if isinstance(expr, MatchExprNode):
-        expr_vars.append(self._emit_match_statement(expr))
-      else:
-        expr_vars.append(None)
+    self._lift_match_expressions(node.exprs)
 
     self.newline()
     names_str = ", ".join(node.names)
@@ -554,18 +668,11 @@ class PythonTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        if expr_vars[idx]:
-          self.emit(expr_vars[idx])
-        else:
-          self.visit(expr)
+        self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
-    expr_vars = []
-    for expr in node.exprs:
-      if isinstance(expr, MatchExprNode):
-        expr_vars.append(self._emit_match_statement(expr))
-      else:
-        expr_vars.append(None)
+    self._lift_match_expressions(node.targets)
+    self._lift_match_expressions(node.exprs)
 
     self.newline()
     if node.op == "=":
@@ -577,46 +684,31 @@ class PythonTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        if expr_vars[idx]:
-          self.emit(expr_vars[idx])
-        else:
-          self.visit(expr)
+        self.visit(expr)
     else:
-      raw_op = node.op[:-1]
       self.visit(node.target)
       self.emit(f" {node.op} ")
-      if expr_vars[0]:
-        self.emit(expr_vars[0])
-      else:
-        self.visit(node.expr)
+      self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
       self._emit_match_statement(node.expr, target_var=None)
       return
+    self._lift_match_expressions(node.expr)
     self.newline()
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
-    expr_vars = []
-    for expr in node.expressions:
-      if isinstance(expr, MatchExprNode):
-        expr_vars.append(self._emit_match_statement(expr))
-      else:
-        expr_vars.append(None)
-
+    self._lift_match_expressions(node.expressions)
     self.newline()
-    if node.expressions:
+    if not node.expressions:
+      self.emit("return")
+    else:
       self.emit("return ")
       for idx, expr in enumerate(node.expressions):
         if idx > 0:
           self.emit(", ")
-        if expr_vars[idx]:
-          self.emit(expr_vars[idx])
-        else:
-          self.visit(expr)
-    else:
-      self.emit("return")
+        self.visit(expr)
 
   def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
     if target_var == "":
@@ -664,6 +756,7 @@ class PythonTranspiler:
     return target_var or ""
 
   def visit_YieldNode(self, node: YieldNode) -> None:
+    self._lift_match_expressions(node.expr)
     target = getattr(self, "_current_match_target", None)
     self.newline()
     if target:
@@ -671,14 +764,20 @@ class PythonTranspiler:
     self.visit(node.expr)
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
-    temp_var = self._emit_match_statement(node)
-    if temp_var:
-      self.emit(temp_var)
+    if not getattr(node, "_is_lifted", False):
+      node._is_lifted = True
+      node._lifted_var = self._emit_match_statement(node)
+    self.emit(node._lifted_var)
 
   def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
     self.emit("_")
 
   def visit_IfNode(self, node: IfNode) -> None:
+    if node.init_binding:
+      self._lift_match_expressions(node.init_binding.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
     self.newline()
     if node.init_binding:
       let_name = node.init_binding.let_name
@@ -733,6 +832,11 @@ class PythonTranspiler:
       self.dedent()
 
   def visit_WhileNode(self, node: WhileNode) -> None:
+    if node.init_binding:
+      self._lift_match_expressions(node.init_binding.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
     self.newline()
     if node.init_binding:
       let_name = node.init_binding.let_name
@@ -786,6 +890,7 @@ class PythonTranspiler:
       self.dedent()
 
   def visit_ForNode(self, node: ForNode) -> None:
+    self._lift_match_expressions(node.iterable)
     self.newline()
     if node.key_var is not None:
       self.emit(f"for {node.key_var}, {node.val_var} in ")

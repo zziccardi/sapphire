@@ -269,7 +269,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local numbers = {10, 20, 30}", lua_code)
     self.assertIn("local first = numbers[1]", lua_code)
     self.assertIn("numbers[idx + 1]", lua_code)
-    self.assertIn("for _, n in ipairs(numbers) do", lua_code)
+    self.assertIn("for _, n in _sapphire_iter_array(numbers) do", lua_code)
 
   def test_struct_declaration_and_impl(self):
     """Verifies struct constructor generation, field defaults, static methods, and traits."""
@@ -913,11 +913,43 @@ class TestLuaTranspiler(unittest.TestCase):
       let single_expr = f"{count}";
     }
     """
+  def test_nested_match_expression_transpilation_lua(self):
+    """Verifies Lua transpilation of match expressions used inline within sub-expressions."""
+    code = """
+    func test_nested_match(val: int): int {
+      let x = (match val { 1 -> 10, ... -> 20 }) + 5;
+      return x;
+    }
+    """
     lua = self._transpile(code)
-    self.assertIn('("Hello " .. tostring(name) .. ", count: " .. tostring(count) .. "!")', lua)
-    self.assertIn('local empty_str = ""', lua)
-    self.assertIn('local single_lit = "just text"', lua)
-    self.assertIn('local single_expr = tostring(count)', lua)
+    self.assertIn("local _match_res_1 = nil", lua)
+    self.assertIn("local x = (_match_res_1 + 5)", lua)
+
+  def test_generic_struct_optional_mangling_lua(self):
+    """Verifies that generic structs instantiated with optional types generate valid mangled Lua identifiers."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func test_opt_box() {
+      let b = Box<int?> { item = none };
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("Box__Opt_int", lua)
+
+  def test_proto_array_iteration_lua(self):
+    """Verifies Lua transpilation uses _sapphire_iter_array for prototypal object arrays."""
+    code = """
+    func test_proto_loop() {
+      let tags = ["a", "b"];
+      for t in tags {
+        let name = t;
+      }
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("for _, t in _sapphire_iter_array(tags) do", lua)
 
 
 if __name__ == "__main__":

@@ -170,11 +170,29 @@ class TypeChecker:
       return new_node
     return copy.deepcopy(node)
 
+  def _mangle_type_name(self, type_obj: Type) -> str:
+    """Recursively converts a semantic Type into a clean, valid identifier string component."""
+    if isinstance(type_obj, OptionalType):
+      return f"Opt_{self._mangle_type_name(type_obj.base_type)}"
+    elif isinstance(type_obj, ArrayType):
+      return f"Arr_{self._mangle_type_name(type_obj.element_type)}"
+    elif isinstance(type_obj, MapType):
+      return f"Map_{self._mangle_type_name(type_obj.key_type)}_{self._mangle_type_name(type_obj.value_type)}"
+    elif isinstance(type_obj, FunctionType):
+      p_str = "_".join(self._mangle_type_name(t) for t in type_obj.param_types)
+      r_str = "_".join(self._mangle_type_name(t) for t in type_obj.return_types)
+      return f"Fn_{p_str}_to_{r_str}"
+    else:
+      raw = str(type_obj)
+      clean = "".join(c if c.isalnum() else "_" for c in raw)
+      clean = "_".join(filter(None, clean.split("_")))
+      return clean or "type"
+
   def _monomorphize_struct(
       self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
   ) -> StructType:
     """Monomorphizes a generic struct template for a specific set of concrete type arguments."""
-    arg_names = [str(t) for t in resolved_type_args]
+    arg_names = [self._mangle_type_name(t) for t in resolved_type_args]
     mangled_name = f"{generic_struct_type.name}__{'_'.join(arg_names)}"
     existing = self.symbol_table.lookup_type(mangled_name)
     if existing and isinstance(existing, StructType):
@@ -189,8 +207,11 @@ class TypeChecker:
     cloned_decl.type_params = []
 
     mono_struct_type = StructType(mangled_name, cloned_decl.parent_name, cloned_decl.is_prototype)
-    self.symbol_table.define_type(mangled_name, mono_struct_type)
-    self.symbol_table.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    root_scope.define_type(mangled_name, mono_struct_type)
+    root_scope.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
 
     # Resolve fields for monomorphized struct
     for f in cloned_decl.fields:
@@ -222,7 +243,7 @@ class TypeChecker:
       self, func_sym: FunctionSymbol, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
   ) -> str:
     """Monomorphizes a generic function template for a specific set of concrete type arguments."""
-    arg_names = [str(t) for t in resolved_type_args]
+    arg_names = [self._mangle_type_name(t) for t in resolved_type_args]
     mangled_name = f"{func_sym.name}__{'_'.join(arg_names)}"
     existing = self.symbol_table.lookup(mangled_name)
     if existing and isinstance(existing, FunctionSymbol):
@@ -238,9 +259,17 @@ class TypeChecker:
 
     p_types = [self._resolve_type_node(p.param_type) for p in cloned_func.parameters]
     ret_t = self._resolve_return_types(cloned_func)
-    sig = FunctionType(p_types, ret_t, [p.is_mutable for p in cloned_func.parameters], [p.name for p in cloned_func.parameters])
-    mono_func_sym = FunctionSymbol(mangled_name, sig, ast_decl=cloned_func)
-    self.symbol_table.define(mangled_name, mono_func_sym)
+    mono_func_type = FunctionType(
+        p_types,
+        ret_t,
+        [p.is_mutable for p in cloned_func.parameters],
+        [p.name for p in cloned_func.parameters],
+    )
+    mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    root_scope.define(mangled_name, mono_func_sym)
 
     if hasattr(self, "program") and self.program:
       self.program.declarations.append(cloned_func)
