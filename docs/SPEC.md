@@ -1050,3 +1050,10 @@ handling:
 * **Resource safety without `finally`**: Lexical RAII and arena destruction
   guarantee that allocations and resources are automatically torn down upon
   scope exit, eliminating the need for exception cleanup blocks.
+
+### Module-level encapsulation over member-level access control
+
+Traditional object-oriented languages rely on fine-grained access modifiers (`public`, `private`, `protected`, `internal`) on individual struct fields and methods. Sapphire intentionally omits member-level access control keywords in favor of a unified **module-level encapsulation model**:
+* **Single encapsulation boundary**: Visibility is defined exclusively at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
+* **Grammar & syntax simplicity**: Eliminates verbose field-level and method-level modifier keywords (such as `pub` or `private`), keeping the AST structure lean and code uncluttered.
+* **Internal member convention**: To signal that a struct field or helper method is intended strictly for internal module maintenance and should not be directly mutated or relied upon by external consumers, Sapphire recommends using an underscore prefix (e.g. `_handle`, `_cache`). The compiler treats all fields of an exported struct as accessible, relying on convention and export manifests to delineate public contracts from private implementation details.
