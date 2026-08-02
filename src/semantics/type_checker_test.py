@@ -2634,9 +2634,142 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("'continue' statement outside of loop.", str(ctx.exception))
 
+  def test_implicit_trait_subtyping(self):
+    """Verifies that structs implementing a trait are assignable to trait parameters and return types."""
+    # 1. Valid trait subtyping for parameters and return types
+    code_valid = """
+    trait Printable {
+      func print_self();
+    }
+
+    struct Point {
+      var x: int;
+    }
+
+    impl Printable for Point {
+      func print_self() {}
+    }
+
+    func display(p: Printable) : Printable {
+      p.print_self();
+      return p;
+    }
+
+    func main() {
+      let pt = Point { x = 10 };
+      let res = display(pt);
+    }
+    """
+    self._check(code_valid)
+
+    # 2. Invalid trait subtyping (struct does not implement trait)
+    code_invalid = """
+    trait Printable {
+      func print_self();
+    }
+
+    struct NonPrintable {
+      var x: int;
+    }
+
+    func display(p: Printable) {
+      p.print_self();
+    }
+
+    func main() {
+      let np = NonPrintable { x = 5 };
+      display(np);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid)
+    self.assertIn("Argument type mismatch at position 1. Expected 'trait Printable', got 'NonPrintable'.", str(ctx.exception))
+
+    # 3. Optional trait subtyping
+    code_optional = """
+    trait Describable {
+      func describe();
+    }
+
+    struct Item {
+      var id: int;
+    }
+
+    impl Describable for Item {
+      func describe() {}
+    }
+
+    func process(item: Describable?) : Describable? {
+      return item;
+    }
+
+    func main() {
+      let it: Item? = Item { id = 1 };
+      let res = process(it);
+    }
+    """
+    self._check(code_optional)
+
+    # 4. Heterogeneous Trait Collection ([Describable])
+    code_collection = """
+    trait Describable {
+      func describe();
+    }
+
+    struct ItemA {
+      var id: int;
+    }
+
+    struct ItemB {
+      var name: String;
+    }
+
+    impl Describable for ItemA {
+      func describe() {}
+    }
+
+    impl Describable for ItemB {
+      func describe() {}
+    }
+
+    func main() {
+      let a = ItemA { id = 1 };
+      let b = ItemB { name = "B" };
+      let items: [Describable] = [a, b];
+      for i in items {
+        i.describe();
+      }
+    }
+    """
+    self._check(code_collection)
+
+    # 5. Invalid element type in trait collection
+    code_invalid_elem = """
+    trait Describable {
+      func describe();
+    }
+
+    struct ItemA {
+      var id: int;
+    }
+
+    impl Describable for ItemA {
+      func describe() {}
+    }
+
+    func main() {
+      let a = ItemA { id = 1 };
+      let items: [Describable] = [a, 42];
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid_elem)
+    self.assertIn("Array element of type 'int' is not compatible with expected element type 'trait Describable'.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
+
 
 
 

@@ -531,6 +531,7 @@ class TypeChecker:
           if not trait_type or not isinstance(trait_type, TraitType):
             self.error(f"Cannot implement undefined trait '{decl.trait_name}'.")
             continue
+          struct_type.implemented_traits.add(trait_type.name)
 
         for member in decl.members:
           func_decl = member.func_decl
@@ -1736,6 +1737,14 @@ class TypeChecker:
       return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
+    if isinstance(self.expected_type, ArrayType):
+      target_elem = self.expected_type.element_type
+      for etype in elem_types:
+        if not etype.is_compatible(target_elem):
+          self.error(f"Array element of type '{etype}' is not compatible with expected element type '{target_elem}'.")
+          break
+      return ArrayType(target_elem, size=len(node.elements))
+
     first_type = elem_types[0]
     for etype in elem_types[1:]:
       if not etype.is_compatible(first_type) and not first_type.is_compatible(etype):

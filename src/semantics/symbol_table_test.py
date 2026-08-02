@@ -250,7 +250,35 @@ class TestSymbolTable(unittest.TestCase):
     self.assertTrue(arr_int.is_compatible(arr_none))
     self.assertTrue(arr_none.is_compatible(arr_int))
 
+  def test_struct_implements_trait(self):
+    """Verifies StructType.implements_trait nominal and structural trait checks."""
+    try:
+      from semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType
+
+    st = StructType("MyStruct")
+    tr = TraitType("MyTrait")
+    tr.methods["foo"] = FunctionType([], PrimitiveType("none"))
+
+    # Initially missing method -> False
+    self.assertFalse(st.implements_trait(tr))
+
+    # Add method -> True
+    st.methods["foo"] = FunctionType([], PrimitiveType("none"))
+    self.assertTrue(st.implements_trait(tr))
+
+    # Nominal implementation -> True
+    st2 = StructType("OtherStruct")
+    st2.implemented_traits.add("MyTrait")
+    self.assertTrue(st2.implements_trait(tr))
+
+    # Empty trait methods without nominal impl -> False
+    tr_empty = TraitType("EmptyTrait")
+    self.assertFalse(st.implements_trait(tr_empty))
+
 
 if __name__ == "__main__":
   unittest.main()
+
 
