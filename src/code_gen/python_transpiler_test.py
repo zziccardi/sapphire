@@ -1140,6 +1140,28 @@ class TestPythonTranspiler(unittest.TestCase):
     pt = PythonTranspiler()
     pt._lift_match_expressions(None)
 
+  def test_break_and_continue_python(self):
+    """Verifies Python transpilation and execution of break and continue statements in while and for loops."""
+    code = """
+    func test_break_continue(): int {
+      var sum = 0;
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 != 0 {
+          continue;
+        }
+        if i > 6 {
+          break;
+        }
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    res = self._transpile_and_run(code, "test_break_continue()")
+    self.assertEqual(res, 2 + 4 + 6)
+
 
 if __name__ == "__main__":
   unittest.main()

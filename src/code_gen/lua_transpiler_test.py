@@ -962,6 +962,52 @@ class TestLuaTranspiler(unittest.TestCase):
     lt = LuaTranspiler()
     lt._lift_match_expressions(None)
 
+  def test_break_and_continue_lua(self):
+    """Verifies Lua transpilation of break and continue statements in while and for loops."""
+    code = """
+    func test_break_continue() {
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 == 0 {
+          continue;
+        }
+        if i > 6 {
+          break;
+        }
+      }
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("repeat", lua)
+    self.assertIn("local _break_outer = false", lua)
+    self.assertIn("if _break_outer then break end", lua)
+
+  def test_has_continue_node_nested_and_private_attr(self):
+    """Verifies _has_continue_node behavior for nested loops and private attributes."""
+    try:
+      from code_gen.lua_transpiler import _has_continue_node
+      from parser.ast import BlockNode
+    except ImportError:
+      from src.code_gen.lua_transpiler import _has_continue_node
+      from src.parser.ast import BlockNode
+
+    code_nested = """
+    func test_nested() {
+      while true {
+        while false {
+          continue;
+        }
+      }
+    }
+    """
+    lua = self._transpile(code_nested)
+    self.assertIn("while true do", lua)
+
+    b = BlockNode([])
+    b._private_attr = "private"
+    self.assertFalse(_has_continue_node(b))
+
 
 if __name__ == "__main__":
   unittest.main()

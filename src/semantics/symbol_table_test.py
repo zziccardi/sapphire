@@ -225,13 +225,14 @@ class TestSymbolTable(unittest.TestCase):
   def test_map_type_methods(self):
     """Verifies MapType __eq__, __repr__, and is_compatible methods."""
     try:
-      from semantics.symbol_table import MapType, PrimitiveType, OptionalType
+      from semantics.symbol_table import MapType, ArrayType, PrimitiveType, OptionalType, NoneType
     except ModuleNotFoundError:
-      from src.semantics.symbol_table import MapType, PrimitiveType, OptionalType
+      from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, OptionalType, NoneType
 
     m1 = MapType(PrimitiveType("String"), PrimitiveType("int"))
     m2 = MapType(PrimitiveType("String"), PrimitiveType("int"))
     m3 = MapType(PrimitiveType("int"), PrimitiveType("int"))
+    m_none = MapType(NoneType(), NoneType())
 
     self.assertEqual(m1, m2)
     self.assertNotEqual(m1, m3)
@@ -239,9 +240,17 @@ class TestSymbolTable(unittest.TestCase):
     self.assertEqual(repr(m1), "[String: int]")
 
     self.assertTrue(m1.is_compatible(m2))
+    self.assertTrue(m1.is_compatible(m_none))
+    self.assertTrue(m_none.is_compatible(m1))
     self.assertTrue(m1.is_compatible(OptionalType(m2)))
     self.assertFalse(m1.is_compatible(PrimitiveType("int")))
+
+    arr_int = ArrayType(PrimitiveType("int"))
+    arr_none = ArrayType(NoneType())
+    self.assertTrue(arr_int.is_compatible(arr_none))
+    self.assertTrue(arr_none.is_compatible(arr_int))
 
 
 if __name__ == "__main__":
   unittest.main()
+

@@ -160,23 +160,28 @@ let dir_str: String = Direction.North as String;  // "North"
 
 ### Expressions & collection access
 
-* **Array literals**: Arrays are defined as comma-separated values inside square brackets. Trailing commas are optional and allowed. Arrays are strongly typed and homogeneous; all elements must have compatible types:
-  ```
-  let numbers = [10, 20, 30,];
+* **Array literals & type syntax**: Arrays are defined as comma-separated values inside square brackets. Array types are annotated using `[T]` (or `Array<T>`). Trailing commas in literals are optional and recommended for multi-line literals. Arrays are strongly typed and homogeneous; all elements must have compatible types:
+  ```sapphire
+  let numbers = [10, 20, 30];  // Inferred as `[int]`
   ```
 * **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
-  ```
+  ```sapphire
   let first = numbers[0];
   ```
   * **Compile-time bounds-checking**: For arrays with compile-time known lengths (such as array literals or statically-initialized array variables), constant integer indices are checked at compile time. Negative indices (`index < 0`) or out-of-bounds indices (`index >= size`) produce a compile-time type-checking error.
-* **Map literals**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
-  ```
-  let scores = {"alice": 100, "bob": 95};
-  let config = {1: "low", 2: "high"};
-  let dir_speeds = {Direction.North: 10, Direction.South: 5};
+* **Map literals & type syntax**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Map types are annotated using `[K: V]` (or `Map<K, V>`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
+  ```sapphire
+  let scores = {"alice": 100, "bob": 95};  // [String: int]
+  let config = {1: "low", 2: "high"};      // [int: String]
+
+  // [Direction: int]
+  let dir_speeds = {
+      Direction.North: 10,
+      Direction.South: 5,
+  };
   ```
 * **Map indexing**: Values in a map are accessed by key using square brackets:
-  ```
+  ```sapphire
   let alice_score = scores["alice"];
   ```
   * **Compile-time key validation**: Indexing map literals directly with a constant literal key validates key existence at compile time; accessing a non-existent literal key emits a compile-time error.
@@ -296,6 +301,41 @@ for key, val in inventory {
 for var key, val in inventory {
   val = val + 1;
   print(key + ": " + val);
+}
+```
+
+#### Loop control statements (`break` & `continue`)
+
+Sapphire provides explicit loop control statements to alter execution flow inside `while` and `for-in` loops:
+
+* **`break;`**: Immediately terminates the innermost enclosing loop and transfers execution to the statement following the loop block.
+* **`continue;`**: Immediately terminates the current iteration of the innermost enclosing loop and skips directly to the loop condition evaluation (`while`) or the next element advancement (`for-in`).
+* **Scope restriction**: Using `break` or `continue` outside of an enclosing loop block produces a compile-time error.
+
+```sapphire
+// Skipping odd numbers with continue; stopping at 8 with break
+var i = 0;
+while i < 10 {
+  i += 1;
+  if i % 2 != 0 {
+    continue;
+  }
+  if i > 8 {
+    break;
+  }
+  print(f"Even count: {i}");
+}
+
+// Searching an array with break and continue
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+for num in numbers {
+  if num % 2 == 0 {
+    continue;  // Skip even numbers
+  }
+  if num > 7 {
+    break;     // Stop processing once number exceeds 7
+  }
+  print(f"Odd number: {num}");
 }
 ```
 
@@ -918,7 +958,7 @@ Sapphire supports zero-overhead parametric polymorphism (generics) for structure
 * **Generic structs**: Structs can declare one or more type parameters:
   ```sapphire
   struct Stack<T> {
-    var items: Array<T>;
+    var items: [T];
   }
 
   struct Pair<K, V> {
@@ -1010,3 +1050,10 @@ handling:
 * **Resource safety without `finally`**: Lexical RAII and arena destruction
   guarantee that allocations and resources are automatically torn down upon
   scope exit, eliminating the need for exception cleanup blocks.
+
+### Module-level encapsulation over member-level access control
+
+Traditional object-oriented languages rely on fine-grained access modifiers (`public`, `private`, `protected`, `internal`) on individual struct fields and methods. Sapphire intentionally omits member-level access control keywords in favor of a unified **module-level encapsulation model**:
+* **Single encapsulation boundary**: Visibility is defined exclusively at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
+* **Grammar & syntax simplicity**: Eliminates verbose field-level and method-level modifier keywords (such as `pub` or `private`), keeping the AST structure lean and code uncluttered.
+* **Internal member convention**: To signal that a struct field or helper method is intended strictly for internal module maintenance and should not be directly mutated or relied upon by external consumers, Sapphire recommends using an underscore prefix (e.g. `_handle`, `_cache`). The compiler treats all fields of an exported struct as accessible, relying on convention and export manifests to delineate public contracts from private implementation details.

@@ -904,6 +904,14 @@ class PythonTranspiler:
     self.visit(node.block)
     self.dedent()
 
+  def visit_BreakNode(self, node: BreakNode) -> None:
+    self.newline()
+    self.emit("break")
+
+  def visit_ContinueNode(self, node: ContinueNode) -> None:
+    self.newline()
+    self.emit("continue")
+
   # ==========================================
   # Expressions Visitor
   # ==========================================

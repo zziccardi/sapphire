@@ -649,7 +649,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
   # 3. Sapphire Keywords & Annotations
   KEYWORDS = [
       "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else",
-      "for", "in", "while", "return", "match", "yield", "true", "false", "none", "const", "static",
+      "for", "in", "while", "break", "continue", "return", "match", "yield", "true", "false", "none", "const", "static",
       "clone", "arena", "import", "export", "as"
   ]
   for kw in KEYWORDS:

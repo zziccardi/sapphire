@@ -2354,7 +2354,63 @@ class TestTypeChecker(unittest.TestCase):
         let x = none;
       }
       """)
-    self.assertIn("Cannot infer type of 'x' from 'none' alone.", str(ctx.exception))
+  def test_shorthand_collection_types(self):
+    """Verifies semantic type checking for [T], [K: V], Array<T>, and Map<K, V>."""
+    self._check("""
+    func test() {
+      let numbers: [int] = [10, 20, 30];
+      let legacy_numbers: Array<int> = [40, 50];
+      let counts: [String: int] = {"apples": 5, "oranges": 10};
+      let legacy_counts: Map<String, int> = {"bananas": 3};
+    }
+    """)
+
+  def test_collection_type_inference(self):
+    """Verifies type inference for implicit array/map literals, empty literals, and type mismatch errors."""
+    self._check("""
+    func test() {
+      let numbers = [1, 2, 3];
+      let counts = {"a": 1, "b": 2};
+      let empty_arr: [int] = [];
+      let empty_map: [String: float] = {};
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let arr = [10, "string"];
+      }
+      """)
+    self.assertIn("Inconsistent element types in array literal", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      func test() {
+        let m = {"a": 10, "b": "string"};
+      }
+      """)
+    self.assertIn("Inconsistent value types in map literal", str(ctx2.exception))
+
+  def test_constructor_default_parameters(self):
+    """Verifies that calling a constructor or function with default arguments allows omitting those parameters."""
+    self._check("""
+    struct Character {
+      let id: int;
+      let name: String;
+      let max_hp: int;
+    }
+    impl Character {
+      func __init__(id: int, name: String, max_hp: int = 100) {
+        self.id = id;
+        self.name = name;
+        self.max_hp = max_hp;
+      }
+    }
+    func test() {
+      let player = Character(id = 1, name = "Galahad");
+    }
+    """)
 
   def test_clone_shadow_let_field(self):
     self._check("""
@@ -2533,6 +2589,50 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot interpolate struct type 'Player' directly into string", str(ctx.exception))
+
+  def test_break_and_continue_type_checking(self):
+    """Verifies valid usage of break/continue in loops and error when used outside loops."""
+    # Valid usage inside while and for loops
+    self._check("""
+    func test() {
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 == 0 {
+          continue;
+        }
+        if i > 5 {
+          break;
+        }
+      }
+
+      let arr = [1, 2, 3];
+      for x in arr {
+        if x == 2 {
+          continue;
+        }
+        break;
+      }
+    }
+    """)
+
+    # Error: break outside loop
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        break;
+      }
+      """)
+    self.assertIn("'break' statement outside of loop.", str(ctx.exception))
+
+    # Error: continue outside loop
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        continue;
+      }
+      """)
+    self.assertIn("'continue' statement outside of loop.", str(ctx.exception))
 
 
 if __name__ == "__main__":

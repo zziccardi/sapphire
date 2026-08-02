@@ -143,7 +143,7 @@ func run_demo() {
 
   // Array literals with optional trailing commas & collection functions
   let scores = [10, 20, 30,];
-  let first_score = scores[0]; // Array indexing
+  let first_score = scores[0];  // Array indexing
 
   // Loops: while loop (no parentheses around condition)
   var timer = 3;

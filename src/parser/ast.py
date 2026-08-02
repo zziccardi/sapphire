@@ -74,6 +74,15 @@ class ArrayTypeNode(TypeNode):
     self.element_type = element_type
 
 
+class MapTypeNode(TypeNode):
+  """Represents a map type wrapper (e.g. '[String: int]')."""
+
+  def __init__(self, key_type: TypeNode, val_type: TypeNode):
+    self.key_type = key_type
+    self.val_type = val_type
+
+
+
 class FunctionTypeNode(TypeNode):
   """Represents a function type signature (e.g. '(int, int) -> float' or '(int) -> (float, float)')."""
 
@@ -432,6 +441,16 @@ class YieldNode(StmtNode):
 
   def __init__(self, expr: ASTNode):
     self.expr = expr
+
+
+class BreakNode(StmtNode):
+  """Represents a break statement (e.g. 'break;')."""
+  pass
+
+
+class ContinueNode(StmtNode):
+  """Represents a continue statement (e.g. 'continue;')."""
+  pass
 
 
 class HeaderBindingNode(ASTNode):
