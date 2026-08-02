@@ -545,6 +545,17 @@ class TestASTBuilder(unittest.TestCase):
     node_trailing = ASTBuilder()._parse_interpolated_string("hello\\")
     self.assertEqual(node_trailing.parts[0].value, "hello\\")
 
+  def test_invalid_struct_initializer_syntax(self):
+    """Verifies that malformed struct initializer field syntax without expression raises a clean SyntaxError."""
+    class MockToken:
+      def getText(self): return "item"
+    class MockCtx:
+      def IDENTIFIER(self): return MockToken()
+      def expression(self): return None
+    with self.assertRaises(SyntaxError) as ctx:
+      ASTBuilder().visitStructInitField(MockCtx())
+    self.assertIn("must be assigned an expression using '='", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

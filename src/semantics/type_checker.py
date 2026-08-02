@@ -170,11 +170,29 @@ class TypeChecker:
       return new_node
     return copy.deepcopy(node)
 
+  def _mangle_type_name(self, type_obj: Type) -> str:
+    """Recursively converts a semantic Type into a clean, valid identifier string component."""
+    if isinstance(type_obj, OptionalType):
+      return f"Opt_{self._mangle_type_name(type_obj.base_type)}"
+    elif isinstance(type_obj, ArrayType):
+      return f"Arr_{self._mangle_type_name(type_obj.element_type)}"
+    elif isinstance(type_obj, MapType):
+      return f"Map_{self._mangle_type_name(type_obj.key_type)}_{self._mangle_type_name(type_obj.value_type)}"
+    elif isinstance(type_obj, FunctionType):
+      p_str = "_".join(self._mangle_type_name(t) for t in type_obj.param_types)
+      r_str = "_".join(self._mangle_type_name(t) for t in type_obj.return_types)
+      return f"Fn_{p_str}_to_{r_str}"
+    else:
+      raw = str(type_obj)
+      clean = "".join(c if c.isalnum() else "_" for c in raw)
+      clean = "_".join(filter(None, clean.split("_")))
+      return clean or "type"
+
   def _monomorphize_struct(
       self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
   ) -> StructType:
     """Monomorphizes a generic struct template for a specific set of concrete type arguments."""
-    arg_names = [str(t) for t in resolved_type_args]
+    arg_names = [self._mangle_type_name(t) for t in resolved_type_args]
     mangled_name = f"{generic_struct_type.name}__{'_'.join(arg_names)}"
     existing = self.symbol_table.lookup_type(mangled_name)
     if existing and isinstance(existing, StructType):
@@ -189,8 +207,11 @@ class TypeChecker:
     cloned_decl.type_params = []
 
     mono_struct_type = StructType(mangled_name, cloned_decl.parent_name, cloned_decl.is_prototype)
-    self.symbol_table.define_type(mangled_name, mono_struct_type)
-    self.symbol_table.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    root_scope.define_type(mangled_name, mono_struct_type)
+    root_scope.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
 
     # Resolve fields for monomorphized struct
     for f in cloned_decl.fields:
@@ -222,7 +243,7 @@ class TypeChecker:
       self, func_sym: FunctionSymbol, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
   ) -> str:
     """Monomorphizes a generic function template for a specific set of concrete type arguments."""
-    arg_names = [str(t) for t in resolved_type_args]
+    arg_names = [self._mangle_type_name(t) for t in resolved_type_args]
     mangled_name = f"{func_sym.name}__{'_'.join(arg_names)}"
     existing = self.symbol_table.lookup(mangled_name)
     if existing and isinstance(existing, FunctionSymbol):
@@ -238,9 +259,17 @@ class TypeChecker:
 
     p_types = [self._resolve_type_node(p.param_type) for p in cloned_func.parameters]
     ret_t = self._resolve_return_types(cloned_func)
-    sig = FunctionType(p_types, ret_t, [p.is_mutable for p in cloned_func.parameters], [p.name for p in cloned_func.parameters])
-    mono_func_sym = FunctionSymbol(mangled_name, sig, ast_decl=cloned_func)
-    self.symbol_table.define(mangled_name, mono_func_sym)
+    mono_func_type = FunctionType(
+        p_types,
+        ret_t,
+        [p.is_mutable for p in cloned_func.parameters],
+        [p.name for p in cloned_func.parameters],
+    )
+    mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    root_scope.define(mangled_name, mono_func_sym)
 
     if hasattr(self, "program") and self.program:
       self.program.declarations.append(cloned_func)
@@ -969,7 +998,7 @@ class TypeChecker:
         if isinstance(sym, EnumSymbol) and isinstance(subject_type, EnumType) and sym.name == subject_type.name:
           pass
         else:
-          has_ellipsis = True
+          self.error(f"Undefined identifier '{case.pattern.name}'.")
       elif isinstance(case.pattern, MemberAccessNode):
         pat_type = self.visit(case.pattern)
         if isinstance(subject_type, EnumType) and isinstance(pat_type, EnumType):
@@ -1145,7 +1174,7 @@ class TypeChecker:
     if node.lit_type == "bool":
       return PrimitiveType("bool")
     if node.lit_type == "string":
-      return PrimitiveType("string")
+      return PrimitiveType("String")
     return NoneType()
 
   def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> Type:
@@ -1156,7 +1185,7 @@ class TypeChecker:
             f"Cannot interpolate struct type '{t.name}' directly into string."
             " Call a string conversion method explicitly."
         )
-    return PrimitiveType("string")
+    return PrimitiveType("String")
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> Type:
     sym = self.symbol_table.lookup(node.name)
@@ -1197,9 +1226,9 @@ class TypeChecker:
 
     # Arithmetic operators
     if node.op in ("+", "-", "*", "/", "%"):
-      if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name in ("String", "string")) or (isinstance(right, PrimitiveType) and right.name in ("String", "string"))):
+      if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name == "String") or (isinstance(right, PrimitiveType) and right.name == "String")):
         node.is_string_concat = True
-        return PrimitiveType("string")
+        return PrimitiveType("String")
       # Supports int and float operations
       is_numeric_left = isinstance(left, PrimitiveType) and left.name in ("int", "float")
       is_numeric_right = isinstance(right, PrimitiveType) and right.name in ("int", "float")
@@ -1249,15 +1278,16 @@ class TypeChecker:
 
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
     expr_type = self.visit(node.expr)
-    if node.op == "!":
-      if expr_type != PrimitiveType("bool"):
-        self.error("Logical NOT operator requires a boolean expression.")
-      return PrimitiveType("bool")
     if node.op in ("-", "+"):
-      is_numeric = isinstance(expr_type, PrimitiveType) and expr_type.name in ("int", "float")
-      if not is_numeric:
-        self.error(f"Numeric operator '{node.op}' requires a numeric expression.")
+      if isinstance(expr_type, PrimitiveType) and expr_type.name in ("int", "float"):
+        return expr_type
+      self.error(f"Unary operator '{node.op}' requires a numeric type, got '{expr_type}'.")
       return expr_type
+    elif node.op == "!":
+      if isinstance(expr_type, PrimitiveType) and expr_type.name == "bool":
+        return expr_type
+      self.error(f"Unary operator '!' requires a boolean type, got '{expr_type}'.")
+      return PrimitiveType("bool")
     return PrimitiveType("none")
 
   def visit_CastExprNode(self, node: CastExprNode) -> Type:
@@ -1272,12 +1302,12 @@ class TypeChecker:
     if is_expr_num and is_target_num:
       return target_type
 
-    if isinstance(expr_type, EnumType) and isinstance(target_type, PrimitiveType) and target_type.name in ("int", "string"):
+    if isinstance(expr_type, EnumType) and isinstance(target_type, PrimitiveType) and target_type.name in ("int", "String"):
       return target_type
 
-    if isinstance(expr_type, PrimitiveType) and expr_type.name in ("string", "pascal_string"):
+    if isinstance(expr_type, PrimitiveType) and expr_type.name == "String":
       if isinstance(target_type, PrimitiveType) and target_type.name in ("int", "float", "bool"):
-        self.error(f"Cannot cast 'string' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
+        self.error(f"Cannot cast 'String' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
         return target_type
 
     self.error(f"Cannot cast type '{expr_type}' to '{target_type}'.")
@@ -1392,15 +1422,15 @@ class TypeChecker:
     if getattr(node.callee, "is_string_from", False):
       if len(node.arguments) != 1:
         self.error("String.from() requires exactly 1 argument.")
-        return PrimitiveType("string")
+        return PrimitiveType("String")
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
-          (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool", "string", "pascal_string"))
+          (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool", "String"))
           or isinstance(arg_t, EnumType)
       )
       if not is_valid:
         self.error(f"Cannot convert type '{arg_t}' to String using String.from().")
-      return PrimitiveType("string")
+      return PrimitiveType("String")
 
     if getattr(node.callee, "is_enum_from", False):
       enum_t = getattr(node.callee, "enum_type", PrimitiveType("none"))
@@ -1409,10 +1439,10 @@ class TypeChecker:
         return OptionalType(enum_t)
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
-          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "string", "pascal_string")
+          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "String")
       )
       if not is_valid:
-        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or string.")
+        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or String.")
       return OptionalType(enum_t)
 
     signature = None
@@ -1507,10 +1537,10 @@ class TypeChecker:
         self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
         return PrimitiveType("none")
 
-    if isinstance(receiver_type, PrimitiveType) and receiver_type.name.lower() in ("string", "pascal_string"):
+    if isinstance(receiver_type, PrimitiveType) and receiver_type.name == "String":
       if node.member == "from":
         node.is_string_from = True
-        return FunctionType([PrimitiveType("string")], PrimitiveType("string"))
+        return FunctionType([PrimitiveType("String")], PrimitiveType("String"))
       method = STRING_METHODS.get(node.member)
       if method:
         node.is_string_method = True
@@ -1531,7 +1561,7 @@ class TypeChecker:
       if node.member == "from":
         node.is_enum_from = True
         node.enum_type = receiver_type
-        return FunctionType([PrimitiveType("string")], OptionalType(receiver_type))
+        return FunctionType([PrimitiveType("String")], OptionalType(receiver_type))
       if node.member in receiver_type.variants:
         return receiver_type
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
@@ -1681,7 +1711,7 @@ class TypeChecker:
 
     def is_valid_key_type(ktype: Type) -> bool:
       return (
-          (isinstance(ktype, PrimitiveType) and ktype.name in ("string", "int"))
+          (isinstance(ktype, PrimitiveType) and ktype.name in ("String", "int"))
           or isinstance(ktype, EnumType)
       )
 

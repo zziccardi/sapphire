@@ -266,6 +266,23 @@ local _sapphire_enum_from = function(enum_tbl, val)
   end
   return nil
 end
+
+local _sapphire_iter_array = function(arr)
+  if type(arr) ~= "table" then return ipairs({}) end
+  local meta = getmetatable(arr)
+  if meta and meta.__index then
+    local i = 0
+    return function()
+      i = i + 1
+      local val = arr[i]
+      if val ~= nil then
+        return i, val
+      end
+      return nil
+    end
+  end
+  return ipairs(arr)
+end
 """
 
 
@@ -682,6 +699,26 @@ class LuaTranspiler:
         self.newline()
         self.emit(f"{arena_name}:destroy()")
 
+  def _lift_match_expressions(self, node: Any) -> None:
+    """Finds all MatchExprNode in the AST subtree and emits their match statement blocks first."""
+    if node is None:
+      return
+    if isinstance(node, MatchExprNode):
+      if not getattr(node, "_is_lifted", False):
+        node._is_lifted = True
+        for case in node.cases:
+          self._lift_match_expressions(case.body)
+        node._lifted_var = self._emit_match_statement(node)
+      return
+    if isinstance(node, list):
+      for item in node:
+        self._lift_match_expressions(item)
+      return
+    if isinstance(node, ASTNode):
+      for v in node.__dict__.values():
+        if isinstance(v, (ASTNode, list)):
+          self._lift_match_expressions(v)
+
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
     if any(a.name == "extern" for a in node.annotations):
       return
@@ -695,12 +732,7 @@ class LuaTranspiler:
       if is_arena and self.arena_stack:
         self.arena_stack[-1].append(node.names[0])
 
-    expr_vars = []
-    for expr in node.exprs:
-      if isinstance(expr, MatchExprNode):
-        expr_vars.append(self._emit_match_statement(expr))
-      else:
-        expr_vars.append(None)
+    self._lift_match_expressions(node.exprs)
 
     self.newline()
     names_str = ", ".join(node.names)
@@ -710,18 +742,11 @@ class LuaTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        if expr_vars[idx]:
-          self.emit(expr_vars[idx])
-        else:
-          self.visit(expr)
+        self.visit(expr)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
-    expr_vars = []
-    for expr in node.exprs:
-      if isinstance(expr, MatchExprNode):
-        expr_vars.append(self._emit_match_statement(expr))
-      else:
-        expr_vars.append(None)
+    self._lift_match_expressions(node.targets)
+    self._lift_match_expressions(node.exprs)
 
     self.newline()
     if node.op == "=":
@@ -733,25 +758,20 @@ class LuaTranspiler:
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
-        if expr_vars[idx]:
-          self.emit(expr_vars[idx])
-        else:
-          self.visit(expr)
+        self.visit(expr)
     else:
       raw_op = node.op[:-1]
       self.visit(node.target)
       self.emit(" = ")
       self.visit(node.target)
       self.emit(f" {raw_op} ")
-      if expr_vars[0]:
-        self.emit(expr_vars[0])
-      else:
-        self.visit(node.expr)
+      self.visit(node.expr)
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
       self._emit_match_statement(node.expr, target_var=None)
       return
+    self._lift_match_expressions(node.expr)
     self.newline()
     self.visit(node.expr)
 
@@ -759,12 +779,7 @@ class LuaTranspiler:
     all_active_arenas = [
         a for frame in reversed(self.arena_stack) for a in reversed(frame)
     ]
-    expr_vars = []
-    for expr in node.expressions:
-      if isinstance(expr, MatchExprNode):
-        expr_vars.append(self._emit_match_statement(expr))
-      else:
-        expr_vars.append(None)
+    self._lift_match_expressions(node.expressions)
 
     for arena_name in all_active_arenas:
       self.newline()
@@ -776,10 +791,7 @@ class LuaTranspiler:
       for idx, expr in enumerate(node.expressions):
         if idx > 0:
           self.emit(", ")
-        if expr_vars[idx]:
-          self.emit(expr_vars[idx])
-        else:
-          self.visit(expr)
+        self.visit(expr)
     else:
       self.emit("return")
 
@@ -801,7 +813,7 @@ class LuaTranspiler:
 
     for idx, case in enumerate(node.cases):
       self.newline()
-      if isinstance(case.pattern, EllipsisPatternNode) or (isinstance(case.pattern, IdentifierNode) and case.pattern.name == "_"):
+      if isinstance(case.pattern, EllipsisPatternNode):
         if idx == 0:
           self.emit("if true then")
         else:
@@ -834,6 +846,7 @@ class LuaTranspiler:
     return target_var or ""
 
   def visit_YieldNode(self, node: YieldNode) -> None:
+    self._lift_match_expressions(node.expr)
     target = getattr(self, "_current_match_target", None)
     self.newline()
     if target:
@@ -841,14 +854,20 @@ class LuaTranspiler:
     self.visit(node.expr)
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
-    temp_var = self._emit_match_statement(node)
-    if temp_var:
-      self.emit(temp_var)
+    if not getattr(node, "_is_lifted", False):
+      node._is_lifted = True
+      node._lifted_var = self._emit_match_statement(node)
+    self.emit(node._lifted_var)
 
   def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
     pass
 
   def visit_IfNode(self, node: IfNode) -> None:
+    if node.init_binding:
+      self._lift_match_expressions(node.init_binding.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
     self.newline()
     if node.init_binding:
       let_name = node.init_binding.let_name
@@ -906,6 +925,11 @@ class LuaTranspiler:
     self.emit("end")
 
   def visit_WhileNode(self, node: WhileNode) -> None:
+    if node.init_binding:
+      self._lift_match_expressions(node.init_binding.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
     self.newline()
     if node.init_binding:
       let_name = node.init_binding.let_name
@@ -967,13 +991,14 @@ class LuaTranspiler:
       self.emit("end")
 
   def visit_ForNode(self, node: ForNode) -> None:
+    self._lift_match_expressions(node.iterable)
     self.newline()
     if node.key_var is not None:
       self.emit(f"for {node.key_var}, {node.val_var} in pairs(")
       self.visit(node.iterable)
       self.emit(") do")
     else:
-      self.emit(f"for _, {node.val_var} in ipairs(")
+      self.emit(f"for _, {node.val_var} in _sapphire_iter_array(")
       self.visit(node.iterable)
       self.emit(") do")
     self.indent()
@@ -1089,7 +1114,7 @@ class LuaTranspiler:
       self.emit("(not not ")
       self.visit(node.expr)
       self.emit(")")
-    elif target in ("string", "String"):
+    elif target == "String":
       self.emit("tostring(")
       self.visit(node.expr)
       self.emit(")")

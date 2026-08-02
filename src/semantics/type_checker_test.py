@@ -65,7 +65,16 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("Cannot assign expression of type 'string' to variable 'x' of type 'int'", str(context.exception))
+    self.assertIn("Cannot assign expression of type 'String' to variable 'x' of type 'int'", str(context.exception))
+
+  def test_lowercase_string_error(self):
+    """Verifies that lowercase 'string' is rejected as an invalid/undefined type."""
+    code = """
+    func greet(name: string) {}
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Undefined type 'string'", str(context.exception))
 
   def test_optional_unwrapping_if_let(self):
     """Verifies that if let binds the unwrapped optional value in the scope."""
@@ -135,7 +144,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code4)
-    self.assertIn("Fallback type 'string' is not compatible with the optional's base type 'int'", str(context.exception))
+    self.assertIn("Fallback type 'String' is not compatible with the optional's base type 'int'", str(context.exception))
 
   def test_struct_constructor_field_initialization(self):
     """Verifies struct constructors require all fields to be initialized."""
@@ -1106,7 +1115,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code_mismatch)
-    self.assertIn("Field 'y' in struct 'Point' initializer has type 'string', but expected 'int'", str(context.exception))
+    self.assertIn("Field 'y' in struct 'Point' initializer has type 'String', but expected 'int'", str(context.exception))
 
     # 3. Valid with default values
     code_valid_defaults = """
@@ -1495,7 +1504,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(bad_code)
-    self.assertIn("Argument type mismatch at position 1. Expected 'string', got 'int'.", str(context.exception))
+    self.assertIn("Argument type mismatch at position 1. Expected 'String', got 'int'.", str(context.exception))
 
     invalid_member_code = """
     trait Graphics {
@@ -1582,7 +1591,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(bad_return_type)
-    self.assertIn("Cannot return value of type 'string' for return value #2", str(context.exception))
+    self.assertIn("Cannot return value of type 'String' for return value #2", str(context.exception))
 
     # Quantity mismatch on unpack
     bad_unpack = """
@@ -1678,7 +1687,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("Argument type mismatch at position 1. Expected 'Mode', got 'string'.", str(context.exception))
+    self.assertIn("Argument type mismatch at position 1. Expected 'Mode', got 'String'.", str(context.exception))
 
   def test_trait_self_parameter_type_checking(self):
     """Verifies argument checking for trait methods with explicit self parameters."""
@@ -2012,13 +2021,15 @@ class TestTypeChecker(unittest.TestCase):
       self._check("func o(v: int?) { let x = match v { none -> 0 }; }")
     self.assertIn("Match expression for optional", str(ctx.exception))
 
-    # Identifier catch-all pattern
-    self._check("func i(v: int): String { return match v { val -> \"ok\" }; }")
+    # Identifier pattern error (underscore or arbitrary identifier rejected)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("func i(v: int): String { return match v { _ -> \"ok\" }; }")
+    self.assertIn("Undefined identifier '_'", str(ctx.exception))
 
     # Incompatible pattern type
     with self.assertRaises(SemanticError) as ctx:
       self._check("func i(v: int) { let x = match v { \"bad\" -> 1, ... -> 0 }; }")
-    self.assertIn("Pattern type 'string' is incompatible with subject type 'int'", str(ctx.exception))
+    self.assertIn("Pattern type 'String' is incompatible with subject type 'int'", str(ctx.exception))
 
     # Incompatible yield types
     with self.assertRaises(SemanticError) as ctx:
@@ -2229,7 +2240,7 @@ class TestTypeChecker(unittest.TestCase):
         let val = string_map[123];
       }
       """)
-    self.assertIn("Map index type 'int' is not compatible with key type 'string'.", str(ctx.exception))
+    self.assertIn("Map index type 'int' is not compatible with key type 'String'.", str(ctx.exception))
 
     # 6. Empty map literal
     self._check("""
@@ -2445,7 +2456,7 @@ class TestTypeChecker(unittest.TestCase):
         let i = "123" as int;
       }
       """)
-    self.assertIn("Cannot cast 'string' to 'int' using 'as'", str(ctx.exception))
+    self.assertIn("Cannot cast 'String' to 'int' using 'as'", str(ctx.exception))
 
     # 3. Invalid cast between incompatible types (e.g. struct to float)
     with self.assertRaises(SemanticError) as ctx:

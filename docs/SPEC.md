@@ -212,6 +212,7 @@ Sapphire provides a first-class `match` construct for pattern matching, supporti
 * **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
 * **Multi-statement blocks**: Cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Using `return` inside a match block returns from the *enclosing function*.
 * **Implicit `none` fallback**: Multi-statement blocks without a `yield` statement automatically evaluate to `none` (type `none`), enabling clean side-effect-only branching without boilerplate.
+* **Optional wrapping for mixed return types**: If a `match` expression contains a mix of value-yielding arms (producing type `T`) and arms that evaluate to `none` (or multi-statement blocks without a `yield`), the compiler automatically wraps the overall result type of the `match` expression into an optional `T?`.
 * **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
 * **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
 * **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
@@ -225,6 +226,16 @@ let label = match status {
     yield "Resource Missing";
   },
   ... -> "Unknown Error",
+};
+
+// Mixed arms produce an optional (type inferred as String?)
+let result: String? = match status {
+  HttpStatus.Ok -> "Success",
+  HttpStatus.InternalError -> {
+    log("Internal server error encountered");
+    // No yield: evaluates to none, wrapping `result` as String?
+  },
+  ... -> none,
 };
 
 // Side-effect-only usage

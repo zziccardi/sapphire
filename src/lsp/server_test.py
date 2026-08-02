@@ -858,7 +858,7 @@ class TestLSPServer(unittest.TestCase):
 
       # Test String method completion items
       from semantics.symbol_table import PrimitiveType, VariableSymbol
-      sym_str = VariableSymbol("str_var", PrimitiveType("string"), is_mutable=False)
+      sym_str = VariableSymbol("str_var", PrimitiveType("String"), is_mutable=False)
       sym_table.current_scope.symbols["str_var"] = sym_str
 
       mock_doc_comp_str = MagicMock()

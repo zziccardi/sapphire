@@ -98,9 +98,9 @@ class TestGenerics(unittest.TestCase):
     """
     ast = self._check(code)
     py_code = PythonTranspiler().transpile(ast)
-    self.assertIn("class Pair__string_int", py_code)
+    self.assertIn("class Pair__String_int", py_code)
     lua_code = LuaTranspiler().transpile(ast)
-    self.assertIn("Pair__string_int", lua_code)
+    self.assertIn("Pair__String_int", lua_code)
 
   def test_generic_trait_declaration_and_impl_variations(self):
     """Verifies generic trait declarations and impl syntax variations."""
@@ -216,3 +216,37 @@ class TestGenerics(unittest.TestCase):
     btn = BasicTypeNode("int")
     sub = tc._substitute_ast(btn, {})
     self.assertEqual(sub.name, "int")
+
+  def test_complex_generic_monomorphization(self):
+    """Verifies monomorphization for generic structs with optional and primitive types."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func main() {
+      let b1 = Box<int?> { item = none };
+      let b2 = Box<String> { item = "hello" };
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertIsNotNone(checker.symbol_table.lookup_type("Box__Opt_int"))
+    self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))
+
+  def test_mangle_type_name_complex_types(self):
+    """Verifies _mangle_type_name for ArrayType, MapType, and FunctionType."""
+    from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
+    tc = TypeChecker()
+    arr_t = ArrayType(PrimitiveType("int"))
+    map_t = MapType(PrimitiveType("String"), PrimitiveType("int"))
+    fn_t = FunctionType([PrimitiveType("int")], PrimitiveType("float"))
+    self.assertEqual(tc._mangle_type_name(arr_t), "Arr_int")
+    self.assertEqual(tc._mangle_type_name(map_t), "Map_String_int")
+    self.assertEqual(tc._mangle_type_name(fn_t), "Fn_int_to_float")
