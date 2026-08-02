@@ -689,15 +689,17 @@ This provides the ergonomic benefits of traditional inheritance while giving the
 
 To support data-oriented design and decouple behaviors from layout, Sapphire supports two primary alternatives:
 
-##### Traits (compile-time monomorphization)
+##### Traits (compile-time contracts & implicit subtyping)
 Traits define behavioral contracts without prescribing physical memory layout.
-They are resolved entirely at compile time through monomorphization, ensuring
-zero runtime overhead.
+Because Sapphire disallows struct upcasting, behavioral polymorphism is achieved via **implicit trait subtyping**:
 
+* **Trait parameter & return types**: Trait names can be used directly as parameter types (e.g. `func display(p: Printable)`) or return types (e.g. `func get_item(): Printable`).
+* **Implicit assignability**: A struct `S` that implements trait `T` (via `impl T for S` or structural method compatibility) is implicitly assignable to any target expecting type `T` or optional type `T?`.
+* **Interface erasure**: Passing or returning a value typed as trait `T` narrows the caller's view strictly to the methods defined on `T`. Unrelated concrete fields of `S` cannot be accessed without explicit casting.
 * **Implicit and explicit `self` for instance methods**: Non-static trait methods implicitly operate on `self` when implemented. In standard Sapphire code, the explicit `self` parameter can be omitted in trait declarations. Specifying an explicit first `self` parameter (which may be `var self` for mutable access) is primarily used when creating bindings for external host libraries (like Love2D) to explicitly designate instance methods that transpile to colon syntax in Lua (e.g. `:draw(x, y)`).
 * **Module/static functions**: For external host bindings, omitting `self` from a trait method signature designates it as a module or static function (e.g. transpiling to Lua dot syntax `.rectangle(...)`).
 
-```
+```sapphire
 // Resource-handle trait (instance methods)
 trait Image {
   func draw(self, x: float, y: float);
@@ -709,6 +711,10 @@ trait Graphics {
   func rectangle(mode: String, x: float, y: float, w: float, h: float);
 }
 
+trait Actor {
+  func update();
+}
+
 struct Cat {
   var lives: int;
 }
@@ -717,6 +723,12 @@ impl Actor for Cat {
   func update() {
     // Concrete implementation
   }
+}
+
+// Polymorphic function accepting any struct implementing Actor
+func update_actor(actor: Actor): Actor {
+  actor.update();
+  return actor;
 }
 ```
 
