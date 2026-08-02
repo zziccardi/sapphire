@@ -239,3 +239,14 @@ class TestGenerics(unittest.TestCase):
     checker.check(ast)
     self.assertIsNotNone(checker.symbol_table.lookup_type("Box__Opt_int"))
     self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))
+
+  def test_mangle_type_name_complex_types(self):
+    """Verifies _mangle_type_name for ArrayType, MapType, and FunctionType."""
+    from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
+    tc = TypeChecker()
+    arr_t = ArrayType(PrimitiveType("int"))
+    map_t = MapType(PrimitiveType("String"), PrimitiveType("int"))
+    fn_t = FunctionType([PrimitiveType("int")], PrimitiveType("float"))
+    self.assertEqual(tc._mangle_type_name(arr_t), "Arr_int")
+    self.assertEqual(tc._mangle_type_name(map_t), "Map_String_int")
+    self.assertEqual(tc._mangle_type_name(fn_t), "Fn_int_to_float")

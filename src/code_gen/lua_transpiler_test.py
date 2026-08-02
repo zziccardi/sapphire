@@ -913,6 +913,12 @@ class TestLuaTranspiler(unittest.TestCase):
       let single_expr = f"{count}";
     }
     """
+    lua = self._transpile(code)
+    self.assertIn('("Hello " .. tostring(name) .. ", count: " .. tostring(count) .. "!")', lua)
+    self.assertIn('local empty_str = ""', lua)
+    self.assertIn('local single_lit = "just text"', lua)
+    self.assertIn('local single_expr = tostring(count)', lua)
+
   def test_nested_match_expression_transpilation_lua(self):
     """Verifies Lua transpilation of match expressions used inline within sub-expressions."""
     code = """
@@ -950,6 +956,11 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua = self._transpile(code)
     self.assertIn("for _, t in _sapphire_iter_array(tags) do", lua)
+
+  def test_lift_match_expressions_none_lua(self):
+    """Verifies _lift_match_expressions handles None gracefully in Lua transpiler."""
+    lt = LuaTranspiler()
+    lt._lift_match_expressions(None)
 
 
 if __name__ == "__main__":

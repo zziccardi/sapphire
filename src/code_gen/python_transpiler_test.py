@@ -1135,6 +1135,11 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_proxy_ops()")
     self.assertEqual(res, 15 + 10)
 
+  def test_lift_match_expressions_none(self):
+    """Verifies _lift_match_expressions handles None gracefully."""
+    pt = PythonTranspiler()
+    pt._lift_match_expressions(None)
+
 
 if __name__ == "__main__":
   unittest.main()
