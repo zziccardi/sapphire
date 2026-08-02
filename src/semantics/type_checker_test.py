@@ -551,6 +551,45 @@ class TestTypeChecker(unittest.TestCase):
       struct Child: Parent { var x: float; }
       """)
 
+    # 5b. Duplicate field inherited from multiple parents
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Position { var x: float; }
+      struct Point { var x: float; }
+      struct Player: Position, Point {}
+      """)
+    self.assertIn("Duplicate field 'x' in struct 'Player' inherited from multiple parents", str(ctx.exception))
+
+    # 5c. Circular struct inheritance
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct A: B {}
+      struct B: A {}
+      """)
+    self.assertIn("Circular inheritance detected involving struct", str(ctx.exception))
+
+  def test_multi_parent_struct_type_checking(self):
+    """Verifies that multi-parent struct field inlining registers all inherited fields in the symbol table."""
+    code = """
+    struct Position { var x: float; var y: float; }
+    struct Health { var hp: int; }
+    struct Player: Position, Health { var name: String; }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    player_type = checker.symbol_table.lookup_type("Player")
+    self.assertIn("x", player_type.fields)
+    self.assertIn("y", player_type.fields)
+    self.assertIn("hp", player_type.fields)
+    self.assertIn("name", player_type.fields)
+
     # 6. Impl undefined struct
     with self.assertRaises(SemanticError):
       self._check("impl UndefinedStruct {}")

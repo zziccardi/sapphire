@@ -186,9 +186,14 @@ class GenericTypeParameter(Type):
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_name: Optional[str] = None, is_prototype: bool = False, comments: Optional[str] = None, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None):
+  def __init__(self, name: str, parent_names: Optional[Union[str, List[str]]] = None, is_prototype: bool = False, comments: Optional[str] = None, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None, parent_name: Optional[str] = None):
     self.name = name
-    self.parent_name = parent_name
+    if parent_names is None:
+      self.parent_names = [parent_name] if parent_name else []
+    elif isinstance(parent_names, str):
+      self.parent_names = [parent_names]
+    else:
+      self.parent_names = parent_names
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.implemented_traits: Set[str] = set()
@@ -198,13 +203,37 @@ class StructType(Type):
     self.type_params = type_params or []
     self.ast_decl = ast_decl
 
-  def implements_trait(self, trait: "TraitType") -> bool:
+  @property
+  def parent_name(self) -> Optional[str]:
+    return self.parent_names[0] if self.parent_names else None
+
+  @parent_name.setter
+  def parent_name(self, value: Optional[str]) -> None:
+    if value is None:
+      self.parent_names = []
+    else:
+      self.parent_names = [value]
+
+  def get_method(self, name: str, symbol_table: Optional[Any] = None) -> Optional["StructMethod"]:
+    """Look up a method on this struct, falling back to parent structs if symbol_table is provided."""
+    if name in self.methods:
+      return self.methods[name]
+    if self.parent_names and symbol_table:
+      for p_name in self.parent_names:
+        parent = symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType):
+          res = parent.get_method(name, symbol_table)
+          if res:
+            return res
+    return None
+
+  def implements_trait(self, trait: "TraitType", symbol_table: Optional[Any] = None) -> bool:
     """Returns True if this struct implements the given trait (nominally or structurally)."""
     if trait.name in self.implemented_traits:
       return True
     if trait.methods:
       for m_name in trait.methods:
-        if m_name not in self.methods:
+        if not self.get_method(m_name, symbol_table):
           return False
       return True
     return False

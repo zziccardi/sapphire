@@ -490,11 +490,10 @@ class PythonTranspiler:
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     is_proto = node.is_prototype
-    parent_class = (
-        node.parent_name
-        if node.parent_name
-        else ("SapphireObject" if is_proto else "object")
-    )
+    if node.parent_names:
+      parent_class = ", ".join(node.parent_names)
+    else:
+      parent_class = "SapphireObject" if is_proto else "object"
     self.newline()
     self.emit(f"class {node.name}({parent_class}):")
     self.indent()
@@ -511,6 +510,10 @@ class PythonTranspiler:
       self.newline()
       self.emit("if proto is None:")
       self.indent()
+      if node.parent_names:
+        for p in node.parent_names:
+          self.newline()
+          self.emit(f"{p}.__init__(self, *args, **kwargs)")
       for f in node.fields:
         if f.default_expr:
           self.newline()
@@ -531,6 +534,10 @@ class PythonTranspiler:
     else:
       self.emit("def __init__(self, *args, **kwargs):")
       self.indent()
+      if node.parent_names:
+        for p in node.parent_names:
+          self.newline()
+          self.emit(f"{p}.__init__(self, *args, **kwargs)")
       for f in node.fields:
         if f.default_expr:
           self.newline()

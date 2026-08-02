@@ -61,7 +61,7 @@ typeArgumentList
     ;
 
 structDeclaration
-    : (STRUCT | PROTO_KEYWORD) IDENTIFIER typeParamList? (COLON IDENTIFIER)? LBRACE structField* RBRACE
+    : (STRUCT | PROTO_KEYWORD) IDENTIFIER typeParamList? (COLON IDENTIFIER (COMMA IDENTIFIER)*)? LBRACE structField* RBRACE
     ;
 
 structField

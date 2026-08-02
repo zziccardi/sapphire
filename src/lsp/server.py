@@ -467,7 +467,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
       markdown_text += f"\n\n{node_type.comments}"
   elif isinstance(node_type, StructType) and category in ("struct", "proto"):
     kind = "proto" if node_type.is_prototype else "struct"
-    inheritance = f" : {node_type.parent_name}" if node_type.parent_name else ""
+    inheritance = f" : {', '.join(node_type.parent_names)}" if getattr(node_type, "parent_names", None) else ""
     params_str = f"<{', '.join(node_type.type_params)}>" if getattr(node_type, "type_params", None) else ""
     markdown_text = f"**({kind})** `{node_type.name}{params_str}{inheritance}`"
     if getattr(node_type, "comments", None):

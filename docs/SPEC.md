@@ -652,18 +652,29 @@ Sapphire implements clean, type-safe inheritance divided into a compile-time mec
 
 ### Static inheritance
 
-Structures can inherit the field layout, methods, and default values of another structure at compile time using a colon syntax similar to that in C++.
+Structures can inherit the field layout, methods, and default values of one or more parent structures at compile time using a colon syntax with a comma-separated list of parents (e.g. `struct Child: Parent1, Parent2`).
 
-```
-struct Animal {
+```sapphire
+struct Position {
+  var x: float;
+  var y: float;
+}
+
+struct Health {
+  var hp: int = 100;
+  var max_hp: int = 100;
+}
+
+struct Player: Position, Health {
   var name: String;
-  var age: int;
-}
-
-struct Cat: Animal {
-  var lives: int;
 }
 ```
+
+#### Multi-parent delegation rules
+
+* **Field layout inlining**: Fields from all parent structures are inlined into the child structure's field layout in order of parent declaration.
+* **Conflict prevention**: If two parent structures contain fields with identical names, or if a child structure declares a field with the same name as an inherited field, the compiler raises a compile-time `SemanticError`.
+* **Circular inheritance**: Circular struct delegation (e.g. `A : B` and `B : A`) is strictly forbidden and rejected at compile time.
 
 #### Disallowed up-casting
 

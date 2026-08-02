@@ -352,3 +352,26 @@ class TestSemanticTokens(unittest.TestCase):
 
     token_types = [t[3] for t in checker.raw_tokens]
     self.assertIn("variable", token_types)
+
+  def test_multi_parent_semantic_tokens(self):
+    """Verifies semantic token extraction for multi-parent struct declarations."""
+    code = """
+    struct Pos { var x: int; }
+    struct Health { var hp: int; }
+    struct Player: Pos, Health { var name: String; }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+
+    pos_tokens = [t for t in checker.raw_tokens if t[3] == "struct" and t[2] == len("Pos")]
+    health_tokens = [t for t in checker.raw_tokens if t[3] == "struct" and t[2] == len("Health")]
+    self.assertTrue(len(pos_tokens) >= 1)
+    self.assertTrue(len(health_tokens) >= 1)

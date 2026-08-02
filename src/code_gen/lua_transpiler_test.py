@@ -1008,6 +1008,25 @@ class TestLuaTranspiler(unittest.TestCase):
     b._private_attr = "private"
     self.assertFalse(_has_continue_node(b))
 
+  def test_multi_parent_struct_lua(self):
+    """Verifies transpilation of multi-parent struct declarations in Lua."""
+    code = """
+    struct Position {
+      var x: int = 10;
+      var y: int = 20;
+    }
+    struct Health {
+      var hp: int = 100;
+    }
+    struct Player: Position, Health {
+      var name: String;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("setmetatable(Player, { __index = function(t, k) return Position[k] or Health[k] end })", lua_code)
+    self.assertIn("Position._init_fields(self)", lua_code)
+    self.assertIn("Health._init_fields(self)", lua_code)
+
 
 if __name__ == "__main__":
   unittest.main()

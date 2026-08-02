@@ -576,6 +576,33 @@ class LuaTranspiler:
     self.emit(f"{struct_name}.__index = {struct_name}")
     self.newline()
 
+    if node.parent_names:
+      if len(node.parent_names) == 1:
+        self.emit(f"setmetatable({struct_name}, {{ __index = {node.parent_names[0]} }})")
+      else:
+        chain = " or ".join(f"{p}[k]" for p in node.parent_names)
+        self.emit(f"setmetatable({struct_name}, {{ __index = function(t, k) return {chain} end }})")
+      self.newline()
+
+    # Define helper `._init_fields(self)`
+    self.emit(f"function {struct_name}._init_fields(self)")
+    self.indent()
+    if node.parent_names:
+      for p in node.parent_names:
+        self.newline()
+        self.emit(f"if {p}._init_fields then {p}._init_fields(self) end")
+    for f in node.fields:
+      if f.default_expr:
+        self.newline()
+        temp = LuaTranspiler()
+        temp.known_structs = self.known_structs
+        temp.visit(f.default_expr)
+        self.emit(f"self.{f.name} = {temp.get_output()}")
+    self.dedent()
+    self.newline()
+    self.emit("end")
+    self.newline()
+
     # Define constructor `.init(...)`
     self.emit(f"function {struct_name}.init(kwargs, proto)")
     self.indent()
@@ -592,13 +619,8 @@ class LuaTranspiler:
     self.newline()
     self.emit("if proto == nil then")
     self.indent()
-    for f in node.fields:
-      if f.default_expr:
-        self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
-        temp.visit(f.default_expr)
-        self.emit(f"self.{f.name} = {temp.get_output()}")
+    self.newline()
+    self.emit(f"{struct_name}._init_fields(self)")
     self.dedent()
     self.newline()
     self.emit("end")
