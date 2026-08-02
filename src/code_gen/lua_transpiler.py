@@ -801,7 +801,7 @@ class LuaTranspiler:
 
     for idx, case in enumerate(node.cases):
       self.newline()
-      if isinstance(case.pattern, EllipsisPatternNode) or (isinstance(case.pattern, IdentifierNode) and case.pattern.name == "_"):
+      if isinstance(case.pattern, EllipsisPatternNode):
         if idx == 0:
           self.emit("if true then")
         else:

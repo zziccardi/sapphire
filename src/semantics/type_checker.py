@@ -969,7 +969,7 @@ class TypeChecker:
         if isinstance(sym, EnumSymbol) and isinstance(subject_type, EnumType) and sym.name == subject_type.name:
           pass
         else:
-          has_ellipsis = True
+          self.error(f"Undefined identifier '{case.pattern.name}'.")
       elif isinstance(case.pattern, MemberAccessNode):
         pat_type = self.visit(case.pattern)
         if isinstance(subject_type, EnumType) and isinstance(pat_type, EnumType):

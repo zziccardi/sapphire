@@ -2012,8 +2012,10 @@ class TestTypeChecker(unittest.TestCase):
       self._check("func o(v: int?) { let x = match v { none -> 0 }; }")
     self.assertIn("Match expression for optional", str(ctx.exception))
 
-    # Identifier catch-all pattern
-    self._check("func i(v: int): String { return match v { val -> \"ok\" }; }")
+    # Identifier pattern error (underscore or arbitrary identifier rejected)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("func i(v: int): String { return match v { _ -> \"ok\" }; }")
+    self.assertIn("Undefined identifier '_'", str(ctx.exception))
 
     # Incompatible pattern type
     with self.assertRaises(SemanticError) as ctx:

@@ -868,11 +868,11 @@ class TestPythonTranspiler(unittest.TestCase):
     """
     self.assertEqual(self._transpile_and_run(multi_code, "test_multi(1)"), 40)
 
-    # Identifier wildcard _
+    # Wildcard ...
     wildcard_code = """
     func test_wildcard(n: int): int {
       return match n {
-        _ -> 999,
+        ... -> 999,
       };
     }
     """

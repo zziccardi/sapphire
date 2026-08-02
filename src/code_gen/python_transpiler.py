@@ -638,8 +638,6 @@ class PythonTranspiler:
       self.newline()
       if isinstance(case.pattern, EllipsisPatternNode):
         self.emit("case _:")
-      elif isinstance(case.pattern, IdentifierNode) and case.pattern.name == "_":
-        self.emit("case _:")
       else:
         self.emit("case ")
         self.visit(case.pattern)

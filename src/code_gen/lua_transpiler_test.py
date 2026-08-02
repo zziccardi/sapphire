@@ -742,8 +742,8 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_out5 = self._transpile(arena_ret)
     self.assertIn("a:destroy()", lua_out5)
 
-    # Identifier wildcard _
-    wild_code = "func test_w(n: int): int { return match n { _ -> 99 }; }"
+    # Wildcard ...
+    wild_code = "func test_w(n: int): int { return match n { ... -> 99 }; }"
     lua_out6 = self._transpile(wild_code)
     self.assertIn("if true then", lua_out6)
 
