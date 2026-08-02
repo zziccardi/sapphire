@@ -304,6 +304,41 @@ for var key, val in inventory {
 }
 ```
 
+#### Loop control statements (`break` & `continue`)
+
+Sapphire provides explicit loop control statements to alter execution flow inside `while` and `for-in` loops:
+
+* **`break;`**: Immediately terminates the innermost enclosing loop and transfers execution to the statement following the loop block.
+* **`continue;`**: Immediately terminates the current iteration of the innermost enclosing loop and skips directly to the loop condition evaluation (`while`) or the next element advancement (`for-in`).
+* **Scope restriction**: Using `break` or `continue` outside of an enclosing loop block produces a compile-time error.
+
+```sapphire
+// Skipping odd numbers with continue; stopping at 8 with break
+var i = 0;
+while i < 10 {
+  i += 1;
+  if i % 2 != 0 {
+    continue;
+  }
+  if i > 8 {
+    break;
+  }
+  print(f"Even count: {i}");
+}
+
+// Searching an array with break and continue
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+for num in numbers {
+  if num % 2 == 0 {
+    continue;  // Skip even numbers
+  }
+  if num > 7 {
+    break;     // Stop processing once number exceeds 7
+  }
+  print(f"Odd number: {num}");
+}
+```
+
 ## 7. Optionals (null safety) & conditional bindings
 
 The language completely forbids null pointers. Instead, it supports type-safe

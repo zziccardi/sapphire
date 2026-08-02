@@ -2590,6 +2590,50 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot interpolate struct type 'Player' directly into string", str(ctx.exception))
 
+  def test_break_and_continue_type_checking(self):
+    """Verifies valid usage of break/continue in loops and error when used outside loops."""
+    # Valid usage inside while and for loops
+    self._check("""
+    func test() {
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 == 0 {
+          continue;
+        }
+        if i > 5 {
+          break;
+        }
+      }
+
+      let arr = [1, 2, 3];
+      for x in arr {
+        if x == 2 {
+          continue;
+        }
+        break;
+      }
+    }
+    """)
+
+    # Error: break outside loop
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        break;
+      }
+      """)
+    self.assertIn("'break' statement outside of loop.", str(ctx.exception))
+
+    # Error: continue outside loop
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        continue;
+      }
+      """)
+    self.assertIn("'continue' statement outside of loop.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

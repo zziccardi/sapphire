@@ -443,6 +443,16 @@ class YieldNode(StmtNode):
     self.expr = expr
 
 
+class BreakNode(StmtNode):
+  """Represents a break statement (e.g. 'break;')."""
+  pass
+
+
+class ContinueNode(StmtNode):
+  """Represents a continue statement (e.g. 'continue;')."""
+  pass
+
+
 class HeaderBindingNode(ASTNode):
   """Represents a variable binding inside control-flow headers (e.g. let x ?= y)."""
 

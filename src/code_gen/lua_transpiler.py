@@ -329,6 +329,24 @@ end
 """
 
 
+def _has_continue_node(node: ASTNode) -> bool:
+  if isinstance(node, ContinueNode):
+    return True
+  if isinstance(node, (WhileNode, ForNode)):
+    return False
+  for attr_name, attr_val in getattr(node, "__dict__", {}).items():
+    if attr_name.startswith("_"):
+      continue
+    if isinstance(attr_val, ASTNode):
+      if _has_continue_node(attr_val):
+        return True
+    elif isinstance(attr_val, list):
+      for item in attr_val:
+        if isinstance(item, ASTNode) and _has_continue_node(item):
+          return True
+  return False
+
+
 class LuaTranspiler:
   """AST visitor to transpile Sapphire code to Lua 5.1."""
 
@@ -348,6 +366,7 @@ class LuaTranspiler:
     self.known_structs: Set[str] = set()
     self.arena_stack: List[List[str]] = []
     self._identifier_map: Dict[str, str] = {}
+    self._loop_stack: List[bool] = []
 
   def emit(self, text: str) -> None:
     """Emits text on the current line and updates line/column numbers."""
@@ -924,88 +943,125 @@ class LuaTranspiler:
     self.newline()
     self.emit("end")
 
+  def _visit_loop_body(self, block: BlockNode, has_continue: bool) -> None:
+    if has_continue:
+      self.newline()
+      self.emit("local _break_outer = false")
+      self.newline()
+      self.emit("repeat")
+      self.indent()
+      self.visit(block)
+      self.dedent()
+      self.newline()
+      self.emit("until true")
+      self.newline()
+      self.emit("if _break_outer then break end")
+    else:
+      self.visit(block)
+
   def visit_WhileNode(self, node: WhileNode) -> None:
-    if node.init_binding:
-      self._lift_match_expressions(node.init_binding.expr)
-    if node.condition:
-      self._lift_match_expressions(node.condition)
+    has_continue = _has_continue_node(node.block)
+    self._loop_stack.append(has_continue)
+    try:
+      if node.init_binding:
+        self._lift_match_expressions(node.init_binding.expr)
+      if node.condition:
+        self._lift_match_expressions(node.condition)
 
-    self.newline()
-    if node.init_binding:
-      let_name = node.init_binding.let_name
-      if node.init_binding.is_unwrap:
-        self.emit("while true do")
-        self.indent()
-        self.newline()
-        val_var = f"_val_{let_name}"
-        self.emit(f"local {val_var} = ")
-        self.visit(node.init_binding.expr)
-        self.newline()
+      self.newline()
+      if node.init_binding:
+        let_name = node.init_binding.let_name
+        if node.init_binding.is_unwrap:
+          self.emit("while true do")
+          self.indent()
+          self.newline()
+          val_var = f"_val_{let_name}"
+          self.emit(f"local {val_var} = ")
+          self.visit(node.init_binding.expr)
+          self.newline()
 
-        # Map identifier to temporary variable during condition check
-        old_map = self._identifier_map.copy()
-        self._identifier_map[let_name] = val_var
+          # Map identifier to temporary variable during condition check
+          old_map = self._identifier_map.copy()
+          self._identifier_map[let_name] = val_var
 
-        self.emit(f"if not ({val_var} ~= nil")
-        if node.condition:
-          self.emit(" and ")
+          self.emit(f"if not ({val_var} ~= nil")
+          if node.condition:
+            self.emit(" and ")
+            self.visit(node.condition)
+          self.emit(") then")
+
+          # Restore map
+          self._identifier_map = old_map
+
+          self.indent()
+          self.newline()
+          self.emit("break")
+          self.dedent()
+          self.newline()
+          self.emit("end")
+          self.newline()
+          self.emit(f"local {let_name} = {val_var}")
+          self._visit_loop_body(node.block, has_continue)
+          self.dedent()
+          self.newline()
+          self.emit("end")
+        else:
+          # Standard init-statement: execute once before loop begins
+          self.emit(f"local {let_name} = ")
+          self.visit(node.init_binding.expr)
+          self.newline()
+          self.emit("while ")
           self.visit(node.condition)
-        self.emit(") then")
-
-        # Restore map
-        self._identifier_map = old_map
-
-        self.indent()
-        self.newline()
-        self.emit("break")
-        self.dedent()
-        self.newline()
-        self.emit("end")
-        self.newline()
-        self.emit(f"local {let_name} = {val_var}")
-        self.visit(node.block)
-        self.dedent()
-        self.newline()
-        self.emit("end")
+          self.emit(" do")
+          self.indent()
+          self._visit_loop_body(node.block, has_continue)
+          self.dedent()
+          self.newline()
+          self.emit("end")
       else:
-        # Standard init-statement: execute once before loop begins
-        self.emit(f"local {let_name} = ")
-        self.visit(node.init_binding.expr)
-        self.newline()
         self.emit("while ")
         self.visit(node.condition)
         self.emit(" do")
         self.indent()
-        self.visit(node.block)
+        self._visit_loop_body(node.block, has_continue)
         self.dedent()
         self.newline()
         self.emit("end")
-    else:
-      self.emit("while ")
-      self.visit(node.condition)
-      self.emit(" do")
+    finally:
+      self._loop_stack.pop()
+
+  def visit_ForNode(self, node: ForNode) -> None:
+    has_continue = _has_continue_node(node.block)
+    self._loop_stack.append(has_continue)
+    try:
+      self._lift_match_expressions(node.iterable)
+      self.newline()
+      if node.key_var is not None:
+        self.emit(f"for {node.key_var}, {node.val_var} in pairs(")
+        self.visit(node.iterable)
+        self.emit(") do")
+      else:
+        self.emit(f"for _, {node.val_var} in _sapphire_iter_array(")
+        self.visit(node.iterable)
+        self.emit(") do")
       self.indent()
-      self.visit(node.block)
+      self._visit_loop_body(node.block, has_continue)
       self.dedent()
       self.newline()
       self.emit("end")
+    finally:
+      self._loop_stack.pop()
 
-  def visit_ForNode(self, node: ForNode) -> None:
-    self._lift_match_expressions(node.iterable)
+  def visit_BreakNode(self, node: BreakNode) -> None:
     self.newline()
-    if node.key_var is not None:
-      self.emit(f"for {node.key_var}, {node.val_var} in pairs(")
-      self.visit(node.iterable)
-      self.emit(") do")
-    else:
-      self.emit(f"for _, {node.val_var} in _sapphire_iter_array(")
-      self.visit(node.iterable)
-      self.emit(") do")
-    self.indent()
-    self.visit(node.block)
-    self.dedent()
+    if self._loop_stack and self._loop_stack[-1]:
+      self.emit("_break_outer = true")
+      self.newline()
+    self.emit("break")
+
+  def visit_ContinueNode(self, node: ContinueNode) -> None:
     self.newline()
-    self.emit("end")
+    self.emit("break")
 
   # ==========================================
   # Expressions Visitor

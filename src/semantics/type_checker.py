@@ -87,6 +87,7 @@ class TypeChecker:
     self.expected_type: Optional[Type] = None
     self.current_function_scope = None
     self._match_stack: List[List[Type]] = []
+    self.loop_depth: int = 0
 
   def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
     if isinstance(node, IdentifierNode):
@@ -1126,63 +1127,79 @@ class TypeChecker:
       self.visit(node.else_block)
 
   def visit_WhileNode(self, node: WhileNode) -> None:
-    if node.init_binding:
-      self.symbol_table.enter_scope()
-      expr_type = self.visit(node.init_binding.expr)
-      if node.init_binding.is_unwrap:
-        if not isinstance(expr_type, OptionalType):
-          self.error("Expression in optional unwrapping must resolve to an optional type.")
-          unwrapped_type = expr_type
+    self.loop_depth += 1
+    try:
+      if node.init_binding:
+        self.symbol_table.enter_scope()
+        expr_type = self.visit(node.init_binding.expr)
+        if node.init_binding.is_unwrap:
+          if not isinstance(expr_type, OptionalType):
+            self.error("Expression in optional unwrapping must resolve to an optional type.")
+            unwrapped_type = expr_type
+          else:
+            unwrapped_type = expr_type.base_type
         else:
-          unwrapped_type = expr_type.base_type
+          unwrapped_type = expr_type
+
+        self.symbol_table.define(
+            node.init_binding.let_name,
+            VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
+        )
+
+        if node.condition:
+          cond_type = self.visit(node.condition)
+          if cond_type != PrimitiveType("bool"):
+            self.error("While condition must resolve to 'bool'.")
+        else:
+          if not node.init_binding.is_unwrap:
+            self.error("Init-statement in 'while' must be followed by a condition unless using optional unwrapping '?='.")
+
+        self.visit(node.block)
+        self.symbol_table.exit_scope()
       else:
-        unwrapped_type = expr_type
-
-      self.symbol_table.define(
-          node.init_binding.let_name,
-          VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
-      )
-
-      if node.condition:
         cond_type = self.visit(node.condition)
         if cond_type != PrimitiveType("bool"):
           self.error("While condition must resolve to 'bool'.")
+        self.visit(node.block)
+    finally:
+      self.loop_depth -= 1
+
+  def visit_ForNode(self, node: ForNode) -> None:
+    self.loop_depth += 1
+    try:
+      iter_type = self.visit(node.iterable)
+      self.symbol_table.enter_scope()
+
+      if isinstance(iter_type, ArrayType):
+        if node.key_var is not None:
+          self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
+        elem_type = iter_type.element_type
+        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, elem_type, node.is_mutable))
+      elif isinstance(iter_type, MapType):
+        if node.key_var is None:
+          self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
+          self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
+        else:
+          self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable))
+          self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
       else:
-        if not node.init_binding.is_unwrap:
-          self.error("Init-statement in 'while' must be followed by a condition unless using optional unwrapping '?='.")
+        self.error("For-in loop source must be an array or map type.")
+        if node.key_var is not None:
+          self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, PrimitiveType("none"), node.is_mutable))
+        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("none"), node.is_mutable))
 
       self.visit(node.block)
       self.symbol_table.exit_scope()
-    else:
-      cond_type = self.visit(node.condition)
-      if cond_type != PrimitiveType("bool"):
-        self.error("While condition must resolve to 'bool'.")
-      self.visit(node.block)
+    finally:
+      self.loop_depth -= 1
 
-  def visit_ForNode(self, node: ForNode) -> None:
-    iter_type = self.visit(node.iterable)
-    self.symbol_table.enter_scope()
+  def visit_BreakNode(self, node: BreakNode) -> None:
+    if self.loop_depth <= 0:
+      self.error("'break' statement outside of loop.")
 
-    if isinstance(iter_type, ArrayType):
-      if node.key_var is not None:
-        self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
-      elem_type = iter_type.element_type
-      self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, elem_type, node.is_mutable))
-    elif isinstance(iter_type, MapType):
-      if node.key_var is None:
-        self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
-        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
-      else:
-        self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable))
-        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
-    else:
-      self.error("For-in loop source must be an array or map type.")
-      if node.key_var is not None:
-        self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, PrimitiveType("none"), node.is_mutable))
-      self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("none"), node.is_mutable))
-
-    self.visit(node.block)
-    self.symbol_table.exit_scope()
+  def visit_ContinueNode(self, node: ContinueNode) -> None:
+    if self.loop_depth <= 0:
+      self.error("'continue' statement outside of loop.")
 
   # ==========================================
   # Expressions Visitor

@@ -962,6 +962,27 @@ class TestLuaTranspiler(unittest.TestCase):
     lt = LuaTranspiler()
     lt._lift_match_expressions(None)
 
+  def test_break_and_continue_lua(self):
+    """Verifies Lua transpilation of break and continue statements in while and for loops."""
+    code = """
+    func test_break_continue() {
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 == 0 {
+          continue;
+        }
+        if i > 6 {
+          break;
+        }
+      }
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("repeat", lua)
+    self.assertIn("local _break_outer = false", lua)
+    self.assertIn("if _break_outer then break end", lua)
+
 
 if __name__ == "__main__":
   unittest.main()

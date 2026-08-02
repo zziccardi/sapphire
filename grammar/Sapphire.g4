@@ -136,8 +136,18 @@ statement
     | whileStatement
     | forStatement
     | returnStatement
+    | breakStatement
+    | continueStatement
     | yieldStatement
     | expressionStatement
+    ;
+
+breakStatement
+    : BREAK SEMICOLON
+    ;
+
+continueStatement
+    : CONTINUE SEMICOLON
     ;
 
 yieldStatement
@@ -325,6 +335,8 @@ CLONE : 'clone';
 IF : 'if';
 ELSE : 'else';
 WHILE : 'while';
+BREAK : 'break';
+CONTINUE : 'continue';
 NONE : 'none';
 RETURN : 'return';
 MATCH : 'match';

@@ -26,6 +26,8 @@ try:
       IdentifierNode,
       ArrayTypeNode,
       MapTypeNode,
+      BreakNode,
+      ContinueNode,
   )
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -46,6 +48,8 @@ except ModuleNotFoundError:
       IdentifierNode,
       ArrayTypeNode,
       MapTypeNode,
+      BreakNode,
+      ContinueNode,
   )
 
 
@@ -573,6 +577,14 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(decl_map.val_types[0], MapTypeNode)
     self.assertEqual(decl_map.val_types[0].key_type.name, "String")
     self.assertEqual(decl_map.val_types[0].val_type.name, "int")
+
+  def test_break_and_continue_statements(self):
+    """Verifies AST construction for break and continue statements."""
+    ast = self._get_ast('while true { continue; break; }')
+    while_stmt = ast.declarations[0]
+    stmts = while_stmt.block.statements
+    self.assertIsInstance(stmts[0], ContinueNode)
+    self.assertIsInstance(stmts[1], BreakNode)
 
 
 if __name__ == "__main__":

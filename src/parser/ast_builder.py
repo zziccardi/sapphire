@@ -391,6 +391,12 @@ class ASTBuilder(SapphireVisitor):
     exprs = [self.visit(e) for e in ctx.expression()] if ctx.expression() else []
     return ReturnNode(exprs)
 
+  def visitBreakStatement(self, ctx: SapphireParser.BreakStatementContext) -> BreakNode:
+    return BreakNode()
+
+  def visitContinueStatement(self, ctx: SapphireParser.ContinueStatementContext) -> ContinueNode:
+    return ContinueNode()
+
   def visitIfStatement(self, ctx: SapphireParser.IfStatementContext) -> IfNode:
     else_block = None
     if ctx.block(1):
