@@ -695,6 +695,7 @@ Because Sapphire disallows struct upcasting, behavioral polymorphism is achieved
 
 * **Trait parameter & return types**: Trait names can be used directly as parameter types (e.g. `func display(p: Printable)`) or return types (e.g. `func get_item(): Printable`).
 * **Implicit assignability**: A struct `S` that implements trait `T` (via `impl T for S` or structural method compatibility) is implicitly assignable to any target expecting type `T` or optional type `T?`.
+* **Heterogeneous trait collections**: Trait types can be element types for collections (e.g. `[Renderable]`). While a concrete array `[Circle]` prohibits storing `Rectangle` instances, an array typed as `[Renderable]` allows heterogeneous storage of any struct types implementing `Renderable`.
 * **Interface erasure**: Passing or returning a value typed as trait `T` narrows the caller's view strictly to the methods defined on `T`. Unrelated concrete fields of `S` cannot be accessed without explicit casting.
 * **Implicit and explicit `self` for instance methods**: Non-static trait methods implicitly operate on `self` when implemented. In standard Sapphire code, the explicit `self` parameter can be omitted in trait declarations. Specifying an explicit first `self` parameter (which may be `var self` for mutable access) is primarily used when creating bindings for external host libraries (like Love2D) to explicitly designate instance methods that transpile to colon syntax in Lua (e.g. `:draw(x, y)`).
 * **Module/static functions**: For external host bindings, omitting `self` from a trait method signature designates it as a module or static function (e.g. transpiling to Lua dot syntax `.rectangle(...)`).
@@ -719,16 +720,30 @@ struct Cat {
   var lives: int;
 }
 
+struct Dog {
+  var barks: int;
+}
+
 impl Actor for Cat {
-  func update() {
-    // Concrete implementation
-  }
+  func update() { /* Cat logic */ }
+}
+
+impl Actor for Dog {
+  func update() { /* Dog logic */ }
 }
 
 // Polymorphic function accepting any struct implementing Actor
 func update_actor(actor: Actor): Actor {
   actor.update();
   return actor;
+}
+
+// Heterogeneous trait collection containing both Cat and Dog instances
+func update_all() {
+  let actors: [Actor] = [Cat { lives = 9 }, Dog { barks = 3 }];
+  for actor in actors {
+    actor.update();
+  }
 }
 ```
 

@@ -1,7 +1,8 @@
 /*
  * Sample Sapphire program illustrating Implicit Trait Subtyping.
  * Demonstrates passing structs to trait-typed parameters, returning structs
- * from trait-typed functions, and handling optional trait parameters.
+ * from trait-typed functions, handling optional trait parameters, and creating
+ * heterogeneous trait collections (e.g. [Renderable]).
  */
 
 // 1. Define trait contracts
@@ -81,4 +82,12 @@ func main() {
   // Optional trait subtyping
   let c_opt: Circle? = c;
   let res = describe_item(c_opt);
+
+  // Heterogeneous trait collection ([Renderable])
+  // Holds different concrete struct types (Circle & Rectangle) in same array
+  print("--- Iterating Heterogeneous Trait Collection ---");
+  let scene: [Renderable] = [c, r, create_circle(1.5)];
+  for item in scene {
+    item.render();
+  }
 }

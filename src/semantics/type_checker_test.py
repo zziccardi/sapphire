@@ -2710,6 +2710,62 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code_optional)
 
+    # 4. Heterogeneous Trait Collection ([Describable])
+    code_collection = """
+    trait Describable {
+      func describe();
+    }
+
+    struct ItemA {
+      var id: int;
+    }
+
+    struct ItemB {
+      var name: String;
+    }
+
+    impl Describable for ItemA {
+      func describe() {}
+    }
+
+    impl Describable for ItemB {
+      func describe() {}
+    }
+
+    func main() {
+      let a = ItemA { id = 1 };
+      let b = ItemB { name = "B" };
+      let items: [Describable] = [a, b];
+      for i in items {
+        i.describe();
+      }
+    }
+    """
+    self._check(code_collection)
+
+    # 5. Invalid element type in trait collection
+    code_invalid_elem = """
+    trait Describable {
+      func describe();
+    }
+
+    struct ItemA {
+      var id: int;
+    }
+
+    impl Describable for ItemA {
+      func describe() {}
+    }
+
+    func main() {
+      let a = ItemA { id = 1 };
+      let items: [Describable] = [a, 42];
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid_elem)
+    self.assertIn("Array element of type 'int' is not compatible with expected element type 'trait Describable'.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
