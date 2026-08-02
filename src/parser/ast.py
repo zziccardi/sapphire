@@ -177,7 +177,7 @@ class StructDeclNode(DeclNode):
     elif isinstance(parent_names, str):
       self.parent_names = [parent_names]
     else:
-      self.parent_names = parent_names
+      self.parent_names = list(parent_names)
     self.fields = fields or []
     self.is_prototype = is_prototype
     self.type_params = type_params or []

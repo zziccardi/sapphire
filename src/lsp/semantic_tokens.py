@@ -207,11 +207,8 @@ class SemanticTokensTypeChecker(TypeChecker):
   def visit_StructDeclNode(self, node) -> None:
     # Struct name declaration
     self.add_token(node.name_line, node.name_column, node.name_length, "struct", 1)  # declaration
-    if getattr(node, "parent_names_info", None):
-      for info in node.parent_names_info:
-        self.add_token(info["line"], info["column"], info["length"], "struct")
-    elif getattr(node, "parent_name", None):
-      self.add_token(node.parent_name_line, node.parent_name_column, node.parent_name_length, "struct")
+    for info in getattr(node, "parent_names_info", []):
+      self.add_token(info["line"], info["column"], info["length"], "struct")
     
     struct_type = self.symbol_table.lookup_type(node.name)
     old_struct = self.current_struct

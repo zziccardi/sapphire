@@ -193,7 +193,7 @@ class StructType(Type):
     elif isinstance(parent_names, str):
       self.parent_names = [parent_names]
     else:
-      self.parent_names = parent_names
+      self.parent_names = list(parent_names)
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.implemented_traits: Set[str] = set()

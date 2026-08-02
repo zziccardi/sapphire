@@ -590,6 +590,38 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("hp", player_type.fields)
     self.assertIn("name", player_type.fields)
 
+  def test_clone_proto_parent_cycle(self):
+    """Verifies that clone prototype check handles circular struct inheritance safely without infinite recursion."""
+    code = """
+    proto A: B { var x: int; }
+    proto B: A { var y: int; }
+    func test(a: A) {
+      let c = clone a;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("Circular inheritance detected involving struct", str(ctx.exception))
+
+  def test_clone_check_proto_cycle_coverage(self):
+    """Directly tests check_proto cycle protection in visit_CloneNode."""
+    try:
+      from semantics.symbol_table import StructType, VariableSymbol
+      from parser.ast import CloneNode, IdentifierNode
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import StructType, VariableSymbol
+      from src.parser.ast import CloneNode, IdentifierNode
+
+    checker = TypeChecker()
+    st_a = StructType("A", parent_names=["B"])
+    st_b = StructType("B", parent_names=["A"])
+    checker.symbol_table.define_type("A", st_a)
+    checker.symbol_table.define_type("B", st_b)
+    checker.symbol_table.define("a", VariableSymbol("a", st_a, is_mutable=False))
+    node = CloneNode(IdentifierNode("a"))
+    checker.visit_CloneNode(node)
+    self.assertTrue(any("Cannot clone instance of non-proto struct 'A'" in err for err in checker.errors))
+
     # 6. Impl undefined struct
     with self.assertRaises(SemanticError):
       self._check("impl UndefinedStruct {}")

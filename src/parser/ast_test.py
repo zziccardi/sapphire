@@ -188,6 +188,31 @@ class TestASTNodes(unittest.TestCase):
     expr_stmt = ExprStmtNode(LiteralNode(1, "int"))
     self.assertEqual(expr_stmt.expr.value, 1)
 
+  def test_struct_decl_node_parent_name(self):
+    """Verifies StructDeclNode parent_name and parent_names initialization and property setter."""
+    try:
+      from parser.ast import StructDeclNode
+    except ModuleNotFoundError:
+      from src.parser.ast import StructDeclNode
+
+    node1 = StructDeclNode("Child", parent_name="Parent1")
+    self.assertEqual(node1.parent_name, "Parent1")
+    self.assertEqual(node1.parent_names, ["Parent1"])
+
+    node2 = StructDeclNode("Child", parent_names="Parent2")
+    self.assertEqual(node2.parent_name, "Parent2")
+
+    node3 = StructDeclNode("Child")
+    self.assertIsNone(node3.parent_name)
+
+    node3.parent_name = "Parent3"
+    self.assertEqual(node3.parent_names, ["Parent3"])
+    self.assertEqual(node3.parent_name, "Parent3")
+
+    node3.parent_name = None
+    self.assertEqual(node3.parent_names, [])
+    self.assertIsNone(node3.parent_name)
+
 
 if __name__ == "__main__":
   unittest.main()
