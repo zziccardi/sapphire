@@ -1089,7 +1089,7 @@ class LuaTranspiler:
       self.emit("(not not ")
       self.visit(node.expr)
       self.emit(")")
-    elif target in ("string", "String"):
+    elif target == "String":
       self.emit("tostring(")
       self.visit(node.expr)
       self.emit(")")

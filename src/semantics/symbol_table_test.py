@@ -43,7 +43,7 @@ class TestSymbolTable(unittest.TestCase):
     self.sym_tab = SymbolTable()
     self.int_type = PrimitiveType("int")
     self.float_type = PrimitiveType("float")
-    self.string_type = PrimitiveType("string")
+    self.string_type = PrimitiveType("String")
     self.bool_type = PrimitiveType("bool")
 
   def test_primitive_type_equality(self):
@@ -229,14 +229,14 @@ class TestSymbolTable(unittest.TestCase):
     except ModuleNotFoundError:
       from src.semantics.symbol_table import MapType, PrimitiveType, OptionalType
 
-    m1 = MapType(PrimitiveType("string"), PrimitiveType("int"))
-    m2 = MapType(PrimitiveType("string"), PrimitiveType("int"))
+    m1 = MapType(PrimitiveType("String"), PrimitiveType("int"))
+    m2 = MapType(PrimitiveType("String"), PrimitiveType("int"))
     m3 = MapType(PrimitiveType("int"), PrimitiveType("int"))
 
     self.assertEqual(m1, m2)
     self.assertNotEqual(m1, m3)
     self.assertFalse(m1 == "not a MapType")
-    self.assertEqual(repr(m1), "[string: int]")
+    self.assertEqual(repr(m1), "[String: int]")
 
     self.assertTrue(m1.is_compatible(m2))
     self.assertTrue(m1.is_compatible(OptionalType(m2)))

@@ -319,53 +319,53 @@ class MapType(Type):
 
 STRING_METHODS: Dict[str, FunctionType] = {
     "size": FunctionType(
-        [PrimitiveType("string")],
+        [PrimitiveType("String")],
         PrimitiveType("int"),
         param_names=["self"],
         has_self=True,
     ),
     "empty": FunctionType(
-        [PrimitiveType("string")],
+        [PrimitiveType("String")],
         PrimitiveType("bool"),
         param_names=["self"],
         has_self=True,
     ),
     "lower": FunctionType(
-        [PrimitiveType("string")],
-        PrimitiveType("string"),
+        [PrimitiveType("String")],
+        PrimitiveType("String"),
         param_names=["self"],
         has_self=True,
     ),
     "upper": FunctionType(
-        [PrimitiveType("string")],
-        PrimitiveType("string"),
+        [PrimitiveType("String")],
+        PrimitiveType("String"),
         param_names=["self"],
         has_self=True,
     ),
     "strip": FunctionType(
-        [PrimitiveType("string"), OptionalType(PrimitiveType("string"))],
-        PrimitiveType("string"),
+        [PrimitiveType("String"), OptionalType(PrimitiveType("String"))],
+        PrimitiveType("String"),
         param_names=["self", "chars"],
         has_self=True,
         num_defaults=1,
     ),
     "split": FunctionType(
-        [PrimitiveType("string"), OptionalType(PrimitiveType("string"))],
-        ArrayType(PrimitiveType("string")),
+        [PrimitiveType("String"), OptionalType(PrimitiveType("String"))],
+        ArrayType(PrimitiveType("String")),
         param_names=["self", "sep"],
         has_self=True,
         num_defaults=1,
     ),
     "contains": FunctionType(
-        [PrimitiveType("string"), PrimitiveType("string")],
+        [PrimitiveType("String"), PrimitiveType("String")],
         PrimitiveType("bool"),
         param_names=["self", "sub"],
         has_self=True,
     ),
     "find": FunctionType(
         [
-            PrimitiveType("string"),
-            PrimitiveType("string"),
+            PrimitiveType("String"),
+            PrimitiveType("String"),
             PrimitiveType("int"),
             PrimitiveType("bool"),
         ],
@@ -375,20 +375,20 @@ STRING_METHODS: Dict[str, FunctionType] = {
         num_defaults=2,
     ),
     "to_int": FunctionType(
-        [PrimitiveType("string"), PrimitiveType("int")],
+        [PrimitiveType("String"), PrimitiveType("int")],
         OptionalType(PrimitiveType("int")),
         param_names=["self", "radix"],
         has_self=True,
         num_defaults=1,
     ),
     "to_float": FunctionType(
-        [PrimitiveType("string")],
+        [PrimitiveType("String")],
         OptionalType(PrimitiveType("float")),
         param_names=["self"],
         has_self=True,
     ),
     "to_bool": FunctionType(
-        [PrimitiveType("string")],
+        [PrimitiveType("String")],
         OptionalType(PrimitiveType("bool")),
         param_names=["self"],
         has_self=True,
@@ -524,13 +524,13 @@ class SymbolTable:
     self.current_scope.define_type("int", PrimitiveType("int"))
     self.current_scope.define_type("float", PrimitiveType("float"))
     self.current_scope.define_type("bool", PrimitiveType("bool"))
-    self.current_scope.define_type("String", PrimitiveType("string"))
+    self.current_scope.define_type("String", PrimitiveType("String"))
     self.current_scope.define_type("none", NoneType())
     self.current_scope.define_type("void", NoneType())
     arena_t = ArenaType()
     self.current_scope.define_type("Arena", arena_t)
     self.current_scope.define("Arena", FunctionSymbol("Arena", FunctionType([], arena_t)))
-    self.current_scope.define("print", FunctionSymbol("print", FunctionType([PrimitiveType("string")], NoneType())))
+    self.current_scope.define("print", FunctionSymbol("print", FunctionType([PrimitiveType("String")], NoneType())))
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

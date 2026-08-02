@@ -897,7 +897,7 @@ class PythonTranspiler:
       self.emit("bool(")
       self.visit(node.expr)
       self.emit(")")
-    elif target in ("string", "String"):
+    elif target == "String":
       self.emit("str(")
       self.visit(node.expr)
       self.emit(")")

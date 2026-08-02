@@ -203,7 +203,7 @@ class ASTBuilder(SapphireVisitor):
     members = [self.visit(m) for m in ctx.implMember()]
 
     # Infer type parameters from type arguments if not explicitly set via impl<T>
-    KNOWN_PRIMITIVES = {"int", "float", "string", "String", "bool", "none", "void"}
+    KNOWN_PRIMITIVES = {"int", "float", "String", "bool", "none", "void"}
     for arg in trait_type_args + struct_type_args:
       if isinstance(arg, BasicTypeNode) and arg.name not in KNOWN_PRIMITIVES:
         if arg.name not in type_params:

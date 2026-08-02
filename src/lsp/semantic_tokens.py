@@ -489,7 +489,7 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def visit_BasicTypeNode(self, node):
     # Type reference
-    if node.name not in ("int", "float", "bool", "string", "none", "void"):
+    if node.name not in ("int", "float", "bool", "none", "void"):
       try:
         from semantics.symbol_table import TraitType, GenericTypeParameter
       except ImportError:  # pragma: no cover

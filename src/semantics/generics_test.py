@@ -98,9 +98,9 @@ class TestGenerics(unittest.TestCase):
     """
     ast = self._check(code)
     py_code = PythonTranspiler().transpile(ast)
-    self.assertIn("class Pair__string_int", py_code)
+    self.assertIn("class Pair__String_int", py_code)
     lua_code = LuaTranspiler().transpile(ast)
-    self.assertIn("Pair__string_int", lua_code)
+    self.assertIn("Pair__String_int", lua_code)
 
   def test_generic_trait_declaration_and_impl_variations(self):
     """Verifies generic trait declarations and impl syntax variations."""

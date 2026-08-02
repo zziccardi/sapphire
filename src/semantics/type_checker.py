@@ -1145,7 +1145,7 @@ class TypeChecker:
     if node.lit_type == "bool":
       return PrimitiveType("bool")
     if node.lit_type == "string":
-      return PrimitiveType("string")
+      return PrimitiveType("String")
     return NoneType()
 
   def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> Type:
@@ -1156,7 +1156,7 @@ class TypeChecker:
             f"Cannot interpolate struct type '{t.name}' directly into string."
             " Call a string conversion method explicitly."
         )
-    return PrimitiveType("string")
+    return PrimitiveType("String")
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> Type:
     sym = self.symbol_table.lookup(node.name)
@@ -1197,9 +1197,9 @@ class TypeChecker:
 
     # Arithmetic operators
     if node.op in ("+", "-", "*", "/", "%"):
-      if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name in ("String", "string")) or (isinstance(right, PrimitiveType) and right.name in ("String", "string"))):
+      if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name == "String") or (isinstance(right, PrimitiveType) and right.name == "String")):
         node.is_string_concat = True
-        return PrimitiveType("string")
+        return PrimitiveType("String")
       # Supports int and float operations
       is_numeric_left = isinstance(left, PrimitiveType) and left.name in ("int", "float")
       is_numeric_right = isinstance(right, PrimitiveType) and right.name in ("int", "float")
@@ -1249,15 +1249,16 @@ class TypeChecker:
 
   def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
     expr_type = self.visit(node.expr)
-    if node.op == "!":
-      if expr_type != PrimitiveType("bool"):
-        self.error("Logical NOT operator requires a boolean expression.")
-      return PrimitiveType("bool")
     if node.op in ("-", "+"):
-      is_numeric = isinstance(expr_type, PrimitiveType) and expr_type.name in ("int", "float")
-      if not is_numeric:
-        self.error(f"Numeric operator '{node.op}' requires a numeric expression.")
+      if isinstance(expr_type, PrimitiveType) and expr_type.name in ("int", "float"):
+        return expr_type
+      self.error(f"Unary operator '{node.op}' requires a numeric type, got '{expr_type}'.")
       return expr_type
+    elif node.op == "!":
+      if isinstance(expr_type, PrimitiveType) and expr_type.name == "bool":
+        return expr_type
+      self.error(f"Unary operator '!' requires a boolean type, got '{expr_type}'.")
+      return PrimitiveType("bool")
     return PrimitiveType("none")
 
   def visit_CastExprNode(self, node: CastExprNode) -> Type:
@@ -1272,12 +1273,12 @@ class TypeChecker:
     if is_expr_num and is_target_num:
       return target_type
 
-    if isinstance(expr_type, EnumType) and isinstance(target_type, PrimitiveType) and target_type.name in ("int", "string"):
+    if isinstance(expr_type, EnumType) and isinstance(target_type, PrimitiveType) and target_type.name in ("int", "String"):
       return target_type
 
-    if isinstance(expr_type, PrimitiveType) and expr_type.name in ("string", "pascal_string"):
+    if isinstance(expr_type, PrimitiveType) and expr_type.name == "String":
       if isinstance(target_type, PrimitiveType) and target_type.name in ("int", "float", "bool"):
-        self.error(f"Cannot cast 'string' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
+        self.error(f"Cannot cast 'String' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
         return target_type
 
     self.error(f"Cannot cast type '{expr_type}' to '{target_type}'.")
@@ -1392,15 +1393,15 @@ class TypeChecker:
     if getattr(node.callee, "is_string_from", False):
       if len(node.arguments) != 1:
         self.error("String.from() requires exactly 1 argument.")
-        return PrimitiveType("string")
+        return PrimitiveType("String")
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
-          (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool", "string", "pascal_string"))
+          (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool", "String"))
           or isinstance(arg_t, EnumType)
       )
       if not is_valid:
         self.error(f"Cannot convert type '{arg_t}' to String using String.from().")
-      return PrimitiveType("string")
+      return PrimitiveType("String")
 
     if getattr(node.callee, "is_enum_from", False):
       enum_t = getattr(node.callee, "enum_type", PrimitiveType("none"))
@@ -1409,10 +1410,10 @@ class TypeChecker:
         return OptionalType(enum_t)
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
-          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "string", "pascal_string")
+          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "String")
       )
       if not is_valid:
-        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or string.")
+        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or String.")
       return OptionalType(enum_t)
 
     signature = None
@@ -1507,10 +1508,10 @@ class TypeChecker:
         self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
         return PrimitiveType("none")
 
-    if isinstance(receiver_type, PrimitiveType) and receiver_type.name.lower() in ("string", "pascal_string"):
+    if isinstance(receiver_type, PrimitiveType) and receiver_type.name == "String":
       if node.member == "from":
         node.is_string_from = True
-        return FunctionType([PrimitiveType("string")], PrimitiveType("string"))
+        return FunctionType([PrimitiveType("String")], PrimitiveType("String"))
       method = STRING_METHODS.get(node.member)
       if method:
         node.is_string_method = True
@@ -1531,7 +1532,7 @@ class TypeChecker:
       if node.member == "from":
         node.is_enum_from = True
         node.enum_type = receiver_type
-        return FunctionType([PrimitiveType("string")], OptionalType(receiver_type))
+        return FunctionType([PrimitiveType("String")], OptionalType(receiver_type))
       if node.member in receiver_type.variants:
         return receiver_type
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
@@ -1681,7 +1682,7 @@ class TypeChecker:
 
     def is_valid_key_type(ktype: Type) -> bool:
       return (
-          (isinstance(ktype, PrimitiveType) and ktype.name in ("string", "int"))
+          (isinstance(ktype, PrimitiveType) and ktype.name in ("String", "int"))
           or isinstance(ktype, EnumType)
       )
 
