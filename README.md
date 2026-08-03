@@ -17,17 +17,18 @@ The project is a **work in progress**. The [language spec](docs/SPEC.md) may
 change significantly over time. For now the transpiler toolchain targets Python
 and Lua 5.1 to facilitate rapid iteration and scripting-engine integration; once
 the language design is finalized, I'd like to introduce a proper native compiler
-(likely built in Rust) to enable the memory-safety the performance features
+(likely built in Rust) to enable the memory-safety and performance features
 described in the spec.
 
 ## Key features of Sapphire
 
 ### 1. Dual-paradigm code reuse
-* **Traits**: Define interfaces/contracts (`trait Damageable`) that are
+* **Traits**: Traits define interfaces/contracts (`trait Damageable`) that are
   statically checked and dispatched.
-* **Static inheritance**: Structures can inherit layouts statically
+* **Structural delegation**: Structs can "inherit" layouts statically
   (`struct Character: Entity`) without runtime overhead or traditional OOP
-  boilerplate.
+  boilerplate. The compiler treats this as syntactic sugar for composition and
+  automatically generates forwarding methods.
 * **Prototypal delegation**: Prototypal delegation is opt-in and uses
   the `proto` keyword (e.g. `proto Character`). Runtime objects can be created
   by cloning existing prototypes using the `clone` keyword.
@@ -40,19 +41,22 @@ described in the spec.
 * Null-pointer errors are prevented at compile time.
 * Optionals are denoted by a `?` suffix (e.g., `Character?`).
 * Optionals can be chained safely (`let speed = target?.speed`).
-* Conditional unwrapping (`let x ?= optional`) and Go/C++17-style init statements within loop headers are supported.
+* Optionals can be conditionally unwrapped (`let x ?= optional`) within
+  Go/C++17-style init statements in `if` and `while` headers.
 * Nil-coalescing fallback values are supported via the `??` operator.
 
 ### 3. Advanced parameter modes
 * Non-primitive types are passed by **constant reference** by default, avoiding
   reference-cycle overhead and a visual pointer syntax.
-* Explicit mutable references are marked with `var` in parameters (e.g.,
-  `func update(var target: Character)`).
-* Native support for named and default parameters at the call site using `=`
-  (e.g., `execute_strike(bonus = 10)`).
+* Mutable parameters must be explicitly marked with `var` in function signatures
+  (e.g., `func update(var target: Character)`).
+* Named parameters are supported at the call site using `=`
+  (e.g., `execute_strike(bonus = 10)`); functions can also specify default
+  parameter values in their signatures.
 
 ### 4. First-class functions & closures
-* Support for block and single-expression lambda syntax (e.g., `x -> x * 2`).
+* The lambda syntax supports both blocks and single experessions
+  (e.g., `x -> x * 2`).
 * Bidirectional type inference resolves lambda parameters automatically based on
   expected types at assignment or call sites.
 
@@ -64,7 +68,8 @@ described in the spec.
 * Native interoperation with host runtimes (such as **Love2D** in Lua 5.1 / LuaJIT environments).
 * `@extern var love: LoveEngine;` binds host runtime global variables with 100% type safety.
 * `@export("love.update") func update(dt: float)` exposes functions directly as global engine callbacks (`function love.update(dt)`).
-* Combines Sapphire `trait`s and `struct`s to model external host APIs without runtime performance penalties.
+* Combines traits and structs to model external host APIs without runtime
+  performance penalties.
 * **Source maps & Love2D error demangling**: Automatically generates standard [source map v3](https://tc39.es/ecma426/) files (`.lua.map`) and embeds runtime stack-trace demanglers. When a runtime error occurs in Love2D, both the terminal and Love2D error screen display original Sapphire `.sp` filenames, line numbers, and source line snippets.
 
 ## CLI overview
