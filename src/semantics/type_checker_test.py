@@ -393,7 +393,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("For-in loop source must be an array or map type", str(context.exception))
+    self.assertIn("For-in loop source must be an array, map, or range type", str(context.exception))
 
   def test_for_map_iteration_valid(self):
     """Verifies type checking for valid map iteration."""
@@ -433,6 +433,69 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as context:
       self._check(code)
     self.assertIn("Cannot iterate over an array with key-value syntax", str(context.exception))
+
+  def test_for_range_iteration_valid(self):
+    """Verifies valid range iteration with 1, 2, and 3 arguments."""
+    code = """
+    func test() {
+      for i in range(10) {
+        let x: int = i;
+      }
+      for i in range(0, 10) {
+        let y: int = i;
+      }
+      for i in range(0, 10, 2) {
+        let z: int = i;
+      }
+    }
+    """
+    self._check(code)
+
+  def test_for_range_variable_iteration_valid(self):
+    """Verifies stored Range variable iteration."""
+    code = """
+    func test() {
+      let r: Range = range(0, 5);
+      for i in r {
+        let x: int = i;
+      }
+    }
+    """
+    self._check(code)
+
+  def test_for_range_iteration_key_value_error(self):
+    """Enforces that iterating over a range prohibits key-value syntax."""
+    code = """
+    func test() {
+      for k, v in range(10) {
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot iterate over a range with key-value syntax", str(context.exception))
+
+  def test_range_call_type_mismatch_error(self):
+    """Enforces integer arguments for range()."""
+    code = """
+    func test() {
+      let r = range("0", "10");
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Argument type mismatch at position 1. Expected 'int', got 'String'", str(context.exception))
+
+  def test_range_call_arg_count_error(self):
+    """Enforces 1 to 3 arguments for range()."""
+    code = """
+    func test() {
+      let r = range();
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Not enough arguments passed to call. Expected at least 1, got 0", str(context.exception))
 
 
   def test_binary_and_unary_ops(self):

@@ -1,7 +1,8 @@
 """Symbol table and type representation for Sapphire's semantic analyzer.
 
 This module defines classes for representing Sapphire types, symbols, scopes,
-and the symbol table used to resolve and validate identifiers during type-checking.
+and the symbol table used to resolve and validate identifiers during
+type-checking.
 """
 
 from typing import Dict, List, Optional, Any, Set
@@ -30,7 +31,8 @@ class Type:
         and other.name == "float"
     ):
       return True
-    if isinstance(self, EnumType) and isinstance(other, PrimitiveType) and self.value_type.lower() == other.name.lower():
+    if (isinstance(self, EnumType) and isinstance(other, PrimitiveType) and
+        self.value_type.lower() == other.name.lower()):
       return True
     if isinstance(other, TraitType) and isinstance(self, StructType):
       return self.implements_trait(other)
@@ -88,7 +90,12 @@ class MultiReturnType(Type):
 
 
 class FunctionType(Type):
-  """Represents a function type signature (e.g., '(int, int) -> float' or '(int, int) -> (float, float)')."""
+  """Represents a function type signature.
+
+  Examples:
+  * (int, int) -> float
+  * (int, int) -> (float, float)
+  """
 
   def __init__(
       self,
@@ -112,7 +119,8 @@ class FunctionType(Type):
       self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
-    self.has_self = has_self or (bool(self.param_names) and self.param_names[0] == "self")
+    self.has_self = (
+        has_self or (bool(self.param_names) and self.param_names[0] == "self"))
     self.extern_name = extern_name
     self.num_defaults = num_defaults
 
@@ -120,7 +128,8 @@ class FunctionType(Type):
   def return_types(self) -> List[Type]:
     if isinstance(self.return_type, MultiReturnType):
       return self.return_type.types
-    elif isinstance(self.return_type, PrimitiveType) and self.return_type.name == "none":
+    elif (isinstance(self.return_type, PrimitiveType) and
+          self.return_type.name == "none"):
       return []
     else:
       return [self.return_type]
@@ -148,7 +157,8 @@ class FunctionType(Type):
 class StructField:
   """Represents a field in a struct."""
 
-  def __init__(self, name: str, field_type: Type, is_mutable: bool, has_default: bool = False, comments: str = ""):
+  def __init__(self, name: str, field_type: Type, is_mutable: bool,
+               has_default: bool = False, comments: str = ""):
     self.name = name
     self.field_type = field_type
     self.is_mutable = is_mutable
@@ -159,7 +169,8 @@ class StructField:
 class StructMethod:
   """Represents a method in a struct impl block."""
 
-  def __init__(self, name: str, method_type: FunctionType, modifier: Optional[str]):
+  def __init__(self, name: str, method_type: FunctionType,
+               modifier: Optional[str]):
     self.name = name
     self.method_type = method_type
     self.modifier = modifier  # 'static', 'const', or None
@@ -186,7 +197,12 @@ class GenericTypeParameter(Type):
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str, parent_names: Optional[Union[str, List[str]]] = None, is_prototype: bool = False, comments: Optional[str] = None, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None, parent_name: Optional[str] = None):
+  def __init__(self, name: str,
+               parent_names: Optional[Union[str, List[str]]] = None,
+               is_prototype: bool = False, comments: Optional[str] = None,
+               type_params: Optional[List[str]] = None,
+               ast_decl: Optional[Any] = None,
+               parent_name: Optional[str] = None):
     self.name = name
     if parent_names is None:
       self.parent_names = [parent_name] if parent_name else []
@@ -214,7 +230,9 @@ class StructType(Type):
     else:
       self.parent_names = [value]
 
-  def get_method(self, name: str, symbol_table: Optional[Any] = None) -> Optional["StructMethod"]:
+  def get_method(
+      self, name: str,
+      symbol_table: Optional[Any] = None) -> Optional["StructMethod"]:
     """Look up a method on this struct, falling back to parent structs if symbol_table is provided."""
     if name in self.methods:
       return self.methods[name]
@@ -227,7 +245,8 @@ class StructType(Type):
             return res
     return None
 
-  def implements_trait(self, trait: "TraitType", symbol_table: Optional[Any] = None) -> bool:
+  def implements_trait(self, trait: "TraitType",
+                       symbol_table: Optional[Any] = None) -> bool:
     """Returns True if this struct implements the given trait (nominally or structurally)."""
     if trait.name in self.implemented_traits:
       return True
@@ -253,7 +272,9 @@ class StructType(Type):
 class TraitType(Type):
   """Represents a user-defined trait type."""
 
-  def __init__(self, name: str, comments: Optional[str] = None, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None):
+  def __init__(self, name: str, comments: Optional[str] = None,
+               type_params: Optional[List[str]] = None,
+               ast_decl: Optional[Any] = None):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
     self.comments = comments or ""
@@ -307,6 +328,16 @@ class ArenaType(Type):
     return "Arena"
 
 
+class RangeType(Type):
+  """Represents the built-in Range type returned by range()."""
+
+  def __eq__(self, other: object) -> bool:
+    return isinstance(other, RangeType)
+
+  def __repr__(self) -> str:
+    return "Range"
+
+
 class NoneType(Type):
   """Represents the special type of the 'none' literal."""
 
@@ -323,7 +354,8 @@ class ArrayType(Type):
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, ArrayType):
-      if isinstance(self.element_type, NoneType) or isinstance(other.element_type, NoneType):
+      if (isinstance(self.element_type, NoneType) or
+          isinstance(other.element_type, NoneType)):
         return True
       return self.element_type.is_compatible(other.element_type)
     if isinstance(other, OptionalType):
@@ -368,7 +400,8 @@ class MapType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, MapType):
       return False
-    return self.key_type == other.key_type and self.value_type == other.value_type
+    return (self.key_type == other.key_type and
+            self.value_type == other.value_type)
 
   def __repr__(self) -> str:
     return f"[{self.key_type}: {self.value_type}]"
@@ -427,7 +460,8 @@ STRING_METHODS: Dict[str, FunctionType] = {
             PrimitiveType("bool"),
         ],
         OptionalType(PrimitiveType("int")),
-        param_names=["self", "start", "reverse"] if False else ["self", "sub", "start", "reverse"],
+        param_names=(["self", "start", "reverse"] if False
+                     else ["self", "sub", "start", "reverse"]),
         has_self=True,
         num_defaults=2,
     ),
@@ -470,8 +504,8 @@ class VariableSymbol(Symbol):
   """Represents variables and parameters."""
 
   def __init__(
-      self, name: str, symbol_type: Type, is_mutable: bool, is_parameter: bool = False
-  ):
+      self, name: str, symbol_type: Type, is_mutable: bool,
+      is_parameter: bool = False):
     super().__init__(name, symbol_type)
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
@@ -481,7 +515,9 @@ class VariableSymbol(Symbol):
 class FunctionSymbol(Symbol):
   """Represents functions and methods."""
 
-  def __init__(self, name: str, signature: FunctionType, type_params: Optional[List[str]] = None, ast_decl: Optional[Any] = None):
+  def __init__(self, name: str, signature: FunctionType,
+               type_params: Optional[List[str]] = None,
+               ast_decl: Optional[Any] = None):
     super().__init__(name, signature)
     self.type_params = type_params or []
     self.ast_decl = ast_decl
@@ -573,7 +609,7 @@ class Scope:
 
 
 class SymbolTable:
-  """Manages the scope stack and provides symbol/type declarations and resolution."""
+  """Manages scope stack; provides symbol/type declarations & resolution."""
 
   def __init__(self):
     self.current_scope = Scope()
@@ -586,8 +622,28 @@ class SymbolTable:
     self.current_scope.define_type("void", NoneType())
     arena_t = ArenaType()
     self.current_scope.define_type("Arena", arena_t)
-    self.current_scope.define("Arena", FunctionSymbol("Arena", FunctionType([], arena_t)))
-    self.current_scope.define("print", FunctionSymbol("print", FunctionType([PrimitiveType("String")], NoneType())))
+    self.current_scope.define(
+        "Arena",
+        FunctionSymbol("Arena", FunctionType([], arena_t)))
+    self.current_scope.define(
+        "print",
+        FunctionSymbol("print", FunctionType([PrimitiveType("String")],
+                                             NoneType())))
+    range_t = RangeType()
+    self.current_scope.define_type("Range", range_t)
+    self.current_scope.define(
+        "range",
+        FunctionSymbol(
+            "range",
+            FunctionType(
+                param_types=[PrimitiveType("int"), PrimitiveType("int"),
+                             PrimitiveType("int")],
+                return_type=range_t,
+                param_names=["start", "stop", "step"],
+                num_defaults=2,
+            ),
+        ),
+    )
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

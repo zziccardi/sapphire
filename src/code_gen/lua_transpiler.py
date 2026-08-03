@@ -18,7 +18,7 @@ try:
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
   from semantics.type_checker import TypeChecker, SemanticError
-  from semantics.symbol_table import MapType
+  from semantics.symbol_table import MapType, RangeType
   from code_gen.source_map import SourceMapBuilder
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
@@ -26,7 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.semantics.symbol_table import MapType
+  from src.semantics.symbol_table import MapType, RangeType
   from src.code_gen.source_map import SourceMapBuilder
 
 
@@ -282,6 +282,31 @@ local _sapphire_iter_array = function(arr)
     end
   end
   return ipairs(arr)
+end
+
+local _sapphire_range = function(a, b, c)
+  local start, stop, step
+  if b == nil then
+    start = 0
+    stop = a
+    step = 1
+  elseif c == nil then
+    start = a
+    stop = b
+    step = 1
+  else
+    start = a
+    stop = b
+    step = c
+  end
+  local iter = function(state, curr)
+    local next_val = curr + state.step
+    if (state.step > 0 and next_val < state.stop) or (state.step < 0 and next_val > state.stop) then
+      return next_val
+    end
+    return nil
+  end
+  return iter, {stop = stop, step = step}, start - step
 end
 """
 
@@ -1062,6 +1087,13 @@ class LuaTranspiler:
         self.emit(f"for {node.key_var}, {node.val_var} in pairs(")
         self.visit(node.iterable)
         self.emit(") do")
+      elif (
+          isinstance(getattr(node.iterable, "inferred_type", None), RangeType)
+          or (isinstance(node.iterable, CallNode) and isinstance(node.iterable.callee, IdentifierNode) and node.iterable.callee.name == "range")
+      ):
+        self.emit(f"for {node.val_var} in ")
+        self.visit(node.iterable)
+        self.emit(" do")
       else:
         self.emit(f"for _, {node.val_var} in _sapphire_iter_array(")
         self.visit(node.iterable)
@@ -1321,6 +1353,15 @@ class LuaTranspiler:
 
     # Method call optimization for instance methods (e.g. obj.method()) vs
     # static calls
+    if isinstance(node.callee, IdentifierNode) and node.callee.name == "range":
+      self.emit("_sapphire_range(")
+      for idx, arg in enumerate(node.arguments):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(arg.expr)
+      self.emit(")")
+      return
+
     if isinstance(node.callee, MemberAccessNode):
       member_name = getattr(node.callee, "target_name", None) or node.callee.member
       receiver_name = getattr(node.callee.receiver, "name", None)

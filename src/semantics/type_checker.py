@@ -26,6 +26,7 @@ try:
       ArrayType,
       MapType,
       ArenaType,
+      RangeType,
       ModuleType,
       GenericTypeParameter,
       VariableSymbol,
@@ -54,6 +55,7 @@ except ModuleNotFoundError:  # pragma: no cover
       ArrayType,
       MapType,
       ArenaType,
+      RangeType,
       ModuleType,
       GenericTypeParameter,
       VariableSymbol,
@@ -1188,6 +1190,10 @@ class TypeChecker:
           self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
         elem_type = iter_type.element_type
         self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, elem_type, node.is_mutable))
+      elif isinstance(iter_type, RangeType):
+        if node.key_var is not None:
+          self.error("Cannot iterate over a range with key-value syntax; use a single loop variable.")
+        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("int"), node.is_mutable))
       elif isinstance(iter_type, MapType):
         if node.key_var is None:
           self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
@@ -1196,7 +1202,7 @@ class TypeChecker:
           self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable))
           self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
       else:
-        self.error("For-in loop source must be an array or map type.")
+        self.error("For-in loop source must be an array, map, or range type.")
         if node.key_var is not None:
           self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, PrimitiveType("none"), node.is_mutable))
         self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("none"), node.is_mutable))

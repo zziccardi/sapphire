@@ -1027,6 +1027,20 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("Position._init_fields(self)", lua_code)
     self.assertIn("Health._init_fields(self)", lua_code)
 
+  def test_range_iteration_lua(self):
+    """Verifies transpilation of range() loops in Lua."""
+    code = """
+    func test_range() {
+      var sum = 0;
+      for i in range(0, 10, 2) {
+        sum += i;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("for i in _sapphire_range(0, 10, 2) do", lua_code)
+    self.assertIn("local _sapphire_range =", lua_code)
+
 
 if __name__ == "__main__":
   unittest.main()

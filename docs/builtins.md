@@ -18,7 +18,7 @@ The `print` function is Sapphire's primary output primitive for writing textual 
 func print(value: String): void
 ```
 
-* **Parameters**: `value` — a `String` expression (or an expression evaluated to a string via string concatenation).
+* **Parameters**: `value` – a `String` expression (or an expression evaluated to a string via string concatenation).
 * **Return type**: `void` (an alias for `none`).
 
 #### Description and behavior
@@ -37,6 +37,55 @@ print("Hello, Sapphire!");
 let user = "Alice";
 let score = 100;
 print("Player " + user + " achieved a score of " + score);
+```
+
+### The range function
+
+The `range` function produces a sequence of integers over a half-open interval
+`[start, stop)`.
+
+#### Signature and definition
+
+```sapphire
+func range(stop: int): Range
+func range(start: int, stop: int): Range
+func range(start: int, stop: int, step: int = 1): Range
+```
+
+* **Parameters**:
+  * `stop` – Exclusive upper bound integer.
+  * `start` – Inclusive lower bound integer (defaults to `0` if omitted).
+  * `step` – Increment/decrement step integer (defaults to `1` if omitted).
+* **Return type**: `Range` – a first-class range sequence type.
+
+#### Description and behavior
+
+`range` creates a half-open numerical range. It is primarily used with `for-in`
+loops for count-based or step-based iteration.
+* **Positive step**: Iterates while `current < stop`.
+* **Negative step**: Iterates while `current > stop`.
+* **Transpilation**:
+  * **Python target**: Transpiles to native Python `range(...)`.
+  * **Lua 5.1 target**: Transpiles to `_sapphire_range(...)` utilizing a zero-allocation stateless iterator.
+
+#### Usage examples
+
+```sapphire
+// Iterate 0 through 4 (5 iterations)
+for i in range(5) {
+  print(String.from(i));
+}
+
+// Iterate 2 through 9 with step of 2
+for i in range(2, 10, 2) {
+  print(String.from(i));  // 2, 4, 6, 8
+}
+
+// Store a range in a variable
+let r: Range = range(0, 5);
+for i in r {
+  print(String.from(i));
+}
 ```
 
 ## Built-in types and structures
@@ -430,7 +479,9 @@ func demo_arena() {
 | Built-in | Category | Key syntax / signature | Primary use case |
 | :--- | :--- | :--- | :--- |
 | **`print`** | Function | `print(value: String): void` | Standard output logging |
-| **`String`** | Primitive Type | `String` | Immutable UTF-8 text manipulation & reference passing |
-| **`Array`** | Collection Type | `[T]`, `[T; N]` | Sequential element collections with 0-based indexing |
-| **`Map`** | Collection Type | `[K: V]` | Key-value associative lookup (`K`: String, int, or enum) |
-| **`Arena`** | Memory Manager | `Arena()`, `expr in arena` | Scope-bound RAII memory allocation & safety control |
+| **`range`** | Function | `range(...)` | Numeric iteration |
+| **`String`** | Reference type | `String` | Immutable UTF-8 text representation |
+| **`Array`** | Collection type | `[T]`, `[T; N]` | Sequential element collections with 0-based indexing |
+| **`Map`** | Collection type | `[K: V]` | Key–value associative lookup (`K`: String, int, or enum) |
+| **`Arena`** | Memory manager | `Arena()`, `expr in arena` | Scope-bound RAII memory allocation & safety control |
+| **`Range`** | Iteration type | `Range()` | Type returned by `range()` for numeric iteration |
