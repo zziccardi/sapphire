@@ -644,6 +644,20 @@ class SymbolTable:
             ),
         ),
     )
+    # Register TestCase trait for std.testing framework
+    testcase_trait = TraitType("TestCase")
+    # Register default assertion and expectation method signatures
+    assertion_names = [
+        "assert_true", "assert_false", "assert_eq", "assert_ne",
+        "assert_almost_eq", "assert_none", "assert_not_none",
+        "expect_true", "expect_false", "expect_eq", "expect_ne",
+        "expect_almost_eq", "expect_none", "expect_not_none"
+    ]
+    for name in assertion_names:
+      fn_t = FunctionType([NoneType(), NoneType(), PrimitiveType("String"), PrimitiveType("String")], NoneType(), num_defaults=4)
+      fn_t.is_testing_assertion = True
+      testcase_trait.methods[name] = fn_t
+    self.current_scope.define_type("TestCase", testcase_trait)
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

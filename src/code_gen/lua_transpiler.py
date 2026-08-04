@@ -379,6 +379,7 @@ class LuaTranspiler:
       self,
       source_file: Optional[str] = None,
       source_map_builder: Optional[SourceMapBuilder] = None,
+      test_mode: bool = False,
   ):
     self.code: List[str] = []
     self.indent_level = 0
@@ -386,6 +387,8 @@ class LuaTranspiler:
     self.current_column = 0
     self.source_file = source_file
     self.source_map_builder = source_map_builder
+    self.test_mode = test_mode
+    self.declared_symbols: List[str] = []
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
@@ -502,10 +505,6 @@ class LuaTranspiler:
       self.emit("main()")
       self.newline()
 
-    # 5. Transpile export manifest module return table _M
-    if getattr(program, "export_block", None):
-      self.visit(program.export_block)
-
     # 6. Append inline source map table and Love2D error demangler if sourcemap builder present
     if self.source_map_builder and self.source_map_builder.mappings:
       self.newline()
@@ -513,6 +512,17 @@ class LuaTranspiler:
       self.newline()
       self.emit(LUA_SOURCEMAP_DEMANGLER)
       self.newline()
+
+    if getattr(program, "export_block", None):
+      self.visit(program.export_block)
+    elif self.test_mode and self.declared_symbols:
+      self.newline()
+      self.emit("local _M = {}")
+      for sym in self.declared_symbols:
+        self.newline()
+        self.emit(f"_M.{sym} = {sym}")
+      self.newline()
+      self.emit("return _M")
 
     return self.get_output()
 
@@ -591,6 +601,7 @@ class LuaTranspiler:
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Header definition for struct
     self.known_structs.add(node.name)
+    self.declared_symbols.append(node.name)
     is_proto = node.is_prototype
     struct_name = node.name
     methods = self.struct_methods.get(struct_name, [])
@@ -720,6 +731,12 @@ class LuaTranspiler:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    is_test_func = any(getattr(a, "name", "") == "test" for a in getattr(node, "annotations", []))
+    if is_test_func and not self.test_mode:
+      return
+    if is_test_func:
+      self.declared_symbols.append(node.name)
+
     export_ann = next((a for a in node.annotations if a.name == "export"), None)
     params = [p.name for p in node.parameters]
 

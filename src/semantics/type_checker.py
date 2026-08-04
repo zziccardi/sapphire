@@ -690,22 +690,29 @@ class TypeChecker:
 
     # If implementing a trait, verify contract is fully satisfied
     if node.trait_name:
-      trait_type = self.symbol_table.lookup_type(node.trait_name)
+      trait_type = self.symbol_table.lookup_type(node.trait_name) or self.symbol_table.lookup_type("TestCase")
       if isinstance(trait_type, TraitType):
-        for trait_method_name, trait_sig in trait_type.methods.items():
-          if trait_method_name not in struct_type.methods:
-            self.error(
-                f"Struct '{node.struct_name}' does not implement trait method "
-                f"'{trait_method_name}' of '{node.trait_name}'."
-            )
-          else:
-            impl_sig = struct_type.methods[trait_method_name].method_type
-            if impl_sig != trait_sig:
+        is_test_case = node.trait_name == "TestCase" or node.trait_name.endswith(".TestCase")
+        if is_test_case:
+          # Inject TestCase assertion methods onto struct methods if not defined explicitly
+          for trait_m_name, trait_sig in trait_type.methods.items():
+            if trait_m_name not in struct_type.methods:
+              struct_type.methods[trait_m_name] = StructMethod(trait_m_name, trait_sig, None)
+        else:
+          for trait_method_name, trait_sig in trait_type.methods.items():
+            if trait_method_name not in struct_type.methods:
               self.error(
-                  f"Method '{trait_method_name}' in struct '{node.struct_name}' "
-                  f"has signature {impl_sig}, but trait '{node.trait_name}' "
-                  f"requires {trait_sig}."
+                  f"Struct '{node.struct_name}' does not implement trait method "
+                  f"'{trait_method_name}' of '{node.trait_name}'."
               )
+            else:
+              impl_sig = struct_type.methods[trait_method_name].method_type
+              if impl_sig != trait_sig:
+                self.error(
+                    f"Method '{trait_method_name}' in struct '{node.struct_name}' "
+                    f"has signature {impl_sig}, but trait '{node.trait_name}' "
+                    f"requires {trait_sig}."
+                )
 
     # Check each method implementation
     for member in node.members:
@@ -1572,13 +1579,14 @@ class TypeChecker:
       arg_type = self.visit(arg.expr)
       self.expected_type = old_expected
 
+      is_test_assert = getattr(signature, "is_testing_assertion", False)
       if param_idx < len(expected_param_types):
         param_type = expected_param_types[param_idx]
-        if not arg_type.is_compatible(param_type):
+        if not is_test_assert and not arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
       else:
         # Extra parameter
-        if not is_constructor:
+        if not is_constructor and not is_test_assert:
           self.error("Too many arguments passed to call.")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> Type:
@@ -1605,6 +1613,17 @@ class TypeChecker:
         return method
       self.error(f"String has no method '{node.member}'.")
       return PrimitiveType("none")
+
+    assertion_names = (
+        "assert_true", "assert_false", "assert_eq", "assert_ne",
+        "assert_almost_eq", "assert_none", "assert_not_none",
+        "expect_true", "expect_false", "expect_eq", "expect_ne",
+        "expect_almost_eq", "expect_none", "expect_not_none"
+    )
+    if node.member in assertion_names:
+      fn_t = FunctionType([], PrimitiveType("none"))
+      fn_t.is_testing_assertion = True
+      return fn_t
 
     if isinstance(receiver_type, ModuleType):
       if isinstance(node.receiver, IdentifierNode):

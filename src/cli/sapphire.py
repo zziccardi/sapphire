@@ -67,6 +67,21 @@ def build_command(args):
   transpile_file(source_file, output_file, target=target, sourcemap=sourcemap)
 
 
+def test_command(args):
+  """Handles `test` subcommand: discovers and executes Sapphire tests."""
+  try:
+    from cli.test_runner import run_tests
+  except ModuleNotFoundError:  # pragma: no cover
+    from src.cli.test_runner import run_tests
+
+  target = getattr(args, "target", "python").lower()
+  source_path = getattr(args, "source", ".")
+  filter_pattern = getattr(args, "filter", None)
+  sourcemap = not getattr(args, "no_sourcemap", False)
+  exit_code = run_tests(source_path, target=target, filter_pattern=filter_pattern, sourcemap=sourcemap)
+  sys.exit(exit_code)
+
+
 def main():
   parser = argparse.ArgumentParser(
       prog="sapphire",
@@ -102,10 +117,25 @@ def main():
       help="Disable source map generation (.lua.map) for Lua targets")
   run_parser.set_defaults(func=run_command)
 
+  # `test` subcommand
+  test_parser = subparsers.add_parser(
+      "test", help="Discover and execute Sapphire tests")
+  test_parser.add_argument(
+      "source", nargs="?", default=".", help="Path to Sapphire source file (.sp) or directory (default: .)")
+  test_parser.add_argument(
+      "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
+      help="Code generation target (default: python)")
+  test_parser.add_argument(
+      "--filter", help="Filter tests by substring matching test name")
+  test_parser.add_argument(
+      "--no_sourcemap", action="store_true",
+      help="Disable source map generation (.lua.map) for Lua targets")
+  test_parser.set_defaults(func=test_command)
+
   # Handle shortcut invocation: if first argument is a file (e.g.
   # `sapphire samples/overview.sp`)
   if (len(sys.argv) > 1 and not sys.argv[1].startswith("-") and
-      sys.argv[1] not in ["build", "run"]):
+      sys.argv[1] not in ["build", "run", "test"]):
     sys.argv.insert(1, "run")
 
   args = parser.parse_args()

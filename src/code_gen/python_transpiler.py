@@ -332,11 +332,13 @@ RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
 class PythonTranspiler:
   """AST visitor to transpile Sapphire code to Python."""
 
-  def __init__(self):
+  def __init__(self, test_mode: bool = False):
     self.code: List[str] = []
     self.indent_level = 0
+    self.test_mode = test_mode
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
+    self.struct_traits: Dict[str, Set[str]] = {}
     self.clone_helper_counter = 0
     self._identifier_map: Dict[str, str] = {}
 
@@ -369,12 +371,20 @@ class PythonTranspiler:
     return "".join(self.code)
 
   def transpile(self, program: ProgramNode) -> str:
-    """Main entry point to transpile a Sapphire ProgramNode to Python."""
+    """Entry point to transpile a ProgramNode AST into Python source code string."""
+    self.code = []
+
     # 1. Output runtime preamble
     self.emit(PYTHON_RUNTIME_PREAMBLE)
     self.newline()
 
-    # 1b. Transpile module imports
+    # Detect testing module import alias
+    self.testing_alias = "testing"
+    for imp in getattr(program, "imports", []):
+      if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+        self.testing_alias = imp.alias if imp.alias else imp.path.split(".")[-1]
+
+    # 1. Imports
     for imp in getattr(program, "imports", []):
       self.visit(imp)
 
@@ -386,6 +396,10 @@ class PythonTranspiler:
         if decl.struct_name not in self.struct_methods:
           self.struct_methods[decl.struct_name] = []
         self.struct_methods[decl.struct_name].extend(decl.members)
+        if decl.trait_name:
+          if decl.struct_name not in self.struct_traits:
+            self.struct_traits[decl.struct_name] = set()
+          self.struct_traits[decl.struct_name].add(decl.trait_name)
 
     top_level_decls = []
     executable_stmts = []
@@ -490,10 +504,20 @@ class PythonTranspiler:
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     is_proto = node.is_prototype
+    traits = self.struct_traits.get(node.name, set())
+    is_test_case = any("TestCase" in t for t in traits)
+    test_base = f"{getattr(self, 'testing_alias', 'testing')}.TestCase"
+
     if node.parent_names:
-      parent_class = ", ".join(node.parent_names)
+      parents = list(node.parent_names)
+      if is_test_case and test_base not in parents:
+        parents.append(test_base)
+      parent_class = ", ".join(parents)
     else:
-      parent_class = "SapphireObject" if is_proto else "object"
+      if is_test_case:
+        parent_class = test_base
+      else:
+        parent_class = "SapphireObject" if is_proto else "object"
     self.newline()
     self.emit(f"class {node.name}({parent_class}):")
     self.indent()
@@ -598,6 +622,10 @@ class PythonTranspiler:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    is_test_func = any(getattr(a, "name", "") == "test" for a in getattr(node, "annotations", []))
+    if is_test_func and not self.test_mode:
+      return
+
     self.newline()
     params = [self._format_param(p) for p in node.parameters]
     self.emit(f"def {node.name}({', '.join(params)}):")
