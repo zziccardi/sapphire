@@ -16,7 +16,12 @@ function testing.TestContext.new(name)
 end
 
 function testing.TestContext:record_failure(message, fatal, kind, expected, actual)
-  local info = debug.getinfo(3, "Sl")
+  local level = 3
+  local info = debug.getinfo(level, "Sl")
+  while info and (info.short_src:find("testing%.lua") or info.short_src:find("std[/\\]testing")) do
+    level = level + 1
+    info = debug.getinfo(level, "Sl")
+  end
   local filename = info and info.short_src or "unknown"
   local lineno = info and info.currentline or 0
   table.insert(self.failures, {

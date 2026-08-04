@@ -216,4 +216,4 @@ class SourceMapBuilder:
           f' col = {m.orig_col}, text = "{escaped_text}" }}'
       )
 
-    return "local _SP_LINE_MAP = {\n" + ",\n".join(entries) + "\n}\n"
+    return "_SP_LINE_MAP = {\n" + ",\n".join(entries) + "\n}\n"

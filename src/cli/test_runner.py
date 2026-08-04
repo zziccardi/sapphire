@@ -344,6 +344,61 @@ def run_tests_lua(
       f'local target_mod = dofile("{out_lua}")',
       'local total_passed = 0',
       'local total_failed = 0',
+      '''
+local function get_sp_info(line_num)
+  local map = (type(target_mod) == "table" and target_mod._SP_LINE_MAP) or _G._SP_LINE_MAP or _SP_LINE_MAP
+  if map and line_num then
+    local entry = map[line_num]
+    if entry then return entry.line, entry.file, entry.text end
+    for offset = 1, 50 do
+      entry = map[line_num - offset]
+      if entry then return entry.line, entry.file, entry.text end
+    end
+  end
+  return 0, nil, nil
+end
+
+local function format_val(v)
+  if type(v) == "string" then
+    return '"' .. v .. '"'
+  end
+  return tostring(v)
+end
+
+local function print_failure(f)
+  local kind = f.kind or "generic"
+  local user_msg = f.message or ""
+  if kind == "eq" or kind == "ne" or kind == "almost_eq" or kind == "bool" or kind == "none" or kind == "not_none" then
+    print("  Expected: " .. format_val(f.expected))
+    print("  Actual:   " .. format_val(f.actual))
+    if user_msg ~= "" then
+      local user_only = user_msg:match("%((.+)%)$")
+      if user_only and user_only ~= user_msg then
+        print("  Message:  " .. tostring(user_only))
+      end
+    end
+  else
+    print("  " .. user_msg)
+  end
+
+  local sp_line, _, sp_text = get_sp_info(f.lineno)
+  if sp_line and sp_line > 0 and sp_text then
+    local stripped = sp_text:match("^%s*(.-)%s*$")
+    local line_str = tostring(sp_line)
+    print("  Line " .. line_str .. ":  " .. stripped)
+    local indent = string.rep(" ", #line_str + 4)
+    print("  " .. indent .. string.rep("^", #stripped))
+  end
+end
+
+local function get_first_sp_line(failures)
+  for _, f in ipairs(failures) do
+    local sp_line = get_sp_info(f.lineno)
+    if sp_line and sp_line > 0 then return sp_line end
+  end
+  return 0
+end
+''',
   ]
 
   # Run standalone @test functions
@@ -366,29 +421,23 @@ do
     print("[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
   else
     total_failed = total_failed + 1
-    local first_line = 0
-    for _, f in ipairs(ctx.failures) do
-      if f.lineno and f.lineno > 0 and first_line == 0 then first_line = f.lineno end
-    end
-    if first_line > 0 then
-      print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:" .. first_line .. ")")
+    local header_line = get_first_sp_line(ctx.failures)
+    if header_line > 0 then
+      print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
     else
       print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
     end
     for _, f in ipairs(ctx.failures) do
-      local kind = f.kind or "generic"
-      if kind == "eq" or kind == "ne" or kind == "almost_eq" or kind == "bool" then
-        print("  Expected: " .. tostring(f.expected))
-        print("  Actual:   " .. tostring(f.actual))
-      elseif kind == "none" or kind == "not_none" then
-        print("  Expected: " .. tostring(f.expected))
-        print("  Actual:   " .. tostring(f.actual))
-      else
-        print("  " .. f.message)
-      end
+      print_failure(f)
     end
     if not ok then
-      print("  " .. tostring(err))
+      local has_fatal = false
+      for _, f in ipairs(ctx.failures) do
+        if f.fatal then has_fatal = true break end
+      end
+      if not has_fatal then
+        print("  Unhandled Error: " .. tostring(err))
+      end
     end
   end
 end
@@ -429,29 +478,23 @@ do
       print("[ PASS ] {full_name} ({os.path.basename(sp_file)})")
     else
       total_failed = total_failed + 1
-      local first_line = 0
-      for _, f in ipairs(ctx.failures) do
-        if f.lineno and f.lineno > 0 and first_line == 0 then first_line = f.lineno end
-      end
-      if first_line > 0 then
-        print("[ FAIL ] {full_name} ({os.path.basename(sp_file)}:" .. first_line .. ")")
+      local header_line = get_first_sp_line(ctx.failures)
+      if header_line > 0 then
+        print("[ FAIL ] {full_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
       else
         print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
       end
       for _, f in ipairs(ctx.failures) do
-        local kind = f.kind or "generic"
-        if kind == "eq" or kind == "ne" or kind == "almost_eq" or kind == "bool" then
-          print("  Expected: " .. tostring(f.expected))
-          print("  Actual:   " .. tostring(f.actual))
-        elseif kind == "none" or kind == "not_none" then
-          print("  Expected: " .. tostring(f.expected))
-          print("  Actual:   " .. tostring(f.actual))
-        else
-          print("  " .. f.message)
-        end
+        print_failure(f)
       end
       if not ok then
-        print("  " .. tostring(err))
+        local has_fatal = false
+        for _, f in ipairs(ctx.failures) do
+          if f.fatal then has_fatal = true break end
+        end
+        if not has_fatal then
+          print("  Unhandled Error: " .. tostring(err))
+        end
       end
     end
   end
