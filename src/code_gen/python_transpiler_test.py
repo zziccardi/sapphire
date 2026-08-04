@@ -1162,6 +1162,45 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_break_continue()")
     self.assertEqual(res, 2 + 4 + 6)
 
+  def test_multi_parent_struct_python(self):
+    """Verifies transpilation and execution of multi-parent struct declarations in Python."""
+    code = """
+    struct Position {
+      var x: int = 10;
+      var y: int = 20;
+    }
+    struct Health {
+      var hp: int = 100;
+    }
+    struct Player: Position, Health {
+      var name: String;
+    }
+    func test_player(): int {
+      let p = Player { name = "Hero" };
+      return p.x + p.y + p.hp;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Player(Position, Health):", py_code)
+    res = self._transpile_and_run(code, "test_player()")
+    self.assertEqual(res, 130)
+
+  def test_range_iteration_python(self):
+    """Verifies transpilation and execution of range() loops in Python."""
+    code = """
+    func test_range(): int {
+      var sum = 0;
+      for i in range(0, 10, 2) {
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("for i in range(0, 10, 2):", py_code)
+    res = self._transpile_and_run(code, "test_range()")
+    self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
+
 
 if __name__ == "__main__":
   unittest.main()

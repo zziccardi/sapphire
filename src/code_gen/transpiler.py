@@ -87,6 +87,7 @@ def transpile_file(
     target: str = "python",
     visited: Optional[set] = None,
     sourcemap: bool = True,
+    test_mode: bool = False,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
@@ -97,6 +98,7 @@ def transpile_file(
     target: Code generation target ("python" or "lua" / "lua5.1").
     visited: Set of already processed file paths to prevent recursion loops.
     sourcemap: Whether to generate source map (.lua.map) for Lua target.
+    test_mode: Whether transpiling in test execution mode (includes @test functions).
 
   Returns:
     The path to the generated output file.
@@ -175,7 +177,7 @@ def transpile_file(
         break
     if sub_source:
       sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap)
+      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode)
 
   # 6. Transpile
   sm_builder = None
@@ -185,12 +187,12 @@ def transpile_file(
     src_content = str(input_stream)
     if sourcemap:
       sm_builder = SourceMapBuilder(src_filename, src_content)
-    transpiler = LuaTranspiler(source_file=src_filename, source_map_builder=sm_builder)
+    transpiler = LuaTranspiler(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode)
     generated_code = transpiler.transpile(ast)
     target_name = "Lua 5.1"
   else:
     print("Transpiling to Python...")
-    transpiler = PythonTranspiler()
+    transpiler = PythonTranspiler(test_mode=test_mode)
     generated_code = transpiler.transpile(ast)
     target_name = "Python"
 

@@ -157,6 +157,21 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(field2.name, "y")
     self.assertEqual(field2.field_type.name, "float")
 
+  def test_multi_parent_struct_declaration(self):
+    """Verifies parsing of multi-parent struct declarations."""
+    ast = self._get_ast("""
+    struct Position { var x: float; var y: float; }
+    struct Health { var hp: int; }
+    struct Player: Position, Health { var name: string; }
+    """)
+    player_decl = ast.declarations[2]
+    self.assertEqual(player_decl.name, "Player")
+    self.assertEqual(player_decl.parent_names, ["Position", "Health"])
+    self.assertEqual(player_decl.parent_name, "Position")
+    self.assertEqual(len(player_decl.parent_names_info), 2)
+    self.assertEqual(player_decl.parent_names_info[0]["name"], "Position")
+    self.assertEqual(player_decl.parent_names_info[1]["name"], "Health")
+
   def test_additional_syntax(self):
     """Verifies parsing of standard if/else, multi-parameter lambdas, and other literals/expressions."""
     ast = self._get_ast("""

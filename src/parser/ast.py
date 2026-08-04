@@ -170,12 +170,29 @@ class AnnotationNode(ASTNode):
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
-  def __init__(self, name: str, parent_name: Optional[str], fields: List[StructFieldNode], is_prototype: bool = False, type_params: Optional[List[str]] = None):
+  def __init__(self, name: str, parent_names: Optional[Union[str, List[str]]] = None, fields: List[StructFieldNode] = None, is_prototype: bool = False, type_params: Optional[List[str]] = None, parent_name: Optional[str] = None):
     self.name = name
-    self.parent_name = parent_name
-    self.fields = fields
+    if parent_names is None:
+      self.parent_names = [parent_name] if parent_name else []
+    elif isinstance(parent_names, str):
+      self.parent_names = [parent_names]
+    else:
+      self.parent_names = list(parent_names)
+    self.fields = fields or []
     self.is_prototype = is_prototype
     self.type_params = type_params or []
+    self.parent_names_info: List[Dict[str, Any]] = []
+
+  @property
+  def parent_name(self) -> Optional[str]:
+    return self.parent_names[0] if self.parent_names else None
+
+  @parent_name.setter
+  def parent_name(self, value: Optional[str]) -> None:
+    if value is None:
+      self.parent_names = []
+    else:
+      self.parent_names = [value]
 
 
 class EnumMemberNode(ASTNode):

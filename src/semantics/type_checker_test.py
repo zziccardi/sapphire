@@ -393,7 +393,7 @@ class TestTypeChecker(unittest.TestCase):
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("For-in loop source must be an array or map type", str(context.exception))
+    self.assertIn("For-in loop source must be an array, map, or range type", str(context.exception))
 
   def test_for_map_iteration_valid(self):
     """Verifies type checking for valid map iteration."""
@@ -433,6 +433,69 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as context:
       self._check(code)
     self.assertIn("Cannot iterate over an array with key-value syntax", str(context.exception))
+
+  def test_for_range_iteration_valid(self):
+    """Verifies valid range iteration with 1, 2, and 3 arguments."""
+    code = """
+    func test() {
+      for i in range(10) {
+        let x: int = i;
+      }
+      for i in range(0, 10) {
+        let y: int = i;
+      }
+      for i in range(0, 10, 2) {
+        let z: int = i;
+      }
+    }
+    """
+    self._check(code)
+
+  def test_for_range_variable_iteration_valid(self):
+    """Verifies stored Range variable iteration."""
+    code = """
+    func test() {
+      let r: Range = range(0, 5);
+      for i in r {
+        let x: int = i;
+      }
+    }
+    """
+    self._check(code)
+
+  def test_for_range_iteration_key_value_error(self):
+    """Enforces that iterating over a range prohibits key-value syntax."""
+    code = """
+    func test() {
+      for k, v in range(10) {
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot iterate over a range with key-value syntax", str(context.exception))
+
+  def test_range_call_type_mismatch_error(self):
+    """Enforces integer arguments for range()."""
+    code = """
+    func test() {
+      let r = range("0", "10");
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Argument type mismatch at position 1. Expected 'int', got 'String'", str(context.exception))
+
+  def test_range_call_arg_count_error(self):
+    """Enforces 1 to 3 arguments for range()."""
+    code = """
+    func test() {
+      let r = range();
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Not enough arguments passed to call. Expected at least 1, got 0", str(context.exception))
 
 
   def test_binary_and_unary_ops(self):
@@ -550,6 +613,77 @@ class TestTypeChecker(unittest.TestCase):
       struct Parent { var x: int; }
       struct Child: Parent { var x: float; }
       """)
+
+    # 5b. Duplicate field inherited from multiple parents
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Position { var x: float; }
+      struct Point { var x: float; }
+      struct Player: Position, Point {}
+      """)
+    self.assertIn("Duplicate field 'x' in struct 'Player' inherited from multiple parents", str(ctx.exception))
+
+    # 5c. Circular struct inheritance
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct A: B {}
+      struct B: A {}
+      """)
+    self.assertIn("Circular inheritance detected involving struct", str(ctx.exception))
+
+  def test_multi_parent_struct_type_checking(self):
+    """Verifies that multi-parent struct field inlining registers all inherited fields in the symbol table."""
+    code = """
+    struct Position { var x: float; var y: float; }
+    struct Health { var hp: int; }
+    struct Player: Position, Health { var name: String; }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    player_type = checker.symbol_table.lookup_type("Player")
+    self.assertIn("x", player_type.fields)
+    self.assertIn("y", player_type.fields)
+    self.assertIn("hp", player_type.fields)
+    self.assertIn("name", player_type.fields)
+
+  def test_clone_proto_parent_cycle(self):
+    """Verifies that clone prototype check handles circular struct inheritance safely without infinite recursion."""
+    code = """
+    proto A: B { var x: int; }
+    proto B: A { var y: int; }
+    func test(a: A) {
+      let c = clone a;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("Circular inheritance detected involving struct", str(ctx.exception))
+
+  def test_clone_check_proto_cycle_coverage(self):
+    """Directly tests check_proto cycle protection in visit_CloneNode."""
+    try:
+      from semantics.symbol_table import StructType, VariableSymbol
+      from parser.ast import CloneNode, IdentifierNode
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import StructType, VariableSymbol
+      from src.parser.ast import CloneNode, IdentifierNode
+
+    checker = TypeChecker()
+    st_a = StructType("A", parent_names=["B"])
+    st_b = StructType("B", parent_names=["A"])
+    checker.symbol_table.define_type("A", st_a)
+    checker.symbol_table.define_type("B", st_b)
+    checker.symbol_table.define("a", VariableSymbol("a", st_a, is_mutable=False))
+    node = CloneNode(IdentifierNode("a"))
+    checker.visit_CloneNode(node)
+    self.assertTrue(any("Cannot clone instance of non-proto struct 'A'" in err for err in checker.errors))
 
     # 6. Impl undefined struct
     with self.assertRaises(SemanticError):

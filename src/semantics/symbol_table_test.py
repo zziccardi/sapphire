@@ -277,6 +277,40 @@ class TestSymbolTable(unittest.TestCase):
     tr_empty = TraitType("EmptyTrait")
     self.assertFalse(st.implements_trait(tr_empty))
 
+  def test_struct_type_parent_name_and_get_method(self):
+    """Verifies StructType parent_name getter/setter and recursive get_method with parent lookup."""
+    try:
+      from semantics.symbol_table import StructType, StructMethod, FunctionType, PrimitiveType, SymbolTable
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import StructType, StructMethod, FunctionType, PrimitiveType, SymbolTable
+
+    st1 = StructType("Child", parent_name="Parent1")
+    self.assertEqual(st1.parent_name, "Parent1")
+    self.assertEqual(st1.parent_names, ["Parent1"])
+
+    st2 = StructType("Child", parent_names="Parent2")
+    self.assertEqual(st2.parent_name, "Parent2")
+
+    st3 = StructType("Child")
+    self.assertIsNone(st3.parent_name)
+    st3.parent_name = "Parent3"
+    self.assertEqual(st3.parent_name, "Parent3")
+    st3.parent_name = None
+    self.assertIsNone(st3.parent_name)
+
+    sym_tab = SymbolTable()
+    parent_st = StructType("Parent")
+    method_sig = FunctionType([], PrimitiveType("none"))
+    parent_st.methods["parent_func"] = StructMethod("parent_func", method_sig, None)
+    sym_tab.define_type("Parent", parent_st)
+
+    child_st = StructType("Child", parent_names=["Parent"])
+    sym_tab.define_type("Child", child_st)
+
+    resolved = child_st.get_method("parent_func", sym_tab)
+    self.assertIsNotNone(resolved)
+    self.assertEqual(resolved.name, "parent_func")
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -36,3 +36,12 @@ for key, val in items {
   }
   print(f"Item: {key} -> {val}");
 }
+
+// 4. For-in range iteration demonstration
+print("--- Range Iteration Demo ---");
+for i in range(0, 10, 2) {
+  if i == 4 {
+    continue;  // Skip 4
+  }
+  print("Range step: " + String.from(i));
+}

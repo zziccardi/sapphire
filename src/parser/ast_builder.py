@@ -120,21 +120,31 @@ class ASTBuilder(SapphireVisitor):
 
   def visitStructDeclaration(self, ctx: SapphireParser.StructDeclarationContext) -> StructDeclNode:
     name = ctx.IDENTIFIER(0).getText()
-    parent_name = ctx.IDENTIFIER(1).getText() if len(ctx.IDENTIFIER()) > 1 else None
+    parent_tokens = ctx.IDENTIFIER()[1:] if len(ctx.IDENTIFIER()) > 1 else []
+    parent_names = [t.getText() for t in parent_tokens]
     type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     fields = [self.visit(field) for field in ctx.structField()] if ctx.structField() else []
     is_prototype = ctx.PROTO_KEYWORD() is not None
-    node = StructDeclNode(name, parent_name, fields, is_prototype, type_params=type_params)
+    node = StructDeclNode(name, parent_names, fields, is_prototype, type_params=type_params)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER(0).getSymbol()
     node.name_line = name_token.line
     node.name_column = name_token.column
     node.name_length = len(name_token.text)
-    if parent_name:
-      parent_token = ctx.IDENTIFIER(1).getSymbol()
-      node.parent_name_line = parent_token.line
-      node.parent_name_column = parent_token.column
-      node.parent_name_length = len(parent_token.text)
+    node.parent_names_info = []
+    for pt in parent_tokens:
+      sym = pt.getSymbol()
+      node.parent_names_info.append({
+          "name": sym.text,
+          "line": sym.line,
+          "column": sym.column,
+          "length": len(sym.text),
+      })
+    if parent_tokens:
+      first_sym = parent_tokens[0].getSymbol()
+      node.parent_name_line = first_sym.line
+      node.parent_name_column = first_sym.column
+      node.parent_name_length = len(first_sym.text)
     return node
 
   def visitEnumDeclaration(self, ctx: SapphireParser.EnumDeclarationContext) -> EnumDeclNode:
@@ -176,7 +186,12 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitImplBlock(self, ctx: SapphireParser.ImplBlockContext) -> ImplBlockNode:
-    trait_name = ctx.traitName.text if ctx.traitName else None
+    trait_name = None
+    if getattr(ctx, "traitName", None):
+      if getattr(ctx, "traitPrefix", None):
+        trait_name = f"{ctx.traitPrefix.text}.{ctx.traitName.text}"
+      else:
+        trait_name = ctx.traitName.text
     struct_name = ctx.structName.text
     tpl = ctx.typeParamList()
     if tpl:
@@ -218,10 +233,10 @@ class ASTBuilder(SapphireVisitor):
     node.struct_name_column = struct_token.column
     node.struct_name_length = len(struct_token.text)
     if trait_name:
-      trait_token = ctx.traitName
+      trait_token = getattr(ctx, "traitPrefix", None) or ctx.traitName
       node.trait_name_line = trait_token.line
       node.trait_name_column = trait_token.column
-      node.trait_name_length = len(trait_token.text)
+      node.trait_name_length = len(trait_name)
     return node
 
   def visitImplMember(self, ctx: SapphireParser.ImplMemberContext) -> ImplMemberNode:

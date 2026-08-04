@@ -26,6 +26,7 @@ try:
       ArrayType,
       MapType,
       ArenaType,
+      RangeType,
       ModuleType,
       GenericTypeParameter,
       VariableSymbol,
@@ -54,6 +55,7 @@ except ModuleNotFoundError:  # pragma: no cover
       ArrayType,
       MapType,
       ArenaType,
+      RangeType,
       ModuleType,
       GenericTypeParameter,
       VariableSymbol,
@@ -207,7 +209,7 @@ class TypeChecker:
     cloned_decl.name = mangled_name
     cloned_decl.type_params = []
 
-    mono_struct_type = StructType(mangled_name, cloned_decl.parent_name, cloned_decl.is_prototype)
+    mono_struct_type = StructType(mangled_name, parent_names=cloned_decl.parent_names, is_prototype=cloned_decl.is_prototype)
     root_scope = self.symbol_table.current_scope
     while root_scope.parent:
       root_scope = root_scope.parent
@@ -293,6 +295,9 @@ class TypeChecker:
       else:
         mod_sym = existing
 
+      if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+        mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
+
       # Resolve imported module file path on disk
       possible_paths = [
           imp.path.replace(".", "/") + ".sp",
@@ -361,7 +366,7 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        struct_type = StructType(decl.name, decl.parent_name, decl.is_prototype, type_params=decl.type_params, ast_decl=decl)
+        struct_type = StructType(decl.name, parent_names=decl.parent_names, is_prototype=decl.is_prototype, type_params=decl.type_params, ast_decl=decl)
         self.symbol_table.define_type(decl.name, struct_type)
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
 
@@ -478,26 +483,37 @@ class TypeChecker:
     structs_to_process = [d for d in program.declarations if isinstance(d, StructDeclNode) and not d.type_params]
     processed = set()
 
+    visiting = set()
+
     def process_struct(node: StructDeclNode):
       if node.name in processed:
         return
+      if node.name in visiting:
+        self.error(f"Circular inheritance detected involving struct '{node.name}'.")
+        return
+      visiting.add(node.name)
 
       struct_type = self.symbol_table.lookup_type(node.name)
       if not isinstance(struct_type, StructType):
+        visiting.remove(node.name)
         return
 
-      if node.parent_name:
-        parent_type = self.symbol_table.lookup_type(node.parent_name)
-        if not parent_type:
-          self.error(f"Parent struct '{node.parent_name}' not found for '{node.name}'.")
-        elif not isinstance(parent_type, StructType):
-          self.error(f"Parent '{node.parent_name}' of '{node.name}' is not a struct type.")
-        else:
-          parent_node = next((s for s in structs_to_process if s.name == node.parent_name), None)
-          if parent_node:
-            process_struct(parent_node)
-          for field_name, field_obj in parent_type.fields.items():
-            struct_type.fields[field_name] = field_obj
+      if node.parent_names:
+        for parent_name in node.parent_names:
+          parent_type = self.symbol_table.lookup_type(parent_name)
+          if not parent_type:
+            self.error(f"Parent struct '{parent_name}' not found for '{node.name}'.")
+          elif not isinstance(parent_type, StructType):
+            self.error(f"Parent '{parent_name}' of '{node.name}' is not a struct type.")
+          else:
+            parent_node = next((s for s in structs_to_process if s.name == parent_name), None)
+            if parent_node:
+              process_struct(parent_node)
+            for field_name, field_obj in parent_type.fields.items():
+              if field_name in struct_type.fields:
+                self.error(f"Duplicate field '{field_name}' in struct '{node.name}' inherited from multiple parents.")
+              else:
+                struct_type.fields[field_name] = field_obj
 
       for f in node.fields:
         ftype = self._resolve_type_node(f.field_type)
@@ -505,6 +521,7 @@ class TypeChecker:
           self.error(f"Field '{f.name}' in struct '{node.name}' shadows inherited parent field.")
         struct_type.fields[f.name] = StructField(f.name, ftype, f.is_mutable, f.default_expr is not None)
 
+      visiting.remove(node.name)
       processed.add(node.name)
 
     for s in structs_to_process:
@@ -678,20 +695,29 @@ class TypeChecker:
     if node.trait_name:
       trait_type = self.symbol_table.lookup_type(node.trait_name)
       if isinstance(trait_type, TraitType):
-        for trait_method_name, trait_sig in trait_type.methods.items():
-          if trait_method_name not in struct_type.methods:
-            self.error(
-                f"Struct '{node.struct_name}' does not implement trait method "
-                f"'{trait_method_name}' of '{node.trait_name}'."
-            )
-          else:
-            impl_sig = struct_type.methods[trait_method_name].method_type
-            if impl_sig != trait_sig:
+        is_test_case = trait_type is self.symbol_table.testcase_trait or node.trait_name.endswith(".TestCase")
+        if is_test_case:
+          # Inject TestCase assertion methods onto struct methods if not defined explicitly
+          for trait_m_name, trait_sig in trait_type.methods.items():
+            if trait_m_name not in struct_type.methods:
+              struct_type.methods[trait_m_name] = StructMethod(trait_m_name, trait_sig, None)
+        else:
+          for trait_method_name, trait_sig in trait_type.methods.items():
+            if trait_method_name not in struct_type.methods:
               self.error(
-                  f"Method '{trait_method_name}' in struct '{node.struct_name}' "
-                  f"has signature {impl_sig}, but trait '{node.trait_name}' "
-                  f"requires {trait_sig}."
+                  f"Struct '{node.struct_name}' does not implement trait method "
+                  f"'{trait_method_name}' of '{node.trait_name}'."
               )
+            else:
+              impl_sig = struct_type.methods[trait_method_name].method_type
+              if impl_sig != trait_sig:
+                self.error(
+                    f"Method '{trait_method_name}' in struct '{node.struct_name}' "
+                    f"has signature {impl_sig}, but trait '{node.trait_name}' "
+                    f"requires {trait_sig}."
+                )
+      else:
+        self.error(f"Trait '{node.trait_name}' is not defined.")
 
     # Check each method implementation
     for member in node.members:
@@ -1176,6 +1202,10 @@ class TypeChecker:
           self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
         elem_type = iter_type.element_type
         self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, elem_type, node.is_mutable))
+      elif isinstance(iter_type, RangeType):
+        if node.key_var is not None:
+          self.error("Cannot iterate over a range with key-value syntax; use a single loop variable.")
+        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("int"), node.is_mutable))
       elif isinstance(iter_type, MapType):
         if node.key_var is None:
           self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
@@ -1184,7 +1214,7 @@ class TypeChecker:
           self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable))
           self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
       else:
-        self.error("For-in loop source must be an array or map type.")
+        self.error("For-in loop source must be an array, map, or range type.")
         if node.key_var is not None:
           self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, PrimitiveType("none"), node.is_mutable))
         self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("none"), node.is_mutable))
@@ -1392,7 +1422,7 @@ class TypeChecker:
       if isinstance(receiver_type, OptionalType):
         receiver_type = receiver_type.base_type
       if isinstance(receiver_type, StructType):
-        method = receiver_type.methods.get(node.callee.member)
+        method = receiver_type.get_method(node.callee.member, self.symbol_table)
         if method and method.modifier != "static":
           # Receiver is implicitly passed.
           # It is mutably borrowed if method is not const.
@@ -1554,13 +1584,14 @@ class TypeChecker:
       arg_type = self.visit(arg.expr)
       self.expected_type = old_expected
 
+      is_test_assert = getattr(signature, "is_testing_assertion", False)
       if param_idx < len(expected_param_types):
         param_type = expected_param_types[param_idx]
-        if not arg_type.is_compatible(param_type):
+        if not is_test_assert and not arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
       else:
         # Extra parameter
-        if not is_constructor:
+        if not is_constructor and not is_test_assert:
           self.error("Too many arguments passed to call.")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> Type:
@@ -1587,6 +1618,17 @@ class TypeChecker:
         return method
       self.error(f"String has no method '{node.member}'.")
       return PrimitiveType("none")
+
+    assertion_names = (
+        "assert_true", "assert_false", "assert_eq", "assert_ne",
+        "assert_almost_eq", "assert_none", "assert_not_none",
+        "expect_true", "expect_false", "expect_eq", "expect_ne",
+        "expect_almost_eq", "expect_none", "expect_not_none"
+    )
+    if node.member in assertion_names:
+      fn_t = FunctionType([], PrimitiveType("none"))
+      fn_t.is_testing_assertion = True
+      return fn_t
 
     if isinstance(receiver_type, ModuleType):
       if isinstance(node.receiver, IdentifierNode):
@@ -1634,7 +1676,7 @@ class TypeChecker:
       return field.field_type
 
     # Resolve method
-    method = receiver_type.methods.get(node.member)
+    method = receiver_type.get_method(node.member, self.symbol_table)
     if method:
       return method.method_type
 
@@ -1648,20 +1690,19 @@ class TypeChecker:
       return PrimitiveType("none")
 
     # Verify struct is a prototype struct (or inherits from one)
-    is_proto = False
-    curr = expr_type
-    while curr:
-      if curr.is_prototype:
-        is_proto = True
-        break
-      if curr.parent_name:
-        parent = self.symbol_table.lookup_type(curr.parent_name)
-        if isinstance(parent, StructType):
-          curr = parent
-        else:
-          break
-      else:
-        break
+    def check_proto(st: StructType, visited: Set[str]) -> bool:
+      if st.name in visited:
+        return False
+      visited.add(st.name)
+      if st.is_prototype:
+        return True
+      for p_name in st.parent_names:
+        parent = self.symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType) and check_proto(parent, visited):
+          return True
+      return False
+
+    is_proto = check_proto(expr_type, set())
 
     if not is_proto:
       self.error(f"Cannot clone instance of non-proto struct '{expr_type.name}'. Struct must be declared using the 'proto' keyword.")
