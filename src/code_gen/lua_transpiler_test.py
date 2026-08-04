@@ -109,6 +109,16 @@ class TestLuaTranspiler(unittest.TestCase):
     transpiler.visit(BlockNode([]))
     transpiler.visit(ExprStmtNode(IdentifierNode("x")))
 
+    # visit_ImplMemberNode raises when called directly (impl members are emitted
+    # via visit_StructDeclNode in the Lua backend, not standalone)
+    try:
+      from parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+    _dummy_func = _FuncDeclNode("do_thing", [], None, _BlockNode([]), [])
+    with self.assertRaises(NotImplementedError):
+      LuaTranspiler().visit_ImplMemberNode(_ImplMemberNode(_dummy_func, None))
+
     # BinaryOpNode with right-operand string concatenation
     transpiler.visit(BinaryOpNode(LiteralNode(10, "int"), "+", LiteralNode("items", "string")))
 
