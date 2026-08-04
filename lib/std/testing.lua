@@ -15,15 +15,23 @@ function testing.TestContext.new(name)
   return self
 end
 
-function testing.TestContext:record_failure(message, fatal)
-  local info = debug.getinfo(3, "Sl")
+function testing.TestContext:record_failure(message, fatal, kind, expected, actual)
+  local level = 3
+  local info = debug.getinfo(level, "Sl")
+  while info and (info.short_src:find("testing%.lua") or info.short_src:find("std[/\\]testing")) do
+    level = level + 1
+    info = debug.getinfo(level, "Sl")
+  end
   local filename = info and info.short_src or "unknown"
   local lineno = info and info.currentline or 0
   table.insert(self.failures, {
     message = message,
     filename = filename,
     lineno = lineno,
-    fatal = fatal
+    fatal = fatal,
+    kind = kind or "generic",
+    expected = expected,
+    actual = actual,
   })
   if fatal then
     error(message, 0)
@@ -46,6 +54,16 @@ local function format_msg(default_msg, user_msg)
     return default_msg .. " (" .. tostring(user_msg) .. ")"
   end
   return default_msg
+end
+
+local function repr(v)
+  if type(v) == "string" then
+    return '"' .. v .. '"'
+  elseif v == nil then
+    return "nil"
+  else
+    return tostring(v)
+  end
 end
 
 -- TestCase table
@@ -99,7 +117,7 @@ function testing.assert_true(cond, msg)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if not cond then
-    ctx:record_failure(format_msg("Expected condition to be true", msg), true)
+    ctx:record_failure(format_msg("Expected condition to be true", msg), true, "bool", true, cond)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -110,7 +128,7 @@ function testing.assert_false(cond, msg)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if cond then
-    ctx:record_failure(format_msg("Expected condition to be false", msg), true)
+    ctx:record_failure(format_msg("Expected condition to be false", msg), true, "bool", false, cond)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -122,7 +140,7 @@ function testing.assert_eq(actual, expected, msg)
   actual = unwrap(actual)
   expected = unwrap(expected)
   if actual ~= expected then
-    ctx:record_failure(format_msg("Expected " .. tostring(expected) .. ", got " .. tostring(actual), msg), true)
+    ctx:record_failure(format_msg("Expected " .. repr(expected) .. ", got " .. repr(actual), msg), true, "eq", expected, actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -134,7 +152,7 @@ function testing.assert_ne(actual, expected, msg)
   actual = unwrap(actual)
   expected = unwrap(expected)
   if actual == expected then
-    ctx:record_failure(format_msg("Expected value to not equal " .. tostring(expected), msg), true)
+    ctx:record_failure(format_msg("Expected value to not equal " .. repr(expected), msg), true, "ne", "anything != " .. repr(expected), actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -147,7 +165,7 @@ function testing.assert_almost_eq(a, b, eps, msg)
   b = unwrap(b)
   local ctx = testing.get_active_context()
   if math.abs(a - b) > eps then
-    ctx:record_failure(format_msg("Expected " .. tostring(a) .. " to almost equal " .. tostring(b), msg), true)
+    ctx:record_failure(format_msg("Expected " .. tostring(a) .. " to almost equal " .. tostring(b), msg), true, "almost_eq", b, a)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -157,7 +175,7 @@ function testing.assert_none(opt, msg)
   opt, msg = normalize_args(opt, msg)
   local ctx = testing.get_active_context()
   if not is_none(opt) then
-    ctx:record_failure(format_msg("Expected nil/None, got " .. tostring(unwrap(opt)), msg), true)
+    ctx:record_failure(format_msg("Expected nil/None, got " .. tostring(unwrap(opt)), msg), true, "none", nil, unwrap(opt))
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -167,7 +185,7 @@ function testing.assert_not_none(opt, msg)
   opt, msg = normalize_args(opt, msg)
   local ctx = testing.get_active_context()
   if is_none(opt) then
-    ctx:record_failure(format_msg("Expected non-nil value, got nil", msg), true)
+    ctx:record_failure(format_msg("Expected non-nil value, got nil", msg), true, "not_none", "<non-nil>", nil)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -178,7 +196,7 @@ function testing.expect_true(cond, msg)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if not cond then
-    ctx:record_failure(format_msg("Expected condition to be true", msg), false)
+    ctx:record_failure(format_msg("Expected condition to be true", msg), false, "bool", true, cond)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -189,7 +207,7 @@ function testing.expect_false(cond, msg)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if cond then
-    ctx:record_failure(format_msg("Expected condition to be false", msg), false)
+    ctx:record_failure(format_msg("Expected condition to be false", msg), false, "bool", false, cond)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -201,7 +219,7 @@ function testing.expect_eq(actual, expected, msg)
   actual = unwrap(actual)
   expected = unwrap(expected)
   if actual ~= expected then
-    ctx:record_failure(format_msg("Expected " .. tostring(expected) .. ", got " .. tostring(actual), msg), false)
+    ctx:record_failure(format_msg("Expected " .. repr(expected) .. ", got " .. repr(actual), msg), false, "eq", expected, actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -213,7 +231,7 @@ function testing.expect_ne(actual, expected, msg)
   actual = unwrap(actual)
   expected = unwrap(expected)
   if actual == expected then
-    ctx:record_failure(format_msg("Expected value to not equal " .. tostring(expected), msg), false)
+    ctx:record_failure(format_msg("Expected value to not equal " .. repr(expected), msg), false, "ne", "anything != " .. repr(expected), actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -226,7 +244,7 @@ function testing.expect_almost_eq(a, b, eps, msg)
   b = unwrap(b)
   local ctx = testing.get_active_context()
   if math.abs(a - b) > eps then
-    ctx:record_failure(format_msg("Expected " .. tostring(a) .. " to almost equal " .. tostring(b), msg), false)
+    ctx:record_failure(format_msg("Expected " .. tostring(a) .. " to almost equal " .. tostring(b), msg), false, "almost_eq", b, a)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -236,7 +254,7 @@ function testing.expect_none(opt, msg)
   opt, msg = normalize_args(opt, msg)
   local ctx = testing.get_active_context()
   if not is_none(opt) then
-    ctx:record_failure(format_msg("Expected nil/None, got " .. tostring(unwrap(opt)), msg), false)
+    ctx:record_failure(format_msg("Expected nil/None, got " .. tostring(unwrap(opt)), msg), false, "none", nil, unwrap(opt))
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end
@@ -246,7 +264,7 @@ function testing.expect_not_none(opt, msg)
   opt, msg = normalize_args(opt, msg)
   local ctx = testing.get_active_context()
   if is_none(opt) then
-    ctx:record_failure(format_msg("Expected non-nil value, got nil", msg), false)
+    ctx:record_failure(format_msg("Expected non-nil value, got nil", msg), false, "not_none", "<non-nil>", nil)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
   end

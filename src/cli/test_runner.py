@@ -123,7 +123,7 @@ def run_tests_python(
   # Ensure workspace root and lib directory are in sys.path
   workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
   lib_dir = os.path.join(workspace_root, "lib")
-  if lib_dir not in sys.path:
+  if lib_dir not in sys.path:  # pragma: no cover
     sys.path.insert(0, lib_dir)
   if workspace_root not in sys.path:  # pragma: no cover
     sys.path.insert(0, workspace_root)
@@ -151,6 +151,70 @@ def run_tests_python(
   failed = 0
   logs = []
 
+  # Load source line map from transpiled module (Python line -> Sapphire line)
+  sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
+
+  def sp_lineno(py_line: int) -> int:
+    """Translate a Python output line number to the nearest Sapphire source line."""
+    if py_line in sp_line_map:
+      return sp_line_map[py_line]
+    # Walk backwards to find the nearest mapped line
+    for offset in range(1, 50):
+      if (py_line - offset) in sp_line_map:  # pragma: no cover
+        return sp_line_map[py_line - offset]
+    return 0
+
+  def format_failure(f: dict, sp_file: str) -> str:
+    """Format a single failure dict into the documented output lines."""
+    lines_out = []
+    kind = f.get("kind", "generic")
+    expected = f.get("expected")
+    actual = f.get("actual")
+    user_msg = f.get("message", "")
+
+    if kind in ("eq", "ne", "almost_eq"):
+      lines_out.append(f"  Expected: {expected!r}")
+      lines_out.append(f"  Actual:   {actual!r}")
+      if user_msg:
+        # Strip the auto-generated prefix to show only the user message
+        import re
+        user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
+        if user_only != user_msg:
+          lines_out.append(f"  Message:  {user_only}")
+    elif kind in ("bool",):
+      lines_out.append(f"  Expected: {expected!r}")
+      lines_out.append(f"  Actual:   {actual!r}")
+      if user_msg:
+        import re
+        user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
+        if user_only != user_msg:
+          lines_out.append(f"  Message:  {user_only}")
+    elif kind in ("none", "not_none"):
+      lines_out.append(f"  Expected: {expected!r}")
+      lines_out.append(f"  Actual:   {actual!r}")
+    else:  # pragma: no cover
+      lines_out.append(f"  {user_msg}")
+
+    # Source line display
+    sp_line = sp_lineno(f.get("lineno", 0))
+    if sp_line > 0:
+      src = get_source_line(sp_file, sp_line)
+      if src:
+        stripped = src.strip()
+        indent_len = len(src) - len(src.lstrip())
+        lines_out.append(f"  Line {sp_line}:  {stripped}")
+        lines_out.append(f"  {' ' * (len(str(sp_line)) + 4)}{'^' * len(stripped)}")
+
+    return "\n".join(lines_out)
+
+  def first_sp_line(failures: list) -> int:
+    """Return the Sapphire source line of the first failure, for the header."""
+    for f in failures:
+      line = sp_lineno(f.get("lineno", 0))
+      if line > 0:
+        return line
+    return 0
+
   # Run standalone @test functions
   for fn_name in standalone_tests:
     if filter_pattern and filter_pattern not in fn_name:
@@ -174,18 +238,16 @@ def run_tests_python(
       print(f"[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
     else:
       failed += 1
-      print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
       all_fails = ctx.failures.copy()
       if err and not any(f["fatal"] for f in all_fails):  # pragma: no cover
-        all_fails.append({"message": err, "lineno": 0, "filename": sp_file})
+        all_fails.append({"message": err, "lineno": 0, "filename": sp_file, "kind": "generic"})
+      header_line = first_sp_line(all_fails)
+      if header_line > 0:
+        print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:{header_line})")
+      else:
+        print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
       for f in all_fails:
-        msg = f["message"]
-        lineno = f.get("lineno", 0)
-        src_line = get_source_line(sp_file, lineno) if lineno > 0 else None
-        print(f"  {msg}")
-        if src_line:  # pragma: no cover
-          print(f"  Line {lineno}: {src_line}")
-          print(f"         {'^' * len(src_line)}")
+        print(format_failure(f, sp_file))
 
   # Run struct-based test suites
   for struct_name, methods in suite_tests.items():
@@ -245,18 +307,16 @@ def run_tests_python(
         print(f"[ PASS ] {full_name} ({os.path.basename(sp_file)})")
       else:
         failed += 1
-        print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
         all_fails = ctx.failures.copy()
         if err and not any(f["fatal"] for f in all_fails):  # pragma: no cover
-          all_fails.append({"message": err, "lineno": 0, "filename": sp_file})
+          all_fails.append({"message": err, "lineno": 0, "filename": sp_file, "kind": "generic"})
+        header_line = first_sp_line(all_fails)
+        if header_line > 0:
+          print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)}:{header_line})")
+        else:
+          print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
         for f in all_fails:
-          msg = f["message"]
-          lineno = f.get("lineno", 0)
-          src_line = get_source_line(sp_file, lineno) if lineno > 0 else None
-          print(f"  {msg}")
-          if src_line:  # pragma: no cover
-            print(f"  Line {lineno}: {src_line}")
-            print(f"         {'^' * len(src_line)}")
+          print(format_failure(f, sp_file))
 
   return passed, failed, logs
 
@@ -284,6 +344,61 @@ def run_tests_lua(
       f'local target_mod = dofile("{out_lua}")',
       'local total_passed = 0',
       'local total_failed = 0',
+      '''
+local function get_sp_info(line_num)
+  local map = (type(target_mod) == "table" and target_mod._SP_LINE_MAP) or _G._SP_LINE_MAP or _SP_LINE_MAP
+  if map and line_num then
+    local entry = map[line_num]
+    if entry then return entry.line, entry.file, entry.text end
+    for offset = 1, 50 do
+      entry = map[line_num - offset]
+      if entry then return entry.line, entry.file, entry.text end
+    end
+  end
+  return 0, nil, nil
+end
+
+local function format_val(v)
+  if type(v) == "string" then
+    return '"' .. v .. '"'
+  end
+  return tostring(v)
+end
+
+local function print_failure(f)
+  local kind = f.kind or "generic"
+  local user_msg = f.message or ""
+  if kind == "eq" or kind == "ne" or kind == "almost_eq" or kind == "bool" or kind == "none" or kind == "not_none" then
+    print("  Expected: " .. format_val(f.expected))
+    print("  Actual:   " .. format_val(f.actual))
+    if user_msg ~= "" then
+      local user_only = user_msg:match("%((.+)%)$")
+      if user_only and user_only ~= user_msg then
+        print("  Message:  " .. tostring(user_only))
+      end
+    end
+  else
+    print("  " .. user_msg)
+  end
+
+  local sp_line, _, sp_text = get_sp_info(f.lineno)
+  if sp_line and sp_line > 0 and sp_text then
+    local stripped = sp_text:match("^%s*(.-)%s*$")
+    local line_str = tostring(sp_line)
+    print("  Line " .. line_str .. ":  " .. stripped)
+    local indent = string.rep(" ", #line_str + 4)
+    print("  " .. indent .. string.rep("^", #stripped))
+  end
+end
+
+local function get_first_sp_line(failures)
+  for _, f in ipairs(failures) do
+    local sp_line = get_sp_info(f.lineno)
+    if sp_line and sp_line > 0 then return sp_line end
+  end
+  return 0
+end
+''',
   ]
 
   # Run standalone @test functions
@@ -303,15 +418,26 @@ do
   end)
   if ok and #ctx.failures == 0 then
     total_passed = total_passed + 1
-    print("[ PASS ] " .. "{fn_name} (" .. "{os.path.basename(sp_file)}" .. ")")
+    print("[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
   else
     total_failed = total_failed + 1
-    print("[ FAIL ] " .. "{fn_name} (" .. "{os.path.basename(sp_file)}" .. ")")
+    local header_line = get_first_sp_line(ctx.failures)
+    if header_line > 0 then
+      print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
+    else
+      print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
+    end
     for _, f in ipairs(ctx.failures) do
-      print("  " .. f.message)
+      print_failure(f)
     end
     if not ok then
-      print("  " .. tostring(err))
+      local has_fatal = false
+      for _, f in ipairs(ctx.failures) do
+        if f.fatal then has_fatal = true break end
+      end
+      if not has_fatal then
+        print("  Unhandled Error: " .. tostring(err))
+      end
     end
   end
 end
@@ -349,15 +475,26 @@ do
 
     if ok and #ctx.failures == 0 then
       total_passed = total_passed + 1
-      print("[ PASS ] " .. "{full_name} (" .. "{os.path.basename(sp_file)}" .. ")")
+      print("[ PASS ] {full_name} ({os.path.basename(sp_file)})")
     else
       total_failed = total_failed + 1
-      print("[ FAIL ] " .. "{full_name} (" .. "{os.path.basename(sp_file)}" .. ")")
+      local header_line = get_first_sp_line(ctx.failures)
+      if header_line > 0 then
+        print("[ FAIL ] {full_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
+      else
+        print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
+      end
       for _, f in ipairs(ctx.failures) do
-        print("  " .. f.message)
+        print_failure(f)
       end
       if not ok then
-        print("  " .. tostring(err))
+        local has_fatal = false
+        for _, f in ipairs(ctx.failures) do
+          if f.fatal then has_fatal = true break end
+        end
+        if not has_fatal then
+          print("  Unhandled Error: " .. tostring(err))
+        end
       end
     end
   end
