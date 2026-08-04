@@ -5,6 +5,8 @@ and preserves all Sapphire runtime semantics, including prototypal delegation.
 """
 
 import os
+import pathlib
+import sys
 import tempfile
 import unittest
 from antlr4 import InputStream, CommonTokenStream
@@ -51,7 +53,7 @@ class TestPythonTranspiler(unittest.TestCase):
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
     tree = parser.program()
-    
+
     builder = ASTBuilder()
     ast = builder.visit(tree)
     try:
@@ -59,7 +61,7 @@ class TestPythonTranspiler(unittest.TestCase):
       checker.check(ast)
     except Exception:
       pass
-    
+
     transpiler = Transpiler()
     py_code = transpiler.transpile(ast)
 
@@ -181,13 +183,13 @@ class TestPythonTranspiler(unittest.TestCase):
       var promo_item = clone base {
         self.price = 80;
       };
-      
+
       let initial_promo_price = promo_item.price; // Shadowed (80)
       let initial_promo_stock = promo_item.stock; // Delegated (10)
-      
+
       base.stock = 5; // Mutating prototype should reflect live on clone
       let final_promo_stock = promo_item.stock;
-      
+
       return [initial_promo_price, initial_promo_stock, final_promo_stock];
     }
     """
@@ -204,13 +206,13 @@ class TestPythonTranspiler(unittest.TestCase):
         sum += count;
         count -= 1;
       }
-      
+
       let scores = [10, 20, 30];
       var loop_sum = 0;
       for score in scores {
         loop_sum += score;
       }
-      
+
       return [sum, loop_sum];
     }
     """
@@ -256,7 +258,7 @@ class TestPythonTranspiler(unittest.TestCase):
     func test_chain() {
       var n1: Node? = none;
       var n2: Node? = Node(s = 99);
-      
+
       let val1 = n1?.score;
       let val2 = n2?.score;
       return [val1, val2];
@@ -339,11 +341,11 @@ class TestPythonTranspiler(unittest.TestCase):
       } else {
         out = -1;
       }
-      
+
       let s = "hello";
       let neg = -out;
       let pos = +out;
-      
+
       return multiply(10, 3) + multiply(3, 3) + b2.y;
     }
     """
@@ -374,7 +376,7 @@ class TestPythonTranspiler(unittest.TestCase):
       from src.parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
 
     transpiler = Transpiler()
-    
+
     # 1. StructFieldNode
     field_node = StructFieldNode(False, "x", BasicTypeNode("int"))
     transpiler.visit(field_node)
@@ -390,7 +392,7 @@ class TestPythonTranspiler(unittest.TestCase):
     # 4. generic_visit NotImplementedError
     with self.assertRaises(NotImplementedError):
       transpiler.visit(ASTNode())
-    
+
     self.assertTrue(len(transpiler.get_output()) > 0)
 
   def test_prototypal_inheritance_with_static_inheritance(self):
@@ -413,13 +415,13 @@ class TestPythonTranspiler(unittest.TestCase):
       var derived_clone = clone base {
         self.health = 80;
       };
-      
+
       let initial_clone_health = derived_clone.health; // Shadowed (80)
       let initial_clone_id = derived_clone.id;         // Delegated (1)
-      
+
       base.id = 10; // Mutating prototype's inherited field should reflect on clone
       let final_clone_id = derived_clone.id;
-      
+
       return [initial_clone_health, initial_clone_id, final_clone_id];
     }
     """
@@ -444,13 +446,13 @@ class TestPythonTranspiler(unittest.TestCase):
       var original_weapon = Weapon { damage = 10 };
       var base_player = Player(w = original_weapon);
       var clone_player = clone base_player;
-      
+
       // Mutating clone player's weapon damage
       clone_player.weapon.damage = 15;
-      
+
       let base_dmg = base_player.weapon.damage; // Should remain 10 (CoW)
       let clone_dmg = clone_player.weapon.damage; // Should be 15
-      
+
       return [base_dmg, clone_dmg];
     }
     """
@@ -497,31 +499,31 @@ class TestPythonTranspiler(unittest.TestCase):
     struct Point {
       var x: int;
     }
-    
+
     var leaked_enemy: Enemy? = none;
     var leaked_point: Point? = none;
-    
+
     func run_scope() {
       let my_arena = Arena();
       let other_arena = Arena();
-      
+
       let base = Enemy { hp = 100 } in my_arena;
-      
+
       // Implicit clone arena propagation
       let cloned = clone base;
-      
+
       // Explicit clone arena override
       let cloned_override = clone base in other_arena;
-      
+
       // Explicit struct allocation in arena
       let pt = Point { x = 42 } in my_arena;
-      
+
       leaked_enemy = cloned;
       leaked_point = pt;
-      
+
       return [cloned.hp, pt.x, cloned_override.hp];
     }
-    
+
     func test_arena_raii() {
       let vals = run_scope();
       return [vals[0], vals[1], vals[2]];
@@ -1202,6 +1204,100 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
 
 
+# ---------------------------------------------------------------------------
+# Shared fixture tests
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtures"
+
+
+class TestSharedFixtures(unittest.TestCase):
+  """Compiles each shared .sp fixture with PythonTranspiler and executes it.
+
+  Every `@test` function inside the fixture is called and its return value
+  is compared against the ground truth in
+  `testing/fixtures/_expectations.py`.  This class is structurally mirrored
+  by `TestSharedFixtures` in `lua_transpiler_test.py`; if the two suites
+  diverge in which fixture tests pass, a transpiler has drifted.
+  """
+
+  @classmethod
+  def _load_expectations(cls):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_expectations", _FIXTURES_DIR / "_expectations.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.EXPECTATIONS
+
+  def _transpile_and_exec(self, source: str) -> dict:
+    """Transpile *source* to Python, exec it, return {fn_name: result}."""
+    input_stream = InputStream(source)
+    try:
+      from parser.gen.SapphireLexer import SapphireLexer as _Lexer
+      from parser.gen.SapphireParser import SapphireParser as _Parser
+      from parser.ast_builder import ASTBuilder as _Builder
+      from semantics.type_checker import TypeChecker as _Checker
+    except ModuleNotFoundError:
+      from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
+      from src.parser.gen.SapphireParser import SapphireParser as _Parser
+      from src.parser.ast_builder import ASTBuilder as _Builder
+      from src.semantics.type_checker import TypeChecker as _Checker
+
+    lexer = _Lexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = _Parser(stream)
+    tree = parser.program()
+    ast = _Builder().visit(tree)
+    try:
+      _Checker().check(ast)
+    except Exception:
+      pass
+    py_code = Transpiler(test_mode=True).transpile(ast)
+    ctx: dict = {}
+    exec(py_code, ctx)  # pylint: disable=exec-used
+    results = {}
+    for name, obj in ctx.items():
+      if name.startswith("test_") and callable(obj):
+        val = obj()
+        # Normalise enum members to their underlying value
+        if hasattr(val, "value"):
+          val = val.value
+        results[name] = val
+    return results
+
+  def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
+    """Factory producing a test method for *fixture_name*."""
+    def _test(self):
+      fixture_path = _FIXTURES_DIR / fixture_name
+      if not fixture_path.exists():
+        self.skipTest(f"Fixture not found: {fixture_path}")
+      expectations = self._load_expectations().get(fixture_name, {})
+      if not expectations:
+        self.skipTest(f"No expectations registered for {fixture_name}")
+      source = fixture_path.read_text(encoding="utf-8")
+      results = self._transpile_and_exec(source)
+      for fn_name, expected in expectations.items():
+        with self.subTest(fixture=fixture_name, fn=fn_name):
+          self.assertIn(
+              fn_name, results,
+              f"{fn_name} was not found in transpiled output for {fixture_name}",
+          )
+          self.assertEqual(
+              results[fn_name], expected,
+              f"{fixture_name}::{fn_name} expected {expected!r}, got {results[fn_name]!r}",
+          )
+    _test.__name__ = f"test_fixture_{fixture_name.removesuffix('.sp')}"
+    _test.__doc__ = f"Shared fixture: {fixture_name}"
+    return _test
+
+  # Dynamically generate one test method per fixture file
+  if _FIXTURES_DIR.exists():
+    for _fixture_file in sorted(_FIXTURES_DIR.glob("*_test.sp")):
+      _name = f"test_fixture_{_fixture_file.stem}"
+      locals()[_name] = _make_fixture_test(_fixture_file.name)
+
+
 if __name__ == "__main__":
   unittest.main()
-

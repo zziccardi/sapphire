@@ -11,8 +11,10 @@ from typing import Any, Dict, List, Optional
 
 try:
   from parser.ast import *
+  from code_gen.base_transpiler import BaseTranspiler
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
+  from src.code_gen.base_transpiler import BaseTranspiler
 
 
 # ==========================================
@@ -329,7 +331,7 @@ def _sapphire_enum_from(enum_cls, val):
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
 
 
-class PythonTranspiler:
+class PythonTranspiler(BaseTranspiler):
   """AST visitor to transpile Sapphire code to Python."""
 
   def __init__(self, test_mode: bool = False):
