@@ -18,13 +18,18 @@ from src.code_gen.transpiler import transpile_file
 from src.code_gen.python_transpiler import PythonTranspiler
 from src.code_gen.lua_transpiler import LuaTranspiler
 from src.parser.ast import FuncDeclNode, StructDeclNode, AnnotationNode, BlockNode
-from src.semantics.symbol_table import PrimitiveType
 from src.semantics.type_checker import SemanticError
 
+try:
+  from testing.test_utils import QuietTestCase
+except ModuleNotFoundError:  # pragma: no cover
+  from src.testing.test_utils import QuietTestCase
 
-class TestRunnerEngineTest(unittest.TestCase):
+
+class TestRunnerEngineTest(QuietTestCase):
 
   def setUp(self):
+    super().setUp()
     self.temp_dir = tempfile.mkdtemp()
     self.sample_sp = os.path.join(self.temp_dir, "test_sample.sp")
     with open(self.sample_sp, "w", encoding="utf-8") as f:
@@ -138,7 +143,7 @@ impl t.TestCase for BadSetupTest {
   def test_at_test_conditional_compilation(self):
     # Normal transpile: @test function should be omitted
     out_normal = os.path.join(self.temp_dir, "normal.py")
-    transpile_file(self.sample_sp, out_normal, target="python", test_mode=False)
+    transpile_file(self.sample_sp, out_normal, target="python", test_mode=False, quiet=True)
     with open(out_normal, "r", encoding="utf-8") as f:
       content = f.read()
     self.assertNotIn("def test_standalone_pass", content)
@@ -146,7 +151,7 @@ impl t.TestCase for BadSetupTest {
 
     # Test transpile: @test function should be emitted
     out_test = os.path.join(self.temp_dir, "test_mode.py")
-    transpile_file(self.sample_sp, out_test, target="python", test_mode=True)
+    transpile_file(self.sample_sp, out_test, target="python", test_mode=True, quiet=True)
     with open(out_test, "r", encoding="utf-8") as f:
       content = f.read()
     self.assertIn("def test_standalone_pass", content)
@@ -349,7 +354,7 @@ impl t.TestCase for NoneKindTest {
 """)
     ast = parse_ast(none_sp)
     standalone, suites = discover_tests(ast)
-    out_py = transpile_file(none_sp, target="python", test_mode=True)
+    out_py = transpile_file(none_sp, target="python", test_mode=True, quiet=True)
 
     # Use a helper to test the formatting logic directly
     patched_py2 = _os.path.join(self.temp_dir, "none_direct.py")
@@ -407,7 +412,7 @@ func test_bare_fail() {
     ast = parse_ast(bare_sp)
     standalone, suites = discover_tests(ast)
 
-    out_py = transpile_file(bare_sp, target="python", test_mode=True)
+    out_py = transpile_file(bare_sp, target="python", test_mode=True, quiet=True)
     with open(out_py, "r") as f:
       content = f.read()
     content_no_map = "\n".join(

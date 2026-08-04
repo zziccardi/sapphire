@@ -8,7 +8,12 @@ local_dir = os.path.dirname(__file__)
 if local_dir not in sys.path:
   sys.path.insert(0, local_dir)
 
+repo_root = os.path.abspath(os.path.join(local_dir, "../../.."))
+if repo_root not in sys.path:
+  sys.path.insert(0, repo_root)
+
 from generate_grammar import parse_antlr_grammar, main
+from testing.test_utils import suppress_output
 
 
 class TestGenerateGrammar(unittest.TestCase):
@@ -40,7 +45,8 @@ class TestGenerateGrammar(unittest.TestCase):
         "types": ["int", "float"],
         "constants": ["true", "false"],
     }
-    main()
+    with suppress_output():
+      main()
     mock_makedirs.assert_called_once()
     mock_file.assert_called_once()
 

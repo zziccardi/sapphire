@@ -6,10 +6,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+try:
+  from testing.test_utils import QuietTestCase, suppress_output
+except ModuleNotFoundError:  # pragma: no cover
+  from src.testing.test_utils import QuietTestCase, suppress_output
+
 from src.cli.sapphire import main
 
 
-class SapphireCLITest(unittest.TestCase):
+class SapphireCLITest(QuietTestCase):
 
   def setUp(self):
     self.temp_dir = tempfile.TemporaryDirectory()
@@ -50,14 +55,16 @@ class SapphireCLITest(unittest.TestCase):
     test_args = ["sapphire", "build", non_existent]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 1)
 
   def test_test_subcommand(self):
     test_args = ["sapphire", "test", self.sp_file]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 0)
 
   def test_run_file_not_found(self):
@@ -65,7 +72,8 @@ class SapphireCLITest(unittest.TestCase):
     test_args = ["sapphire", "run", non_existent]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 1)
 
   def test_run_subcommand_lua(self):
@@ -75,7 +83,8 @@ class SapphireCLITest(unittest.TestCase):
         with patch("subprocess.run") as mock_run:
           mock_run.return_value.returncode = 0
           with self.assertRaises(SystemExit) as cm:
-            main()
+            with suppress_output():
+              main()
           self.assertEqual(cm.exception.code, 0)
           mock_run.assert_called_once()
 
@@ -84,7 +93,8 @@ class SapphireCLITest(unittest.TestCase):
     with patch.object(sys, "argv", test_args):
       with patch("shutil.which", return_value=None):
         with self.assertRaises(SystemExit) as cm:
-          main()
+          with suppress_output():
+            main()
         self.assertEqual(cm.exception.code, 1)
 
   def test_shortcut_invocation(self):

@@ -118,7 +118,7 @@ def run_tests_python(
     filter_pattern: Optional[str] = None,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Python target backend."""
-  out_py = transpile_file(sp_file, target="python", test_mode=True)
+  out_py = transpile_file(sp_file, target="python", test_mode=True, quiet=True)
 
   # Ensure workspace root and lib directory are in sys.path
   workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -329,7 +329,7 @@ def run_tests_lua(
     sourcemap: bool = True,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Lua 5.1 target backend."""
-  out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap)
+  out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap, quiet=True)
   lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
   if not lua_bin:  # pragma: no cover
     print("Error: Lua interpreter ('lua', 'luajit', or 'lua5.1') not found in PATH.", file=sys.stderr)

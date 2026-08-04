@@ -617,7 +617,7 @@ class TestPythonTranspiler(unittest.TestCase):
       sp_file = os.path.join(temp_dir, "test.sp")
       with open(sp_file, "w", encoding="utf-8") as f:
         f.write("let val: int = 100;\n")
-      out_path = transpile_file(sp_file)
+      out_path = transpile_file(sp_file, quiet=True)
       self.assertEqual(out_path, os.path.join(temp_dir, "test.py"))
       self.assertTrue(os.path.exists(out_path))
 
@@ -626,7 +626,7 @@ class TestPythonTranspiler(unittest.TestCase):
     with tempfile.TemporaryDirectory() as temp_dir:
       non_existent = os.path.join(temp_dir, "missing.sp")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(non_existent)
+        transpile_file(non_existent, quiet=True)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_syntax_error(self):
@@ -636,7 +636,7 @@ class TestPythonTranspiler(unittest.TestCase):
       with open(bad_sp, "w", encoding="utf-8") as f:
         f.write("let x: int = ;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(bad_sp)
+        transpile_file(bad_sp, quiet=True)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_semantic_error(self):
@@ -646,7 +646,7 @@ class TestPythonTranspiler(unittest.TestCase):
       with open(semantic_sp, "w", encoding="utf-8") as f:
         f.write("return 42;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(semantic_sp)
+        transpile_file(semantic_sp, quiet=True)
       self.assertEqual(cm.exception.code, 1)
 
   def test_export_and_extern_annotations_python(self):
@@ -792,7 +792,7 @@ class TestPythonTranspiler(unittest.TestCase):
         f.write("import sub;\n")
 
       out_py = os.path.join(tmpdir, "main.py")
-      transpile_file(main_sp, output_file=out_py, target="python")
+      transpile_file(main_sp, output_file=out_py, target="python", quiet=True)
       self.assertTrue(os.path.exists(out_py))
       sub_py = os.path.join(tmpdir, "sub.py")
       self.assertTrue(os.path.exists(sub_py))

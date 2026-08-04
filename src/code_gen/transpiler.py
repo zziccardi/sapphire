@@ -71,14 +71,16 @@ def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
 class CustomErrorListener(ErrorListener):
   """Custom ANTLR error listener to track and report syntax errors."""
 
-  def __init__(self):
+  def __init__(self, quiet: bool = False):
     super().__init__()
     self.errors = 0
+    self.quiet = quiet
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1
-    custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
-    print(f"Syntax Error: Line {line}:{column} - {custom_msg}", file=sys.stderr)
+    if not self.quiet:
+      custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
+      print(f"Syntax Error: Line {line}:{column} - {custom_msg}", file=sys.stderr)
 
 
 def transpile_file(
@@ -88,6 +90,7 @@ def transpile_file(
     visited: Optional[set] = None,
     sourcemap: bool = True,
     test_mode: bool = False,
+    quiet: bool = False,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
@@ -99,6 +102,7 @@ def transpile_file(
     visited: Set of already processed file paths to prevent recursion loops.
     sourcemap: Whether to generate source map (.lua.map) for Lua target.
     test_mode: Whether transpiling in test execution mode (includes @test functions).
+    quiet: Whether to suppress progress and status messages.
 
   Returns:
     The path to the generated output file.
@@ -119,15 +123,17 @@ def transpile_file(
     return output_file
   visited.add(input_abs)
 
-  print(f"Reading source file: {input_file}...")
+  if not quiet:
+    print(f"Reading source file: {input_file}...")
 
   try:
     input_stream = FileStream(input_file, encoding="utf-8")
   except Exception as e:
-    print(f"Failed to read file: {e}", file=sys.stderr)
+    if not quiet:  # pragma: no cover
+      print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
 
-  error_listener = CustomErrorListener()
+  error_listener = CustomErrorListener(quiet=quiet)
 
   # 1. Lexical Analysis
   lexer = SapphireLexer(input_stream)
@@ -141,25 +147,30 @@ def transpile_file(
   parser.removeErrorListeners()
   parser.addErrorListener(error_listener)
 
-  print("Parsing program to Parse Tree...")
+  if not quiet:
+    print("Parsing program to Parse Tree...")
   tree = parser.program()
 
   if error_listener.errors > 0:
-    print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
+    if not quiet:
+      print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
     sys.exit(1)
 
   # 3. Build AST
-  print("Building AST...")
+  if not quiet:
+    print("Building AST...")
   builder = ASTBuilder()
   ast = builder.visit(tree)
 
   # 4. Semantic Analysis & Type Checking
-  print("Running Semantic Analysis & Type Checker...")
+  if not quiet:
+    print("Running Semantic Analysis & Type Checker...")
   checker = TypeChecker(source_file_path=input_file)
   try:
     checker.check(ast)
   except SemanticError as e:
-    print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
+    if not quiet:  # pragma: no cover
+      print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
     sys.exit(1)
 
   # 5. Transitive Module Dependencies Transpilation
@@ -177,12 +188,13 @@ def transpile_file(
         break
     if sub_source:
       sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode)
+      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, quiet=quiet)
 
   # 6. Transpile
   sm_builder = None
   if target_lower in ("lua", "lua5.1"):
-    print("Transpiling to Lua 5.1...")
+    if not quiet:
+      print("Transpiling to Lua 5.1...")
     src_filename = os.path.basename(input_file)
     src_content = str(input_stream)
     if sourcemap:
@@ -191,7 +203,8 @@ def transpile_file(
     generated_code = transpiler.transpile(ast)
     target_name = "Lua 5.1"
   else:
-    print("Transpiling to Python...")
+    if not quiet:
+      print("Transpiling to Python...")
     transpiler = PythonTranspiler(test_mode=test_mode)
     generated_code = transpiler.transpile(ast)
     target_name = "Python"
@@ -205,11 +218,14 @@ def transpile_file(
       map_output_file = output_file + ".map"
       with open(map_output_file, "w", encoding="utf-8") as f:
         f.write(sm_builder.to_v3_json(os.path.basename(output_file)))
-      print(f"Source map generated at: {map_output_file}")
+      if not quiet:
+        print(f"Source map generated at: {map_output_file}")
 
-    print(f"\nCompilation successful! {target_name} output written to:\n"
-          f"{output_file}")
+    if not quiet:
+      print(f"\nCompilation successful! {target_name} output written to:\n"
+            f"{output_file}")
     return output_file
   except Exception as e:
-    print(f"Failed to write output file: {e}", file=sys.stderr)
+    if not quiet:  # pragma: no cover
+      print(f"Failed to write output file: {e}", file=sys.stderr)
     sys.exit(1)
