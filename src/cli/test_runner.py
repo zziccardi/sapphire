@@ -203,7 +203,7 @@ def run_tests_python(
         stripped = src.strip()
         indent_len = len(src) - len(src.lstrip())
         lines_out.append(f"  Line {sp_line}:  {stripped}")
-        lines_out.append(f"  {' ' * (len(str(sp_line)) + 4)}{'^' * len(stripped)}")
+        lines_out.append(f"  {' ' * (len(str(sp_line)) + 8)}{'^' * len(stripped)}")
 
     return "\n".join(lines_out)
 
@@ -386,7 +386,7 @@ local function print_failure(f)
     local stripped = sp_text:match("^%s*(.-)%s*$")
     local line_str = tostring(sp_line)
     print("  Line " .. line_str .. ":  " .. stripped)
-    local indent = string.rep(" ", #line_str + 4)
+    local indent = string.rep(" ", #line_str + 8)
     print("  " .. indent .. string.rep("^", #stripped))
   end
 end
