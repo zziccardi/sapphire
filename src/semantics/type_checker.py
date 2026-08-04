@@ -295,6 +295,10 @@ class TypeChecker:
       else:
         mod_sym = existing
 
+      if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+        mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
+        self.symbol_table.define_type("TestCase", self.symbol_table.testcase_trait)
+
       # Resolve imported module file path on disk
       possible_paths = [
           imp.path.replace(".", "/") + ".sp",
@@ -690,9 +694,9 @@ class TypeChecker:
 
     # If implementing a trait, verify contract is fully satisfied
     if node.trait_name:
-      trait_type = self.symbol_table.lookup_type(node.trait_name) or self.symbol_table.lookup_type("TestCase")
+      trait_type = self.symbol_table.lookup_type(node.trait_name)
       if isinstance(trait_type, TraitType):
-        is_test_case = node.trait_name == "TestCase" or node.trait_name.endswith(".TestCase")
+        is_test_case = trait_type is self.symbol_table.testcase_trait or node.trait_name.endswith(".TestCase")
         if is_test_case:
           # Inject TestCase assertion methods onto struct methods if not defined explicitly
           for trait_m_name, trait_sig in trait_type.methods.items():
@@ -713,6 +717,8 @@ class TypeChecker:
                     f"has signature {impl_sig}, but trait '{node.trait_name}' "
                     f"requires {trait_sig}."
                 )
+      else:
+        self.error(f"Trait '{node.trait_name}' is not defined.")
 
     # Check each method implementation
     for member in node.members:

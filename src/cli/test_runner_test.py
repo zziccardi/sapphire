@@ -233,6 +233,22 @@ impl TestCase for BadSetupTest {
     py_tr.visit_StructDeclNode(struct_node)
     self.assertIn("class ChildStruct(BaseStruct, testing.TestCase):", py_tr.get_output())
 
+  def test_unimported_testcase_trait_raises_error(self):
+    unimported_sp = os.path.join(self.temp_dir, "unimported_testcase.txt")
+    with open(unimported_sp, "w", encoding="utf-8") as f:
+      f.write("""
+struct UnimportedSuite {}
+
+impl TestCase for UnimportedSuite {
+  func test_something() {}
+}
+""")
+    from src.semantics.type_checker import TypeChecker
+    with self.assertRaises(SemanticError):
+      checker = TypeChecker(source_file_path=unimported_sp)
+      ast = parse_ast(unimported_sp)
+      checker.check(ast)
+
 
 if __name__ == "__main__":
   unittest.main()

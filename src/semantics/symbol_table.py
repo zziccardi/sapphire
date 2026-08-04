@@ -657,7 +657,7 @@ class SymbolTable:
       fn_t = FunctionType([NoneType(), NoneType(), PrimitiveType("String"), PrimitiveType("String")], NoneType(), num_defaults=4)
       fn_t.is_testing_assertion = True
       testcase_trait.methods[name] = fn_t
-    self.current_scope.define_type("TestCase", testcase_trait)
+    self.testcase_trait = testcase_trait
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""
