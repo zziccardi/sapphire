@@ -29,7 +29,8 @@ class SapphireCLITest(QuietTestCase):
     py_file = os.path.join(self.temp_dir.name, "output.py")
     test_args = ["sapphire", "build", self.sp_file, "-o", py_file]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
     self.assertTrue(os.path.exists(py_file))
 
   def test_build_subcommand_lua(self):
@@ -37,7 +38,8 @@ class SapphireCLITest(QuietTestCase):
     map_file = lua_file + ".map"
     test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
     self.assertTrue(os.path.exists(lua_file))
     self.assertTrue(os.path.exists(map_file))
 
@@ -46,7 +48,8 @@ class SapphireCLITest(QuietTestCase):
     map_file = lua_file + ".map"
     test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file, "--no_sourcemap"]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
     self.assertTrue(os.path.exists(lua_file))
     self.assertFalse(os.path.exists(map_file))
 
@@ -103,14 +106,16 @@ class SapphireCLITest(QuietTestCase):
       with patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
         with self.assertRaises(SystemExit) as cm:
-          main()
+          with suppress_output():
+            main()
         self.assertEqual(cm.exception.code, 0)
         mock_run.assert_called_once()
 
   def test_no_args_prints_help(self):
     test_args = ["sapphire"]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
 
   def test_game_loop_sample_execution(self):
     game_loop_sp = os.path.abspath(
@@ -121,7 +126,8 @@ class SapphireCLITest(QuietTestCase):
     test_args = ["sapphire", "run", game_loop_sp]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 0)
 
   def test_sys_path_auto_injection(self):

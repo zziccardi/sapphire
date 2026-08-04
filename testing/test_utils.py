@@ -27,10 +27,10 @@ class QuietTestCase(unittest.TestCase):
     super().setUp()
     self._stdout_io = io.StringIO()
     self._stderr_io = io.StringIO()
-    self._stdout_patcher = patch("sys.stdout", self._stdout_io)
-    self._stderr_patcher = patch("sys.stderr", self._stderr_io)
-    self._stdout_patcher.start()
-    self._stderr_patcher.start()
+    self._old_stdout = sys.stdout
+    self._old_stderr = sys.stderr
+    sys.stdout = self._stdout_io
+    sys.stderr = self._stderr_io
 
     # Redirect low-level OS file descriptors 1 and 2 to devnull so child subprocesses are silent
     self._null_fd = os.open(os.devnull, os.O_WRONLY)
@@ -45,6 +45,6 @@ class QuietTestCase(unittest.TestCase):
     os.close(self._old_stdout_fd)
     os.close(self._old_stderr_fd)
     os.close(self._null_fd)
-    self._stderr_patcher.stop()
-    self._stdout_patcher.stop()
+    sys.stdout = self._old_stdout
+    sys.stderr = self._old_stderr
     super().tearDown()
