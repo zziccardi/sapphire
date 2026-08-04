@@ -1,9 +1,15 @@
 [run]
+source =
+    src
+    tools/vscode-extension/scripts
 omit =
     src/parser/gen/*
     src/run_*.py
     *__init__.py
     *_test.py
+    /tmp/*
+    /var/*
+    /private/var/*
 
 [report]
 omit =
@@ -11,3 +17,7 @@ omit =
     src/run_*.py
     *__init__.py
     *_test.py
+    /tmp/*
+    /var/*
+    /private/var/*
+
