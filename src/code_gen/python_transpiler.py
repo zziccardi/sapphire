@@ -341,6 +341,9 @@ class PythonTranspiler:
     self.struct_traits: Dict[str, Set[str]] = {}
     self.clone_helper_counter = 0
     self._identifier_map: Dict[str, str] = {}
+    # Source line map: Python output line -> Sapphire source line
+    self._py_lineno = 1
+    self._line_map: Dict[int, int] = {}
 
   def emit(self, text: str) -> None:
     """Emits text on the current line."""
@@ -348,7 +351,13 @@ class PythonTranspiler:
 
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
+    self._py_lineno += 1
     self.code.append("\n" + "  " * self.indent_level)
+
+  def record_line(self, sp_line: int) -> None:
+    """Records a mapping from the current Python output line to a Sapphire source line."""
+    if sp_line and sp_line > 0:
+      self._line_map[self._py_lineno] = sp_line
 
   def indent(self) -> None:
     """Increments the indentation level."""
@@ -373,9 +382,12 @@ class PythonTranspiler:
   def transpile(self, program: ProgramNode) -> str:
     """Entry point to transpile a ProgramNode AST into Python source code string."""
     self.code = []
+    self._py_lineno = 1
+    self._line_map = {}
 
     # 1. Output runtime preamble
     self.emit(PYTHON_RUNTIME_PREAMBLE)
+    self._py_lineno += PYTHON_RUNTIME_PREAMBLE.count("\n")
     self.newline()
 
     # Detect testing module import alias
@@ -441,6 +453,15 @@ class PythonTranspiler:
     # 5. Transpile export manifest to __all__
     if getattr(program, "export_block", None):
       self.visit(program.export_block)
+
+    # 6. Emit source line map for test runner demangling
+    if self._line_map:
+      self.newline()
+      self.emit("_SP_LINE_MAP = {")
+      for py_line, sp_line in sorted(self._line_map.items()):
+        self.emit(f"{py_line}: {sp_line}, ")
+      self.emit("}")
+      self.newline()
 
     return self.get_output()
 
@@ -697,6 +718,7 @@ class PythonTranspiler:
     self._lift_match_expressions(node.exprs)
 
     self.newline()
+    self.record_line(getattr(node, "start_line", None))
     names_str = ", ".join(node.names)
     self.emit(f"{names_str}")
     if node.exprs:
@@ -711,6 +733,7 @@ class PythonTranspiler:
     self._lift_match_expressions(node.exprs)
 
     self.newline()
+    self.record_line(getattr(node, "start_line", None))
     if node.op == "=":
       for idx, target in enumerate(node.targets):
         if idx > 0:
@@ -732,6 +755,7 @@ class PythonTranspiler:
       return
     self._lift_match_expressions(node.expr)
     self.newline()
+    self.record_line(getattr(node, "start_line", None))
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:

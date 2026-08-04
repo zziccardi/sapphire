@@ -249,6 +249,117 @@ impl TestCase for UnimportedSuite {
       ast = parse_ast(unimported_sp)
       checker.check(ast)
 
+  def test_failure_format_none_and_not_none_kinds(self):
+    """Covers none/not_none failure kinds and generic kind via format_failure branches."""
+    import io
+    import sys
+    import os as _os
+    from unittest.mock import patch
+    from contextlib import redirect_stdout
+
+    workspace_root = _os.path.abspath(
+        _os.path.join(_os.path.dirname(__file__), "..", "..")
+    )
+    lib_dir = _os.path.join(workspace_root, "lib")
+    if lib_dir not in sys.path:
+      sys.path.insert(0, lib_dir)
+
+    import std.testing as testing
+    from src.code_gen.transpiler import transpile_file
+
+    none_sp = _os.path.join(self.temp_dir, "test_none_kinds.sp")
+    with open(none_sp, "w", encoding="utf-8") as f:
+      f.write("""
+import std.testing as t;
+struct NoneKindTest {}
+impl t.TestCase for NoneKindTest {
+  func test_none_fail() {
+    let x: int? = 42;
+    self.expect_not_none(x);
+  }
+}
+""")
+    ast = parse_ast(none_sp)
+    standalone, suites = discover_tests(ast)
+    out_py = transpile_file(none_sp, target="python", test_mode=True)
+
+    # Use a helper to test the formatting logic directly
+    patched_py2 = _os.path.join(self.temp_dir, "none_direct.py")
+    with open(patched_py2, "w") as f:
+      f.write("""import std.testing as testing
+class NoneKindTest(testing.TestCase):
+  def __init__(self, *args, **kwargs):
+    for k, v in kwargs.items():
+      setattr(self, k, v)
+  def test_none_fail(self):
+    testing.expect_none(42)
+    testing.expect_not_none(None)
+_SP_LINE_MAP = {}
+""")
+
+    buf4 = io.StringIO()
+    with redirect_stdout(buf4):
+      with patch("src.cli.test_runner.transpile_file", return_value=patched_py2):
+        passed4, failed4, _ = run_tests_python(
+            none_sp, [], {"NoneKindTest": ["test_none_fail"]}
+        )
+    out4 = buf4.getvalue()
+
+    self.assertIn("Expected:", out4)
+    self.assertIn("Actual:", out4)
+    self.assertGreater(failed4, 0)
+
+  def test_failure_header_without_source_line(self):
+    """Covers first_sp_line returning 0 (fallback walk fails) -> header without :LINE."""
+    import io
+    import sys
+    import os as _os
+    from unittest.mock import patch
+    from contextlib import redirect_stdout
+
+    workspace_root = _os.path.abspath(
+        _os.path.join(_os.path.dirname(__file__), "..", "..")
+    )
+    lib_dir = _os.path.join(workspace_root, "lib")
+    if lib_dir not in sys.path:
+      sys.path.insert(0, lib_dir)
+
+    from src.code_gen.transpiler import transpile_file
+
+    bare_sp = _os.path.join(self.temp_dir, "test_bare.sp")
+    with open(bare_sp, "w", encoding="utf-8") as f:
+      f.write("""
+import std.testing as t;
+
+@test
+func test_bare_fail() {
+  t.expect_eq(1, 2);
+}
+""")
+    ast = parse_ast(bare_sp)
+    standalone, suites = discover_tests(ast)
+
+    out_py = transpile_file(bare_sp, target="python", test_mode=True)
+    with open(out_py, "r") as f:
+      content = f.read()
+    content_no_map = "\n".join(
+        line for line in content.splitlines()
+        if "_SP_LINE_MAP" not in line
+    )
+    patched_py = _os.path.join(self.temp_dir, "bare_no_map.py")
+    with open(patched_py, "w") as f:
+      f.write(content_no_map)
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+      with patch("src.cli.test_runner.transpile_file", return_value=patched_py):
+        passed, failed, _ = run_tests_python(bare_sp, standalone, suites)
+    out = buf.getvalue()
+
+    self.assertIn("[ FAIL ] test_bare_fail (test_bare.sp)", out)
+    self.assertNotIn("test_bare.sp:", out)
+    self.assertGreater(failed, 0)
+
 
 if __name__ == "__main__":
   unittest.main()
