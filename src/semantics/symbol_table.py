@@ -345,6 +345,24 @@ class NoneType(Type):
     return "none"
 
 
+class InferredType(Type):
+  """Placeholder type for a lambda parameter whose type is being inferred.
+
+  Used during the speculative body scan in ``visit_LambdaNode`` when neither
+  an explicit annotation nor an enclosing ``expected_type`` is available.
+  ``is_compatible`` returns ``True`` for all types so that no false arithmetic
+  or comparison errors are emitted while the real type is being discovered.
+  Once inference completes the placeholder is replaced with the resolved
+  ``PrimitiveType`` before the symbol table entry is finalised.
+  """
+
+  def is_compatible(self, other: "Type") -> bool:
+    return True
+
+  def __repr__(self) -> str:
+    return "<inferred>"
+
+
 class ArrayType(Type):
   """Represents an array type (e.g. '[int]' or '[int; 3]')."""
 

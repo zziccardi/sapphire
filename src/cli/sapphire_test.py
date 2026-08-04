@@ -6,10 +6,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+try:
+  from testing.test_utils import QuietTestCase, suppress_output
+except ModuleNotFoundError:  # pragma: no cover
+  from src.testing.test_utils import QuietTestCase, suppress_output
+
 from src.cli.sapphire import main
 
 
-class SapphireCLITest(unittest.TestCase):
+class SapphireCLITest(QuietTestCase):
 
   def setUp(self):
     self.temp_dir = tempfile.TemporaryDirectory()
@@ -24,7 +29,8 @@ class SapphireCLITest(unittest.TestCase):
     py_file = os.path.join(self.temp_dir.name, "output.py")
     test_args = ["sapphire", "build", self.sp_file, "-o", py_file]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
     self.assertTrue(os.path.exists(py_file))
 
   def test_build_subcommand_lua(self):
@@ -32,7 +38,8 @@ class SapphireCLITest(unittest.TestCase):
     map_file = lua_file + ".map"
     test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
     self.assertTrue(os.path.exists(lua_file))
     self.assertTrue(os.path.exists(map_file))
 
@@ -41,7 +48,8 @@ class SapphireCLITest(unittest.TestCase):
     map_file = lua_file + ".map"
     test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file, "--no_sourcemap"]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
     self.assertTrue(os.path.exists(lua_file))
     self.assertFalse(os.path.exists(map_file))
 
@@ -50,14 +58,16 @@ class SapphireCLITest(unittest.TestCase):
     test_args = ["sapphire", "build", non_existent]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 1)
 
   def test_test_subcommand(self):
     test_args = ["sapphire", "test", self.sp_file]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 0)
 
   def test_run_file_not_found(self):
@@ -65,7 +75,8 @@ class SapphireCLITest(unittest.TestCase):
     test_args = ["sapphire", "run", non_existent]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 1)
 
   def test_run_subcommand_lua(self):
@@ -75,7 +86,8 @@ class SapphireCLITest(unittest.TestCase):
         with patch("subprocess.run") as mock_run:
           mock_run.return_value.returncode = 0
           with self.assertRaises(SystemExit) as cm:
-            main()
+            with suppress_output():
+              main()
           self.assertEqual(cm.exception.code, 0)
           mock_run.assert_called_once()
 
@@ -84,7 +96,8 @@ class SapphireCLITest(unittest.TestCase):
     with patch.object(sys, "argv", test_args):
       with patch("shutil.which", return_value=None):
         with self.assertRaises(SystemExit) as cm:
-          main()
+          with suppress_output():
+            main()
         self.assertEqual(cm.exception.code, 1)
 
   def test_shortcut_invocation(self):
@@ -93,14 +106,16 @@ class SapphireCLITest(unittest.TestCase):
       with patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
         with self.assertRaises(SystemExit) as cm:
-          main()
+          with suppress_output():
+            main()
         self.assertEqual(cm.exception.code, 0)
         mock_run.assert_called_once()
 
   def test_no_args_prints_help(self):
     test_args = ["sapphire"]
     with patch.object(sys, "argv", test_args):
-      main()
+      with suppress_output():
+        main()
 
   def test_game_loop_sample_execution(self):
     game_loop_sp = os.path.abspath(
@@ -111,7 +126,8 @@ class SapphireCLITest(unittest.TestCase):
     test_args = ["sapphire", "run", game_loop_sp]
     with patch.object(sys, "argv", test_args):
       with self.assertRaises(SystemExit) as cm:
-        main()
+        with suppress_output():
+          main()
       self.assertEqual(cm.exception.code, 0)
 
   def test_sys_path_auto_injection(self):

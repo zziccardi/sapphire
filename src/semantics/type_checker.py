@@ -23,6 +23,7 @@ try:
       TraitType,
       EnumType,
       NoneType,
+      InferredType,
       ArrayType,
       MapType,
       ArenaType,
@@ -52,6 +53,7 @@ except ModuleNotFoundError:  # pragma: no cover
       TraitType,
       EnumType,
       NoneType,
+      InferredType,
       ArrayType,
       MapType,
       ArenaType,
@@ -1299,15 +1301,18 @@ class TypeChecker:
       if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name == "String") or (isinstance(right, PrimitiveType) and right.name == "String")):
         node.is_string_concat = True
         return PrimitiveType("String")
-      # Supports int and float operations
-      is_numeric_left = isinstance(left, PrimitiveType) and left.name in ("int", "float")
-      is_numeric_right = isinstance(right, PrimitiveType) and right.name in ("int", "float")
+      # Supports int and float operations; InferredType is a permitted
+      # placeholder during lambda body analysis — treat it as numeric.
+      is_numeric_left = (isinstance(left, PrimitiveType) and left.name in ("int", "float")) or isinstance(left, InferredType)
+      is_numeric_right = (isinstance(right, PrimitiveType) and right.name in ("int", "float")) or isinstance(right, InferredType)
       if not (is_numeric_left and is_numeric_right):
         self.error(f"Arithmetic operator '{node.op}' requires numeric types.")
         return PrimitiveType("none")
 
-      # Common type rules
-      if left.name == "float" or right.name == "float":
+      # If one side is a concrete float, propagate float; otherwise int.
+      left_is_float = isinstance(left, PrimitiveType) and left.name == "float"
+      right_is_float = isinstance(right, PrimitiveType) and right.name == "float"
+      if left_is_float or right_is_float:
         return PrimitiveType("float")
       return PrimitiveType("int")
 
@@ -1730,6 +1735,94 @@ class TypeChecker:
 
     return expr_type
 
+  def _infer_lambda_param_type(self, param_name: str, body: "ASTNode") -> Optional[Type]:
+    """Infer the type of a lambda parameter from its usage in *body*.
+
+    Performs a lightweight structural scan of the body AST — not a full
+    type-check pass — to determine the most specific type for *param_name*
+    based on how it is used.  Returns a ``PrimitiveType`` if a clear
+    constraint is found, or ``None`` if the usage is unconstrained.
+
+    This is called only when neither an explicit annotation nor an enclosing
+    ``expected_type`` FunctionType is available.
+    """
+    ARITHMETIC_OPS = {"+", "-", "*", "/", "%"}
+
+    def references_param(node: "ASTNode") -> bool:
+      return isinstance(node, IdentifierNode) and node.name == param_name
+
+    def scan(node: "ASTNode") -> Optional[Type]:
+      if node is None:
+        return None
+
+      if isinstance(node, BinaryOpNode):
+        left_is_param = references_param(node.left)
+        right_is_param = references_param(node.right)
+
+        if node.op in ARITHMETIC_OPS and (left_is_param or right_is_param):
+          # The other operand tells us whether this is float or int.
+          other = node.right if left_is_param else node.left
+          if isinstance(other, LiteralNode) and other.lit_type == "float":
+            return PrimitiveType("float")
+          return PrimitiveType("int")
+
+        if node.op in ("==", "!=", "<", "<=", ">", ">=") and (left_is_param or right_is_param):
+          # Comparison with a numeric literal → param is numeric
+          other = node.right if left_is_param else node.left
+          if isinstance(other, LiteralNode):
+            if other.lit_type == "float":
+              return PrimitiveType("float")
+            if other.lit_type == "int":
+              return PrimitiveType("int")
+            if other.lit_type == "string":
+              return PrimitiveType("String")
+          return None
+
+        if node.op in ("&&", "||") and (left_is_param or right_is_param):
+          return PrimitiveType("bool")
+
+        # Recurse into both sides
+        return scan(node.left) or scan(node.right)
+
+      if isinstance(node, UnaryOpNode):
+        if node.op in ("-", "+") and references_param(node.expr):
+          return PrimitiveType("int")
+        return scan(node.expr)
+
+      if isinstance(node, BlockNode):
+        for stmt in (node.statements or []):
+          result = scan(stmt)
+          if result is not None:
+            return result
+        return None
+
+      if isinstance(node, ReturnNode):
+        return scan(node.expr) if node.expr else None
+
+      if isinstance(node, VarDeclNode):
+        for expr in (node.exprs or []):
+          result = scan(expr)
+          if result is not None:
+            return result
+        return None
+
+      if isinstance(node, ExprStmtNode):
+        return scan(node.expr)
+
+      if isinstance(node, CallNode):
+        for arg in (node.arguments or []):
+          result = scan(arg.expr)
+          if result is not None:
+            return result
+        return None
+
+      if isinstance(node, TernaryExprNode):
+        return scan(node.condition) or scan(node.true_expr) or scan(node.false_expr)
+
+      return None
+
+    return scan(body)
+
   def visit_LambdaNode(self, node: LambdaNode) -> Type:
     self.symbol_table.enter_scope()
 
@@ -1752,11 +1845,23 @@ class TypeChecker:
       ):
         ptype = expected_func.param_types[idx]
       else:
-        ptype = PrimitiveType("none")
+        # No annotation and no expected type: infer from usage in the body.
+        # Fall back to InferredType (compatible with all ops) when the usage
+        # is ambiguous so that no false errors are emitted.
+        inferred = self._infer_lambda_param_type(p.name, node.body)
+        ptype = inferred if inferred is not None else InferredType()
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, is_mutable=False))
       param_types.append(ptype)
 
     body_type = self.visit(node.body)
+
+    # Resolve any InferredType placeholders: if the body produced a concrete
+    # return type, use it to back-fill params that remained unconstrained.
+    resolved_param_types = [
+        body_type if isinstance(pt, InferredType) and not isinstance(body_type, (NoneType, InferredType))
+        else (PrimitiveType("none") if isinstance(pt, InferredType) else pt)
+        for pt in param_types
+    ]
 
     # Lambda expression implicit return
     ret_type = body_type if not isinstance(node.body, BlockNode) else PrimitiveType("none")
@@ -1769,7 +1874,7 @@ class TypeChecker:
       ret_type = expected_func.return_type
 
     self.symbol_table.exit_scope()
-    return FunctionType(param_types, ret_type)
+    return FunctionType(resolved_param_types, ret_type)
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:

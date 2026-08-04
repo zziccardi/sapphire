@@ -18,13 +18,18 @@ from src.code_gen.transpiler import transpile_file
 from src.code_gen.python_transpiler import PythonTranspiler
 from src.code_gen.lua_transpiler import LuaTranspiler
 from src.parser.ast import FuncDeclNode, StructDeclNode, AnnotationNode, BlockNode
-from src.semantics.symbol_table import PrimitiveType
 from src.semantics.type_checker import SemanticError
 
+try:
+  from testing.test_utils import QuietTestCase
+except ModuleNotFoundError:  # pragma: no cover
+  from src.testing.test_utils import QuietTestCase
 
-class TestRunnerEngineTest(unittest.TestCase):
+
+class TestRunnerEngineTest(QuietTestCase):
 
   def setUp(self):
+    super().setUp()
     self.temp_dir = tempfile.mkdtemp()
     self.sample_sp = os.path.join(self.temp_dir, "test_sample.sp")
     with open(self.sample_sp, "w", encoding="utf-8") as f:
@@ -138,7 +143,7 @@ impl t.TestCase for BadSetupTest {
   def test_at_test_conditional_compilation(self):
     # Normal transpile: @test function should be omitted
     out_normal = os.path.join(self.temp_dir, "normal.py")
-    transpile_file(self.sample_sp, out_normal, target="python", test_mode=False)
+    transpile_file(self.sample_sp, out_normal, target="python", test_mode=False, quiet=True)
     with open(out_normal, "r", encoding="utf-8") as f:
       content = f.read()
     self.assertNotIn("def test_standalone_pass", content)
@@ -146,7 +151,7 @@ impl t.TestCase for BadSetupTest {
 
     # Test transpile: @test function should be emitted
     out_test = os.path.join(self.temp_dir, "test_mode.py")
-    transpile_file(self.sample_sp, out_test, target="python", test_mode=True)
+    transpile_file(self.sample_sp, out_test, target="python", test_mode=True, quiet=True)
     with open(out_test, "r", encoding="utf-8") as f:
       content = f.read()
     self.assertIn("def test_standalone_pass", content)
@@ -249,6 +254,74 @@ impl TestCase for UnimportedSuite {
       ast = parse_ast(unimported_sp)
       checker.check(ast)
 
+  def test_caret_alignment(self):
+    """Verifies carets align exactly under the source code snippet.
+
+    The header prefix is '  Line <N>:  ' (2 + 5 + len(N) + 3 = 10 + len(N) chars).
+    The caret line prefix is '  ' + ' ' * (len(N) + 8) = 2 + len(N) + 8 = 10 + len(N) chars.
+    So the first caret must land in the same column as the first character of the
+    stripped source snippet.
+    """
+    import io
+    import sys
+    import os as _os
+    from contextlib import redirect_stdout
+
+    workspace_root = _os.path.abspath(
+        _os.path.join(_os.path.dirname(__file__), "..", "..")
+    )
+    lib_dir = _os.path.join(workspace_root, "lib")
+    if lib_dir not in sys.path:
+      sys.path.insert(0, lib_dir)
+
+    def _check_alignment(output: str):
+      """Assert that every caret line is properly indented under its source line."""
+      lines = output.splitlines()
+      for i, line in enumerate(lines):
+        # Identify source-line rows: '  Line <N>:  <code>'
+        import re
+        m = re.match(r"^  Line (\d+):  (.+)$", line)
+        if m:
+          lineno_str = m.group(1)
+          code = m.group(2)
+          expected_indent = 2 + len("Line ") + len(lineno_str) + len(":  ")
+          if i + 1 < len(lines):
+            caret_line = lines[i + 1]
+            # Count leading spaces in caret line
+            actual_indent = len(caret_line) - len(caret_line.lstrip(" "))
+            self.assertEqual(
+                actual_indent, expected_indent,
+                f"Caret indent {actual_indent} != expected {expected_indent} "
+                f"for line-number length {len(lineno_str)}.\n"
+                f"  source line: {line!r}\n"
+                f"  caret line:  {caret_line!r}"
+            )
+            # The caret line should consist only of spaces then carets
+            stripped_carets = caret_line.lstrip()
+            self.assertRegex(
+                stripped_carets, r"^\^+$",
+                f"Caret line contains unexpected characters: {caret_line!r}"
+            )
+            # Caret span should match the length of the code
+            self.assertEqual(
+                len(stripped_carets), len(code),
+                f"Caret count {len(stripped_carets)} != code length {len(code)}"
+            )
+
+    # --- Python runner ---
+    ast = parse_ast(self.sample_sp)
+    standalone, suites = discover_tests(ast)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+      run_tests_python(self.sample_sp, standalone, suites)
+    _check_alignment(buf.getvalue())
+
+    # --- Lua runner ---
+    buf_lua = io.StringIO()
+    with redirect_stdout(buf_lua):
+      run_tests_lua(self.sample_sp, standalone, suites)
+    _check_alignment(buf_lua.getvalue())
+
   def test_failure_format_none_and_not_none_kinds(self):
     """Covers none/not_none failure kinds and generic kind via format_failure branches."""
     import io
@@ -281,7 +354,7 @@ impl t.TestCase for NoneKindTest {
 """)
     ast = parse_ast(none_sp)
     standalone, suites = discover_tests(ast)
-    out_py = transpile_file(none_sp, target="python", test_mode=True)
+    out_py = transpile_file(none_sp, target="python", test_mode=True, quiet=True)
 
     # Use a helper to test the formatting logic directly
     patched_py2 = _os.path.join(self.temp_dir, "none_direct.py")
@@ -339,7 +412,7 @@ func test_bare_fail() {
     ast = parse_ast(bare_sp)
     standalone, suites = discover_tests(ast)
 
-    out_py = transpile_file(bare_sp, target="python", test_mode=True)
+    out_py = transpile_file(bare_sp, target="python", test_mode=True, quiet=True)
     with open(out_py, "r") as f:
       content = f.read()
     content_no_map = "\n".join(

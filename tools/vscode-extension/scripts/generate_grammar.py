@@ -60,8 +60,9 @@ def parse_antlr_grammar():
   }
 
 
-def main():
-  print("Parsing ANTLR grammar specification...")
+def main(quiet: bool = False):
+  if not quiet:
+    print("Parsing ANTLR grammar specification...")
   data = parse_antlr_grammar()
 
   # Define TextMate JSON structure
@@ -157,7 +158,8 @@ def main():
   with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
     json.dump(tm_grammar, f, indent=2)
 
-  print(f"TextMate grammar successfully written to: {OUTPUT_FILE}")
+  if not quiet:
+    print(f"TextMate grammar successfully written to: {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":  # pragma: no cover

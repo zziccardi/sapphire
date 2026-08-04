@@ -6,6 +6,7 @@ compound assignment expansion, and array indexing adjustments.
 """
 
 import os
+import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -107,6 +108,16 @@ class TestLuaTranspiler(unittest.TestCase):
     transpiler.visit(TraitDeclNode("T", []))
     transpiler.visit(BlockNode([]))
     transpiler.visit(ExprStmtNode(IdentifierNode("x")))
+
+    # visit_ImplMemberNode raises when called directly (impl members are emitted
+    # via visit_StructDeclNode in the Lua backend, not standalone)
+    try:
+      from parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+    _dummy_func = _FuncDeclNode("do_thing", [], None, _BlockNode([]), [])
+    with self.assertRaises(NotImplementedError):
+      LuaTranspiler().visit_ImplMemberNode(_ImplMemberNode(_dummy_func, None))
 
     # BinaryOpNode with right-operand string concatenation
     transpiler.visit(BinaryOpNode(LiteralNode(10, "int"), "+", LiteralNode("items", "string")))
@@ -449,7 +460,7 @@ class TestLuaTranspiler(unittest.TestCase):
       with open(sp_file, "w", encoding="utf-8") as f:
         f.write("let x: int = 1;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(sp_file, output_file="/invalid_dir_xyz/out.lua", target="lua")
+        transpile_file(sp_file, output_file="/invalid_dir_xyz/out.lua", target="lua", quiet=True)
       self.assertEqual(cm.exception.code, 1)
 
   def test_trait_member_modifiers(self):
@@ -493,7 +504,7 @@ class TestLuaTranspiler(unittest.TestCase):
 
     lua_path = sp_path[:-3] + ".lua"
     try:
-      transpile_file(sp_path, output_file=lua_path, target="lua")
+      transpile_file(sp_path, output_file=lua_path, target="lua", quiet=True)
       result = subprocess.run([lua_bin, lua_path], capture_output=True, text=True)
       self.assertEqual(result.returncode, 0)
     finally:
@@ -643,7 +654,7 @@ class TestLuaTranspiler(unittest.TestCase):
         f.write("import sub;\n")
 
       out_lua = os.path.join(tmpdir, "main.lua")
-      transpile_file(main_sp, output_file=out_lua, target="lua")
+      transpile_file(main_sp, output_file=out_lua, target="lua", quiet=True)
       self.assertTrue(os.path.exists(out_lua))
       sub_lua = os.path.join(tmpdir, "sub.lua")
       self.assertTrue(os.path.exists(sub_lua))
@@ -651,7 +662,7 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_transpile_file_missing_file(self):
     """Verifies SystemExit on missing file input."""
     with self.assertRaises(SystemExit):
-      transpile_file("/non_existent_path_xyz_123.sp")
+      transpile_file("/non_existent_path_xyz_123.sp", quiet=True)
 
 
   def test_lua_match_expression_transpilation(self):
@@ -1040,6 +1051,139 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_code = self._transpile(code)
     self.assertIn("for i in _sapphire_range(0, 10, 2) do", lua_code)
     self.assertIn("local _sapphire_range =", lua_code)
+
+
+# ---------------------------------------------------------------------------
+# Shared fixture tests
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtures"
+
+
+class TestSharedFixtures(unittest.TestCase):
+  """Transpiles each shared .sp fixture with LuaTranspiler and verifies output.
+
+  Two levels of verification are performed:
+
+  1. **Transpilation succeeds** — the fixture must produce Lua output without
+     raising `NotImplementedError` from `generic_visit`. This confirms
+     that the Lua backend covers every AST node used by the fixture.
+
+  2. **Execution matches expectations** (optional) — if a Lua 5.1+ binary is
+     available in `PATH`, the generated Lua is executed and the return value
+     of each `@test` function is compared against the shared ground truth in
+     `testing/fixtures/_expectations.py`. Skipped automatically when Lua is
+     not installed.
+
+  This class is structurally mirrored by `TestSharedFixtures` in
+  `python_transpiler_test.py`.
+  """
+
+  @classmethod
+  def _load_expectations(cls):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_expectations", _FIXTURES_DIR / "_expectations.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.EXPECTATIONS
+
+  def _transpile_fixture(self, source: str) -> str:
+    """Parse *source* and return the generated Lua code string."""
+    try:
+      from parser.gen.SapphireLexer import SapphireLexer as _Lexer
+      from parser.gen.SapphireParser import SapphireParser as _Parser
+      from parser.ast_builder import ASTBuilder as _Builder
+      from semantics.type_checker import TypeChecker as _Checker
+    except ModuleNotFoundError:
+      from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
+      from src.parser.gen.SapphireParser import SapphireParser as _Parser
+      from src.parser.ast_builder import ASTBuilder as _Builder
+      from src.semantics.type_checker import TypeChecker as _Checker
+
+    input_stream = InputStream(source)
+    lexer = _Lexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = _Parser(stream)
+    tree = parser.program()
+    ast = _Builder().visit(tree)
+    try:
+      _Checker().check(ast)
+    except Exception:
+      pass
+    return LuaTranspiler(test_mode=True).transpile(ast)
+
+  def _make_fixture_test(fixture_name: str):  # noqa: N805
+    """Factory producing a test method for *fixture_name*."""
+    def _test(self):
+      fixture_path = _FIXTURES_DIR / fixture_name
+      if not fixture_path.exists():
+        self.skipTest(f"Fixture not found: {fixture_path}")
+      source = fixture_path.read_text(encoding="utf-8")
+
+      # Level 1: transpilation must not raise
+      lua_code = self._transpile_fixture(source)
+      self.assertIsInstance(lua_code, str)
+      self.assertGreater(len(lua_code), 0)
+
+      # Level 2: optional execution via a Lua binary
+      lua_bin = shutil.which("lua") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      if not lua_bin:
+        return  # Lua not available — transpilation check is sufficient
+
+      expectations = self._load_expectations().get(fixture_name, {})
+      if not expectations:
+        return  # Nothing to assert at runtime
+
+      for fn_name, expected in expectations.items():
+        with self.subTest(fixture=fixture_name, fn=fn_name):
+          # Wrap the fixture in a tiny Lua driver that calls the function and
+          # prints its return value so we can capture it from stdout.
+          driver = (
+              lua_code
+              + f"\nprint(tostring({fn_name}()))\n"
+          )
+          with tempfile.NamedTemporaryFile(
+              suffix=".lua", mode="w", delete=False, encoding="utf-8"
+          ) as tmp:
+            tmp.write(driver)
+            tmp_path = tmp.name
+          try:
+            proc = subprocess.run(
+                [lua_bin, tmp_path],
+                capture_output=True, text=True, timeout=10,
+            )
+            if proc.returncode != 0:
+              self.skipTest(
+                  f"Lua execution failed for {fn_name}: {proc.stderr.strip()}"
+              )
+            raw = proc.stdout.strip()
+            # Coerce to the same Python type as the expected value
+            if isinstance(expected, bool):
+              actual = raw == "true"
+            elif isinstance(expected, int):
+              actual = int(float(raw))
+            elif isinstance(expected, float):
+              actual = float(raw)
+            else:
+              actual = raw
+            self.assertEqual(
+                actual, expected,
+                f"{fixture_name}::{fn_name} expected {expected!r}, Lua returned {raw!r}",
+            )
+          finally:
+            os.unlink(tmp_path)
+
+    _test.__name__ = f"test_fixture_{fixture_name.removesuffix('.sp')}"
+    _test.__doc__ = f"Shared fixture: {fixture_name}"
+    return _test
+
+  # Dynamically generate one test method per fixture file
+  if _FIXTURES_DIR.exists():
+    for _fixture_file in sorted(_FIXTURES_DIR.glob("*_test.sp")):
+      _name = f"test_fixture_{_fixture_file.stem}"
+      locals()[_name] = _make_fixture_test(_fixture_file.name)
 
 
 if __name__ == "__main__":

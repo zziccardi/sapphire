@@ -20,6 +20,7 @@ try:
   from semantics.type_checker import TypeChecker, SemanticError
   from semantics.symbol_table import MapType, RangeType
   from code_gen.source_map import SourceMapBuilder
+  from code_gen.base_transpiler import BaseTranspiler
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -28,6 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.semantics.type_checker import TypeChecker, SemanticError
   from src.semantics.symbol_table import MapType, RangeType
   from src.code_gen.source_map import SourceMapBuilder
+  from src.code_gen.base_transpiler import BaseTranspiler
 
 
 # ==========================================
@@ -317,7 +319,7 @@ local function _sapphire_demangle_traceback(msg)
   local traceback = debug.traceback("", 2)
   local demangled_lines = {}
   local full_text = err_msg .. "\\n" .. traceback
-  
+
   for line in full_text:gmatch("[^\\r\\n]+") do
     local cur_line = line
     local lua_file, line_num = cur_line:match("([^:%s]+%.lua):(%d+):")
@@ -372,7 +374,7 @@ def _has_continue_node(node: ASTNode) -> bool:
   return False
 
 
-class LuaTranspiler:
+class LuaTranspiler(BaseTranspiler):
   """AST visitor to transpile Sapphire code to Lua 5.1."""
 
   def __init__(
@@ -698,6 +700,21 @@ class LuaTranspiler:
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
     pass
+
+  def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
+    """Public visitor satisfying the BaseTranspiler contract.
+
+    Impl members are not visited standalone in the Lua backend —- they are
+    emitted as part of `visit_StructDeclNode` via the private helper. This
+    method exists solely to fulfil the abstract-method contract so that the
+    class hierarchy remains structurally symmetric with `PythonTranspiler`.
+    """
+    # Struct name is unavailable at this call site; callers that need to emit
+    # a specific impl member should use _visit_ImplMemberNode_for_struct.
+    raise NotImplementedError(
+        "visit_ImplMemberNode must be called via visit_StructDeclNode in the "
+        "Lua backend, not directly on a standalone ImplMemberNode."
+    )
 
   def _visit_ImplMemberNode_for_struct(self, node: ImplMemberNode,
                                        struct_name: str) -> None:
