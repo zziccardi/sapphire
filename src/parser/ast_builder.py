@@ -186,7 +186,12 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitImplBlock(self, ctx: SapphireParser.ImplBlockContext) -> ImplBlockNode:
-    trait_name = ctx.traitName.text if ctx.traitName else None
+    trait_name = None
+    if getattr(ctx, "traitName", None):
+      if getattr(ctx, "traitPrefix", None):
+        trait_name = f"{ctx.traitPrefix.text}.{ctx.traitName.text}"
+      else:
+        trait_name = ctx.traitName.text
     struct_name = ctx.structName.text
     tpl = ctx.typeParamList()
     if tpl:
@@ -228,10 +233,10 @@ class ASTBuilder(SapphireVisitor):
     node.struct_name_column = struct_token.column
     node.struct_name_length = len(struct_token.text)
     if trait_name:
-      trait_token = ctx.traitName
+      trait_token = getattr(ctx, "traitPrefix", None) or ctx.traitName
       node.trait_name_line = trait_token.line
       node.trait_name_column = trait_token.column
-      node.trait_name_length = len(trait_token.text)
+      node.trait_name_length = len(trait_name)
     return node
 
   def visitImplMember(self, ctx: SapphireParser.ImplMemberContext) -> ImplMemberNode:

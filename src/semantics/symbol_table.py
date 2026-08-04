@@ -597,6 +597,13 @@ class Scope:
 
   def lookup_type(self, name: str) -> Optional[Type]:
     """Looks up a type name recursively up the scope chain."""
+    if "." in name:
+      parts = name.split(".")
+      mod_sym = self.lookup(parts[0])
+      if isinstance(mod_sym, ModuleSymbol):
+        exp = mod_sym.lookup_export(parts[1])
+        if isinstance(exp, Type):
+          return exp
     if name in self.types:
       return self.types[name]
     if self.parent:

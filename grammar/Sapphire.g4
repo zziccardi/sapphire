@@ -69,7 +69,7 @@ structField
     ;
 
 implBlock
-    : IMPL typeParamList? (traitName=IDENTIFIER (tp1=typeParamList | ta1=typeArgumentList)? FOR)? structName=IDENTIFIER (tp2=typeParamList | ta2=typeArgumentList)? LBRACE implMember* RBRACE
+    : IMPL typeParamList? (traitName=identifierPath (tp1=typeParamList | ta1=typeArgumentList)? FOR)? structName=IDENTIFIER (tp2=typeParamList | ta2=typeArgumentList)? LBRACE implMember* RBRACE
     ;
 
 implMember

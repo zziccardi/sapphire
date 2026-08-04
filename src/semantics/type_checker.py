@@ -297,7 +297,6 @@ class TypeChecker:
 
       if imp.path == "std.testing" or imp.path.startswith("std.testing"):
         mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
-        self.symbol_table.define_type("TestCase", self.symbol_table.testcase_trait)
 
       # Resolve imported module file path on disk
       possible_paths = [

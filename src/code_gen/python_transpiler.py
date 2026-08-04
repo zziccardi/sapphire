@@ -490,8 +490,9 @@ class PythonTranspiler:
     self.newline()
 
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
-    if node.alias:
-      self.emit(f"import {node.path} as {node.alias}")
+    alias = node.alias if node.alias else node.path.split(".")[-1]
+    if node.alias or "." in node.path:
+      self.emit(f"import {node.path} as {alias}")
     else:
       self.emit(f"import {node.path}")
     self.newline()

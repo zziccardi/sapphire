@@ -37,7 +37,7 @@ struct SuiteTest : Parent {
   var count: int;
 }
 
-impl TestCase for SuiteTest {
+impl t.TestCase for SuiteTest {
   func set_up() {
     self.count = 5;
   }
@@ -79,7 +79,7 @@ import std.testing as t;
 
 struct BadSetupTest {}
 
-impl TestCase for BadSetupTest {
+impl t.TestCase for BadSetupTest {
   func set_up() {
     t.assert_true(false, "Setup failed");
   }

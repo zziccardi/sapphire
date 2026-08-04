@@ -2,13 +2,13 @@
  * Sample test suite illustrating Sapphire's std.testing framework.
  */
 
-import std.testing as t;
+import std.testing;
 
 struct MathSuiteTest {
   var initial_val: int;
 }
 
-impl TestCase for MathSuiteTest {
+impl testing.TestCase for MathSuiteTest {
   func set_up() {
     self.initial_val = 10;
   }
@@ -33,6 +33,6 @@ impl TestCase for MathSuiteTest {
 @test
 func test_standalone_assertions() {
   let val: int? = 42;
-  t.expect_not_none(val, "Val should not be none");
-  t.assert_eq(val ?? 0, 42);
+  testing.expect_not_none(val, "Val should not be none");
+  testing.assert_eq(val ?? 0, 42);
 }
