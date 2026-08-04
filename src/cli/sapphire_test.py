@@ -53,6 +53,13 @@ class SapphireCLITest(unittest.TestCase):
         main()
       self.assertEqual(cm.exception.code, 1)
 
+  def test_test_subcommand(self):
+    test_args = ["sapphire", "test", self.sp_file]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        main()
+      self.assertEqual(cm.exception.code, 0)
+
   def test_run_file_not_found(self):
     non_existent = os.path.join(self.temp_dir.name, "does_not_exist.sp")
     test_args = ["sapphire", "run", non_existent]
