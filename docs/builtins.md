@@ -320,11 +320,11 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
 | `size(): int` | Returns the total number of elements in the array. |
 | `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
 | `contains(element: T): bool` | Returns `true` if `element` exists in the array, otherwise `false`. |
-| `map<U>(fn: (T) -> U): [U]` | Returns a new array by applying `fn` to each element. |
-| `filter(fn: (T) -> bool): [T]` | Returns a new dynamic array containing elements for which `fn` returns `true`. |
+| `map<U>(fn: (T) -> U, in_place: bool = false): [U]` | Returns an array by applying `fn` to each element. Mutates `self` in place when `in_place = true` (requires `U == T`). |
+| `filter(fn: (T) -> bool, in_place: bool = false): [T]` | Returns dynamic array containing elements for which `fn` returns `true`. Mutates `self` in place when `in_place = true`. |
 | `reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U` | Accumulates elements using `fn` starting from `initial`. Iterates right-to-left when `reverse = true`. |
-| `reverse(): [T]` | Returns a new array with elements in reversed order. |
-| `sort(by: ((T, T) -> int)? = none, reverse: bool = false): [T]` | Returns a sorted copy of the array using optional comparator `by` and optional `reverse` flag. |
+| `reverse(in_place: bool = false): [T]` | Returns array with elements in reversed order. Mutates `self` in place when `in_place = true`. |
+| `sort(by: ((T, T) -> int)? = none, reverse: bool = false, in_place: bool = false): [T]` | Returns sorted array using optional comparator `by` and optional `reverse` flag. Mutates `self` in place when `in_place = true`. |
 | `join(sep: String = ", "): String` | Concatenates array elements into a string joined by `sep`. |
 | `push(element: T): T` | Appends `element` to a mutable dynamic array (`var [T]`) and returns `element`. |
 | `pop(): T?` | Removes and returns the last element of a mutable dynamic array (`var [T]`), or `none` if empty. |

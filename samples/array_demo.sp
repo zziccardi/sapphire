@@ -1,6 +1,6 @@
 // Sample Sapphire program demonstrating Array instance built-in methods:
-// size(), empty(), contains(), map(), filter(), reduce(), reverse(), sort(), join(),
-// push(), pop(), insert(), remove(), and clear().
+// size(), empty(), contains(), map(), filter(), reduce(), reverse(), sort(),
+// join(), push(), pop(), insert(), remove(), and clear().
 
 func main() {
   print("=== Sapphire Array Built-in Methods Demo ===");
@@ -71,7 +71,19 @@ func main() {
   mut_arr.clear();
   print("After clear, size: " + mut_arr.size());
 
-  // 7. Method Chaining
+  // 7. In-Place Transformations (in_place = true)
+  var values = [5, 2, 8, 1, 9, 4];
+  values.map(x -> x * 10, in_place = true);
+  values.filter(x -> x > 30, in_place = true);
+  values.sort(in_place = true);
+  values.reverse(in_place = true);
+
+  print("In-place transformed array size: " + values.size());
+  for v in values {
+    print("  value: " + v);
+  }
+
+  // 8. Method Chaining
   let sum_of_even_squares = numbers
       .filter(x -> x % 2 == 0)
       .map(x -> x * x)

@@ -327,10 +327,18 @@ def _sapphire_enum_from(enum_cls, val):
         return None
     return None
 
-def _sapphire_array_map(arr, fn):
+def _sapphire_array_map(arr, fn, in_place=False):
+  if in_place:
+    for i in range(len(arr)):
+      arr[i] = fn(arr[i])
+    return arr
   return [fn(x) for x in arr]
 
-def _sapphire_array_filter(arr, fn):
+def _sapphire_array_filter(arr, fn, in_place=False):
+  if in_place:
+    filtered = [x for x in arr if fn(x)]
+    arr[:] = filtered
+    return arr
   return [x for x in arr if fn(x)]
 
 def _sapphire_array_reduce(arr, initial, fn, reverse=False):
@@ -343,10 +351,20 @@ def _sapphire_array_reduce(arr, initial, fn, reverse=False):
 def _sapphire_array_contains(arr, element):
   return element in arr
 
-def _sapphire_array_reverse(arr):
+def _sapphire_array_reverse(arr, in_place=False):
+  if in_place:
+    arr.reverse()
+    return arr
   return list(reversed(arr))
 
-def _sapphire_array_sort(arr, by=None, reverse=False):
+def _sapphire_array_sort(arr, by=None, reverse=False, in_place=False):
+  if in_place:
+    if by is None:
+      arr.sort(reverse=reverse)
+    else:
+      import functools
+      arr.sort(key=functools.cmp_to_key(by), reverse=reverse)
+    return arr
   if by is None:
     return sorted(arr, reverse=reverse)
   import functools
@@ -1240,15 +1258,43 @@ class PythonTranspiler(BaseTranspiler):
       elif method == "map":
         self.emit("_sapphire_array_map(")
         self.visit(receiver)
+        fn_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            in_place_expr = arg.expr
         self.emit(", ")
-        self.visit(node.arguments[0].expr)
+        self.visit(fn_expr)
+        if in_place_expr:
+          self.emit(", in_place=")
+          self.visit(in_place_expr)
         self.emit(")")
         return
       elif method == "filter":
         self.emit("_sapphire_array_filter(")
         self.visit(receiver)
+        fn_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            in_place_expr = arg.expr
         self.emit(", ")
-        self.visit(node.arguments[0].expr)
+        self.visit(fn_expr)
+        if in_place_expr:
+          self.emit(", in_place=")
+          self.visit(in_place_expr)
         self.emit(")")
         return
       elif method == "reduce":
@@ -1290,6 +1336,9 @@ class PythonTranspiler(BaseTranspiler):
       elif method == "reverse":
         self.emit("_sapphire_array_reverse(")
         self.visit(receiver)
+        if node.arguments:
+          self.emit(", in_place=")
+          self.visit(node.arguments[0].expr)
         self.emit(")")
         return
       elif method == "sort":
@@ -1297,15 +1346,20 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(receiver)
         by_expr = None
         reverse_expr = None
+        in_place_expr = None
         for idx, arg in enumerate(node.arguments):
           if arg.name == "by":
             by_expr = arg.expr
           elif arg.name == "reverse":
             reverse_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
           elif idx == 0 and not arg.name:
             by_expr = arg.expr
           elif idx == 1 and not arg.name:
             reverse_expr = arg.expr
+          elif idx == 2 and not arg.name:
+            in_place_expr = arg.expr
 
         self.emit(", ")
         if by_expr:
@@ -1315,6 +1369,11 @@ class PythonTranspiler(BaseTranspiler):
         if reverse_expr:
           self.emit(", reverse=")
           self.visit(reverse_expr)
+        else:
+          self.emit(", reverse=False")
+        if in_place_expr:
+          self.emit(", in_place=")
+          self.visit(in_place_expr)
         self.emit(")")
         return
       elif method == "join":

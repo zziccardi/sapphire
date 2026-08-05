@@ -269,7 +269,13 @@ local _sapphire_enum_from = function(enum_tbl, val)
   return nil
 end
 
-local _sapphire_array_map = function(arr, fn)
+local _sapphire_array_map = function(arr, fn, in_place)
+  if in_place then
+    for i = 1, #arr do
+      arr[i] = fn(arr[i])
+    end
+    return arr
+  end
   local res = {}
   for i = 1, #arr do
     res[i] = fn(arr[i])
@@ -277,7 +283,22 @@ local _sapphire_array_map = function(arr, fn)
   return res
 end
 
-local _sapphire_array_filter = function(arr, fn)
+local _sapphire_array_filter = function(arr, fn, in_place)
+  if in_place then
+    local res = {}
+    for i = 1, #arr do
+      if fn(arr[i]) then
+        table.insert(res, arr[i])
+      end
+    end
+    for i = #arr, 1, -1 do
+      arr[i] = nil
+    end
+    for i = 1, #res do
+      arr[i] = res[i]
+    end
+    return arr
+  end
   local res = {}
   for i = 1, #arr do
     if fn(arr[i]) then
@@ -311,21 +332,32 @@ local _sapphire_array_contains = function(arr, element)
   return false
 end
 
-local _sapphire_array_reverse = function(arr)
-  local res = {}
+local _sapphire_array_reverse = function(arr, in_place)
   local len = #arr
+  if in_place then
+    for i = 1, math.floor(len / 2) do
+      local tmp = arr[i]
+      arr[i] = arr[len - i + 1]
+      arr[len - i + 1] = tmp
+    end
+    return arr
+  end
+  local res = {}
   for i = 1, len do
     res[i] = arr[len - i + 1]
   end
   return res
 end
 
-local _sapphire_array_sort = function(arr, by, reverse)
-  local res = {}
-  for i = 1, #arr do
-    res[i] = arr[i]
+local _sapphire_array_sort = function(arr, by, reverse, in_place)
+  local target = arr
+  if not in_place then
+    target = {}
+    for i = 1, #arr do
+      target[i] = arr[i]
+    end
   end
-  table.sort(res, function(a, b)
+  table.sort(target, function(a, b)
     if by then
       local cmp = by(a, b)
       if reverse then
@@ -341,7 +373,7 @@ local _sapphire_array_sort = function(arr, by, reverse)
       end
     end
   end)
-  return res
+  return target
 end
 
 local _sapphire_array_join = function(arr, sep)
@@ -1503,15 +1535,43 @@ class LuaTranspiler(BaseTranspiler):
       elif method == "map":
         self.emit("_sapphire_array_map(")
         self.visit(receiver)
+        fn_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            in_place_expr = arg.expr
         self.emit(", ")
-        self.visit(node.arguments[0].expr)
+        self.visit(fn_expr)
+        if in_place_expr:
+          self.emit(", ")
+          self.visit(in_place_expr)
         self.emit(")")
         return
       elif method == "filter":
         self.emit("_sapphire_array_filter(")
         self.visit(receiver)
+        fn_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            in_place_expr = arg.expr
         self.emit(", ")
-        self.visit(node.arguments[0].expr)
+        self.visit(fn_expr)
+        if in_place_expr:
+          self.emit(", ")
+          self.visit(in_place_expr)
         self.emit(")")
         return
       elif method == "reduce":
@@ -1553,6 +1613,9 @@ class LuaTranspiler(BaseTranspiler):
       elif method == "reverse":
         self.emit("_sapphire_array_reverse(")
         self.visit(receiver)
+        if node.arguments:
+          self.emit(", ")
+          self.visit(node.arguments[0].expr)
         self.emit(")")
         return
       elif method == "sort":
@@ -1560,15 +1623,20 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(receiver)
         by_expr = None
         reverse_expr = None
+        in_place_expr = None
         for idx, arg in enumerate(node.arguments):
           if arg.name == "by":
             by_expr = arg.expr
           elif arg.name == "reverse":
             reverse_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
           elif idx == 0 and not arg.name:
             by_expr = arg.expr
           elif idx == 1 and not arg.name:
             reverse_expr = arg.expr
+          elif idx == 2 and not arg.name:
+            in_place_expr = arg.expr
 
         self.emit(", ")
         if by_expr:
@@ -1578,6 +1646,11 @@ class LuaTranspiler(BaseTranspiler):
         if reverse_expr:
           self.emit(", ")
           self.visit(reverse_expr)
+        else:
+          self.emit(", false")
+        if in_place_expr:
+          self.emit(", ")
+          self.visit(in_place_expr)
         self.emit(")")
         return
       elif method == "join":

@@ -3192,7 +3192,7 @@ class TestTypeChecker(unittest.TestCase):
         let res = arr.map();
       }
       """)
-    self.assertIn(".map() requires exactly 1 argument (fn)", str(ctx.exception))
+    self.assertIn(".map() requires at least 1 argument (fn)", str(ctx.exception))
 
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
@@ -3211,7 +3211,7 @@ class TestTypeChecker(unittest.TestCase):
         let res = arr.filter();
       }
       """)
-    self.assertIn(".filter() requires exactly 1 argument (fn)", str(ctx.exception))
+    self.assertIn(".filter() requires at least 1 argument (fn)", str(ctx.exception))
 
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
@@ -3294,7 +3294,7 @@ class TestTypeChecker(unittest.TestCase):
         let r = arr.reverse(123);
       }
       """)
-    self.assertIn(".reverse() takes no arguments", str(ctx.exception))
+    self.assertIn("'in_place' parameter in .reverse() must be 'bool'", str(ctx.exception))
 
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
@@ -3413,14 +3413,125 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn(".clear() takes no arguments", str(ctx.exception))
 
+    self._check("""
+    func main() {
+      var in_p_arr = [1, 2, 3];
+      in_p_arr.map(x -> x * 2, in_place = true);
+      in_p_arr.map(fn = x -> x * 2, in_place = true);
+      in_p_arr.map(x -> x * 2, true);
+      in_p_arr.map(x -> x * 2, in_place = false);
+      in_p_arr.filter(x -> x > 1, in_place = true);
+      in_p_arr.filter(fn = x -> x > 1, in_place = true);
+      in_p_arr.filter(x -> x > 1, true);
+      in_p_arr.filter(x -> x > 1, in_place = false);
+      in_p_arr.reverse(in_place = true);
+      in_p_arr.reverse(true);
+      in_p_arr.reverse(in_place = false);
+      in_p_arr.sort(in_place = true);
+      in_p_arr.sort((a, b) -> a - b, false, false);
+      in_p_arr.sort((a, b) -> a - b, false, true);
+    }
+    """)
+
+    # In-place error checks
+    checker = TypeChecker()
+    checker.symbol_table.define("fixed_arr", VariableSymbol("fixed_arr", ArrayType(PrimitiveType("int"), size=2, is_fixed_size=True), is_mutable=True))
+    call_node = CallNode(
+        MemberAccessNode(IdentifierNode("fixed_arr"), "filter", is_optional=False),
+        [ArgumentNode(None, IdentifierNode("fn")), ArgumentNode("in_place", LiteralNode(True, "bool"))]
+    )
+    checker.visit(call_node)
+    self.assertTrue(any("Cannot invoke in-place '.filter()' on fixed-size array" in e for e in checker.errors))
+
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {
-        let arr = [1, 2];
+        var arr = [1, 2];
+        arr.map(x -> x, in_place = 123);
+      }
+      """)
+    self.assertIn("'in_place' parameter in .map() must be 'bool'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.filter(x -> true, in_place = 123);
+      }
+      """)
+    self.assertIn("'in_place' parameter in .filter() must be 'bool'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.sort(in_place = 123);
+      }
+      """)
+    self.assertIn("'in_place' parameter in .sort() must be 'bool'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.reverse(true, false);
+      }
+      """)
+    self.assertIn(".reverse() takes at most 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = ["a"];
         arr.join("a", "b");
       }
       """)
     self.assertIn(".join() takes at most 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.map(x -> x * 2, in_place = true);
+      }
+      """)
+    self.assertIn("Cannot invoke in-place transformation '.map()' on constant variable 'arr'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.filter(x -> x > 1, in_place = true);
+      }
+      """)
+    self.assertIn("Cannot invoke in-place transformation '.filter()' on constant variable 'arr'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.reverse(in_place = true);
+      }
+      """)
+    self.assertIn("Cannot invoke in-place transformation '.reverse()' on constant variable 'arr'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.sort(in_place = true);
+      }
+      """)
+    self.assertIn("Cannot invoke in-place transformation '.sort()' on constant variable 'arr'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.map(x -> String.from(x), in_place = true);
+      }
+      """)
+    self.assertIn("In-place mapping requires closure return type to match element type 'int'", str(ctx.exception))
 
     # 7. Non-existent array method
     with self.assertRaises(SemanticError) as ctx:

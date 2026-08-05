@@ -1538,10 +1538,22 @@ class TypeChecker:
         return PrimitiveType("bool")
 
       elif method == "map":
-        if len(node.arguments) != 1:
-          self.error(".map() requires exactly 1 argument (fn).")
+        fn_arg = None
+        in_place_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_arg = arg
+          elif arg.name == "in_place":
+            in_place_arg = arg
+          elif idx == 0 and not arg.name:
+            fn_arg = arg
+          elif idx == 1 and not arg.name:
+            in_place_arg = arg
+
+        if not fn_arg:
+          self.error(".map() requires at least 1 argument (fn).")
           return ArrayType(elem_type, size=receiver_type.size)
-        fn_arg = node.arguments[0]
+
         old_expected = self.expected_type
         self.expected_type = FunctionType([elem_type], InferredType())
         fn_type = self.visit(fn_arg.expr)
@@ -1553,15 +1565,45 @@ class TypeChecker:
           if fn_type.param_types and not elem_type.is_compatible(fn_type.param_types[0]):
             self.error(f"Closure parameter type mismatch in .map(). Expected '{elem_type}', got '{fn_type.param_types[0]}'.")
 
+        is_in_place = False
+        if in_place_arg:
+          in_p_type = self.visit(in_place_arg.expr)
+          if not in_p_type.is_compatible(PrimitiveType("bool")):
+            self.error(f"'in_place' parameter in .map() must be 'bool', got '{in_p_type}'.")
+          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
+            is_in_place = True
+
+        if is_in_place:
+          receiver = node.callee.receiver
+          if isinstance(receiver, IdentifierNode):
+            sym = self.symbol_table.lookup(receiver.name)
+            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+              self.error(f"Cannot invoke in-place transformation '.map()' on constant variable '{receiver.name}'.")
+          if isinstance(fn_type, FunctionType) and not ret_elem_type.is_compatible(elem_type):
+            self.error(f"In-place mapping requires closure return type to match element type '{elem_type}', got '{ret_elem_type}'.")
+          return ArrayType(elem_type, size=receiver_type.size)
+
         if receiver_type.size is not None:
           return ArrayType(ret_elem_type, size=receiver_type.size)
         return ArrayType(ret_elem_type)
 
       elif method == "filter":
-        if len(node.arguments) != 1:
-          self.error(".filter() requires exactly 1 argument (fn).")
+        fn_arg = None
+        in_place_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_arg = arg
+          elif arg.name == "in_place":
+            in_place_arg = arg
+          elif idx == 0 and not arg.name:
+            fn_arg = arg
+          elif idx == 1 and not arg.name:
+            in_place_arg = arg
+
+        if not fn_arg:
+          self.error(".filter() requires at least 1 argument (fn).")
           return ArrayType(elem_type)
-        fn_arg = node.arguments[0]
+
         old_expected = self.expected_type
         self.expected_type = FunctionType([elem_type], PrimitiveType("bool"))
         fn_type = self.visit(fn_arg.expr)
@@ -1572,6 +1614,23 @@ class TypeChecker:
             self.error(f"Closure parameter type mismatch in .filter(). Expected '{elem_type}', got '{fn_type.param_types[0]}'.")
           if not fn_type.return_type.is_compatible(PrimitiveType("bool")):
             self.error(f".filter() predicate closure must return 'bool', got '{fn_type.return_type}'.")
+
+        is_in_place = False
+        if in_place_arg:
+          in_p_type = self.visit(in_place_arg.expr)
+          if not in_p_type.is_compatible(PrimitiveType("bool")):
+            self.error(f"'in_place' parameter in .filter() must be 'bool', got '{in_p_type}'.")
+          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
+            is_in_place = True
+
+        if is_in_place:
+          if receiver_type.is_fixed_size:
+            self.error(f"Cannot invoke in-place '.filter()' on fixed-size array '{receiver_type}'.")
+          receiver = node.callee.receiver
+          if isinstance(receiver, IdentifierNode):
+            sym = self.symbol_table.lookup(receiver.name)
+            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+              self.error(f"Cannot invoke in-place transformation '.filter()' on constant variable '{receiver.name}'.")
 
         return ArrayType(elem_type)
 
@@ -1692,22 +1751,50 @@ class TypeChecker:
         return PrimitiveType("bool")
 
       elif method == "reverse":
-        if node.arguments:
-          self.error(".reverse() takes no arguments.")
+        in_place_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "in_place":
+            in_place_arg = arg
+          elif idx == 0 and not arg.name:
+            in_place_arg = arg
+
+        if len(node.arguments) > 1:
+          self.error(".reverse() takes at most 1 argument (in_place).")
+
+        is_in_place = False
+        if in_place_arg:
+          in_p_type = self.visit(in_place_arg.expr)
+          if not in_p_type.is_compatible(PrimitiveType("bool")):
+            self.error(f"'in_place' parameter in .reverse() must be 'bool', got '{in_p_type}'.")
+          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
+            is_in_place = True
+
+        if is_in_place:
+          receiver = node.callee.receiver
+          if isinstance(receiver, IdentifierNode):
+            sym = self.symbol_table.lookup(receiver.name)
+            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+              self.error(f"Cannot invoke in-place transformation '.reverse()' on constant variable '{receiver.name}'.")
+
         return ArrayType(elem_type, size=receiver_type.size)
 
       elif method == "sort":
         by_arg = None
         reverse_arg = None
+        in_place_arg = None
         for idx, arg in enumerate(node.arguments):
           if arg.name == "by":
             by_arg = arg
           elif arg.name == "reverse":
             reverse_arg = arg
+          elif arg.name == "in_place":
+            in_place_arg = arg
           elif idx == 0 and not arg.name:
             by_arg = arg
           elif idx == 1 and not arg.name:
             reverse_arg = arg
+          elif idx == 2 and not arg.name:
+            in_place_arg = arg
 
         if by_arg:
           old_expected = self.expected_type
@@ -1721,6 +1808,22 @@ class TypeChecker:
           rev_t = self.visit(reverse_arg.expr)
           if not rev_t.is_compatible(PrimitiveType("bool")):
             self.error(f"'reverse' parameter in .sort() must be 'bool', got '{rev_t}'.")
+
+        is_in_place = False
+        if in_place_arg:
+          in_p_type = self.visit(in_place_arg.expr)
+          if not in_p_type.is_compatible(PrimitiveType("bool")):
+            self.error(f"'in_place' parameter in .sort() must be 'bool', got '{in_p_type}'.")
+          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
+            is_in_place = True
+
+        if is_in_place:
+          receiver = node.callee.receiver
+          if isinstance(receiver, IdentifierNode):
+            sym = self.symbol_table.lookup(receiver.name)
+            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+              self.error(f"Cannot invoke in-place transformation '.sort()' on constant variable '{receiver.name}'.")
+
         return ArrayType(elem_type, size=receiver_type.size)
 
       elif method == "join":
@@ -1847,17 +1950,17 @@ class TypeChecker:
         elif node.member == "empty":
           return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
         elif node.member == "map":
-          return FunctionType([receiver_type, FunctionType([elem_t], InferredType())], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn"], has_self=True)
+          return FunctionType([receiver_type, FunctionType([elem_t], InferredType()), PrimitiveType("bool")], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn", "in_place"], has_self=True, num_defaults=1)
         elif node.member == "filter":
-          return FunctionType([receiver_type, FunctionType([elem_t], PrimitiveType("bool"))], ArrayType(elem_t), param_names=["self", "fn"], has_self=True)
+          return FunctionType([receiver_type, FunctionType([elem_t], PrimitiveType("bool")), PrimitiveType("bool")], ArrayType(elem_t), param_names=["self", "fn", "in_place"], has_self=True, num_defaults=1)
         elif node.member == "reduce":
           return FunctionType([receiver_type, InferredType(), FunctionType([InferredType(), elem_t], InferredType()), PrimitiveType("bool")], InferredType(), param_names=["self", "initial", "fn", "reverse"], has_self=True, num_defaults=1)
         elif node.member == "contains":
           return FunctionType([receiver_type, elem_t], PrimitiveType("bool"), param_names=["self", "element"], has_self=True)
         elif node.member == "reverse":
-          return FunctionType([receiver_type], ArrayType(elem_t, size=receiver_type.size), param_names=["self"], has_self=True)
+          return FunctionType([receiver_type, PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "in_place"], has_self=True, num_defaults=1)
         elif node.member == "sort":
-          return FunctionType([receiver_type, OptionalType(FunctionType([elem_t, elem_t], PrimitiveType("int"))), PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "by", "reverse"], has_self=True, num_defaults=2)
+          return FunctionType([receiver_type, OptionalType(FunctionType([elem_t, elem_t], PrimitiveType("int"))), PrimitiveType("bool"), PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "by", "reverse", "in_place"], has_self=True, num_defaults=3)
         elif node.member == "join":
           return FunctionType([receiver_type, PrimitiveType("String")], PrimitiveType("String"), param_names=["self", "sep"], has_self=True, num_defaults=1)
         elif node.member == "push":

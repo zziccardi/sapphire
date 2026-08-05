@@ -1102,6 +1102,18 @@ class TestPythonTranspiler(unittest.TestCase):
       let rem_val = mut_arr.remove(2) ?? 0; // 15
       mut_arr.clear();
 
+      var inp_num = [5, 1, 4, 2, 3];
+      inp_num.map(x -> x * 2, in_place = true); // [10, 2, 8, 4, 6]
+      inp_num.map(fn = x -> x * 1, false);
+      inp_num.filter(x -> x > 4, in_place = true); // [10, 8, 6]
+      inp_num.filter(fn = x -> x > 0, false);
+      inp_num.sort(in_place = true); // [6, 8, 10]
+      inp_num.reverse(in_place = true); // [10, 8, 6]
+      inp_num.reverse(false);
+
+      var temp = [3, 1, 2];
+      temp.sort((a, b) -> a - b, false, true);
+
       let c1 = sz == 5 && is_empty == false;
       let c2 = doubled[0] == 2 && doubled[4] == 10;
       let c3 = evens.size() == 2 && evens[0] == 2 && evens[1] == 4;
@@ -1110,8 +1122,9 @@ class TestPythonTranspiler(unittest.TestCase):
       let c6 = has_three == true && not_has_99 == false && rev[0] == 5 && rev[4] == 1;
       let c7 = sorted_asc[0] == 1 && sorted_custom[0] == 3 && joined == "a-b-c";
       let c8 = p_val == 30 && i_val == 15 && pop_val == 30 && rem_val == 15 && mut_arr.empty() == true;
+      let c9 = inp_num.size() == 3 && inp_num[0] == 10 && inp_num[1] == 8 && inp_num[2] == 6;
 
-      return c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8;
+      return c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9;
     }
     """
     res = self._transpile_and_run(code, "test_array_ops()")

@@ -941,6 +941,15 @@ class TestLuaTranspiler(unittest.TestCase):
       let pop_val = mut_arr.pop();
       let rem_val = mut_arr.remove(1);
       mut_arr.clear();
+
+      mut_arr.map(x -> x * 2, in_place = true);
+      mut_arr.map(fn = x -> x * 2, false);
+      mut_arr.filter(x -> x > 4, in_place = true);
+      mut_arr.filter(fn = x -> x > 4, false);
+      mut_arr.reverse(in_place = true);
+      mut_arr.reverse(false);
+      mut_arr.sort(in_place = true);
+      mut_arr.sort((a, b) -> a - b, false, true);
     }
     """
     lua = self._transpile(code)
