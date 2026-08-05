@@ -924,6 +924,8 @@ class TestLuaTranspiler(unittest.TestCase):
       let evens = nums.filter(x -> x % 2 == 0);
       let sum = nums.reduce(0, (acc, x) -> acc + x);
       let sum_rev = nums.reduce(0, (acc, x) -> acc + x, reverse = true);
+      let named_red = nums.reduce(initial = 0, fn = (acc, x) -> acc + x);
+      let pos3_red = nums.reduce(0, (acc, x) -> acc + x, true);
     }
     """
     lua = self._transpile(code)

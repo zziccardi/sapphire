@@ -3125,10 +3125,13 @@ class TestTypeChecker(unittest.TestCase):
           .filter(x -> x % 2 == 0)
           .map(x -> x * 10)
           .reduce(0, (acc, x) -> acc + x);
+
+      let named_reduce: int = numbers.reduce(initial = 0, fn = (acc, x) -> acc + x, reverse = false);
+      let pos3_reduce: int = numbers.reduce(0, (acc, x) -> acc + x, true);
     }
     """)
 
-    # 2. Invalid size call with arguments
+    # 2. Invalid size and empty call with arguments
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {
@@ -3138,7 +3141,53 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn(".size() takes no arguments", str(ctx.exception))
 
-    # 3. Invalid filter return type
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let is_emp = arr.empty(123);
+      }
+      """)
+    self.assertIn(".empty() takes no arguments", str(ctx.exception))
+
+    # 3. Invalid map call (wrong argument count or param type mismatch)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.map();
+      }
+      """)
+    self.assertIn(".map() requires exactly 1 argument (fn)", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.map((x: String) -> "str");
+      }
+      """)
+    self.assertIn("Closure parameter type mismatch in .map()", str(ctx.exception))
+
+    # 4. Invalid filter call (wrong argument count, param type mismatch, or return type)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.filter();
+      }
+      """)
+    self.assertIn(".filter() requires exactly 1 argument (fn)", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.filter((x: String) -> true);
+      }
+      """)
+    self.assertIn("Closure parameter type mismatch in .filter()", str(ctx.exception))
+
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {
@@ -3148,7 +3197,7 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn(".filter() predicate closure must return 'bool'", str(ctx.exception))
 
-    # 4. Invalid reduce missing initial argument
+    # 5. Invalid reduce call (missing initial, param mismatch, or return mismatch)
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {
@@ -3157,6 +3206,52 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn(".reduce() requires mandatory 'initial' and 'fn' arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.reduce(0, (acc: String, x: int) -> "str");
+      }
+      """)
+    self.assertIn("Closure accumulator parameter mismatch in .reduce()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.reduce(0, (acc: int, x: String) -> acc);
+      }
+      """)
+    self.assertIn("Closure item parameter mismatch in .reduce()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.reduce(0, (acc: int, x: int) -> "str");
+      }
+      """)
+    self.assertIn("Closure return type in .reduce() must match initial value type", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.reduce(0, (acc, x) -> acc + x, reverse = 123);
+      }
+      """)
+    self.assertIn("'reverse' parameter in .reduce() must be 'bool'", str(ctx.exception))
+
+    # 6. Non-existent array method
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.non_existent_method();
+      }
+      """)
+    self.assertIn("Array has no method 'non_existent_method'", str(ctx.exception))
 
 
 if __name__ == "__main__":

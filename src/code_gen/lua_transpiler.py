@@ -1446,7 +1446,7 @@ class LuaTranspiler(BaseTranspiler):
           elif idx == 1 and not arg.name:
             fn_expr = arg.expr
           elif idx == 2 and not arg.name:
-            reverse_expr = arg
+            reverse_expr = arg.expr
 
         self.emit(", ")
         self.visit(initial_expr)

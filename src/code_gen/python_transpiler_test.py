@@ -1083,13 +1083,15 @@ class TestPythonTranspiler(unittest.TestCase):
       let evens = nums.filter(x -> x % 2 == 0);
       let sum = nums.reduce(0, (acc, x) -> acc + x);
       let sub_rev = nums.reduce(0, (acc, x) -> acc - x, reverse = true);
+      let named_red = nums.reduce(initial = 10, fn = (acc, x) -> acc + x, reverse = false);
+      let pos3_red = nums.reduce(0, (acc, x) -> acc - x, true);
 
       let c1 = sz == 5 && is_empty == false;
       let c2 = doubled[0] == 2 && doubled[4] == 10;
       let c3 = evens.size() == 2 && evens[0] == 2 && evens[1] == 4;
       let c4 = sum == 15;
       // 0 - 5 - 4 - 3 - 2 - 1 = -15
-      let c5 = sub_rev == -15;
+      let c5 = sub_rev == -15 && named_red == 25 && pos3_red == -15;
 
       return c1 && c2 && c3 && c4 && c5;
     }
