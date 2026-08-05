@@ -797,6 +797,18 @@ class TestPythonTranspiler(unittest.TestCase):
       sub_py = os.path.join(tmpdir, "sub.py")
       self.assertTrue(os.path.exists(sub_py))
 
+  def test_uninitialized_var_decl_python(self):
+    """Verifies that uninitialized variable declarations emit `= None` in Python."""
+    code = """
+    func test() {
+      var x: int;
+      var a: String, b: bool;
+    }
+    """
+    py = self._transpile(code)
+    self.assertIn("x = None", py)
+    self.assertIn("a, b = None, None", py)
+
 
   def test_match_expression_transpilation_and_execution(self):
     """Verifies Python transpilation and execution of match expressions."""

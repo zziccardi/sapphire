@@ -138,6 +138,13 @@ class TestLuaTranspiler(unittest.TestCase):
     # UnaryOpNode with unary plus
     transpiler.visit(UnaryOpNode("+", LiteralNode(10, "int")))
 
+    # String concat with CallNode and non-literal AST node
+    transpiler.visit(BinaryOpNode(LiteralNode("Val: ", "string"), "+", CallNode(IdentifierNode("get_val"), [])))
+    transpiler.visit(BinaryOpNode(LiteralNode("Res: ", "string"), "+", UnaryOpNode("-", LiteralNode(5, "int"))))
+
+    # Chained member call without static/instance annotation
+    transpiler.visit(CallNode(MemberAccessNode(MemberAccessNode(IdentifierNode("a"), "b", False), "c", False), []))
+
     output = transpiler.get_output()
     self.assertIn("-- pass", output)
     self.assertIn('10 .. "items"', output)
@@ -146,6 +153,9 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("pt:get_x()", output)
     self.assertIn("my_arena:register(Point.init({x = 1, [2] = 2}))", output)
     self.assertIn("(10)", output)
+    self.assertIn('"Val: " .. tostring(get_val())', output)
+    self.assertIn('"Res: " .. (-5)', output)
+    self.assertIn("a.b.c()", output)
 
   def test_basic_arithmetic(self):
     """Verifies that variable declarations and arithmetic expressions transpile to Lua."""
