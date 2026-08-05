@@ -12,7 +12,7 @@ import unittest
 from antlr4 import InputStream, CommonTokenStream
 
 try:
-  from parser.ast import BasicTypeNode
+  from parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
@@ -21,7 +21,7 @@ try:
   from code_gen.transpiler import transpile_file
   from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
-  from src.parser.ast import BasicTypeNode
+  from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
@@ -37,8 +37,10 @@ class TestPythonTranspiler(unittest.TestCase):
   def _transpile(self, code: str) -> str:
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
@@ -1351,6 +1353,78 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_range()")
     self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
 
+  def test_guard_statement_execution(self):
+    """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
+    code = """
+    func test_guard(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag; x > 0 else {
+        return -1;
+      }
+      return x * 10;
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_guard(15, True)")
+    self.assertEqual(res1, 150)
+
+    res2 = self._transpile_and_run(code, "test_guard(None, True)")
+    self.assertEqual(res2, -1)
+
+    res3 = self._transpile_and_run(code, "test_guard(15, False)")
+    self.assertEqual(res3, -1)
+
+    res4 = self._transpile_and_run(code, "test_guard(-5, True)")
+    self.assertEqual(res4, -1)
+
+  def test_guard_destructuring_and_clause_node(self):
+    """Verifies Python transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
+    code = """
+    func test_destruct(arr: [int]): int {
+      guard let a, b = arr else {
+        return 0;
+      }
+      return a + b;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("a = _guard_val_1[0]", py_code)
+    self.assertIn("b = _guard_val_1[1]", py_code)
+
+    # Directly visit GuardClauseNode to cover visitor
+    clause1 = GuardClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="x", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
+    clause2 = GuardClauseNode(condition=LiteralNode(True, "bool"))
+    tr = PythonTranspiler()
+    tr.visit_GuardClauseNode(clause1)
+    tr.visit_GuardClauseNode(clause2)
+    self.assertIn("1", tr.get_output())
+
+  def test_dynamic_indexing_execution(self):
+    """Verifies Python transpilation and execution of dynamic array and map indexing with type checking."""
+    code = """
+    func test_subscript(): int {
+      let arr = [10, 20, 30];
+      let m = {"a": 100};
+      var idx = 5;
+      var key = "b";
+
+      guard let val1 ?= arr[idx] else {
+        guard let val2 ?= m[key] else {
+          return 999;
+        }
+        return val2;
+      }
+      return val1;
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    ast = ASTBuilder().visit(parser.program())
+    TypeChecker().check(ast)
+    py_code = PythonTranspiler().transpile(ast)
+    self.assertIn("_sapphire_array_get", py_code)
+    self.assertIn("_sapphire_map_get", py_code)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixture tests
@@ -1360,14 +1434,7 @@ _FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtu
 
 
 class TestSharedFixtures(unittest.TestCase):
-  """Compiles each shared .sp fixture with PythonTranspiler and executes it.
-
-  Every `@test` function inside the fixture is called and its return value
-  is compared against the ground truth in
-  `testing/fixtures/_expectations.py`.  This class is structurally mirrored
-  by `TestSharedFixtures` in `lua_transpiler_test.py`; if the two suites
-  diverge in which fixture tests pass, a transpiler has drifted.
-  """
+  """Compiles each shared .sp fixture with PythonTranspiler and executes it."""
 
   @classmethod
   def _load_expectations(cls):

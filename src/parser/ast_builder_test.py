@@ -60,8 +60,10 @@ class TestASTBuilder(unittest.TestCase):
     """Helper to parse a Sapphire code string and return the Program AST Node."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     builder = ASTBuilder()
     return builder.visit(tree)
@@ -306,8 +308,10 @@ class TestASTBuilder(unittest.TestCase):
     """Verifies direct invocation of visitStatement on ASTBuilder."""
     input_stream = InputStream("let x = 1;")
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     stmt_ctx = parser.statement()
     builder = ASTBuilder()
     stmt_node = builder.visitStatement(stmt_ctx)
@@ -408,8 +412,10 @@ class TestASTBuilder(unittest.TestCase):
     """Verifies that an export block with a trailing semicolon causes a syntax error."""
     input_stream = InputStream("export { A };")
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     parser.program()
     self.assertGreater(parser.getNumberOfSyntaxErrors(), 0)
 
@@ -600,6 +606,44 @@ class TestASTBuilder(unittest.TestCase):
     stmts = while_stmt.block.statements
     self.assertIsInstance(stmts[0], ContinueNode)
     self.assertIsInstance(stmts[1], BreakNode)
+
+  def test_impl_trait_prefix(self):
+    """Verifies AST building for trait prefix in impl block."""
+    ast = self._get_ast('impl pkg.Trait for TargetStruct {}')
+    impl = ast.declarations[0]
+    self.assertEqual(impl.trait_name, "pkg.Trait")
+    self.assertEqual(impl.struct_name, "TargetStruct")
+
+  def test_guard_statement_ast(self):
+    """Verifies AST construction for guard statements with semicolon clause separation and multi-variable binding."""
+    try:
+      from parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    except ModuleNotFoundError:
+      from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    code = """
+    func test() {
+      guard let x ?= opt; let a, b ?= get_pair(); x > 0 else {
+        return;
+      }
+    }
+    """
+    ast = self._get_ast(code)
+    func_decl = ast.declarations[0]
+    guard_node = func_decl.body.statements[0]
+    self.assertIsInstance(guard_node, GuardStmtNode)
+    self.assertEqual(len(guard_node.clauses), 3)
+
+    # Clause 1: let x ?= opt
+    self.assertIsNotNone(guard_node.clauses[0].binding)
+    self.assertEqual(guard_node.clauses[0].binding.let_name, "x")
+    self.assertEqual(guard_node.clauses[0].binding.let_names, ["x"])
+
+    # Clause 2: let a, b ?= get_pair()
+    self.assertIsNotNone(guard_node.clauses[1].binding)
+    self.assertEqual(guard_node.clauses[1].binding.let_names, ["a", "b"])
+
+    # Clause 3: x > 0
+    self.assertIsNotNone(guard_node.clauses[2].condition)
 
 
 if __name__ == "__main__":

@@ -279,3 +279,9 @@ class BaseTranspiler(ABC):
 
   @abstractmethod
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None: ...
+
+  @abstractmethod
+  def visit_GuardClauseNode(self, node: GuardClauseNode) -> None: ...
+
+  @abstractmethod
+  def visit_GuardStmtNode(self, node: GuardStmtNode) -> None: ...

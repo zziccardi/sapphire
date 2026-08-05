@@ -133,6 +133,7 @@ statement
     | variableDeclarationStatement
     | assignmentStatement
     | ifStatement
+    | guardStatement
     | whileStatement
     | forStatement
     | returnStatement
@@ -208,13 +209,22 @@ ifStatement
     | IF letOrVarBinding (SEMICOLON expression)? block (ELSE ifStatement | ELSE block)?
     ;
 
+guardStatement
+    : GUARD guardClause (SEMICOLON guardClause)* ELSE block
+    ;
+
+guardClause
+    : letOrVarBinding
+    | expression
+    ;
+
 whileStatement
     : WHILE expression block
     | WHILE letOrVarBinding (SEMICOLON expression)? block
     ;
 
 letOrVarBinding
-    : (LET | VAR) IDENTIFIER (COLON type)? (ASSIGN | UNWRAP_ASSIGN) expression
+    : (LET | VAR) varBindingList (ASSIGN | UNWRAP_ASSIGN) expression
     ;
 
 forStatement
@@ -334,6 +344,7 @@ CONST : 'const';
 CLONE : 'clone';
 IF : 'if';
 ELSE : 'else';
+GUARD : 'guard';
 WHILE : 'while';
 BREAK : 'break';
 CONTINUE : 'continue';

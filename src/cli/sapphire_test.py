@@ -7,14 +7,14 @@ import unittest
 from unittest.mock import patch
 
 try:
-  from testing.test_utils import QuietTestCase, suppress_output
+  from testing.test_utils import suppress_output
 except ModuleNotFoundError:  # pragma: no cover
-  from src.testing.test_utils import QuietTestCase, suppress_output
+  from src.testing.test_utils import suppress_output
 
 from src.cli.sapphire import main
 
 
-class SapphireCLITest(QuietTestCase):
+class SapphireCLITest(unittest.TestCase):
 
   def setUp(self):
     self.temp_dir = tempfile.TemporaryDirectory()

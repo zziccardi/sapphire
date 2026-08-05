@@ -452,13 +452,12 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
 | Operation | Syntax / example | Description |
 | :--- | :--- | :--- |
 | **Literal initialization** | `let numbers = [10, 20, 30];` | Instantiates an array literal. Element types must be strictly homogeneous. |
-| **Index access** | `let first = numbers[0];` | Reads the element at index `i` (0-based indexing). |
+| **Index access** | `let first = numbers[0];`<br>`let item: int? = numbers[i];` | Reads element at index `i` (0-based). Constant integer index returns `T`. Dynamic index returns `T?` (`none` if out of bounds). |
 | **Index mutation** | `numbers[1] = 25;` | Updates the element at index `i` on mutable array instances (declared with `var`). |
 | **Iteration** | `for item in numbers { ... }` | Iterates sequentially over elements in the array. |
 
-#### Compile-time bounds-checking
-
-For fixed-size arrays (`[T; N]`) initialized with known lengths, constant integer indices are checked at compile time by the type checker. Out-of-bounds indices (`index < 0` or `index >= N`) trigger a compile-time type-checking error.
+#### Tiered bounds-checking
+For fixed-size arrays (`[T; N]`) initialized with known lengths, constant integer indices are checked at compile time by the type checker; out-of-bounds constant indices trigger a compile-time error. Dynamic array indexing with variable integer expressions returns `T?` and evaluates to `none` at runtime if out of bounds (zero runtime exceptions).
 
 #### Type compatibility and assignability
 

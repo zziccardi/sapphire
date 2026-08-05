@@ -5,6 +5,7 @@ rules, struct constructor initialization, and inheritance casting restrictions.
 """
 
 import unittest
+from testing.test_utils import suppress_output
 from antlr4 import InputStream, CommonTokenStream
 
 try:
@@ -30,8 +31,10 @@ class TestTypeChecker(unittest.TestCase):
     """Helper to parse and run the semantic check on a code string."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
@@ -309,7 +312,7 @@ class TestTypeChecker(unittest.TestCase):
     """Enforces that impl of a trait must implement all methods of the trait."""
     code = """
     trait Target {
-      func resolve(): int;
+      func resolve(): int
     }
     struct Runner {}
     impl Target for Runner {
@@ -324,7 +327,7 @@ class TestTypeChecker(unittest.TestCase):
     """Enforces that impl methods of a trait must match trait signatures exactly."""
     code = """
     trait Target {
-      func resolve(x: int): int;
+      func resolve(x: int): int
     }
     struct Runner {}
     impl Target for Runner {
@@ -2150,22 +2153,24 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError):
       self._check("""
       export {
-        unimported.Symbol,
-      };
+        unimported.Symbol
+      }
       """)
 
     # 2. Export non-existent symbol from imported module with populated exports
     code = """
     import lib.love2d.enums;
     export {
-      enums.MissingSymbol,
-    };
+      enums.MissingSymbol
+    }
     """
     checker = TypeChecker()
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     ast = ASTBuilder().visit(tree)
 
@@ -2331,7 +2336,8 @@ class TestTypeChecker(unittest.TestCase):
       ast2 = ASTBuilder().visit(tree2)
 
       checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
-      checker2.check(ast2)
+      with suppress_output():
+        checker2.check(ast2)
 
   def test_import_module_without_export_block(self):
     """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
@@ -2362,7 +2368,7 @@ class TestTypeChecker(unittest.TestCase):
         Status.NotFound -> {
           yield "Not Found";
         },
-        ... -> "Generic Error",
+        ... -> "Generic Error"
       };
       return msg;
     }
@@ -2374,7 +2380,7 @@ class TestTypeChecker(unittest.TestCase):
         },
         ... -> {
           let y = 2;
-        },
+        }
       };
     }
     """
@@ -2384,7 +2390,7 @@ class TestTypeChecker(unittest.TestCase):
     enum Status { Ok, NotFound, Error }
     func test_bad(s: Status) {
       let x = match s {
-        Status.Ok -> 1,
+        Status.Ok -> 1
       };
     }
     """
@@ -2430,7 +2436,7 @@ class TestTypeChecker(unittest.TestCase):
     func test_enum_pat(s: Status): int {
       return match s {
         Status.Ok -> 1,
-        Status.NotFound -> 2,
+        Status.NotFound -> 2
       };
     }
     """)
@@ -2442,7 +2448,7 @@ class TestTypeChecker(unittest.TestCase):
       func test_item(i: Item) {
         let x = match i {
           i.id -> 1,
-          ... -> 0,
+          ... -> 0
         };
       }
       """)
@@ -2455,7 +2461,7 @@ class TestTypeChecker(unittest.TestCase):
         let b = 2;
         let x = match n {
           "invalid" -> 1,
-          ... -> 0,
+          ... -> 0
         };
       }
       """)
@@ -2466,7 +2472,7 @@ class TestTypeChecker(unittest.TestCase):
     func test_enum_name(s: Status): int {
       return match s {
         Status -> 1,
-        ... -> 0,
+        ... -> 0
       };
     }
     """)
@@ -2476,7 +2482,7 @@ class TestTypeChecker(unittest.TestCase):
     func test_opt_fall(n: int): int? {
       return match n {
         1 -> 10,
-        ... -> none,
+        ... -> none
       };
     }
     """)
@@ -3761,6 +3767,100 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Map has no method 'invalid_map_method'", str(ctx.exception))
+
+  def test_guard_statement_type_checking(self):
+    """Verifies type checking, scope promotion, and control-flow termination enforcement for guard statements."""
+    # 1. Valid guard statement with scope promotion
+    self._check("""
+    func test(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag; x > 0 else {
+        return 0;
+      }
+      return x * 2; // 'x' is promoted to outer scope as non-optional int
+    }
+    """)
+
+    # 2. Guard else block fails to terminate control flow
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(opt: int?): int {
+        guard let x ?= opt else {
+          let dummy = 1;
+        }
+        return x;
+      }
+      """)
+    self.assertIn("Guard else block must terminate control flow (via return, break, or continue).", str(ctx.exception))
+
+    # 3. Guard unwrapping non-optional type
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(num: int) {
+        guard let x ?= num else {
+          return;
+        }
+      }
+      """)
+    self.assertIn("Cannot unwrap non-optional type 'int' in guard clause.", str(ctx.exception))
+
+    # 4. Guard condition must be bool
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        guard 123 else {
+          return;
+        }
+      }
+      """)
+    self.assertIn("Guard condition must be of type 'bool', got 'int'.", str(ctx.exception))
+
+    # 5. Guard with non-unwrap binding, multi-variable destructuring, and nested if termination in else
+    self._check("""
+    func test(opt: int?, flag: bool, arr: [int]): int {
+      guard
+        let x = 5;
+        let a, b = arr;
+        opt != none
+      else {
+        if flag {
+          return 0;
+        } else {
+          return -1;
+        }
+      }
+      return x + a + b;
+    }
+    """)
+
+  def test_dynamic_indexing_type_checking(self):
+    """Verifies dynamic array and map indexing return optional types while constant indexing returns non-optional types."""
+    # 1. Dynamic array indexing returns Optional
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(arr: [int], idx: int) {
+        let val: int = arr[idx]; // Dynamic indexing returns int?, cannot assign directly to int
+      }
+      """)
+    self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
+
+    # 2. Dynamic map indexing with variable key returns Optional
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(m: [String: int], k: String) {
+        let val: int = m[k]; // Dynamic key returns int?, cannot assign directly to int
+      }
+      """)
+    self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
+
+    # 3. Dynamic indexing handled safely via guard or nil-coalescing
+    self._check("""
+    func test(arr: [int], idx: int, m: [String: int], k: String): int {
+      guard let a_val ?= arr[idx]; let m_val ?= m[k] else {
+        return -1;
+      }
+      return a_val + m_val;
+    }
+    """)
 
 
 if __name__ == "__main__":
