@@ -356,7 +356,7 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   let has_two = [1, 2, 3].contains(2);  // true
   ```
 
-* **`map<U>(fn: (T) -> U): [U]`**
+* **`map<U>(fn: (T) -> U, in_place: bool = false): [U]`**
 
   Transforms each element in the array using the function `fn` and returns a new array. When called on a fixed-size array `[T; N]`, produces a fixed-size array `[U; N]`.
   ```sapphire
@@ -364,7 +364,7 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   let doubled = numbers.map(x -> x * 2);  // [2, 4, 6]
   ```
 
-* **`filter(fn: (T) -> bool): [T]`**
+* **`filter(fn: (T) -> bool, in_place: bool = false): [T]`**
 
   Evaluates predicate `fn` on each element and returns a new dynamic array containing only elements that satisfy the condition.
   ```sapphire
@@ -385,14 +385,14 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   let sentence = words.reduce("", (acc, w) -> acc + " " + w, reverse = true);  // " hello world"
   ```
 
-* **`reverse(): [T]`**
+* **`reverse(in_place: bool = false): [T]`**
 
   Returns a copy of the array with elements in reversed order.
   ```sapphire
   let rev = [1, 2, 3].reverse();  // [3, 2, 1]
   ```
 
-* **`sort(by: ((T, T) -> int)? = none, reverse: bool = false): [T]`**
+* **`sort(by: ((T, T) -> int)? = none, reverse: bool = false, in_place: bool = false): [T]`**
 
   Returns a sorted copy of the array.
   ```sapphire
