@@ -311,6 +311,142 @@ Sapphire supports both dynamic (unbounded) arrays and fixed-size (statically bou
 * **Dynamic array**: `[T]` where `T` is the element type.
 * **Fixed-size array**: `[T; N]` where `T` is the element type and `N` is a positive integer compile-time constant.
 
+#### Built-in methods
+
+Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
+
+| Method signature | Description |
+| :--- | :--- |
+| `size(): int` | Returns the total number of elements in the array. |
+| `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
+| `contains(element: T): bool` | Returns `true` if `element` exists in the array, otherwise `false`. |
+| `map<U>(fn: (T) -> U, in_place: bool = false): [U]` | Returns an array by applying `fn` to each element. Mutates `self` in place when `in_place = true` (requires `U == T`). |
+| `filter(fn: (T) -> bool, in_place: bool = false): [T]` | Returns dynamic array containing elements for which `fn` returns `true`. Mutates `self` in place when `in_place = true`. |
+| `reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U` | Accumulates elements using `fn` starting from `initial`. Iterates right-to-left when `reverse = true`. |
+| `reverse(in_place: bool = false): [T]` | Returns array with elements in reversed order. Mutates `self` in place when `in_place = true`. |
+| `sort(by: ((T, T) -> int)? = none, reverse: bool = false, in_place: bool = false): [T]` | Returns sorted array using optional comparator `by` and optional `reverse` flag. Mutates `self` in place when `in_place = true`. |
+| `join(sep: String = ", "): String` | Concatenates array elements into a string joined by `sep`. |
+| `push(element: T): T` | Appends `element` to a mutable dynamic array (`var [T]`) and returns `element`. |
+| `pop(): T?` | Removes and returns the last element of a mutable dynamic array (`var [T]`), or `none` if empty. |
+| `insert(index: int, element: T): T` | Inserts `element` at `index` in a mutable dynamic array (`var [T]`) and returns `element`. |
+| `remove(index: int): T?` | Removes and returns element at `index` in a mutable dynamic array (`var [T]`), or `none` if out of bounds. |
+| `clear(): void` | Clears all elements from a mutable dynamic array (`var [T]`). |
+
+##### Detailed method behavior
+
+* **`size(): int`**
+
+  Returns the length of the array in elements.
+  ```sapphire
+  let nums = [10, 20, 30];
+  let len = nums.size();  // 3
+  ```
+
+* **`empty(): bool`**
+
+  Returns `true` if the array contains no elements (`size() == 0`).
+  ```sapphire
+  let is_empty = [].empty();  // true
+  ```
+
+* **`contains(element: T): bool`**
+
+  Returns `true` if `element` is found in the array.
+  ```sapphire
+  let has_two = [1, 2, 3].contains(2);  // true
+  ```
+
+* **`map<U>(fn: (T) -> U): [U]`**
+
+  Transforms each element in the array using the function `fn` and returns a new array. When called on a fixed-size array `[T; N]`, produces a fixed-size array `[U; N]`.
+  ```sapphire
+  let numbers = [1, 2, 3];
+  let doubled = numbers.map(x -> x * 2);  // [2, 4, 6]
+  ```
+
+* **`filter(fn: (T) -> bool): [T]`**
+
+  Evaluates predicate `fn` on each element and returns a new dynamic array containing only elements that satisfy the condition.
+  ```sapphire
+  let numbers = [1, 2, 3, 4, 5];
+  let evens = numbers.filter(x -> x % 2 == 0);  // [2, 4]
+  ```
+
+* **`reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U`**
+
+  Reduces the array elements to a single accumulated value starting with `initial`.
+  * When `reverse` is `false` (default), iterates forward from left to right (index 0 to `size() - 1`).
+  * When `reverse` is `true`, iterates backward from right to left (index `size() - 1` down to 0).
+  ```sapphire
+  let numbers = [1, 2, 3, 4];
+  let sum = numbers.reduce(0, (acc, x) -> acc + x);  // 10
+
+  let words = ["world", "hello"];
+  let sentence = words.reduce("", (acc, w) -> acc + " " + w, reverse = true);  // " hello world"
+  ```
+
+* **`reverse(): [T]`**
+
+  Returns a copy of the array with elements in reversed order.
+  ```sapphire
+  let rev = [1, 2, 3].reverse();  // [3, 2, 1]
+  ```
+
+* **`sort(by: ((T, T) -> int)? = none, reverse: bool = false): [T]`**
+
+  Returns a sorted copy of the array.
+  ```sapphire
+  let sorted = [3, 1, 2].sort();  // [1, 2, 3]
+  let desc = [1, 2, 3].sort(reverse = true);  // [3, 2, 1]
+  ```
+
+* **`join(sep: String = ", "): String`**
+
+  Joins array elements into a string with delimiter `sep` (defaults to `", "`).
+  ```sapphire
+  let text = ["a", "b", "c"].join("-");  // "a-b-c"
+  ```
+
+* **`push(element: T): T`**
+
+  Appends `element` to the end of a mutable dynamic array (`var [T]`) and returns `element`.
+  ```sapphire
+  var items = [10, 20];
+  let added = items.push(30);  // items is now [10, 20, 30], added is 30
+  ```
+
+* **`pop(): T?`**
+
+  Removes and returns the last element of a mutable dynamic array (`var [T]`), or `none` if empty.
+  ```sapphire
+  var items = [10, 20];
+  let last_val = items.pop();  // 20
+  ```
+
+* **`insert(index: int, element: T): T`**
+
+  Inserts `element` at `index` in a mutable dynamic array (`var [T]`) and returns `element`.
+  ```sapphire
+  var items = [10, 30];
+  let added = items.insert(1, 20);  // items is now [10, 20, 30], added is 20
+  ```
+
+* **`remove(index: int): T?`**
+
+  Removes and returns the element at `index` in a mutable dynamic array (`var [T]`), or `none` if out of bounds.
+  ```sapphire
+  var items = [10, 20, 30];
+  let removed = items.remove(1);  // 20
+  ```
+
+* **`clear(): void`**
+
+  Clears all elements from a mutable dynamic array (`var [T]`).
+  ```sapphire
+  var items = [10, 20];
+  items.clear();  // items is now []
+  ```
+
 #### Operations and capabilities
 
 | Operation | Syntax / example | Description |
@@ -334,13 +470,14 @@ A fixed-size array `[T; N]` is compatible with and assignable to an unbounded ar
 // Fixed-size array declaration
 let scores: [int; 3] = [95, 88, 72];
 
-// Index access (0-based)
+// Index access & size method
+let count = scores.size();
 let top_score = scores[0];
 
-// Iterating over array elements
-for score in scores {
-  print("Score: " + score);
-}
+// Functional chaining
+let total_high_scores = scores
+    .filter(s -> s >= 80)
+    .reduce(0, (acc, s) -> acc + s);
 ```
 
 ### Map

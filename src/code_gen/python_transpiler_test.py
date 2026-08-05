@@ -1071,6 +1071,65 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_conv()")
     self.assertTrue(res)
 
+  def test_array_methods_python(self):
+    """Verifies Python transpilation and execution of array built-in methods."""
+    code = """
+    func test_array_ops(): bool {
+      let nums = [1, 2, 3, 4, 5];
+      let sz = nums.size();
+      let is_empty = nums.empty();
+
+      let doubled = nums.map(x -> x * 2);
+      let evens = nums.filter(x -> x % 2 == 0);
+      let sum = nums.reduce(0, (acc, x) -> acc + x);
+      let sub_rev = nums.reduce(0, (acc, x) -> acc - x, reverse = true);
+      let named_red = nums.reduce(initial = 10, fn = (acc, x) -> acc + x, reverse = false);
+      let pos3_red = nums.reduce(0, (acc, x) -> acc - x, true);
+
+      let has_three = nums.contains(3);
+      let not_has_99 = nums.contains(99);
+      let rev = nums.reverse();
+      let sorted_asc = [3, 1, 2].sort();
+      let sorted_custom = [3, 1, 2].sort(by = (a, b) -> b - a, reverse = false);
+      let sorted_pos = [3, 1, 2].sort((a, b) -> b - a, true);
+      let joined = ["a", "b", "c"].join("-");
+
+      var mut_arr = [10, 20];
+      let p_val = mut_arr.push(30); // returns 30
+      let i_val = mut_arr.insert(1, 15); // returns 15
+      let i_named = mut_arr.insert(index = 0, element = 5);
+      let pop_val = mut_arr.pop() ?? 0; // 30
+      let rem_val = mut_arr.remove(2) ?? 0; // 15
+      mut_arr.clear();
+
+      var inp_num = [5, 1, 4, 2, 3];
+      inp_num.map(x -> x * 2, in_place = true); // [10, 2, 8, 4, 6]
+      inp_num.map(fn = x -> x * 1, false);
+      inp_num.filter(x -> x > 4, in_place = true); // [10, 8, 6]
+      inp_num.filter(fn = x -> x > 0, false);
+      inp_num.sort(in_place = true); // [6, 8, 10]
+      inp_num.reverse(in_place = true); // [10, 8, 6]
+      inp_num.reverse(false);
+
+      var temp = [3, 1, 2];
+      temp.sort((a, b) -> a - b, false, true);
+
+      let c1 = sz == 5 && is_empty == false;
+      let c2 = doubled[0] == 2 && doubled[4] == 10;
+      let c3 = evens.size() == 2 && evens[0] == 2 && evens[1] == 4;
+      let c4 = sum == 15;
+      let c5 = sub_rev == -15 && named_red == 25 && pos3_red == -15;
+      let c6 = has_three == true && not_has_99 == false && rev[0] == 5 && rev[4] == 1;
+      let c7 = sorted_asc[0] == 1 && sorted_custom[0] == 3 && joined == "a-b-c";
+      let c8 = p_val == 30 && i_val == 15 && pop_val == 30 && rem_val == 15 && mut_arr.empty() == true;
+      let c9 = inp_num.size() == 3 && inp_num[0] == 10 && inp_num[1] == 8 && inp_num[2] == 6;
+
+      return c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9;
+    }
+    """
+    res = self._transpile_and_run(code, "test_array_ops()")
+    self.assertTrue(res)
+
   def test_interpolated_string_python(self):
     """Verifies Python transpilation and execution of f-strings."""
     code = """

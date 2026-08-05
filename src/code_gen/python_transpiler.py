@@ -326,6 +326,79 @@ def _sapphire_enum_from(enum_cls, val):
       except KeyError:
         return None
     return None
+
+def _sapphire_array_map(arr, fn, in_place=False):
+  if in_place:
+    for i in range(len(arr)):
+      arr[i] = fn(arr[i])
+    return arr
+  return [fn(x) for x in arr]
+
+def _sapphire_array_filter(arr, fn, in_place=False):
+  if in_place:
+    filtered = [x for x in arr if fn(x)]
+    arr[:] = filtered
+    return arr
+  return [x for x in arr if fn(x)]
+
+def _sapphire_array_reduce(arr, initial, fn, reverse=False):
+  items = reversed(arr) if reverse else arr
+  acc = initial
+  for x in items:
+    acc = fn(acc, x)
+  return acc
+
+def _sapphire_array_contains(arr, element):
+  return element in arr
+
+def _sapphire_array_reverse(arr, in_place=False):
+  if in_place:
+    arr.reverse()
+    return arr
+  return list(reversed(arr))
+
+def _sapphire_array_sort(arr, by=None, reverse=False, in_place=False):
+  if in_place:
+    if by is None:
+      arr.sort(reverse=reverse)
+    else:
+      import functools
+      arr.sort(key=functools.cmp_to_key(by), reverse=reverse)
+    return arr
+  if by is None:
+    return sorted(arr, reverse=reverse)
+  import functools
+  return sorted(arr, key=functools.cmp_to_key(by), reverse=reverse)
+
+def _sapphire_array_join(arr, sep=", "):
+  return sep.join(str(x) for x in arr)
+
+def _sapphire_array_push(arr, element):
+  arr.append(element)
+  return element
+
+def _sapphire_array_pop(arr):
+  if not arr:
+    return None
+  return arr.pop()
+
+def _sapphire_array_insert(arr, index, element):
+  idx = len(arr) + index if index < 0 else index
+  if idx < 0:
+    idx = 0
+  elif idx > len(arr):
+    idx = len(arr)
+  arr.insert(idx, element)
+  return element
+
+def _sapphire_array_remove(arr, index):
+  idx = len(arr) + index if index < 0 else index
+  if 0 <= idx < len(arr):
+    return arr.pop(idx)
+  return None
+
+def _sapphire_array_clear(arr):
+  arr.clear()
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
@@ -1165,6 +1238,193 @@ class PythonTranspiler(BaseTranspiler):
         return
       elif method == "to_bool":
         self.emit("_sapphire_string_to_bool(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_array_method", False):
+      method = node.callee.array_method
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("len(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("(len(")
+        self.visit(receiver)
+        self.emit(") == 0)")
+        return
+      elif method == "map":
+        self.emit("_sapphire_array_map(")
+        self.visit(receiver)
+        fn_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            in_place_expr = arg.expr
+        self.emit(", ")
+        self.visit(fn_expr)
+        if in_place_expr:
+          self.emit(", in_place=")
+          self.visit(in_place_expr)
+        self.emit(")")
+        return
+      elif method == "filter":
+        self.emit("_sapphire_array_filter(")
+        self.visit(receiver)
+        fn_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            in_place_expr = arg.expr
+        self.emit(", ")
+        self.visit(fn_expr)
+        if in_place_expr:
+          self.emit(", in_place=")
+          self.visit(in_place_expr)
+        self.emit(")")
+        return
+      elif method == "reduce":
+        self.emit("_sapphire_array_reduce(")
+        self.visit(receiver)
+        initial_expr = None
+        fn_expr = None
+        reverse_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "initial":
+            initial_expr = arg.expr
+          elif arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "reverse":
+            reverse_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            initial_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 2 and not arg.name:
+            reverse_expr = arg.expr
+
+        self.emit(", ")
+        self.visit(initial_expr)
+        self.emit(", ")
+        self.visit(fn_expr)
+        if reverse_expr:
+          self.emit(", reverse=")
+          self.visit(reverse_expr)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("_sapphire_array_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "reverse":
+        self.emit("_sapphire_array_reverse(")
+        self.visit(receiver)
+        if node.arguments:
+          self.emit(", in_place=")
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "sort":
+        self.emit("_sapphire_array_sort(")
+        self.visit(receiver)
+        by_expr = None
+        reverse_expr = None
+        in_place_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "by":
+            by_expr = arg.expr
+          elif arg.name == "reverse":
+            reverse_expr = arg.expr
+          elif arg.name == "in_place":
+            in_place_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            by_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            reverse_expr = arg.expr
+          elif idx == 2 and not arg.name:
+            in_place_expr = arg.expr
+
+        self.emit(", ")
+        if by_expr:
+          self.visit(by_expr)
+        else:
+          self.emit("None")
+        if reverse_expr:
+          self.emit(", reverse=")
+          self.visit(reverse_expr)
+        else:
+          self.emit(", reverse=False")
+        if in_place_expr:
+          self.emit(", in_place=")
+          self.visit(in_place_expr)
+        self.emit(")")
+        return
+      elif method == "join":
+        self.emit("_sapphire_array_join(")
+        self.visit(receiver)
+        if node.arguments:
+          self.emit(", ")
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "push":
+        self.emit("_sapphire_array_push(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "pop":
+        self.emit("_sapphire_array_pop(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "insert":
+        self.emit("_sapphire_array_insert(")
+        self.visit(receiver)
+        index_expr = None
+        element_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "index":
+            index_expr = arg.expr
+          elif arg.name == "element":
+            element_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            index_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            element_expr = arg.expr
+        self.emit(", ")
+        self.visit(index_expr)
+        self.emit(", ")
+        self.visit(element_expr)
+        self.emit(")")
+        return
+      elif method == "remove":
+        self.emit("_sapphire_array_remove(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "clear":
+        self.emit("_sapphire_array_clear(")
         self.visit(receiver)
         self.emit(")")
         return

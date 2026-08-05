@@ -912,6 +912,62 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_enum_from(Status", lua)
     self.assertIn("_sapphire_enum_from(LogLevel", lua)
 
+  def test_array_methods_lua(self):
+    """Verifies transpilation of Array built-in methods to Lua."""
+    code = """
+    func test_array_ops() {
+      let nums = [1, 2, 3, 4, 5];
+      let sz = nums.size();
+      let is_empty = nums.empty();
+
+      let doubled = nums.map(x -> x * 2);
+      let evens = nums.filter(x -> x % 2 == 0);
+      let sum = nums.reduce(0, (acc, x) -> acc + x);
+      let sum_rev = nums.reduce(0, (acc, x) -> acc + x, reverse = true);
+      let named_red = nums.reduce(initial = 0, fn = (acc, x) -> acc + x);
+      let pos3_red = nums.reduce(0, (acc, x) -> acc + x, true);
+
+      let has_three = nums.contains(3);
+      let rev = nums.reverse();
+      let sorted_asc = [3, 1, 2].sort();
+      let sorted_pos = [3, 1, 2].sort((a, b) -> a - b, true);
+      let sorted_named = [3, 1, 2].sort(by = (a, b) -> a - b, reverse = true);
+      let joined = ["a", "b"].join("-");
+
+      var mut_arr = [10, 20];
+      let p_val = mut_arr.push(30);
+      let i_val = mut_arr.insert(1, 15);
+      let i_named = mut_arr.insert(index = 0, element = 5);
+      let pop_val = mut_arr.pop();
+      let rem_val = mut_arr.remove(1);
+      mut_arr.clear();
+
+      mut_arr.map(x -> x * 2, in_place = true);
+      mut_arr.map(fn = x -> x * 2, false);
+      mut_arr.filter(x -> x > 4, in_place = true);
+      mut_arr.filter(fn = x -> x > 4, false);
+      mut_arr.reverse(in_place = true);
+      mut_arr.reverse(false);
+      mut_arr.sort(in_place = true);
+      mut_arr.sort((a, b) -> a - b, false, true);
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("#nums", lua)
+    self.assertIn("(#nums == 0)", lua)
+    self.assertIn("_sapphire_array_map(nums", lua)
+    self.assertIn("_sapphire_array_filter(nums", lua)
+    self.assertIn("_sapphire_array_reduce(nums, 0", lua)
+    self.assertIn("_sapphire_array_contains(nums, 3)", lua)
+    self.assertIn("_sapphire_array_reverse(nums)", lua)
+    self.assertIn("_sapphire_array_sort(", lua)
+    self.assertIn("_sapphire_array_join(", lua)
+    self.assertIn("_sapphire_array_push(mut_arr, 30)", lua)
+    self.assertIn("_sapphire_array_insert(mut_arr, 1, 15)", lua)
+    self.assertIn("_sapphire_array_pop(mut_arr)", lua)
+    self.assertIn("_sapphire_array_remove(mut_arr, 1)", lua)
+    self.assertIn("_sapphire_array_clear(mut_arr)", lua)
+
   def test_interpolated_string(self):
     """Verifies transpilation of f-strings to Lua string concatenation."""
     code = """

@@ -241,8 +241,10 @@ class TestGenerics(unittest.TestCase):
     self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))
 
   def test_mangle_type_name_complex_types(self):
-    """Verifies _mangle_type_name for ArrayType, MapType, and FunctionType."""
-    from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
+    try:
+      from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
+    except ModuleNotFoundError:
+      from src.semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
     tc = TypeChecker()
     arr_t = ArrayType(PrimitiveType("int"))
     map_t = MapType(PrimitiveType("String"), PrimitiveType("int"))

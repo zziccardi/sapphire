@@ -366,9 +366,10 @@ class InferredType(Type):
 class ArrayType(Type):
   """Represents an array type (e.g. '[int]' or '[int; 3]')."""
 
-  def __init__(self, element_type: Type, size: Optional[int] = None):
+  def __init__(self, element_type: Type, size: Optional[int] = None, is_fixed_size: bool = False):
     self.element_type = element_type
     self.size = size
+    self.is_fixed_size = is_fixed_size
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, ArrayType):
@@ -383,7 +384,7 @@ class ArrayType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, ArrayType):
       return False
-    return self.element_type == other.element_type and self.size == other.size
+    return self.element_type == other.element_type and self.size == other.size and self.is_fixed_size == other.is_fixed_size
 
   def __repr__(self) -> str:
     if self.size is not None:
@@ -504,6 +505,23 @@ STRING_METHODS: Dict[str, FunctionType] = {
     ),
 }
 
+
+ARRAY_METHODS: Dict[str, bool] = {
+    "size": True,
+    "empty": True,
+    "map": True,
+    "filter": True,
+    "reduce": True,
+    "contains": True,
+    "reverse": True,
+    "sort": True,
+    "join": True,
+    "push": True,
+    "pop": True,
+    "insert": True,
+    "remove": True,
+    "clear": True,
+}
 
 # ==========================================
 # Symbol Representations
