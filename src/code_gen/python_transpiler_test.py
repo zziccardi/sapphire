@@ -12,17 +12,21 @@ import unittest
 from antlr4 import InputStream, CommonTokenStream
 
 try:
+  from parser.ast import BasicTypeNode
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
   from code_gen.python_transpiler import PythonTranspiler, Transpiler
+  from code_gen.base_transpiler import get_default_value_for_type_node
   from code_gen.transpiler import transpile_file
   from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
+  from src.parser.ast import BasicTypeNode
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
+  from src.code_gen.base_transpiler import get_default_value_for_type_node
   from src.code_gen.transpiler import transpile_file
   from src.semantics.type_checker import TypeChecker
 
@@ -797,6 +801,61 @@ class TestPythonTranspiler(unittest.TestCase):
       sub_py = os.path.join(tmpdir, "sub.py")
       self.assertTrue(os.path.exists(sub_py))
 
+  def test_uninitialized_var_decl_python(self):
+    """Verifies that uninitialized variable declarations emit reasonable type defaults in Python."""
+    code = """
+    func test() {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+      var s: String;
+    }
+    """
+    py = self._transpile(code)
+    self.assertIn("i = 0", py)
+    self.assertIn("f = 0.0", py)
+    self.assertIn("b = False", py)
+    self.assertIn("opt = None", py)
+    self.assertIn("s = None", py)
+    self.assertIsNone(get_default_value_for_type_node(None))
+    self.assertIsNone(get_default_value_for_type_node(BasicTypeNode("String")))
+
+  def test_implicit_struct_field_and_var_defaults_execution_python(self):
+    """Verifies runtime values for uninitialized struct fields (int=0, float=0.0, bool=False, T?=None)."""
+    code = """
+    struct DefaultsTest {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+    }
+
+    func get_i(): int {
+      var d = DefaultsTest {};
+      return d.i;
+    }
+
+    func get_f(): float {
+      var d = DefaultsTest {};
+      return d.f;
+    }
+
+    func get_b(): bool {
+      var d = DefaultsTest {};
+      return d.b;
+    }
+
+    func is_opt_none(): bool {
+      var d = DefaultsTest {};
+      return d.opt == none;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(code, "get_i()"), 0)
+    self.assertEqual(self._transpile_and_run(code, "get_f()"), 0.0)
+    self.assertEqual(self._transpile_and_run(code, "get_b()"), False)
+    self.assertEqual(self._transpile_and_run(code, "is_opt_none()"), True)
+
 
   def test_match_expression_transpilation_and_execution(self):
     """Verifies Python transpilation and execution of match expressions."""
@@ -1128,6 +1187,36 @@ class TestPythonTranspiler(unittest.TestCase):
     }
     """
     res = self._transpile_and_run(code, "test_array_ops()")
+    self.assertTrue(res)
+
+  def test_map_methods_python(self):
+    """Verifies Python transpilation and execution of map built-in methods."""
+    code = """
+    func test_map_ops(): bool {
+      let m = {"a": 10, "b": 20};
+      let sz = m.size();
+      let is_empty = m.empty();
+      let has_a = m.contains("a");
+      let has_z = m.contains("z");
+      let k_list = m.keys();
+      let v_list = m.values();
+
+      var mut_m = {"x": 100};
+      let ins_val = mut_m.insert("y", 200);
+      let ins_named = mut_m.insert(key = "z", value = 300);
+      let rem_val = mut_m.remove("x") ?? 0;
+      let missing_rem = mut_m.remove("nonexistent") == none;
+      mut_m.clear();
+
+      let c1 = sz == 2 && is_empty == false;
+      let c2 = has_a == true && has_z == false;
+      let c3 = k_list.size() == 2 && v_list.size() == 2;
+      let c4 = ins_val == 200 && ins_named == 300 && rem_val == 100 && missing_rem == true && mut_m.empty() == true;
+
+      return c1 && c2 && c3 && c4;
+    }
+    """
+    res = self._transpile_and_run(code, "test_map_ops()")
     self.assertTrue(res)
 
   def test_interpolated_string_python(self):

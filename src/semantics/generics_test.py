@@ -242,12 +242,12 @@ class TestGenerics(unittest.TestCase):
 
   def test_mangle_type_name_complex_types(self):
     try:
-      from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
+      from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType, StringType
     except ModuleNotFoundError:
-      from src.semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType
+      from src.semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType, StringType
     tc = TypeChecker()
     arr_t = ArrayType(PrimitiveType("int"))
-    map_t = MapType(PrimitiveType("String"), PrimitiveType("int"))
+    map_t = MapType(StringType(), PrimitiveType("int"))
     fn_t = FunctionType([PrimitiveType("int")], PrimitiveType("float"))
     self.assertEqual(tc._mangle_type_name(arr_t), "Arr_int")
     self.assertEqual(tc._mangle_type_name(map_t), "Map_String_int")

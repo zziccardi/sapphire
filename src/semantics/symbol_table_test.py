@@ -10,6 +10,7 @@ try:
   from semantics.symbol_table import (
       SymbolTable,
       PrimitiveType,
+      StringType,
       OptionalType,
       ArrayType,
       NoneType,
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
   from src.semantics.symbol_table import (
       SymbolTable,
       PrimitiveType,
+      StringType,
       OptionalType,
       ArrayType,
       NoneType,
@@ -43,7 +45,7 @@ class TestSymbolTable(unittest.TestCase):
     self.sym_tab = SymbolTable()
     self.int_type = PrimitiveType("int")
     self.float_type = PrimitiveType("float")
-    self.string_type = PrimitiveType("String")
+    self.string_type = StringType()
     self.bool_type = PrimitiveType("bool")
 
   def test_primitive_type_equality(self):
@@ -225,12 +227,12 @@ class TestSymbolTable(unittest.TestCase):
   def test_map_type_methods(self):
     """Verifies MapType __eq__, __repr__, and is_compatible methods."""
     try:
-      from semantics.symbol_table import MapType, ArrayType, PrimitiveType, OptionalType, NoneType
+      from semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType
     except ModuleNotFoundError:
-      from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, OptionalType, NoneType
+      from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType
 
-    m1 = MapType(PrimitiveType("String"), PrimitiveType("int"))
-    m2 = MapType(PrimitiveType("String"), PrimitiveType("int"))
+    m1 = MapType(StringType(), PrimitiveType("int"))
+    m2 = MapType(StringType(), PrimitiveType("int"))
     m3 = MapType(PrimitiveType("int"), PrimitiveType("int"))
     m_none = MapType(NoneType(), NoneType())
 

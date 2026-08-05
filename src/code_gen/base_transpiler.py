@@ -6,6 +6,7 @@ import time, making backend divergence impossible to miss.
 """
 
 from abc import ABC, abstractmethod
+from typing import Optional
 
 try:
   from parser.ast import (
@@ -47,6 +48,9 @@ try:
       WhileNode,
       YieldNode,
       ImportStmtNode,
+      BasicTypeNode,
+      OptionalTypeNode,
+      TypeNode,
   )
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import (
@@ -88,7 +92,26 @@ except ModuleNotFoundError:  # pragma: no cover
       WhileNode,
       YieldNode,
       ImportStmtNode,
+      BasicTypeNode,
+      OptionalTypeNode,
+      TypeNode,
   )
+
+
+def get_default_value_for_type_node(type_node: Optional[TypeNode]) -> Optional[ASTNode]:
+  """Returns a reasonable default literal ASTNode for uninitialized variables and struct fields."""
+  if type_node is None:
+    return None
+  if isinstance(type_node, OptionalTypeNode):
+    return LiteralNode(value="none", lit_type="none")
+  if isinstance(type_node, BasicTypeNode):
+    if type_node.name == "int":
+      return LiteralNode(value=0, lit_type="int")
+    elif type_node.name == "float":
+      return LiteralNode(value=0.0, lit_type="float")
+    elif type_node.name == "bool":
+      return LiteralNode(value=False, lit_type="bool")
+  return None
 
 
 class BaseTranspiler(ABC):

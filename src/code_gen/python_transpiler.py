@@ -11,10 +11,10 @@ from typing import Any, Dict, List, Optional
 
 try:
   from parser.ast import *
-  from code_gen.base_transpiler import BaseTranspiler
+  from code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
-  from src.code_gen.base_transpiler import BaseTranspiler
+  from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 
 
 # ==========================================
@@ -399,6 +399,31 @@ def _sapphire_array_remove(arr, index):
 
 def _sapphire_array_clear(arr):
   arr.clear()
+
+def _sapphire_map_size(m):
+  return len(m)
+
+def _sapphire_map_empty(m):
+  return len(m) == 0
+
+def _sapphire_map_contains(m, k):
+  return k in m
+
+def _sapphire_map_keys(m):
+  return list(m.keys())
+
+def _sapphire_map_values(m):
+  return list(m.values())
+
+def _sapphire_map_insert(m, k, v):
+  m[k] = v
+  return v
+
+def _sapphire_map_remove(m, k):
+  return m.pop(k, None)
+
+def _sapphire_map_clear(m):
+  m.clear()
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
@@ -636,10 +661,11 @@ class PythonTranspiler(BaseTranspiler):
           self.newline()
           self.emit(f"{p}.__init__(self, *args, **kwargs)")
       for f in node.fields:
-        if f.default_expr:
+        default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+        if default_expr:
           self.newline()
           temp = PythonTranspiler()
-          temp.visit(f.default_expr)
+          temp.visit(default_expr)
           self.emit(f"self.{f.name} = {temp.get_output()}")
       self.newline()
       self.emit("for k, v in kwargs.items():")
@@ -660,10 +686,11 @@ class PythonTranspiler(BaseTranspiler):
           self.newline()
           self.emit(f"{p}.__init__(self, *args, **kwargs)")
       for f in node.fields:
-        if f.default_expr:
+        default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+        if default_expr:
           self.newline()
           temp = PythonTranspiler()
-          temp.visit(f.default_expr)
+          temp.visit(default_expr)
           self.emit(f"self.{f.name} = {temp.get_output()}")
       self.newline()
       self.emit("for k, v in kwargs.items():")
@@ -802,6 +829,18 @@ class PythonTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    else:
+      defaults = []
+      for idx, name in enumerate(node.names):
+        val_type = node.val_types[idx] if idx < len(node.val_types) else None
+        default_expr = get_default_value_for_type_node(val_type)
+        if default_expr:
+          temp = PythonTranspiler()
+          temp.visit(default_expr)
+          defaults.append(temp.get_output())
+        else:
+          defaults.append("None")
+      self.emit(" = " + ", ".join(defaults))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)
@@ -1425,6 +1464,69 @@ class PythonTranspiler(BaseTranspiler):
         return
       elif method == "clear":
         self.emit("_sapphire_array_clear(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
+      method = node.callee.map_method
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("_sapphire_map_size(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("_sapphire_map_empty(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("_sapphire_map_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "keys":
+        self.emit("_sapphire_map_keys(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "values":
+        self.emit("_sapphire_map_values(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "insert":
+        self.emit("_sapphire_map_insert(")
+        self.visit(receiver)
+        key_expr = None
+        val_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "key":
+            key_expr = arg.expr
+          elif arg.name == "value":
+            val_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            key_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            val_expr = arg.expr
+        self.emit(", ")
+        self.visit(key_expr)
+        self.emit(", ")
+        self.visit(val_expr)
+        self.emit(")")
+        return
+      elif method == "remove":
+        self.emit("_sapphire_map_remove(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "clear":
+        self.emit("_sapphire_map_clear(")
         self.visit(receiver)
         self.emit(")")
         return

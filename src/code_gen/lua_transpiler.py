@@ -20,7 +20,7 @@ try:
   from semantics.type_checker import TypeChecker, SemanticError
   from semantics.symbol_table import MapType, RangeType
   from code_gen.source_map import SourceMapBuilder
-  from code_gen.base_transpiler import BaseTranspiler
+  from code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -29,7 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.semantics.type_checker import TypeChecker, SemanticError
   from src.semantics.symbol_table import MapType, RangeType
   from src.code_gen.source_map import SourceMapBuilder
-  from src.code_gen.base_transpiler import BaseTranspiler
+  from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 
 
 # ==========================================
@@ -259,6 +259,12 @@ local _sapphire_string_to_bool = function(s)
   return nil
 end
 
+local _sapphire_cast_int = function(v)
+  if type(v) == "boolean" then return v and 1 or 0 end
+  local n = tonumber(v)
+  return n and math.floor(n) or 0
+end
+
 local _sapphire_enum_from = function(enum_tbl, val)
   if val == nil or enum_tbl == nil then return nil end
   for name, value in pairs(enum_tbl) do
@@ -417,6 +423,55 @@ end
 local _sapphire_array_clear = function(arr)
   for i = #arr, 1, -1 do
     arr[i] = nil
+  end
+end
+
+local _sapphire_map_size = function(m)
+  local count = 0
+  for _ in pairs(m) do
+    count = count + 1
+  end
+  return count
+end
+
+local _sapphire_map_empty = function(m)
+  return next(m) == nil
+end
+
+local _sapphire_map_contains = function(m, k)
+  return m[k] ~= nil
+end
+
+local _sapphire_map_keys = function(m)
+  local res = {}
+  for k in pairs(m) do
+    table.insert(res, k)
+  end
+  return res
+end
+
+local _sapphire_map_values = function(m)
+  local res = {}
+  for _, v in pairs(m) do
+    table.insert(res, v)
+  end
+  return res
+end
+
+local _sapphire_map_insert = function(m, k, v)
+  m[k] = v
+  return v
+end
+
+local _sapphire_map_remove = function(m, k)
+  local val = m[k]
+  m[k] = nil
+  return val
+end
+
+local _sapphire_map_clear = function(m)
+  for k in pairs(m) do
+    m[k] = nil
   end
 end
 
@@ -781,11 +836,12 @@ class LuaTranspiler(BaseTranspiler):
         self.newline()
         self.emit(f"if {p}._init_fields then {p}._init_fields(self) end")
     for f in node.fields:
-      if f.default_expr:
+      default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+      if default_expr:
         self.newline()
         temp = LuaTranspiler()
         temp.known_structs = self.known_structs
-        temp.visit(f.default_expr)
+        temp.visit(default_expr)
         self.emit(f"self.{f.name} = {temp.get_output()}")
     self.dedent()
     self.newline()
@@ -994,6 +1050,23 @@ class LuaTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    else:
+      defaults = []
+      has_non_nil = False
+      for idx, name in enumerate(node.names):
+        val_type = node.val_types[idx] if idx < len(node.val_types) else None
+        default_expr = get_default_value_for_type_node(val_type)
+        if default_expr:
+          temp = LuaTranspiler()
+          temp.known_structs = self.known_structs
+          temp.visit(default_expr)
+          defaults.append(temp.get_output())
+          if default_expr.lit_type != "none":
+            has_non_nil = True
+        else:
+          defaults.append("nil")
+      if has_non_nil:
+        self.emit(" = " + ", ".join(defaults))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)
@@ -1369,10 +1442,23 @@ class LuaTranspiler(BaseTranspiler):
         op = ".."
 
     self.emit("(")
-    self.visit(node.left)
+    self._visit_concat_operand(node.left, is_string_concat=(op == ".."))
     self.emit(f" {op} ")
-    self.visit(node.right)
+    self._visit_concat_operand(node.right, is_string_concat=(op == ".."))
     self.emit(")")
+
+  def _visit_concat_operand(self, expr: ASTNode, is_string_concat: bool) -> None:
+    if not is_string_concat:
+      self.visit(expr)
+      return
+    if isinstance(expr, LiteralNode) and expr.lit_type in ("string", "int", "float"):
+      self.visit(expr)
+    elif isinstance(expr, (CallNode, IdentifierNode, MemberAccessNode, IndexExprNode)):
+      self.emit("tostring(")
+      self.visit(expr)
+      self.emit(")")
+    else:
+      self.visit(expr)
 
   def visit_TernaryExprNode(self, node: TernaryExprNode) -> None:
     self.emit("((function() if ")
@@ -1402,9 +1488,9 @@ class LuaTranspiler(BaseTranspiler):
       self.visit(node.expr)
       self.emit(")")
     elif target == "int":
-      self.emit("math.floor(tonumber(")
+      self.emit("_sapphire_cast_int(")
       self.visit(node.expr)
-      self.emit("))")
+      self.emit(")")
     elif target == "bool":
       self.emit("(not not ")
       self.visit(node.expr)
@@ -1706,6 +1792,69 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(")")
         return
 
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
+      method = node.callee.map_method
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("_sapphire_map_size(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("_sapphire_map_empty(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("_sapphire_map_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "keys":
+        self.emit("_sapphire_map_keys(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "values":
+        self.emit("_sapphire_map_values(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "insert":
+        self.emit("_sapphire_map_insert(")
+        self.visit(receiver)
+        key_expr = None
+        val_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "key":
+            key_expr = arg.expr
+          elif arg.name == "value":
+            val_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            key_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            val_expr = arg.expr
+        self.emit(", ")
+        self.visit(key_expr)
+        self.emit(", ")
+        self.visit(val_expr)
+        self.emit(")")
+        return
+      elif method == "remove":
+        self.emit("_sapphire_map_remove(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "clear":
+        self.emit("_sapphire_map_clear(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+
     # Check if this call is calling a struct constructor, e.g. Weapon(...)
     if (isinstance(node.callee, IdentifierNode) and
         node.callee.name in self.known_structs):
@@ -1736,12 +1885,16 @@ class LuaTranspiler(BaseTranspiler):
     if isinstance(node.callee, MemberAccessNode):
       member_name = getattr(node.callee, "target_name", None) or node.callee.member
       receiver_name = getattr(node.callee.receiver, "name", None)
-      if (receiver_name and receiver_name in self.known_structs) or isinstance(node.callee.receiver, MemberAccessNode):
-        # Static method or chained module call (e.g. StructName.func(...) or love.graphics.rectangle(...))
+      if getattr(node.callee, "is_instance_method", False):
+        self.visit(node.callee.receiver)
+        self.emit(f":{member_name}(")
+      elif getattr(node.callee, "is_static_method", False) or (receiver_name and receiver_name in self.known_structs):
+        self.visit(node.callee.receiver)
+        self.emit(f".{member_name}(")
+      elif isinstance(node.callee.receiver, MemberAccessNode):
         self.visit(node.callee.receiver)
         self.emit(f".{member_name}(")
       else:
-        # Instance method call: receiver:method(...)
         self.visit(node.callee.receiver)
         self.emit(f":{member_name}(")
     else:

@@ -1424,29 +1424,67 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code_opt_chained_recv)
     self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
 
-    # 12. Direct test for _is_reference_type with NoneType (edge case coverage)
+    # 12. Direct test for _is_reference_type with all types
     try:
-      from semantics.symbol_table import NoneType
+      from semantics.symbol_table import (
+          PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
+          StructType, OptionalType, NoneType
+      )
     except ImportError:
-      from src.semantics.symbol_table import NoneType
+      from src.semantics.symbol_table import (
+          PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
+          StructType, OptionalType, NoneType
+      )
     checker = TypeChecker()
+    # Value types
+    self.assertFalse(checker._is_reference_type(PrimitiveType("int")))
+    self.assertFalse(checker._is_reference_type(PrimitiveType("float")))
+    self.assertFalse(checker._is_reference_type(PrimitiveType("bool")))
     self.assertFalse(checker._is_reference_type(NoneType()))
+    self.assertFalse(checker._is_reference_type(OptionalType(PrimitiveType("int"))))
+
+    # Reference types
+    self.assertTrue(checker._is_reference_type(StringType()))
+    self.assertTrue(checker._is_reference_type(ArrayType(PrimitiveType("int"))))
+    self.assertTrue(checker._is_reference_type(MapType(StringType(), PrimitiveType("int"))))
+    self.assertTrue(checker._is_reference_type(ArenaType()))
+    self.assertTrue(checker._is_reference_type(RangeType()))
+    self.assertTrue(checker._is_reference_type(StructType("Point")))
+    self.assertTrue(checker._is_reference_type(StructType("Enemy", is_prototype=True)))
+    self.assertTrue(checker._is_reference_type(OptionalType(StringType())))
+
+    # 13. Verify aliasing conflicts for builtin reference types (String, Array, Map, Arena, Range)
+    code_builtin_ref_aliasing = """
+    func test_str(var a: String, b: String) {}
+    func test_arr(var a: [int], b: [int]) {}
+    func test_map(var a: [String: int], b: [String: int]) {}
+    func test_arena(var a: Arena, b: Arena) {}
+    func test_range(var a: Range, b: Range) {}
+
+    func run() {
+      var s = "hello";
+      test_str(a = s, b = s);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_builtin_ref_aliasing)
+    self.assertIn("Aliasing conflict: variable 's'", str(context.exception))
 
   def test_struct_initialization_checking(self):
     """Verifies semantic checking of struct initializers."""
-    # 1. Missing required field
+    # 1. Missing required field (non-primitive, non-optional reference type)
     code_missing = """
     struct Point {
       var x: int;
-      var y: int;
+      var owner: String;
     }
     func test() {
-      let p = Point { x = 10 }; // Missing required field y
+      let p = Point { x = 10 }; // Missing required field owner
     }
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code_missing)
-    self.assertIn("Struct initializer for 'Point' is missing required field 'y'", str(context.exception))
+    self.assertIn("Struct initializer for 'Point' is missing required field 'owner'", str(context.exception))
 
     # 2. Type mismatch
     code_mismatch = """
@@ -2453,6 +2491,23 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot return a reference to an object allocated in local arena", str(ctx.exception))
+
+  def test_struct_field_implicit_defaults(self):
+    """Verifies that fields of type int, float, bool, and T? implicitly default and can be omitted from initializers."""
+    self._check("""
+    struct Entity {
+      var id: int;
+      var speed: float;
+      var is_alive: bool;
+      var target: String?;
+      let name: String;
+    }
+
+    func test() {
+      // id, speed, is_alive, and target can all be omitted because they have implicit defaults
+      let e = Entity { name = "Hero" };
+    }
+    """)
 
   def test_compiler_fixes_and_inference(self):
     """Verifies parenthesized types, optional lambda parameter inference, and struct initializer context propagation."""
@@ -3542,6 +3597,170 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Array has no method 'non_existent_method'", str(ctx.exception))
+
+  def test_map_builtin_methods(self):
+    """Verifies type checking for Map built-in methods (size, empty, contains, keys, values, insert, remove, clear)."""
+    self._check("""
+    func main() {
+      let m = {"a": 1, "b": 2};
+      let sz: int = m.size();
+      let is_empty: bool = m.empty();
+      let has_a: bool = m.contains("a");
+      let k_list: [String] = m.keys();
+      let v_list: [int] = m.values();
+
+      var mut_m = {"x": 10};
+      let ins_val: int = mut_m.insert("y", 20);
+      let ins_named: int = mut_m.insert(key = "z", value = 30);
+      let rem_val: int? = mut_m.remove("x");
+      mut_m.clear();
+    }
+    """)
+
+    # Invalid Map methods & mutability error checks
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.size(123);
+      }
+      """)
+    self.assertIn(".size() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.empty(123);
+      }
+      """)
+    self.assertIn(".empty() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.contains("a", "b");
+      }
+      """)
+    self.assertIn(".contains() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.contains(123);
+      }
+      """)
+    self.assertIn("Argument type mismatch in .contains()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.keys(123);
+      }
+      """)
+    self.assertIn(".keys() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.values(123);
+      }
+      """)
+    self.assertIn(".values() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.insert("b", 2);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'insert' on constant variable 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.insert("b");
+      }
+      """)
+    self.assertIn(".insert() requires mandatory 'key' and 'value' arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.insert(123, 2);
+      }
+      """)
+    self.assertIn("Argument 'key' in .insert() must be 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.insert("b", "not_int");
+      }
+      """)
+    self.assertIn("Argument 'value' in .insert() must be 'int'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.remove("a");
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'remove' on constant variable 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.remove();
+      }
+      """)
+    self.assertIn(".remove() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.remove(123);
+      }
+      """)
+    self.assertIn("Argument 'key' in .remove() must be 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.clear();
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'clear' on constant variable 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.clear(123);
+      }
+      """)
+    self.assertIn(".clear() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.invalid_map_method();
+      }
+      """)
+    self.assertIn("Map has no method 'invalid_map_method'", str(ctx.exception))
 
 
 if __name__ == "__main__":

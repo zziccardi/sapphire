@@ -856,9 +856,11 @@ class TestLSPServer(unittest.TestCase):
       self.assertEqual(len(res_comp.items), 2) # f1 and m1, __init__ skipped
       self.assertIsNone(next((item for item in res_comp.items if item.label == "__init__"), None))
 
-      # Test String method completion items
-      from semantics.symbol_table import PrimitiveType, VariableSymbol
-      sym_str = VariableSymbol("str_var", PrimitiveType("String"), is_mutable=False)
+      try:
+        from semantics.symbol_table import StringType, VariableSymbol
+      except ImportError:
+        from src.semantics.symbol_table import StringType, VariableSymbol
+      sym_str = VariableSymbol("str_var", StringType(), is_mutable=False)
       sym_table.current_scope.symbols["str_var"] = sym_str
 
       mock_doc_comp_str = MagicMock()

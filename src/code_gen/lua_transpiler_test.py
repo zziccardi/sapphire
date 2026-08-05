@@ -138,6 +138,13 @@ class TestLuaTranspiler(unittest.TestCase):
     # UnaryOpNode with unary plus
     transpiler.visit(UnaryOpNode("+", LiteralNode(10, "int")))
 
+    # String concat with CallNode and non-literal AST node
+    transpiler.visit(BinaryOpNode(LiteralNode("Val: ", "string"), "+", CallNode(IdentifierNode("get_val"), [])))
+    transpiler.visit(BinaryOpNode(LiteralNode("Res: ", "string"), "+", UnaryOpNode("-", LiteralNode(5, "int"))))
+
+    # Chained member call without static/instance annotation
+    transpiler.visit(CallNode(MemberAccessNode(MemberAccessNode(IdentifierNode("a"), "b", False), "c", False), []))
+
     output = transpiler.get_output()
     self.assertIn("-- pass", output)
     self.assertIn('10 .. "items"', output)
@@ -146,6 +153,9 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("pt:get_x()", output)
     self.assertIn("my_arena:register(Point.init({x = 1, [2] = 2}))", output)
     self.assertIn("(10)", output)
+    self.assertIn('"Val: " .. tostring(get_val())', output)
+    self.assertIn('"Res: " .. (-5)', output)
+    self.assertIn("a.b.c()", output)
 
   def test_basic_arithmetic(self):
     """Verifies that variable declarations and arithmetic expressions transpile to Lua."""
@@ -901,7 +911,7 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua = self._transpile(code)
     self.assertIn("tonumber(10)", lua)
-    self.assertIn("math.floor(tonumber(3.14))", lua)
+    self.assertIn("_sapphire_cast_int(3.14)", lua)
     self.assertIn("(not not 1)", lua)
     self.assertIn("tostring(10)", lua)
     self.assertIn("tostring(42)", lua)
@@ -911,6 +921,32 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_string_to_bool(", lua)
     self.assertIn("_sapphire_enum_from(Status", lua)
     self.assertIn("_sapphire_enum_from(LogLevel", lua)
+
+  def test_implicit_struct_field_and_var_defaults_lua(self):
+    """Verifies Lua transpilation of implicit struct field defaults (int=0, float=0.0, bool=false, T?=nil)."""
+    code = """
+    struct DefaultsTest {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+    }
+
+    func test() {
+      var d = DefaultsTest {};
+      var local_i: int, local_s: String;
+      var local_f: float;
+      var local_b: bool;
+      var local_opt: String?;
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("self.i = 0", lua)
+    self.assertIn("self.f = 0.0", lua)
+    self.assertIn("self.b = false", lua)
+    self.assertIn("local local_i, local_s = 0, nil", lua)
+    self.assertIn("local local_f = 0.0", lua)
+    self.assertIn("local local_b = false", lua)
 
   def test_array_methods_lua(self):
     """Verifies transpilation of Array built-in methods to Lua."""
@@ -967,6 +1003,35 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_array_pop(mut_arr)", lua)
     self.assertIn("_sapphire_array_remove(mut_arr, 1)", lua)
     self.assertIn("_sapphire_array_clear(mut_arr)", lua)
+
+  def test_map_methods_lua(self):
+    """Verifies Lua transpilation of map built-in methods."""
+    code = """
+    func main() {
+      let m = {"a": 10, "b": 20};
+      let sz = m.size();
+      let is_empty = m.empty();
+      let has_a = m.contains("a");
+      let k_list = m.keys();
+      let v_list = m.values();
+
+      var mut_m = {"x": 100};
+      let ins_val = mut_m.insert("y", 200);
+      let ins_named = mut_m.insert(key = "z", value = 300);
+      let rem_val = mut_m.remove("x");
+      mut_m.clear();
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("_sapphire_map_size(m)", lua)
+    self.assertIn("_sapphire_map_empty(m)", lua)
+    self.assertIn("_sapphire_map_contains(m, \"a\")", lua)
+    self.assertIn("_sapphire_map_keys(m)", lua)
+    self.assertIn("_sapphire_map_values(m)", lua)
+    self.assertIn("_sapphire_map_insert(mut_m, \"y\", 200)", lua)
+    self.assertIn("_sapphire_map_insert(mut_m, \"z\", 300)", lua)
+    self.assertIn("_sapphire_map_remove(mut_m, \"x\")", lua)
+    self.assertIn("_sapphire_map_clear(mut_m)", lua)
 
   def test_interpolated_string(self):
     """Verifies transpilation of f-strings to Lua string concatenation."""

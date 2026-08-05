@@ -735,7 +735,7 @@ def completion(ls: SapphireLanguageServer,
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
 
-    if type(receiver_type).__name__ == "PrimitiveType" and getattr(receiver_type, "name", "") == "String":
+    if type(receiver_type).__name__ in ("StringType", "PrimitiveType") and getattr(receiver_type, "name", "") == "String":
       try:
         from semantics.symbol_table import STRING_METHODS
       except ImportError:  # pragma: no cover
