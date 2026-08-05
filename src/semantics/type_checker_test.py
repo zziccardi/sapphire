@@ -36,6 +36,8 @@ class TestTypeChecker(unittest.TestCase):
     parser = SapphireParser(stream)
     parser.removeErrorListeners()
     tree = parser.program()
+    if parser.getNumberOfSyntaxErrors() > 0:
+      raise SyntaxError(f"Syntax error while parsing code string for type checking:\n{code}")
     builder = ASTBuilder()
     ast = builder.visit(tree)
     checker = TypeChecker()
@@ -312,7 +314,7 @@ class TestTypeChecker(unittest.TestCase):
     """Enforces that impl of a trait must implement all methods of the trait."""
     code = """
     trait Target {
-      func resolve(): int
+      func resolve(): int;
     }
     struct Runner {}
     impl Target for Runner {
@@ -327,7 +329,7 @@ class TestTypeChecker(unittest.TestCase):
     """Enforces that impl methods of a trait must match trait signatures exactly."""
     code = """
     trait Target {
-      func resolve(x: int): int
+      func resolve(x: int): int;
     }
     struct Runner {}
     impl Target for Runner {
@@ -2120,7 +2122,7 @@ class TestTypeChecker(unittest.TestCase):
       Player,
       create_player,
       enums.DrawMode,
-    };
+    }
 
     struct Player {
       var name: String;
@@ -2137,7 +2139,7 @@ class TestTypeChecker(unittest.TestCase):
     code = """
     export {
       NonExistentSymbol,
-    };
+    }
     """
     with self.assertRaises(SemanticError):
       self._check(code)
