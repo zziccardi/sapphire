@@ -34,6 +34,9 @@ class Type:
     if (isinstance(self, EnumType) and isinstance(other, PrimitiveType) and
         self.value_type.lower() == other.name.lower()):
       return True
+    if (isinstance(self, EnumType) and isinstance(other, StringType) and
+        self.value_type == "String"):
+      return True
     if isinstance(other, TraitType) and isinstance(self, StructType):
       return self.implements_trait(other)
     return self == other
@@ -44,8 +47,21 @@ class Type:
     return type(self) is type(other)
 
 
+class StringType(Type):
+  """Represents the built-in String reference type."""
+
+  def __init__(self):
+    self.name = "String"
+
+  def __eq__(self, other: object) -> bool:
+    return isinstance(other, StringType)
+
+  def __repr__(self) -> str:
+    return "String"
+
+
 class PrimitiveType(Type):
-  """Represents primitive types like 'int', 'float', 'bool', 'string'."""
+  """Represents primitive scalar value types like 'int', 'float', 'bool'."""
 
   def __init__(self, name: str):
     self.name = name
@@ -428,53 +444,53 @@ class MapType(Type):
 
 STRING_METHODS: Dict[str, FunctionType] = {
     "size": FunctionType(
-        [PrimitiveType("String")],
+        [StringType()],
         PrimitiveType("int"),
         param_names=["self"],
         has_self=True,
     ),
     "empty": FunctionType(
-        [PrimitiveType("String")],
+        [StringType()],
         PrimitiveType("bool"),
         param_names=["self"],
         has_self=True,
     ),
     "lower": FunctionType(
-        [PrimitiveType("String")],
-        PrimitiveType("String"),
+        [StringType()],
+        StringType(),
         param_names=["self"],
         has_self=True,
     ),
     "upper": FunctionType(
-        [PrimitiveType("String")],
-        PrimitiveType("String"),
+        [StringType()],
+        StringType(),
         param_names=["self"],
         has_self=True,
     ),
     "strip": FunctionType(
-        [PrimitiveType("String"), OptionalType(PrimitiveType("String"))],
-        PrimitiveType("String"),
+        [StringType(), OptionalType(StringType())],
+        StringType(),
         param_names=["self", "chars"],
         has_self=True,
         num_defaults=1,
     ),
     "split": FunctionType(
-        [PrimitiveType("String"), OptionalType(PrimitiveType("String"))],
-        ArrayType(PrimitiveType("String")),
+        [StringType(), OptionalType(StringType())],
+        ArrayType(StringType()),
         param_names=["self", "sep"],
         has_self=True,
         num_defaults=1,
     ),
     "contains": FunctionType(
-        [PrimitiveType("String"), PrimitiveType("String")],
+        [StringType(), StringType()],
         PrimitiveType("bool"),
         param_names=["self", "sub"],
         has_self=True,
     ),
     "find": FunctionType(
         [
-            PrimitiveType("String"),
-            PrimitiveType("String"),
+            StringType(),
+            StringType(),
             PrimitiveType("int"),
             PrimitiveType("bool"),
         ],
@@ -485,20 +501,20 @@ STRING_METHODS: Dict[str, FunctionType] = {
         num_defaults=2,
     ),
     "to_int": FunctionType(
-        [PrimitiveType("String"), PrimitiveType("int")],
+        [StringType(), PrimitiveType("int")],
         OptionalType(PrimitiveType("int")),
         param_names=["self", "radix"],
         has_self=True,
         num_defaults=1,
     ),
     "to_float": FunctionType(
-        [PrimitiveType("String")],
+        [StringType()],
         OptionalType(PrimitiveType("float")),
         param_names=["self"],
         has_self=True,
     ),
     "to_bool": FunctionType(
-        [PrimitiveType("String")],
+        [StringType()],
         OptionalType(PrimitiveType("bool")),
         param_names=["self"],
         has_self=True,
@@ -672,7 +688,7 @@ class SymbolTable:
     self.current_scope.define_type("int", PrimitiveType("int"))
     self.current_scope.define_type("float", PrimitiveType("float"))
     self.current_scope.define_type("bool", PrimitiveType("bool"))
-    self.current_scope.define_type("String", PrimitiveType("String"))
+    self.current_scope.define_type("String", StringType())
     self.current_scope.define_type("none", NoneType())
     self.current_scope.define_type("void", NoneType())
     arena_t = ArenaType()
@@ -682,7 +698,7 @@ class SymbolTable:
         FunctionSymbol("Arena", FunctionType([], arena_t)))
     self.current_scope.define(
         "print",
-        FunctionSymbol("print", FunctionType([PrimitiveType("String")],
+        FunctionSymbol("print", FunctionType([StringType()],
                                              NoneType())))
     range_t = RangeType()
     self.current_scope.define_type("Range", range_t)
@@ -709,7 +725,7 @@ class SymbolTable:
         "expect_almost_eq", "expect_none", "expect_not_none"
     ]
     for name in assertion_names:
-      fn_t = FunctionType([NoneType(), NoneType(), PrimitiveType("String"), PrimitiveType("String")], NoneType(), num_defaults=4)
+      fn_t = FunctionType([NoneType(), NoneType(), StringType(), StringType()], NoneType(), num_defaults=4)
       fn_t.is_testing_assertion = True
       testcase_trait.methods[name] = fn_t
     self.testcase_trait = testcase_trait

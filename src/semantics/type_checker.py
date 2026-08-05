@@ -14,6 +14,7 @@ try:
       SymbolTable,
       Type,
       PrimitiveType,
+      StringType,
       OptionalType,
       FunctionType,
       MultiReturnType,
@@ -46,6 +47,7 @@ except ModuleNotFoundError:  # pragma: no cover
       SymbolTable,
       Type,
       PrimitiveType,
+      StringType,
       OptionalType,
       FunctionType,
       MultiReturnType,
@@ -1250,7 +1252,7 @@ class TypeChecker:
     if node.lit_type == "bool":
       return PrimitiveType("bool")
     if node.lit_type == "string":
-      return PrimitiveType("String")
+      return StringType()
     return NoneType()
 
   def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> Type:
@@ -1261,7 +1263,7 @@ class TypeChecker:
             f"Cannot interpolate struct type '{t.name}' directly into string."
             " Call a string conversion method explicitly."
         )
-    return PrimitiveType("String")
+    return StringType()
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> Type:
     sym = self.symbol_table.lookup(node.name)
@@ -1302,9 +1304,9 @@ class TypeChecker:
 
     # Arithmetic operators
     if node.op in ("+", "-", "*", "/", "%"):
-      if node.op == "+" and ((isinstance(left, PrimitiveType) and left.name == "String") or (isinstance(right, PrimitiveType) and right.name == "String")):
+      if node.op == "+" and (isinstance(left, StringType) or isinstance(right, StringType)):
         node.is_string_concat = True
-        return PrimitiveType("String")
+        return StringType()
       # Supports int and float operations; InferredType is a permitted
       # placeholder during lambda body analysis — treat it as numeric.
       is_numeric_left = (isinstance(left, PrimitiveType) and left.name in ("int", "float")) or isinstance(left, InferredType)
@@ -1381,10 +1383,10 @@ class TypeChecker:
     if is_expr_num and is_target_num:
       return target_type
 
-    if isinstance(expr_type, EnumType) and isinstance(target_type, PrimitiveType) and target_type.name in ("int", "String"):
+    if isinstance(expr_type, EnumType) and (isinstance(target_type, StringType) or (isinstance(target_type, PrimitiveType) and target_type.name == "int")):
       return target_type
 
-    if isinstance(expr_type, PrimitiveType) and expr_type.name == "String":
+    if isinstance(expr_type, StringType):
       if isinstance(target_type, PrimitiveType) and target_type.name in ("int", "float", "bool"):
         self.error(f"Cannot cast 'String' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
         return target_type
@@ -1415,7 +1417,7 @@ class TypeChecker:
     if isinstance(type_obj, OptionalType):
       return self._is_reference_type(type_obj.base_type)
     if isinstance(type_obj, PrimitiveType):
-      return type_obj.name not in ("int", "float", "bool")
+      return False
     if isinstance(type_obj, NoneType):
       return False
     return True
@@ -1501,15 +1503,16 @@ class TypeChecker:
     if getattr(node.callee, "is_string_from", False):
       if len(node.arguments) != 1:
         self.error("String.from() requires exactly 1 argument.")
-        return PrimitiveType("String")
+        return StringType()
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
-          (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool", "String"))
+          isinstance(arg_t, StringType)
+          or (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool"))
           or isinstance(arg_t, EnumType)
       )
       if not is_valid:
         self.error(f"Cannot convert type '{arg_t}' to String using String.from().")
-      return PrimitiveType("String")
+      return StringType()
 
     if getattr(node.callee, "is_enum_from", False):
       enum_t = getattr(node.callee, "enum_type", PrimitiveType("none"))
@@ -1518,7 +1521,8 @@ class TypeChecker:
         return OptionalType(enum_t)
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
-          isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "String")
+          isinstance(arg_t, StringType)
+          or (isinstance(arg_t, PrimitiveType) and arg_t.name == "int")
       )
       if not is_valid:
         self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or String.")
@@ -1833,9 +1837,9 @@ class TypeChecker:
           self.error(".join() takes at most 1 argument (sep).")
         elif len(node.arguments) == 1:
           sep_t = self.visit(node.arguments[0].expr)
-          if not sep_t.is_compatible(PrimitiveType("String")):
+          if not sep_t.is_compatible(StringType()):
             self.error(f"Delimiter 'sep' in .join() must be 'String', got '{sep_t}'.")
-        return PrimitiveType("String")
+        return StringType()
 
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
       method = node.callee.map_method
@@ -2013,10 +2017,10 @@ class TypeChecker:
         self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
         return PrimitiveType("none")
 
-    if isinstance(receiver_type, PrimitiveType) and receiver_type.name == "String":
+    if isinstance(receiver_type, StringType):
       if node.member == "from":
         node.is_string_from = True
-        return FunctionType([PrimitiveType("String")], PrimitiveType("String"))
+        return FunctionType([StringType()], StringType())
       method = STRING_METHODS.get(node.member)
       if method:
         node.is_string_method = True
@@ -2047,7 +2051,7 @@ class TypeChecker:
         elif node.member == "sort":
           return FunctionType([receiver_type, OptionalType(FunctionType([elem_t, elem_t], PrimitiveType("int"))), PrimitiveType("bool"), PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "by", "reverse", "in_place"], has_self=True, num_defaults=3)
         elif node.member == "join":
-          return FunctionType([receiver_type, PrimitiveType("String")], PrimitiveType("String"), param_names=["self", "sep"], has_self=True, num_defaults=1)
+          return FunctionType([receiver_type, OptionalType(StringType())], StringType(), param_names=["self", "sep"], has_self=True, num_defaults=1)
         elif node.member == "push":
           return FunctionType([receiver_type, elem_t], elem_t, param_names=["self", "element"], has_self=True)
         elif node.member == "pop":
@@ -2111,7 +2115,7 @@ class TypeChecker:
       if node.member == "from":
         node.is_enum_from = True
         node.enum_type = receiver_type
-        return FunctionType([PrimitiveType("String")], OptionalType(receiver_type))
+        return FunctionType([StringType()], OptionalType(receiver_type))
       if node.member in receiver_type.variants:
         return receiver_type
       self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
@@ -2238,7 +2242,7 @@ class TypeChecker:
             if other.lit_type == "int":
               return PrimitiveType("int")
             if other.lit_type == "string":
-              return PrimitiveType("String")
+              return StringType()
           return None
 
         if node.op in ("&&", "||") and (left_is_param or right_is_param):
@@ -2367,7 +2371,8 @@ class TypeChecker:
 
     def is_valid_key_type(ktype: Type) -> bool:
       return (
-          (isinstance(ktype, PrimitiveType) and ktype.name in ("String", "int"))
+          isinstance(ktype, StringType)
+          or (isinstance(ktype, PrimitiveType) and ktype.name == "int")
           or isinstance(ktype, EnumType)
       )
 

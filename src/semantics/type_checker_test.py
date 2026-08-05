@@ -1427,12 +1427,12 @@ class TestTypeChecker(unittest.TestCase):
     # 12. Direct test for _is_reference_type with all types
     try:
       from semantics.symbol_table import (
-          PrimitiveType, ArrayType, MapType, ArenaType, RangeType,
+          PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
           StructType, OptionalType, NoneType
       )
     except ImportError:
       from src.semantics.symbol_table import (
-          PrimitiveType, ArrayType, MapType, ArenaType, RangeType,
+          PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
           StructType, OptionalType, NoneType
       )
     checker = TypeChecker()
@@ -1444,14 +1444,14 @@ class TestTypeChecker(unittest.TestCase):
     self.assertFalse(checker._is_reference_type(OptionalType(PrimitiveType("int"))))
 
     # Reference types
-    self.assertTrue(checker._is_reference_type(PrimitiveType("String")))
+    self.assertTrue(checker._is_reference_type(StringType()))
     self.assertTrue(checker._is_reference_type(ArrayType(PrimitiveType("int"))))
-    self.assertTrue(checker._is_reference_type(MapType(PrimitiveType("String"), PrimitiveType("int"))))
+    self.assertTrue(checker._is_reference_type(MapType(StringType(), PrimitiveType("int"))))
     self.assertTrue(checker._is_reference_type(ArenaType()))
     self.assertTrue(checker._is_reference_type(RangeType()))
     self.assertTrue(checker._is_reference_type(StructType("Point")))
     self.assertTrue(checker._is_reference_type(StructType("Enemy", is_prototype=True)))
-    self.assertTrue(checker._is_reference_type(OptionalType(PrimitiveType("String"))))
+    self.assertTrue(checker._is_reference_type(OptionalType(StringType())))
 
     # 13. Verify aliasing conflicts for builtin reference types (String, Array, Map, Arena, Range)
     code_builtin_ref_aliasing = """
