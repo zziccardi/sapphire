@@ -11,12 +11,16 @@ try:
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
+  from parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode
   from semantics.type_checker import TypeChecker, SemanticError
+  from semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
+  from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode
   from src.semantics.type_checker import TypeChecker, SemanticError
+  from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
 
 
 class TestTypeChecker(unittest.TestCase):
@@ -3128,8 +3132,38 @@ class TestTypeChecker(unittest.TestCase):
 
       let named_reduce: int = numbers.reduce(initial = 0, fn = (acc, x) -> acc + x, reverse = false);
       let pos3_reduce: int = numbers.reduce(0, (acc, x) -> acc + x, true);
+
+      let has_three: bool = numbers.contains(3);
+      let rev_arr: [int] = numbers.reverse();
+      let sorted_arr: [int] = numbers.sort();
+      let custom_sort: [int] = numbers.sort(by = (a, b) -> b - a, reverse = false);
+      let joined: String = numbers.join(", ");
+
+      var mut_arr = [10, 20];
+      let p_val: int = mut_arr.push(30);
+      let i_val: int = mut_arr.insert(1, 15);
+      let pop_val: int? = mut_arr.pop();
+      let rem_val: int? = mut_arr.remove(0);
+      mut_arr.clear();
     }
     """)
+
+    # 1b. Mutating methods on constant binding (error)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let p = arr.push(3);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'push' on constant variable 'arr'", str(ctx.exception))
+
+    # 1c. Mutating methods on fixed-size array (error)
+    checker = TypeChecker()
+    checker.symbol_table.define("fixed_arr", VariableSymbol("fixed_arr", ArrayType(PrimitiveType("int"), size=2, is_fixed_size=True), is_mutable=True))
+    call_node = CallNode(MemberAccessNode(IdentifierNode("fixed_arr"), "push", is_optional=False), [ArgumentNode(None, LiteralNode(3, "int"))])
+    checker.visit(call_node)
+    self.assertTrue(any("Cannot invoke mutating method 'push' on fixed-size array" in e for e in checker.errors))
 
     # 2. Invalid size and empty call with arguments
     with self.assertRaises(SemanticError) as ctx:
@@ -3243,7 +3277,152 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("'reverse' parameter in .reduce() must be 'bool'", str(ctx.exception))
 
-    # 6. Non-existent array method
+    # 6. Phase 2 method errors
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let c = arr.contains("str");
+      }
+      """)
+    self.assertIn("Argument type mismatch in .contains()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let r = arr.reverse(123);
+      }
+      """)
+    self.assertIn(".reverse() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let s = arr.sort(by = (a, b) -> "not int");
+      }
+      """)
+    self.assertIn("Comparator closure in .sort() must return 'int'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let j = arr.join(123);
+      }
+      """)
+    self.assertIn("Delimiter 'sep' in .join() must be 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        let i = arr.insert(index = 0);
+      }
+      """)
+    self.assertIn(".insert() requires mandatory 'index' and 'element' arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        let rem = arr.remove("not int");
+      }
+      """)
+    self.assertIn("Argument 'index' in .remove() must be 'int'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.push();
+      }
+      """)
+    self.assertIn(".push() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.push("str");
+      }
+      """)
+    self.assertIn("Argument type mismatch in .push()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.pop(123);
+      }
+      """)
+    self.assertIn(".pop() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.insert(index = 0, element = "str");
+      }
+      """)
+    self.assertIn("Argument type mismatch in .insert()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.remove();
+      }
+      """)
+    self.assertIn(".remove() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.contains();
+      }
+      """)
+    self.assertIn(".contains() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.sort(by = (a, b) -> a - b, reverse = 123);
+      }
+      """)
+    self.assertIn("'reverse' parameter in .sort() must be 'bool'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.insert("not int", 10);
+      }
+      """)
+    self.assertIn("Argument 'index' in .insert() must be 'int'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2];
+        arr.clear(123);
+      }
+      """)
+    self.assertIn(".clear() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        arr.join("a", "b");
+      }
+      """)
+    self.assertIn(".join() takes at most 1 argument", str(ctx.exception))
+
+    # 7. Non-existent array method
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {

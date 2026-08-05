@@ -302,6 +302,92 @@ local _sapphire_array_reduce = function(arr, initial, fn, reverse)
   return acc
 end
 
+local _sapphire_array_contains = function(arr, element)
+  for i = 1, #arr do
+    if arr[i] == element then
+      return true
+    end
+  end
+  return false
+end
+
+local _sapphire_array_reverse = function(arr)
+  local res = {}
+  local len = #arr
+  for i = 1, len do
+    res[i] = arr[len - i + 1]
+  end
+  return res
+end
+
+local _sapphire_array_sort = function(arr, by, reverse)
+  local res = {}
+  for i = 1, #arr do
+    res[i] = arr[i]
+  end
+  table.sort(res, function(a, b)
+    if by then
+      local cmp = by(a, b)
+      if reverse then
+        return cmp > 0
+      else
+        return cmp < 0
+      end
+    else
+      if reverse then
+        return a > b
+      else
+        return a < b
+      end
+    end
+  end)
+  return res
+end
+
+local _sapphire_array_join = function(arr, sep)
+  local delimiter = sep
+  if delimiter == nil then delimiter = ", " end
+  local str_arr = {}
+  for i = 1, #arr do
+    str_arr[i] = tostring(arr[i])
+  end
+  return table.concat(str_arr, delimiter)
+end
+
+local _sapphire_array_push = function(arr, element)
+  table.insert(arr, element)
+  return element
+end
+
+local _sapphire_array_pop = function(arr)
+  if #arr == 0 then return nil end
+  return table.remove(arr)
+end
+
+local _sapphire_array_insert = function(arr, index, element)
+  local len = #arr
+  local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+  if idx_1 < 1 then idx_1 = 1 end
+  if idx_1 > len + 1 then idx_1 = len + 1 end
+  table.insert(arr, idx_1, element)
+  return element
+end
+
+local _sapphire_array_remove = function(arr, index)
+  local len = #arr
+  local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+  if idx_1 >= 1 and idx_1 <= len then
+    return table.remove(arr, idx_1)
+  end
+  return nil
+end
+
+local _sapphire_array_clear = function(arr)
+  for i = #arr, 1, -1 do
+    arr[i] = nil
+  end
+end
+
 local _sapphire_iter_array = function(arr)
   if type(arr) ~= "table" then return ipairs({}) end
   local meta = getmetatable(arr)
@@ -1455,6 +1541,95 @@ class LuaTranspiler(BaseTranspiler):
         if reverse_expr:
           self.emit(", ")
           self.visit(reverse_expr)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("_sapphire_array_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "reverse":
+        self.emit("_sapphire_array_reverse(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "sort":
+        self.emit("_sapphire_array_sort(")
+        self.visit(receiver)
+        by_expr = None
+        reverse_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "by":
+            by_expr = arg.expr
+          elif arg.name == "reverse":
+            reverse_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            by_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            reverse_expr = arg.expr
+
+        self.emit(", ")
+        if by_expr:
+          self.visit(by_expr)
+        else:
+          self.emit("nil")
+        if reverse_expr:
+          self.emit(", ")
+          self.visit(reverse_expr)
+        self.emit(")")
+        return
+      elif method == "join":
+        self.emit("_sapphire_array_join(")
+        self.visit(receiver)
+        if node.arguments:
+          self.emit(", ")
+          self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "push":
+        self.emit("_sapphire_array_push(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "pop":
+        self.emit("_sapphire_array_pop(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "insert":
+        self.emit("_sapphire_array_insert(")
+        self.visit(receiver)
+        index_expr = None
+        element_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "index":
+            index_expr = arg.expr
+          elif arg.name == "element":
+            element_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            index_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            element_expr = arg.expr
+        self.emit(", ")
+        self.visit(index_expr)
+        self.emit(", ")
+        self.visit(element_expr)
+        self.emit(")")
+        return
+      elif method == "remove":
+        self.emit("_sapphire_array_remove(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "clear":
+        self.emit("_sapphire_array_clear(")
+        self.visit(receiver)
         self.emit(")")
         return
 

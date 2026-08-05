@@ -926,6 +926,21 @@ class TestLuaTranspiler(unittest.TestCase):
       let sum_rev = nums.reduce(0, (acc, x) -> acc + x, reverse = true);
       let named_red = nums.reduce(initial = 0, fn = (acc, x) -> acc + x);
       let pos3_red = nums.reduce(0, (acc, x) -> acc + x, true);
+
+      let has_three = nums.contains(3);
+      let rev = nums.reverse();
+      let sorted_asc = [3, 1, 2].sort();
+      let sorted_pos = [3, 1, 2].sort((a, b) -> a - b, true);
+      let sorted_named = [3, 1, 2].sort(by = (a, b) -> a - b, reverse = true);
+      let joined = ["a", "b"].join("-");
+
+      var mut_arr = [10, 20];
+      let p_val = mut_arr.push(30);
+      let i_val = mut_arr.insert(1, 15);
+      let i_named = mut_arr.insert(index = 0, element = 5);
+      let pop_val = mut_arr.pop();
+      let rem_val = mut_arr.remove(1);
+      mut_arr.clear();
     }
     """
     lua = self._transpile(code)
@@ -934,7 +949,15 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_array_map(nums", lua)
     self.assertIn("_sapphire_array_filter(nums", lua)
     self.assertIn("_sapphire_array_reduce(nums, 0", lua)
-    self.assertIn("true)", lua)
+    self.assertIn("_sapphire_array_contains(nums, 3)", lua)
+    self.assertIn("_sapphire_array_reverse(nums)", lua)
+    self.assertIn("_sapphire_array_sort(", lua)
+    self.assertIn("_sapphire_array_join(", lua)
+    self.assertIn("_sapphire_array_push(mut_arr, 30)", lua)
+    self.assertIn("_sapphire_array_insert(mut_arr, 1, 15)", lua)
+    self.assertIn("_sapphire_array_pop(mut_arr)", lua)
+    self.assertIn("_sapphire_array_remove(mut_arr, 1)", lua)
+    self.assertIn("_sapphire_array_clear(mut_arr)", lua)
 
   def test_interpolated_string(self):
     """Verifies transpilation of f-strings to Lua string concatenation."""

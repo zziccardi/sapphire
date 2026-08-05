@@ -1620,6 +1620,118 @@ class TypeChecker:
 
         return acc_type
 
+      elif method in ("push", "pop", "insert", "remove", "clear"):
+        if receiver_type.is_fixed_size:
+          self.error(f"Cannot invoke mutating method '{method}' on fixed-size array '{receiver_type}'.")
+        receiver = node.callee.receiver
+        if isinstance(receiver, IdentifierNode):
+          sym = self.symbol_table.lookup(receiver.name)
+          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+            self.error(f"Cannot invoke mutating method '{method}' on constant variable '{receiver.name}'.")
+
+        if method == "push":
+          if len(node.arguments) != 1:
+            self.error(".push() requires exactly 1 argument (element).")
+            return elem_type
+          arg_t = self.visit(node.arguments[0].expr)
+          if not arg_t.is_compatible(elem_type):
+            self.error(f"Argument type mismatch in .push(). Expected '{elem_type}', got '{arg_t}'.")
+          return elem_type
+
+        elif method == "pop":
+          if node.arguments:
+            self.error(".pop() takes no arguments.")
+          return OptionalType(elem_type)
+
+        elif method == "insert":
+          index_arg = None
+          element_arg = None
+          for idx, arg in enumerate(node.arguments):
+            if arg.name == "index":
+              index_arg = arg
+            elif arg.name == "element":
+              element_arg = arg
+            elif idx == 0 and not arg.name:
+              index_arg = arg
+            elif idx == 1 and not arg.name:
+              element_arg = arg
+
+          if not index_arg or not element_arg:
+            self.error(".insert() requires mandatory 'index' and 'element' arguments.")
+            return elem_type
+
+          idx_t = self.visit(index_arg.expr)
+          if not idx_t.is_compatible(PrimitiveType("int")):
+            self.error(f"Argument 'index' in .insert() must be 'int', got '{idx_t}'.")
+          elem_t = self.visit(element_arg.expr)
+          if not elem_t.is_compatible(elem_type):
+            self.error(f"Argument type mismatch in .insert(). Expected '{elem_type}', got '{elem_t}'.")
+          return elem_type
+
+        elif method == "remove":
+          if len(node.arguments) != 1:
+            self.error(".remove() requires exactly 1 argument (index).")
+            return OptionalType(elem_type)
+          idx_t = self.visit(node.arguments[0].expr)
+          if not idx_t.is_compatible(PrimitiveType("int")):
+            self.error(f"Argument 'index' in .remove() must be 'int', got '{idx_t}'.")
+          return OptionalType(elem_type)
+
+        elif method == "clear":
+          if node.arguments:
+            self.error(".clear() takes no arguments.")
+          return PrimitiveType("none")
+
+      elif method == "contains":
+        if len(node.arguments) != 1:
+          self.error(".contains() requires exactly 1 argument (element).")
+          return PrimitiveType("bool")
+        arg_t = self.visit(node.arguments[0].expr)
+        if not arg_t.is_compatible(elem_type):
+          self.error(f"Argument type mismatch in .contains(). Expected '{elem_type}', got '{arg_t}'.")
+        return PrimitiveType("bool")
+
+      elif method == "reverse":
+        if node.arguments:
+          self.error(".reverse() takes no arguments.")
+        return ArrayType(elem_type, size=receiver_type.size)
+
+      elif method == "sort":
+        by_arg = None
+        reverse_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "by":
+            by_arg = arg
+          elif arg.name == "reverse":
+            reverse_arg = arg
+          elif idx == 0 and not arg.name:
+            by_arg = arg
+          elif idx == 1 and not arg.name:
+            reverse_arg = arg
+
+        if by_arg:
+          old_expected = self.expected_type
+          self.expected_type = FunctionType([elem_type, elem_type], PrimitiveType("int"))
+          by_type = self.visit(by_arg.expr)
+          self.expected_type = old_expected
+          if isinstance(by_type, FunctionType):
+            if not by_type.return_type.is_compatible(PrimitiveType("int")):
+              self.error(f"Comparator closure in .sort() must return 'int', got '{by_type.return_type}'.")
+        if reverse_arg:
+          rev_t = self.visit(reverse_arg.expr)
+          if not rev_t.is_compatible(PrimitiveType("bool")):
+            self.error(f"'reverse' parameter in .sort() must be 'bool', got '{rev_t}'.")
+        return ArrayType(elem_type, size=receiver_type.size)
+
+      elif method == "join":
+        if len(node.arguments) > 1:
+          self.error(".join() takes at most 1 argument (sep).")
+        elif len(node.arguments) == 1:
+          sep_t = self.visit(node.arguments[0].expr)
+          if not sep_t.is_compatible(PrimitiveType("String")):
+            self.error(f"Delimiter 'sep' in .join() must be 'String', got '{sep_t}'.")
+        return PrimitiveType("String")
+
     signature = None
     is_constructor = False
 
@@ -1729,16 +1841,35 @@ class TypeChecker:
         node.is_array_method = True
         node.array_method = node.member
         node.array_receiver_type = receiver_type
+        elem_t = receiver_type.element_type
         if node.member == "size":
           return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
         elif node.member == "empty":
           return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
         elif node.member == "map":
-          return FunctionType([receiver_type, FunctionType([receiver_type.element_type], InferredType())], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn"], has_self=True)
+          return FunctionType([receiver_type, FunctionType([elem_t], InferredType())], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn"], has_self=True)
         elif node.member == "filter":
-          return FunctionType([receiver_type, FunctionType([receiver_type.element_type], PrimitiveType("bool"))], ArrayType(receiver_type.element_type), param_names=["self", "fn"], has_self=True)
+          return FunctionType([receiver_type, FunctionType([elem_t], PrimitiveType("bool"))], ArrayType(elem_t), param_names=["self", "fn"], has_self=True)
         elif node.member == "reduce":
-          return FunctionType([receiver_type, InferredType(), FunctionType([InferredType(), receiver_type.element_type], InferredType()), PrimitiveType("bool")], InferredType(), param_names=["self", "initial", "fn", "reverse"], has_self=True, num_defaults=1)
+          return FunctionType([receiver_type, InferredType(), FunctionType([InferredType(), elem_t], InferredType()), PrimitiveType("bool")], InferredType(), param_names=["self", "initial", "fn", "reverse"], has_self=True, num_defaults=1)
+        elif node.member == "contains":
+          return FunctionType([receiver_type, elem_t], PrimitiveType("bool"), param_names=["self", "element"], has_self=True)
+        elif node.member == "reverse":
+          return FunctionType([receiver_type], ArrayType(elem_t, size=receiver_type.size), param_names=["self"], has_self=True)
+        elif node.member == "sort":
+          return FunctionType([receiver_type, OptionalType(FunctionType([elem_t, elem_t], PrimitiveType("int"))), PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "by", "reverse"], has_self=True, num_defaults=2)
+        elif node.member == "join":
+          return FunctionType([receiver_type, PrimitiveType("String")], PrimitiveType("String"), param_names=["self", "sep"], has_self=True, num_defaults=1)
+        elif node.member == "push":
+          return FunctionType([receiver_type, elem_t], elem_t, param_names=["self", "element"], has_self=True)
+        elif node.member == "pop":
+          return FunctionType([receiver_type], OptionalType(elem_t), param_names=["self"], has_self=True)
+        elif node.member == "insert":
+          return FunctionType([receiver_type, PrimitiveType("int"), elem_t], elem_t, param_names=["self", "index", "element"], has_self=True)
+        elif node.member == "remove":
+          return FunctionType([receiver_type, PrimitiveType("int")], OptionalType(elem_t), param_names=["self", "index"], has_self=True)
+        elif node.member == "clear":
+          return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
       self.error(f"Array has no method '{node.member}'.")
       return PrimitiveType("none")
 

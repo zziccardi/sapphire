@@ -319,9 +319,18 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
 | :--- | :--- |
 | `size(): int` | Returns the total number of elements in the array. |
 | `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
+| `contains(element: T): bool` | Returns `true` if `element` exists in the array, otherwise `false`. |
 | `map<U>(fn: (T) -> U): [U]` | Returns a new array by applying `fn` to each element. |
 | `filter(fn: (T) -> bool): [T]` | Returns a new dynamic array containing elements for which `fn` returns `true`. |
 | `reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U` | Accumulates elements using `fn` starting from `initial`. Iterates right-to-left when `reverse = true`. |
+| `reverse(): [T]` | Returns a new array with elements in reversed order. |
+| `sort(by: ((T, T) -> int)? = none, reverse: bool = false): [T]` | Returns a sorted copy of the array using optional comparator `by` and optional `reverse` flag. |
+| `join(sep: String = ", "): String` | Concatenates array elements into a string joined by `sep`. |
+| `push(element: T): T` | Appends `element` to a mutable dynamic array (`var [T]`) and returns `element`. |
+| `pop(): T?` | Removes and returns the last element of a mutable dynamic array (`var [T]`), or `none` if empty. |
+| `insert(index: int, element: T): T` | Inserts `element` at `index` in a mutable dynamic array (`var [T]`) and returns `element`. |
+| `remove(index: int): T?` | Removes and returns element at `index` in a mutable dynamic array (`var [T]`), or `none` if out of bounds. |
+| `clear(): void` | Clears all elements from a mutable dynamic array (`var [T]`). |
 
 ##### Detailed method behavior
 
@@ -338,6 +347,13 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   Returns `true` if the array contains no elements (`size() == 0`).
   ```sapphire
   let is_empty = [].empty();  // true
+  ```
+
+* **`contains(element: T): bool`**
+
+  Returns `true` if `element` is found in the array.
+  ```sapphire
+  let has_two = [1, 2, 3].contains(2);  // true
   ```
 
 * **`map<U>(fn: (T) -> U): [U]`**
@@ -366,9 +382,69 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   let sum = numbers.reduce(0, (acc, x) -> acc + x);  // 10
 
   let words = ["world", "hello"];
+  let sentence = words.reduce("", (acc, w) -> acc + " " + w, reverse = true);  // " hello world"
+  ```
 
-  // " hello world"
-  let sentence = words.reduce("", (acc, w) -> acc + " " + w, reverse = true);
+* **`reverse(): [T]`**
+
+  Returns a copy of the array with elements in reversed order.
+  ```sapphire
+  let rev = [1, 2, 3].reverse();  // [3, 2, 1]
+  ```
+
+* **`sort(by: ((T, T) -> int)? = none, reverse: bool = false): [T]`**
+
+  Returns a sorted copy of the array.
+  ```sapphire
+  let sorted = [3, 1, 2].sort();  // [1, 2, 3]
+  let desc = [1, 2, 3].sort(reverse = true);  // [3, 2, 1]
+  ```
+
+* **`join(sep: String = ", "): String`**
+
+  Joins array elements into a string with delimiter `sep` (defaults to `", "`).
+  ```sapphire
+  let text = ["a", "b", "c"].join("-");  // "a-b-c"
+  ```
+
+* **`push(element: T): T`**
+
+  Appends `element` to the end of a mutable dynamic array (`var [T]`) and returns `element`.
+  ```sapphire
+  var items = [10, 20];
+  let added = items.push(30);  // items is now [10, 20, 30], added is 30
+  ```
+
+* **`pop(): T?`**
+
+  Removes and returns the last element of a mutable dynamic array (`var [T]`), or `none` if empty.
+  ```sapphire
+  var items = [10, 20];
+  let last_val = items.pop();  // 20
+  ```
+
+* **`insert(index: int, element: T): T`**
+
+  Inserts `element` at `index` in a mutable dynamic array (`var [T]`) and returns `element`.
+  ```sapphire
+  var items = [10, 30];
+  let added = items.insert(1, 20);  // items is now [10, 20, 30], added is 20
+  ```
+
+* **`remove(index: int): T?`**
+
+  Removes and returns the element at `index` in a mutable dynamic array (`var [T]`), or `none` if out of bounds.
+  ```sapphire
+  var items = [10, 20, 30];
+  let removed = items.remove(1);  // 20
+  ```
+
+* **`clear(): void`**
+
+  Clears all elements from a mutable dynamic array (`var [T]`).
+  ```sapphire
+  var items = [10, 20];
+  items.clear();  // items is now []
   ```
 
 #### Operations and capabilities
