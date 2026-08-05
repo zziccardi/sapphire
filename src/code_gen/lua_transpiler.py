@@ -2028,7 +2028,7 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_GuardClauseNode(self, node: GuardClauseNode) -> None:
     if node.binding:
-      self.visit(node.binding)
+      self.visit(node.binding.expr)
     elif node.condition:
       self.visit(node.condition)
 

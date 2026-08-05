@@ -189,13 +189,7 @@ class ASTBuilder(SapphireVisitor):
     trait_name = None
     if getattr(ctx, "traitName", None):
       tn = ctx.traitName
-      tn_text = tn.getText() if hasattr(tn, "getText") else getattr(tn, "text", str(tn))
-      if getattr(ctx, "traitPrefix", None):
-        tp = ctx.traitPrefix
-        tp_text = tp.getText() if hasattr(tp, "getText") else getattr(tp, "text", str(tp))
-        trait_name = f"{tp_text}.{tn_text}"
-      else:
-        trait_name = tn_text
+      trait_name = tn.getText() if hasattr(tn, "getText") else getattr(tn, "text", str(tn))
     sn = ctx.structName
     struct_name = sn.getText() if hasattr(sn, "getText") else getattr(sn, "text", str(sn))
     tpl = ctx.typeParamList()
@@ -234,16 +228,14 @@ class ASTBuilder(SapphireVisitor):
     node = ImplBlockNode(struct_name, trait_name, members, type_params=type_params, trait_type_args=trait_type_args, struct_type_args=struct_type_args)
     # Positioning for Language Server:
     struct_token = getattr(ctx.structName, "start", ctx.structName)
-    if hasattr(struct_token, "line"):
-      node.struct_name_line = struct_token.line
-      node.struct_name_column = struct_token.column
+    node.struct_name_line = getattr(struct_token, "line", None)
+    node.struct_name_column = getattr(struct_token, "column", None)
     node.struct_name_length = len(struct_name)
     if trait_name:
-      t_tok = getattr(ctx, "traitPrefix", None) or ctx.traitName
+      t_tok = ctx.traitName
       trait_token = getattr(t_tok, "start", t_tok)
-      if hasattr(trait_token, "line"):
-        node.trait_name_line = trait_token.line
-        node.trait_name_column = trait_token.column
+      node.trait_name_line = getattr(trait_token, "line", None)
+      node.trait_name_column = getattr(trait_token, "column", None)
       node.trait_name_length = len(trait_name)
     return node
 
@@ -470,17 +462,11 @@ class ASTBuilder(SapphireVisitor):
     is_unwrap = ctx.UNWRAP_ASSIGN() is not None
     expr = self.visit(ctx.expression())
 
-    if ctx.varBindingList():
-      bindings = ctx.varBindingList().varBinding()
-      let_names = [b.IDENTIFIER().getText() for b in bindings]
-      let_name = let_names[0]
-      type_node = self.visit(bindings[0].type_()) if bindings[0].type_() else None
-      first_token = bindings[0].IDENTIFIER().getSymbol()
-    else:
-      let_name = ctx.IDENTIFIER().getText()
-      let_names = [let_name]
-      type_node = self.visit(ctx.type_()) if ctx.type_() else None
-      first_token = ctx.IDENTIFIER().getSymbol()
+    bindings = ctx.varBindingList().varBinding()
+    let_names = [b.IDENTIFIER().getText() for b in bindings]
+    let_name = let_names[0]
+    type_node = self.visit(bindings[0].type_()) if bindings[0].type_() else None
+    first_token = bindings[0].IDENTIFIER().getSymbol()
 
     node = HeaderBindingNode(is_mutable, let_name, type_node, expr, is_unwrap, let_names=let_names)
     node.let_name_line = first_token.line

@@ -21,6 +21,8 @@ try:
       BlockNode,
       CallNode,
       ExprStmtNode,
+      GuardClauseNode,
+      HeaderBindingNode,
       IdentifierNode,
       LambdaNode,
       LambdaParamNode,
@@ -46,6 +48,8 @@ except ModuleNotFoundError:
       BlockNode,
       CallNode,
       ExprStmtNode,
+      GuardClauseNode,
+      HeaderBindingNode,
       IdentifierNode,
       LambdaNode,
       LambdaParamNode,
@@ -498,6 +502,12 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
     if not lua_bin:
       self.skipTest("No Lua interpreter found in system PATH.")
+    try:
+      test_run = subprocess.run([lua_bin, "-v"], capture_output=True, timeout=2)
+      if test_run.returncode != 0:
+        self.skipTest("Lua interpreter is not executable in current environment.")
+    except Exception:
+      self.skipTest("Lua interpreter execution failed.")
 
     code = """
     func main(): int {
@@ -1190,6 +1200,28 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("if _guard_val_1 == nil then", lua_code)
     self.assertIn("return (-1)", lua_code)
     self.assertIn("if not (flag) then", lua_code)
+
+  def test_guard_destructuring_and_clause_node_lua(self):
+    """Verifies Lua transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
+    code = """
+    func test_destruct(arr: [int]): int {
+      guard let a, b = arr else {
+        return 0;
+      }
+      return a + b;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local a = _guard_val_1[1]", lua_code)
+    self.assertIn("local b = _guard_val_1[2]", lua_code)
+
+    # Directly visit GuardClauseNode to cover visitor
+    clause1 = GuardClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="x", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
+    clause2 = GuardClauseNode(condition=LiteralNode(True, "bool"))
+    tr = LuaTranspiler()
+    tr.visit_GuardClauseNode(clause1)
+    tr.visit_GuardClauseNode(clause2)
+    self.assertIn("1", tr.get_output())
 
 
 # ---------------------------------------------------------------------------

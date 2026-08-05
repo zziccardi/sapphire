@@ -3803,6 +3803,35 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot unwrap non-optional type 'int' in guard clause.", str(ctx.exception))
 
+    # 4. Guard condition must be bool
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        guard 123 else {
+          return;
+        }
+      }
+      """)
+    self.assertIn("Guard condition must be of type 'bool', got 'int'.", str(ctx.exception))
+
+    # 5. Guard with non-unwrap binding, multi-variable destructuring, and nested if termination in else
+    self._check("""
+    func test(opt: int?, flag: bool, arr: [int]): int {
+      guard
+        let x = 5;
+        let a, b = arr;
+        opt != none
+      else {
+        if flag {
+          return 0;
+        } else {
+          return -1;
+        }
+      }
+      return x + a + b;
+    }
+    """)
+
   def test_dynamic_indexing_type_checking(self):
     """Verifies dynamic array and map indexing return optional types while constant indexing returns non-optional types."""
     # 1. Dynamic array indexing returns Optional

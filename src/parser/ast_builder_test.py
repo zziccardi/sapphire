@@ -607,6 +607,13 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(stmts[0], ContinueNode)
     self.assertIsInstance(stmts[1], BreakNode)
 
+  def test_impl_trait_prefix(self):
+    """Verifies AST building for trait prefix in impl block."""
+    ast = self._get_ast('impl pkg.Trait for TargetStruct {}')
+    impl = ast.declarations[0]
+    self.assertEqual(impl.trait_name, "pkg.Trait")
+    self.assertEqual(impl.struct_name, "TargetStruct")
+
   def test_guard_statement_ast(self):
     """Verifies AST construction for guard statements with semicolon clause separation and multi-variable binding."""
     try:

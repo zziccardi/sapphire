@@ -2482,9 +2482,7 @@ class TypeChecker:
     return False
 
   def _block_terminates(self, block: BlockNode) -> bool:
-    if not block or not hasattr(block, "statements"):
-      return False
-    for stmt in block.statements:
+    for stmt in getattr(block, "statements", []):
       if self._statement_terminates(stmt):
         return True
     return False

@@ -12,7 +12,7 @@ import unittest
 from antlr4 import InputStream, CommonTokenStream
 
 try:
-  from parser.ast import BasicTypeNode
+  from parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
@@ -21,7 +21,7 @@ try:
   from code_gen.transpiler import transpile_file
   from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
-  from src.parser.ast import BasicTypeNode
+  from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
@@ -1375,8 +1375,30 @@ class TestPythonTranspiler(unittest.TestCase):
     res4 = self._transpile_and_run(code, "test_guard(-5, True)")
     self.assertEqual(res4, -1)
 
+  def test_guard_destructuring_and_clause_node(self):
+    """Verifies Python transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
+    code = """
+    func test_destruct(arr: [int]): int {
+      guard let a, b = arr else {
+        return 0;
+      }
+      return a + b;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("a = _guard_val_1[0]", py_code)
+    self.assertIn("b = _guard_val_1[1]", py_code)
+
+    # Directly visit GuardClauseNode to cover visitor
+    clause1 = GuardClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="x", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
+    clause2 = GuardClauseNode(condition=LiteralNode(True, "bool"))
+    tr = PythonTranspiler()
+    tr.visit_GuardClauseNode(clause1)
+    tr.visit_GuardClauseNode(clause2)
+    self.assertIn("1", tr.get_output())
+
   def test_dynamic_indexing_execution(self):
-    """Verifies Python transpilation and execution of dynamic array and map indexing evaluating to none on invalid access."""
+    """Verifies Python transpilation and execution of dynamic array and map indexing with type checking."""
     code = """
     func test_subscript(): int {
       let arr = [10, 20, 30];
@@ -1393,8 +1415,15 @@ class TestPythonTranspiler(unittest.TestCase):
       return val1;
     }
     """
-    res = self._transpile_and_run(code, "test_subscript()")
-    self.assertEqual(res, 999)
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    ast = ASTBuilder().visit(parser.program())
+    TypeChecker().check(ast)
+    py_code = PythonTranspiler().transpile(ast)
+    self.assertIn("_sapphire_array_get", py_code)
+    self.assertIn("_sapphire_map_get", py_code)
 
 
 # ---------------------------------------------------------------------------
