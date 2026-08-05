@@ -901,7 +901,7 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua = self._transpile(code)
     self.assertIn("tonumber(10)", lua)
-    self.assertIn("math.floor(tonumber(3.14))", lua)
+    self.assertIn("_sapphire_cast_int(3.14)", lua)
     self.assertIn("(not not 1)", lua)
     self.assertIn("tostring(10)", lua)
     self.assertIn("tostring(42)", lua)

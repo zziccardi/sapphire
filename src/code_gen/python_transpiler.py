@@ -827,6 +827,8 @@ class PythonTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    else:
+      self.emit(" = " + ", ".join(["None"] * len(node.names)))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)

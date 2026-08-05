@@ -259,6 +259,12 @@ local _sapphire_string_to_bool = function(s)
   return nil
 end
 
+local _sapphire_cast_int = function(v)
+  if type(v) == "boolean" then return v and 1 or 0 end
+  local n = tonumber(v)
+  return n and math.floor(n) or 0
+end
+
 local _sapphire_enum_from = function(enum_tbl, val)
   if val == nil or enum_tbl == nil then return nil end
   for name, value in pairs(enum_tbl) do
@@ -1418,10 +1424,23 @@ class LuaTranspiler(BaseTranspiler):
         op = ".."
 
     self.emit("(")
-    self.visit(node.left)
+    self._visit_concat_operand(node.left, is_string_concat=(op == ".."))
     self.emit(f" {op} ")
-    self.visit(node.right)
+    self._visit_concat_operand(node.right, is_string_concat=(op == ".."))
     self.emit(")")
+
+  def _visit_concat_operand(self, expr: ASTNode, is_string_concat: bool) -> None:
+    if not is_string_concat:
+      self.visit(expr)
+      return
+    if isinstance(expr, LiteralNode) and expr.lit_type in ("string", "int", "float"):
+      self.visit(expr)
+    elif isinstance(expr, (CallNode, IdentifierNode, MemberAccessNode, IndexExprNode)):
+      self.emit("tostring(")
+      self.visit(expr)
+      self.emit(")")
+    else:
+      self.visit(expr)
 
   def visit_TernaryExprNode(self, node: TernaryExprNode) -> None:
     self.emit("((function() if ")
@@ -1451,9 +1470,9 @@ class LuaTranspiler(BaseTranspiler):
       self.visit(node.expr)
       self.emit(")")
     elif target == "int":
-      self.emit("math.floor(tonumber(")
+      self.emit("_sapphire_cast_int(")
       self.visit(node.expr)
-      self.emit("))")
+      self.emit(")")
     elif target == "bool":
       self.emit("(not not ")
       self.visit(node.expr)
@@ -1848,12 +1867,16 @@ class LuaTranspiler(BaseTranspiler):
     if isinstance(node.callee, MemberAccessNode):
       member_name = getattr(node.callee, "target_name", None) or node.callee.member
       receiver_name = getattr(node.callee.receiver, "name", None)
-      if (receiver_name and receiver_name in self.known_structs) or isinstance(node.callee.receiver, MemberAccessNode):
-        # Static method or chained module call (e.g. StructName.func(...) or love.graphics.rectangle(...))
+      if getattr(node.callee, "is_instance_method", False):
+        self.visit(node.callee.receiver)
+        self.emit(f":{member_name}(")
+      elif getattr(node.callee, "is_static_method", False) or (receiver_name and receiver_name in self.known_structs):
+        self.visit(node.callee.receiver)
+        self.emit(f".{member_name}(")
+      elif isinstance(node.callee.receiver, MemberAccessNode):
         self.visit(node.callee.receiver)
         self.emit(f".{member_name}(")
       else:
-        # Instance method call: receiver:method(...)
         self.visit(node.callee.receiver)
         self.emit(f":{member_name}(")
     else:

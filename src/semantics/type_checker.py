@@ -2126,6 +2126,8 @@ class TypeChecker:
       if method:
         if getattr(method, "extern_name", None):
           node.target_name = method.extern_name
+        node.is_instance_method = method.has_self
+        node.is_static_method = not method.has_self
         return method
       self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")
@@ -2150,6 +2152,8 @@ class TypeChecker:
     # Resolve method
     method = receiver_type.get_method(node.member, self.symbol_table)
     if method:
+      node.is_static_method = (method.modifier == "static")
+      node.is_instance_method = (method.modifier != "static")
       return method.method_type
 
     self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
