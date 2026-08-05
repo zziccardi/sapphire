@@ -601,6 +601,34 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(stmts[0], ContinueNode)
     self.assertIsInstance(stmts[1], BreakNode)
 
+  def test_guard_statement_ast(self):
+    """Verifies AST construction for guard statements with semicolon clause separation and multi-variable binding."""
+    from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    code = """
+    func test() {
+      guard let x ?= opt; let a, b ?= get_pair(); x > 0 else {
+        return;
+      }
+    }
+    """
+    ast = self._get_ast(code)
+    func_decl = ast.declarations[0]
+    guard_node = func_decl.body.statements[0]
+    self.assertIsInstance(guard_node, GuardStmtNode)
+    self.assertEqual(len(guard_node.clauses), 3)
+
+    # Clause 1: let x ?= opt
+    self.assertIsNotNone(guard_node.clauses[0].binding)
+    self.assertEqual(guard_node.clauses[0].binding.let_name, "x")
+    self.assertEqual(guard_node.clauses[0].binding.let_names, ["x"])
+
+    # Clause 2: let a, b ?= get_pair()
+    self.assertIsNotNone(guard_node.clauses[1].binding)
+    self.assertEqual(guard_node.clauses[1].binding.let_names, ["a", "b"])
+
+    # Clause 3: x > 0
+    self.assertIsNotNone(guard_node.clauses[2].condition)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -188,11 +188,16 @@ class ASTBuilder(SapphireVisitor):
   def visitImplBlock(self, ctx: SapphireParser.ImplBlockContext) -> ImplBlockNode:
     trait_name = None
     if getattr(ctx, "traitName", None):
+      tn = ctx.traitName
+      tn_text = tn.getText() if hasattr(tn, "getText") else getattr(tn, "text", str(tn))
       if getattr(ctx, "traitPrefix", None):
-        trait_name = f"{ctx.traitPrefix.text}.{ctx.traitName.text}"
+        tp = ctx.traitPrefix
+        tp_text = tp.getText() if hasattr(tp, "getText") else getattr(tp, "text", str(tp))
+        trait_name = f"{tp_text}.{tn_text}"
       else:
-        trait_name = ctx.traitName.text
-    struct_name = ctx.structName.text
+        trait_name = tn_text
+    sn = ctx.structName
+    struct_name = sn.getText() if hasattr(sn, "getText") else getattr(sn, "text", str(sn))
     tpl = ctx.typeParamList()
     if tpl:
       type_params = self.visitTypeParamList(tpl[0] if isinstance(tpl, list) else tpl)
@@ -228,14 +233,17 @@ class ASTBuilder(SapphireVisitor):
 
     node = ImplBlockNode(struct_name, trait_name, members, type_params=type_params, trait_type_args=trait_type_args, struct_type_args=struct_type_args)
     # Positioning for Language Server:
-    struct_token = ctx.structName
-    node.struct_name_line = struct_token.line
-    node.struct_name_column = struct_token.column
-    node.struct_name_length = len(struct_token.text)
+    struct_token = getattr(ctx.structName, "start", ctx.structName)
+    if hasattr(struct_token, "line"):
+      node.struct_name_line = struct_token.line
+      node.struct_name_column = struct_token.column
+    node.struct_name_length = len(struct_name)
     if trait_name:
-      trait_token = getattr(ctx, "traitPrefix", None) or ctx.traitName
-      node.trait_name_line = trait_token.line
-      node.trait_name_column = trait_token.column
+      t_tok = getattr(ctx, "traitPrefix", None) or ctx.traitName
+      trait_token = getattr(t_tok, "start", t_tok)
+      if hasattr(trait_token, "line"):
+        node.trait_name_line = trait_token.line
+        node.trait_name_column = trait_token.column
       node.trait_name_length = len(trait_name)
     return node
 
@@ -442,18 +450,42 @@ class ASTBuilder(SapphireVisitor):
     block = self.visit(ctx.block())
     return WhileNode(init_binding, condition, block)
 
+  def visitGuardStatement(self, ctx: SapphireParser.GuardStatementContext) -> GuardStmtNode:
+    clauses = []
+    for clause_ctx in ctx.guardClause():
+      clauses.append(self.visit(clause_ctx))
+    else_block = self.visit(ctx.block())
+    return GuardStmtNode(clauses, else_block)
+
+  def visitGuardClause(self, ctx: SapphireParser.GuardClauseContext) -> GuardClauseNode:
+    if ctx.letOrVarBinding():
+      binding = self.visit(ctx.letOrVarBinding())
+      return GuardClauseNode(binding=binding)
+    else:
+      condition = self.visit(ctx.expression())
+      return GuardClauseNode(condition=condition)
+
   def visitLetOrVarBinding(self, ctx: SapphireParser.LetOrVarBindingContext) -> HeaderBindingNode:
     is_mutable = ctx.VAR() is not None
-    let_name = ctx.IDENTIFIER().getText()
-    type_node = self.visit(ctx.type_()) if ctx.type_() else None
-    expr = self.visit(ctx.expression())
     is_unwrap = ctx.UNWRAP_ASSIGN() is not None
+    expr = self.visit(ctx.expression())
 
-    node = HeaderBindingNode(is_mutable, let_name, type_node, expr, is_unwrap)
-    var_token = ctx.IDENTIFIER().getSymbol()
-    node.let_name_line = var_token.line
-    node.let_name_column = var_token.column
-    node.let_name_length = len(var_token.text)
+    if ctx.varBindingList():
+      bindings = ctx.varBindingList().varBinding()
+      let_names = [b.IDENTIFIER().getText() for b in bindings]
+      let_name = let_names[0]
+      type_node = self.visit(bindings[0].type_()) if bindings[0].type_() else None
+      first_token = bindings[0].IDENTIFIER().getSymbol()
+    else:
+      let_name = ctx.IDENTIFIER().getText()
+      let_names = [let_name]
+      type_node = self.visit(ctx.type_()) if ctx.type_() else None
+      first_token = ctx.IDENTIFIER().getSymbol()
+
+    node = HeaderBindingNode(is_mutable, let_name, type_node, expr, is_unwrap, let_names=let_names)
+    node.let_name_line = first_token.line
+    node.let_name_column = first_token.column
+    node.let_name_length = len(first_token.text)
     return node
 
   def visitForStatement(self, ctx: SapphireParser.ForStatementContext) -> ForNode:

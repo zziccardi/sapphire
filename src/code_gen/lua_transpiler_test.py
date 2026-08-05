@@ -1173,6 +1173,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("for i in _sapphire_range(0, 10, 2) do", lua_code)
     self.assertIn("local _sapphire_range =", lua_code)
 
+  def test_guard_statement_lua(self):
+    """Verifies Lua transpilation of guard statements."""
+    code = """
+    func test_guard(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag; x > 0 else {
+        return -1;
+      }
+      return x * 10;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _guard_val_1 = opt", lua_code)
+    self.assertIn("if _guard_val_1 == nil then", lua_code)
+    self.assertIn("return (-1)", lua_code)
+    self.assertIn("if not (flag) then", lua_code)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixture tests

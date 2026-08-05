@@ -471,14 +471,31 @@ class ContinueNode(StmtNode):
 
 
 class HeaderBindingNode(ASTNode):
-  """Represents a variable binding inside control-flow headers (e.g. let x ?= y)."""
+  """Represents a variable binding inside control-flow headers (e.g. let x ?= y or let x, y ?= pair)."""
 
-  def __init__(self, is_mutable: bool, let_name: str, type_node: Optional[ASTNode], expr: ASTNode, is_unwrap: bool):
+  def __init__(self, is_mutable: bool, let_name: str, type_node: Optional[ASTNode], expr: ASTNode, is_unwrap: bool, let_names: Optional[List[str]] = None):
     self.is_mutable = is_mutable
     self.let_name = let_name
+    self.let_names = let_names if let_names is not None else [let_name]
     self.type_node = type_node
     self.expr = expr
     self.is_unwrap = is_unwrap
+
+
+class GuardClauseNode(ASTNode):
+  """Represents a single clause within a guard statement (binding or boolean condition)."""
+
+  def __init__(self, binding: Optional[HeaderBindingNode] = None, condition: Optional[ASTNode] = None):
+    self.binding = binding
+    self.condition = condition
+
+
+class GuardStmtNode(StmtNode):
+  """Represents a guard statement (e.g. 'guard clause1; clause2 else { ... }')."""
+
+  def __init__(self, clauses: List[GuardClauseNode], else_block: BlockNode):
+    self.clauses = clauses
+    self.else_block = else_block
 
 
 class IfNode(StmtNode):

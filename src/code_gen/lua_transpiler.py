@@ -1987,6 +1987,51 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(" + 1")
     self.emit("]")
 
+  def visit_GuardStmtNode(self, node: GuardStmtNode) -> None:
+    for clause in node.clauses:
+      self.newline()
+      if clause.binding:
+        binding = clause.binding
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        self._temp_guard_count = getattr(self, "_temp_guard_count", 0) + 1
+        tmp_var = f"_guard_val_{self._temp_guard_count}"
+
+        self.emit(f"local {tmp_var} = ")
+        self.visit(binding.expr)
+        self.newline()
+
+        if binding.is_unwrap:
+          self.emit(f"if {tmp_var} == nil then")
+          self.indent()
+          self.visit(node.else_block)
+          self.dedent()
+          self.newline()
+          self.emit("end")
+          self.newline()
+
+        if len(let_names) > 1:
+          for idx, name in enumerate(let_names):
+            self.emit(f"local {name} = {tmp_var}[{idx + 1}]")
+            if idx < len(let_names) - 1:
+              self.newline()
+        else:
+          self.emit(f"local {binding.let_name} = {tmp_var}")
+      elif clause.condition:
+        self.emit("if not (")
+        self.visit(clause.condition)
+        self.emit(") then")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
+        self.newline()
+        self.emit("end")
+
+  def visit_GuardClauseNode(self, node: GuardClauseNode) -> None:
+    if node.binding:
+      self.visit(node.binding)
+    elif node.condition:
+      self.visit(node.condition)
+
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
     if node.arena_expr:
       self.visit(node.arena_expr)

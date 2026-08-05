@@ -422,6 +422,19 @@ def _sapphire_map_insert(m, k, v):
 def _sapphire_map_remove(m, k):
   return m.pop(k, None)
 
+def _sapphire_array_get(arr, index):
+  if arr is None:
+    return None
+  idx = len(arr) + index if index < 0 else index
+  if 0 <= idx < len(arr):
+    return arr[idx]
+  return None
+
+def _sapphire_map_get(m, key):
+  if m is None or not isinstance(m, dict):
+    return None
+  return m.get(key, None)
+
 def _sapphire_map_clear(m):
   m.clear()
 """
@@ -1619,10 +1632,78 @@ class PythonTranspiler(BaseTranspiler):
     self.emit("}")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
-    self.visit(node.array)
-    self.emit("[")
-    self.visit(node.index)
-    self.emit("]")
+    container_t = getattr(node.array, 'inferred_type', None)
+    is_map = type(container_t).__name__ == "MapType"
+    const_int = getattr(node.index, 'lit_type', None) == "int" if isinstance(node.index, LiteralNode) else False
+    is_const_key = isinstance(node.index, (LiteralNode, MemberAccessNode))
+
+    if is_map:
+      if is_const_key:
+        self.visit(node.array)
+        self.emit("[")
+        self.visit(node.index)
+        self.emit("]")
+      else:
+        self.emit("_sapphire_map_get(")
+        self.visit(node.array)
+        self.emit(", ")
+        self.visit(node.index)
+        self.emit(")")
+    else:
+      if const_int:
+        self.visit(node.array)
+        self.emit("[")
+        self.visit(node.index)
+        self.emit("]")
+      else:
+        self.emit("_sapphire_array_get(")
+        self.visit(node.array)
+        self.emit(", ")
+        self.visit(node.index)
+        self.emit(")")
+
+  def visit_GuardClauseNode(self, node: GuardClauseNode) -> None:
+    if node.binding:
+      self.visit(node.binding)
+    elif node.condition:
+      self.visit(node.condition)
+
+  def visit_GuardStmtNode(self, node: GuardStmtNode) -> None:
+    for clause in node.clauses:
+      self.newline()
+      if clause.binding:
+        binding = clause.binding
+        self._lift_match_expressions(binding.expr)
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        self._temp_guard_count = getattr(self, "_temp_guard_count", 0) + 1
+        tmp_var = f"_guard_val_{self._temp_guard_count}"
+
+        self.emit(f"{tmp_var} = ")
+        self.visit(binding.expr)
+        self.newline()
+
+        if binding.is_unwrap:
+          self.emit(f"if {tmp_var} is None:")
+          self.indent()
+          self.visit(node.else_block)
+          self.dedent()
+          self.newline()
+
+        if len(let_names) > 1:
+          for idx, name in enumerate(let_names):
+            self.emit(f"{name} = {tmp_var}[{idx}]")
+            if idx < len(let_names) - 1:
+              self.newline()
+        else:
+          self.emit(f"{binding.let_name} = {tmp_var}")
+      elif clause.condition:
+        self._lift_match_expressions(clause.condition)
+        self.emit("if not (")
+        self.visit(clause.condition)
+        self.emit("):")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
     if node.arena_expr:

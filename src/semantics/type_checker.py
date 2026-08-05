@@ -2447,16 +2447,81 @@ class TypeChecker:
     if isinstance(container_type, ArrayType):
       if index_type != PrimitiveType("int"):
         self.error("Array index must be an 'int'.")
-      self._check_array_bounds(node, container_type)
-      return container_type.element_type
+      const_idx = self._get_const_int_value(node.index)
+      if const_idx is not None:
+        self._check_array_bounds(node, container_type)
+        return container_type.element_type
+      else:
+        return OptionalType(container_type.element_type)
     elif isinstance(container_type, MapType):
       if not index_type.is_compatible(container_type.key_type) and not container_type.key_type.is_compatible(index_type):
         self.error(f"Map index type '{index_type}' is not compatible with key type '{container_type.key_type}'.")
-      self._check_map_literal_key(node)
-      return container_type.value_type
+      if isinstance(node.array, MapLiteralNode):
+        self._check_map_literal_key(node)
+      is_const_key = isinstance(node.index, (LiteralNode, MemberAccessNode))
+      if is_const_key:
+        return container_type.value_type
+      else:
+        return OptionalType(container_type.value_type)
     else:
       self.error("Cannot index non-array type.")
       return PrimitiveType("none")
+
+  def _statement_terminates(self, stmt: ASTNode) -> bool:
+    if isinstance(stmt, (ReturnNode, BreakNode, ContinueNode)):
+      return True
+    if isinstance(stmt, IfNode):
+      if stmt.then_block and stmt.else_block:
+        then_term = self._block_terminates(stmt.then_block)
+        else_term = self._statement_terminates(stmt.else_block) if isinstance(stmt.else_block, ASTNode) else self._block_terminates(stmt.else_block)
+        return then_term and else_term
+    if isinstance(stmt, BlockNode):
+      return self._block_terminates(stmt)
+    return False
+
+  def _block_terminates(self, block: BlockNode) -> bool:
+    if not block or not hasattr(block, "statements"):
+      return False
+    for stmt in block.statements:
+      if self._statement_terminates(stmt):
+        return True
+    return False
+
+  def visit_GuardStmtNode(self, node: GuardStmtNode) -> Type:
+    for clause in node.clauses:
+      if clause.binding:
+        binding = clause.binding
+        expr_t = self.visit(binding.expr)
+        if binding.is_unwrap:
+          if not isinstance(expr_t, OptionalType):
+            self.error(f"Cannot unwrap non-optional type '{expr_t}' in guard clause.")
+            base_t = expr_t
+          else:
+            base_t = expr_t.base_type
+        else:
+          base_t = expr_t
+
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        if len(let_names) > 1:
+          elem_t = base_t.element_type if isinstance(base_t, ArrayType) else base_t
+          for name in let_names:
+            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+        else:
+          name = binding.let_name
+          self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))
+      elif clause.condition:
+        cond_t = self.visit(clause.condition)
+        if cond_t != PrimitiveType("bool"):
+          self.error(f"Guard condition must be of type 'bool', got '{cond_t}'.")
+
+    self.symbol_table.enter_scope()
+    self.visit(node.else_block)
+    self.symbol_table.exit_scope()
+
+    if not self._block_terminates(node.else_block):
+      self.error("Guard else block must terminate control flow (via return, break, or continue).")
+
+    return PrimitiveType("none")
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:
     struct_type = self.symbol_table.lookup_type(node.struct_name)

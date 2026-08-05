@@ -1351,6 +1351,49 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_range()")
     self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
 
+  def test_guard_statement_execution(self):
+    """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
+    code = """
+    func test_guard(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag; x > 0 else {
+        return -1;
+      }
+      return x * 10;
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_guard(15, True)")
+    self.assertEqual(res1, 150)
+
+    res2 = self._transpile_and_run(code, "test_guard(None, True)")
+    self.assertEqual(res2, -1)
+
+    res3 = self._transpile_and_run(code, "test_guard(15, False)")
+    self.assertEqual(res3, -1)
+
+    res4 = self._transpile_and_run(code, "test_guard(-5, True)")
+    self.assertEqual(res4, -1)
+
+  def test_dynamic_indexing_execution(self):
+    """Verifies Python transpilation and execution of dynamic array and map indexing evaluating to none on invalid access."""
+    code = """
+    func test_subscript(): int {
+      let arr = [10, 20, 30];
+      let m = {"a": 100};
+      var idx = 5;
+      var key = "b";
+
+      guard let val1 ?= arr[idx] else {
+        guard let val2 ?= m[key] else {
+          return 999;
+        }
+        return val2;
+      }
+      return val1;
+    }
+    """
+    res = self._transpile_and_run(code, "test_subscript()")
+    self.assertEqual(res, 999)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixture tests
@@ -1360,14 +1403,7 @@ _FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtu
 
 
 class TestSharedFixtures(unittest.TestCase):
-  """Compiles each shared .sp fixture with PythonTranspiler and executes it.
-
-  Every `@test` function inside the fixture is called and its return value
-  is compared against the ground truth in
-  `testing/fixtures/_expectations.py`.  This class is structurally mirrored
-  by `TestSharedFixtures` in `lua_transpiler_test.py`; if the two suites
-  diverge in which fixture tests pass, a transpiler has drifted.
-  """
+  """Compiles each shared .sp fixture with PythonTranspiler and executes it."""
 
   @classmethod
   def _load_expectations(cls):

@@ -172,9 +172,13 @@ let dir_str: String = Direction.North as String;  // "North"
   ```
 * **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
   ```sapphire
+  // Statically checked constant index -> `int`
   let first = numbers[0];
+
+  // Dynamic index -> `int?` (evaluates to `none` if out of bounds)
+  let item = numbers[dynamic_idx];
   ```
-  * **Compile-time bounds-checking**: For arrays with compile-time known lengths (such as array literals or statically-initialized array variables), constant integer indices are checked at compile time. Negative indices (`index < 0`) or out-of-bounds indices (`index >= size`) produce a compile-time type-checking error.
+  * **Tiered bounds-checking**: Constant integer indices on literals and fixed-size arrays (`[T; N]`) are checked at compile time; invalid constant indices produce a compile-time `SemanticError`. Dynamic array indexing with variable integer expressions returns an optional `T?` and safely evaluates to `none` on out-of-bounds access without throwing runtime exceptions.
 * **Map literals & type syntax**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Map types are annotated using `[K: V]` (or `Map<K, V>`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
   ```sapphire
   let scores = {"alice": 100, "bob": 95};  // [String: int]
@@ -188,9 +192,11 @@ let dir_str: String = Direction.North as String;  // "North"
   ```
 * **Map indexing**: Values in a map are accessed by key using square brackets:
   ```sapphire
-  let alice_score = scores["alice"];
+  let alice_score = scores["alice"];  // Constant key -> `int`
+  let val = scores[user_key];         // Dynamic key -> `int?` (evaluates to
+                                      // `none` if missing)
   ```
-  * **Compile-time key validation**: Indexing map literals directly with a constant literal key validates key existence at compile time; accessing a non-existent literal key emits a compile-time error.
+  * **Tiered key-checking**: Indexing map literals with constant literal/enum keys validates key existence at compile time; accessing non-existent constant keys emits a compile-time error. Dynamic map indexing with variable keys returns an optional `V?` and evaluates to `none` when a key is absent at runtime.
 * **Map built-in methods**: `Map` instances support `size(): int`, `empty(): bool`, `contains(key: K): bool`, `keys(): [K]`, `values(): [V]`, and mutating methods `insert(key: K, value: V): V`, `remove(key: K): V?`, and `clear(): void` on mutable map instances (`var`).
 * **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
   ```
@@ -406,6 +412,29 @@ let active_enemy = target ?? default_enemy;
 
 // `active_enemy` is guaranteed to be non-optional
 ```
+
+### Guard statements (`guard ... else { ... }`)
+Sapphire provides Swift-style `guard` statements to enforce function and loop
+preconditions, avoid deep nesting, and promote unwrapped variables into the
+surrounding scope:
+
+```sapphire
+func process_user(users: [String: User], id: String): int {
+  guard let user ?= users[id];
+        user.is_active;
+        user.score > 0
+  else {
+    return -1;
+  }
+
+  // `user` is unwrapped as non-optional `User` in the outer scope
+  return user.score * 10;
+}
+```
+
+* **Semicolon clause separation**: Guard clauses must be separated by semicolons. Clauses can include optional bindings (`let x ?= opt`, including multi-variable destructuring, e.g. `let x, y ?= get_pair()`) and boolean conditions (`x > 0`).
+* **Scope promotion**: Variables unwrapped inside `guard` clauses are bound in the **surrounding outer scope** for all statements following the `guard`.
+* **Control-flow termination**: The `else` block executes if any clause evaluates to `none` or `false`. The compiler statically verifies that every code path inside the `else` block terminates control flow via `return`, `break`, or `continue`.
 
 ## 8. Functions & closures
 

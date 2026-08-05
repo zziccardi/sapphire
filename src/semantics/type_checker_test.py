@@ -3762,6 +3762,71 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Map has no method 'invalid_map_method'", str(ctx.exception))
 
+  def test_guard_statement_type_checking(self):
+    """Verifies type checking, scope promotion, and control-flow termination enforcement for guard statements."""
+    # 1. Valid guard statement with scope promotion
+    self._check("""
+    func test(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag; x > 0 else {
+        return 0;
+      }
+      return x * 2; // 'x' is promoted to outer scope as non-optional int
+    }
+    """)
+
+    # 2. Guard else block fails to terminate control flow
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(opt: int?): int {
+        guard let x ?= opt else {
+          let dummy = 1;
+        }
+        return x;
+      }
+      """)
+    self.assertIn("Guard else block must terminate control flow (via return, break, or continue).", str(ctx.exception))
+
+    # 3. Guard unwrapping non-optional type
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(num: int) {
+        guard let x ?= num else {
+          return;
+        }
+      }
+      """)
+    self.assertIn("Cannot unwrap non-optional type 'int' in guard clause.", str(ctx.exception))
+
+  def test_dynamic_indexing_type_checking(self):
+    """Verifies dynamic array and map indexing return optional types while constant indexing returns non-optional types."""
+    # 1. Dynamic array indexing returns Optional
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(arr: [int], idx: int) {
+        let val: int = arr[idx]; // Dynamic indexing returns int?, cannot assign directly to int
+      }
+      """)
+    self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
+
+    # 2. Dynamic map indexing with variable key returns Optional
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(m: [String: int], k: String) {
+        let val: int = m[k]; // Dynamic key returns int?, cannot assign directly to int
+      }
+      """)
+    self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
+
+    # 3. Dynamic indexing handled safely via guard or nil-coalescing
+    self._check("""
+    func test(arr: [int], idx: int, m: [String: int], k: String): int {
+      guard let a_val ?= arr[idx]; let m_val ?= m[k] else {
+        return -1;
+      }
+      return a_val + m_val;
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()
