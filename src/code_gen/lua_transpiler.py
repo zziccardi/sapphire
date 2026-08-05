@@ -269,6 +269,39 @@ local _sapphire_enum_from = function(enum_tbl, val)
   return nil
 end
 
+local _sapphire_array_map = function(arr, fn)
+  local res = {}
+  for i = 1, #arr do
+    res[i] = fn(arr[i])
+  end
+  return res
+end
+
+local _sapphire_array_filter = function(arr, fn)
+  local res = {}
+  for i = 1, #arr do
+    if fn(arr[i]) then
+      table.insert(res, arr[i])
+    end
+  end
+  return res
+end
+
+local _sapphire_array_reduce = function(arr, initial, fn, reverse)
+  local acc = initial
+  local len = #arr
+  if reverse then
+    for i = len, 1, -1 do
+      acc = fn(acc, arr[i])
+    end
+  else
+    for i = 1, len do
+      acc = fn(acc, arr[i])
+    end
+  end
+  return acc
+end
+
 local _sapphire_iter_array = function(arr)
   if type(arr) ~= "table" then return ipairs({}) end
   local meta = getmetatable(arr)
@@ -1366,6 +1399,62 @@ class LuaTranspiler(BaseTranspiler):
       elif method == "to_bool":
         self.emit("_sapphire_string_to_bool(")
         self.visit(receiver)
+        self.emit(")")
+        return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_array_method", False):
+      method = node.callee.array_method
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("#")
+        self.visit(receiver)
+        return
+      elif method == "empty":
+        self.emit("(#")
+        self.visit(receiver)
+        self.emit(" == 0)")
+        return
+      elif method == "map":
+        self.emit("_sapphire_array_map(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "filter":
+        self.emit("_sapphire_array_filter(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "reduce":
+        self.emit("_sapphire_array_reduce(")
+        self.visit(receiver)
+        initial_expr = None
+        fn_expr = None
+        reverse_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "initial":
+            initial_expr = arg.expr
+          elif arg.name == "fn":
+            fn_expr = arg.expr
+          elif arg.name == "reverse":
+            reverse_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            initial_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            fn_expr = arg.expr
+          elif idx == 2 and not arg.name:
+            reverse_expr = arg
+
+        self.emit(", ")
+        self.visit(initial_expr)
+        self.emit(", ")
+        self.visit(fn_expr)
+        if reverse_expr:
+          self.emit(", ")
+          self.visit(reverse_expr)
         self.emit(")")
         return
 

@@ -3107,6 +3107,57 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code_invalid_elem)
     self.assertIn("Array element of type 'int' is not compatible with expected element type 'trait Describable'.", str(ctx.exception))
 
+  def test_array_builtin_methods(self):
+    """Verifies type checking for Array built-in methods (size, empty, map, filter, reduce)."""
+    # 1. Valid method usage & chaining
+    self._check("""
+    func main() {
+      let numbers = [1, 2, 3, 4, 5];
+      let sz: int = numbers.size();
+      let is_empty: bool = numbers.empty();
+
+      let doubled: [int] = numbers.map(x -> x * 2);
+      let evens: [int] = numbers.filter(x -> x % 2 == 0);
+      let sum: int = numbers.reduce(0, (acc, x) -> acc + x);
+      let sum_rev: int = numbers.reduce(0, (acc, x) -> acc + x, reverse = true);
+
+      let chained_sum: int = numbers
+          .filter(x -> x % 2 == 0)
+          .map(x -> x * 10)
+          .reduce(0, (acc, x) -> acc + x);
+    }
+    """)
+
+    # 2. Invalid size call with arguments
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let sz = arr.size(123);
+      }
+      """)
+    self.assertIn(".size() takes no arguments", str(ctx.exception))
+
+    # 3. Invalid filter return type
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.filter(x -> "not a bool");
+      }
+      """)
+    self.assertIn(".filter() predicate closure must return 'bool'", str(ctx.exception))
+
+    # 4. Invalid reduce missing initial argument
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2];
+        let res = arr.reduce(fn = (acc, x) -> acc + x);
+      }
+      """)
+    self.assertIn(".reduce() requires mandatory 'initial' and 'fn' arguments", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

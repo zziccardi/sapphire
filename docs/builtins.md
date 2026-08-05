@@ -311,6 +311,66 @@ Sapphire supports both dynamic (unbounded) arrays and fixed-size (statically bou
 * **Dynamic array**: `[T]` where `T` is the element type.
 * **Fixed-size array**: `[T; N]` where `T` is the element type and `N` is a positive integer compile-time constant.
 
+#### Built-in methods
+
+Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
+
+| Method signature | Description |
+| :--- | :--- |
+| `size(): int` | Returns the total number of elements in the array. |
+| `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
+| `map<U>(fn: (T) -> U): [U]` | Returns a new array by applying `fn` to each element. |
+| `filter(fn: (T) -> bool): [T]` | Returns a new dynamic array containing elements for which `fn` returns `true`. |
+| `reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U` | Accumulates elements using `fn` starting from `initial`. Iterates right-to-left when `reverse = true`. |
+
+##### Detailed method behavior
+
+* **`size(): int`**
+
+  Returns the length of the array in elements.
+  ```sapphire
+  let nums = [10, 20, 30];
+  let len = nums.size();  // 3
+  ```
+
+* **`empty(): bool`**
+
+  Returns `true` if the array contains no elements (`size() == 0`).
+  ```sapphire
+  let is_empty = [].empty();  // true
+  ```
+
+* **`map<U>(fn: (T) -> U): [U]`**
+
+  Transforms each element in the array using the function `fn` and returns a new array. When called on a fixed-size array `[T; N]`, produces a fixed-size array `[U; N]`.
+  ```sapphire
+  let numbers = [1, 2, 3];
+  let doubled = numbers.map(x -> x * 2);  // [2, 4, 6]
+  ```
+
+* **`filter(fn: (T) -> bool): [T]`**
+
+  Evaluates predicate `fn` on each element and returns a new dynamic array containing only elements that satisfy the condition.
+  ```sapphire
+  let numbers = [1, 2, 3, 4, 5];
+  let evens = numbers.filter(x -> x % 2 == 0);  // [2, 4]
+  ```
+
+* **`reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U`**
+
+  Reduces the array elements to a single accumulated value starting with `initial`.
+  * When `reverse` is `false` (default), iterates forward from left to right (index 0 to `size() - 1`).
+  * When `reverse` is `true`, iterates backward from right to left (index `size() - 1` down to 0).
+  ```sapphire
+  let numbers = [1, 2, 3, 4];
+  let sum = numbers.reduce(0, (acc, x) -> acc + x);  // 10
+
+  let words = ["world", "hello"];
+
+  // " hello world"
+  let sentence = words.reduce("", (acc, w) -> acc + " " + w, reverse = true);
+  ```
+
 #### Operations and capabilities
 
 | Operation | Syntax / example | Description |
@@ -334,13 +394,14 @@ A fixed-size array `[T; N]` is compatible with and assignable to an unbounded ar
 // Fixed-size array declaration
 let scores: [int; 3] = [95, 88, 72];
 
-// Index access (0-based)
+// Index access & size method
+let count = scores.size();
 let top_score = scores[0];
 
-// Iterating over array elements
-for score in scores {
-  print("Score: " + score);
-}
+// Functional chaining
+let total_high_scores = scores
+    .filter(s -> s >= 80)
+    .reduce(0, (acc, s) -> acc + s);
 ```
 
 ### Map

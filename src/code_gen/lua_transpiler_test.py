@@ -912,6 +912,28 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_enum_from(Status", lua)
     self.assertIn("_sapphire_enum_from(LogLevel", lua)
 
+  def test_array_methods_lua(self):
+    """Verifies transpilation of Array built-in methods to Lua."""
+    code = """
+    func test_array_ops() {
+      let nums = [1, 2, 3, 4, 5];
+      let sz = nums.size();
+      let is_empty = nums.empty();
+
+      let doubled = nums.map(x -> x * 2);
+      let evens = nums.filter(x -> x % 2 == 0);
+      let sum = nums.reduce(0, (acc, x) -> acc + x);
+      let sum_rev = nums.reduce(0, (acc, x) -> acc + x, reverse = true);
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("#nums", lua)
+    self.assertIn("(#nums == 0)", lua)
+    self.assertIn("_sapphire_array_map(nums", lua)
+    self.assertIn("_sapphire_array_filter(nums", lua)
+    self.assertIn("_sapphire_array_reduce(nums, 0", lua)
+    self.assertIn("true)", lua)
+
   def test_interpolated_string(self):
     """Verifies transpilation of f-strings to Lua string concatenation."""
     code = """

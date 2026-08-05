@@ -1071,6 +1071,32 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_conv()")
     self.assertTrue(res)
 
+  def test_array_methods_python(self):
+    """Verifies Python transpilation and execution of array built-in methods."""
+    code = """
+    func test_array_ops(): bool {
+      let nums = [1, 2, 3, 4, 5];
+      let sz = nums.size();
+      let is_empty = nums.empty();
+
+      let doubled = nums.map(x -> x * 2);
+      let evens = nums.filter(x -> x % 2 == 0);
+      let sum = nums.reduce(0, (acc, x) -> acc + x);
+      let sub_rev = nums.reduce(0, (acc, x) -> acc - x, reverse = true);
+
+      let c1 = sz == 5 && is_empty == false;
+      let c2 = doubled[0] == 2 && doubled[4] == 10;
+      let c3 = evens.size() == 2 && evens[0] == 2 && evens[1] == 4;
+      let c4 = sum == 15;
+      // 0 - 5 - 4 - 3 - 2 - 1 = -15
+      let c5 = sub_rev == -15;
+
+      return c1 && c2 && c3 && c4 && c5;
+    }
+    """
+    res = self._transpile_and_run(code, "test_array_ops()")
+    self.assertTrue(res)
+
   def test_interpolated_string_python(self):
     """Verifies Python transpilation and execution of f-strings."""
     code = """

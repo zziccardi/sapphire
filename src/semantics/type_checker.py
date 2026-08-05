@@ -37,6 +37,7 @@ try:
       EnumSymbol,
       ModuleSymbol,
       STRING_METHODS,
+      ARRAY_METHODS,
   )
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
@@ -67,6 +68,7 @@ except ModuleNotFoundError:  # pragma: no cover
       EnumSymbol,
       ModuleSymbol,
       STRING_METHODS,
+      ARRAY_METHODS,
   )
 
 
@@ -1520,6 +1522,104 @@ class TypeChecker:
         self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or String.")
       return OptionalType(enum_t)
 
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_array_method", False):
+      method = node.callee.array_method
+      receiver_type = node.callee.array_receiver_type
+      elem_type = receiver_type.element_type
+
+      if method == "size":
+        if node.arguments:
+          self.error(".size() takes no arguments.")
+        return PrimitiveType("int")
+
+      elif method == "empty":
+        if node.arguments:
+          self.error(".empty() takes no arguments.")
+        return PrimitiveType("bool")
+
+      elif method == "map":
+        if len(node.arguments) != 1:
+          self.error(".map() requires exactly 1 argument (fn).")
+          return ArrayType(elem_type, size=receiver_type.size)
+        fn_arg = node.arguments[0]
+        old_expected = self.expected_type
+        self.expected_type = FunctionType([elem_type], InferredType())
+        fn_type = self.visit(fn_arg.expr)
+        self.expected_type = old_expected
+
+        ret_elem_type = PrimitiveType("none")
+        if isinstance(fn_type, FunctionType):
+          ret_elem_type = fn_type.return_type
+          if fn_type.param_types and not elem_type.is_compatible(fn_type.param_types[0]):
+            self.error(f"Closure parameter type mismatch in .map(). Expected '{elem_type}', got '{fn_type.param_types[0]}'.")
+
+        if receiver_type.size is not None:
+          return ArrayType(ret_elem_type, size=receiver_type.size)
+        return ArrayType(ret_elem_type)
+
+      elif method == "filter":
+        if len(node.arguments) != 1:
+          self.error(".filter() requires exactly 1 argument (fn).")
+          return ArrayType(elem_type)
+        fn_arg = node.arguments[0]
+        old_expected = self.expected_type
+        self.expected_type = FunctionType([elem_type], PrimitiveType("bool"))
+        fn_type = self.visit(fn_arg.expr)
+        self.expected_type = old_expected
+
+        if isinstance(fn_type, FunctionType):
+          if fn_type.param_types and not elem_type.is_compatible(fn_type.param_types[0]):
+            self.error(f"Closure parameter type mismatch in .filter(). Expected '{elem_type}', got '{fn_type.param_types[0]}'.")
+          if not fn_type.return_type.is_compatible(PrimitiveType("bool")):
+            self.error(f".filter() predicate closure must return 'bool', got '{fn_type.return_type}'.")
+
+        return ArrayType(elem_type)
+
+      elif method == "reduce":
+        initial_arg = None
+        fn_arg = None
+        reverse_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "initial":
+            initial_arg = arg
+          elif arg.name == "fn":
+            fn_arg = arg
+          elif arg.name == "reverse":
+            reverse_arg = arg
+          elif idx == 0 and not arg.name:
+            initial_arg = arg
+          elif idx == 1 and not arg.name:
+            fn_arg = arg
+          elif idx == 2 and not arg.name:
+            reverse_arg = arg
+
+        if not initial_arg or not fn_arg:
+          self.error(".reduce() requires mandatory 'initial' and 'fn' arguments.")
+          return elem_type
+
+        acc_type = self.visit(initial_arg.expr)
+
+        old_expected = self.expected_type
+        self.expected_type = FunctionType([acc_type, elem_type], acc_type)
+        fn_type = self.visit(fn_arg.expr)
+        self.expected_type = old_expected
+
+        if isinstance(fn_type, FunctionType):
+          if len(fn_type.param_types) >= 2:
+            if not acc_type.is_compatible(fn_type.param_types[0]):
+              self.error(f"Closure accumulator parameter mismatch in .reduce(). Expected '{acc_type}', got '{fn_type.param_types[0]}'.")
+            if not elem_type.is_compatible(fn_type.param_types[1]):
+              self.error(f"Closure item parameter mismatch in .reduce(). Expected '{elem_type}', got '{fn_type.param_types[1]}'.")
+          if not fn_type.return_type.is_compatible(acc_type):
+            self.error(f"Closure return type in .reduce() must match initial value type '{acc_type}', got '{fn_type.return_type}'.")
+
+        if reverse_arg:
+          rev_type = self.visit(reverse_arg.expr)
+          if not rev_type.is_compatible(PrimitiveType("bool")):
+            self.error(f"'reverse' parameter in .reduce() must be 'bool', got '{rev_type}'.")
+
+        return acc_type
+
     signature = None
     is_constructor = False
 
@@ -1622,6 +1722,24 @@ class TypeChecker:
         node.is_string_method = True
         return method
       self.error(f"String has no method '{node.member}'.")
+      return PrimitiveType("none")
+
+    if isinstance(receiver_type, ArrayType):
+      if node.member in ARRAY_METHODS:
+        node.is_array_method = True
+        node.array_method = node.member
+        node.array_receiver_type = receiver_type
+        if node.member == "size":
+          return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
+        elif node.member == "empty":
+          return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
+        elif node.member == "map":
+          return FunctionType([receiver_type, FunctionType([receiver_type.element_type], InferredType())], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn"], has_self=True)
+        elif node.member == "filter":
+          return FunctionType([receiver_type, FunctionType([receiver_type.element_type], PrimitiveType("bool"))], ArrayType(receiver_type.element_type), param_names=["self", "fn"], has_self=True)
+        elif node.member == "reduce":
+          return FunctionType([receiver_type, InferredType(), FunctionType([InferredType(), receiver_type.element_type], InferredType()), PrimitiveType("bool")], InferredType(), param_names=["self", "initial", "fn", "reverse"], has_self=True, num_defaults=1)
+      self.error(f"Array has no method '{node.member}'.")
       return PrimitiveType("none")
 
     assertion_names = (
@@ -1867,11 +1985,6 @@ class TypeChecker:
     ret_type = body_type if not isinstance(node.body, BlockNode) else PrimitiveType("none")
     if node.return_type:
       ret_type = self._resolve_type_node(node.return_type)
-    elif (
-        expected_func
-        and isinstance(expected_func, FunctionType)
-    ):
-      ret_type = expected_func.return_type
 
     self.symbol_table.exit_scope()
     return FunctionType(resolved_param_types, ret_type)

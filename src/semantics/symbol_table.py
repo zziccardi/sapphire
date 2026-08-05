@@ -505,6 +505,14 @@ STRING_METHODS: Dict[str, FunctionType] = {
 }
 
 
+ARRAY_METHODS: Dict[str, bool] = {
+    "size": True,
+    "empty": True,
+    "map": True,
+    "filter": True,
+    "reduce": True,
+}
+
 # ==========================================
 # Symbol Representations
 # ==========================================
