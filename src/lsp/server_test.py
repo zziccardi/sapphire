@@ -30,6 +30,8 @@ except ImportError:
 class TestLSPServer(unittest.TestCase):
 
   def setUp(self):
+    import warnings
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
     self.ls = SapphireLanguageServer("test-lsp", "0.1.0")
     # Mock text_document_publish_diagnostics
     self.ls.text_document_publish_diagnostics = MagicMock()

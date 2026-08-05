@@ -76,8 +76,10 @@ class TestLuaTranspiler(unittest.TestCase):
     """Helper to parse Sapphire code string and return transpiled Lua code."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
 
     builder = ASTBuilder()

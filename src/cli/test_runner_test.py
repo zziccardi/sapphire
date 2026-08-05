@@ -116,7 +116,8 @@ impl t.TestCase for BadSetupTest {
 
     # Non-existent path
     with self.assertRaises(SystemExit):
-      find_sp_files(os.path.join(self.temp_dir, "non_existent"))
+      with suppress_output():
+        find_sp_files(os.path.join(self.temp_dir, "non_existent"))
 
   def test_get_source_line(self):
     line1 = get_source_line(self.sample_sp, 2)

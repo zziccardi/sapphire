@@ -339,7 +339,9 @@ class TypeChecker:
           from antlr4 import InputStream, CommonTokenStream
 
           sub_lexer = SapphireLexer(InputStream(sub_code))
+          sub_lexer.removeErrorListeners()
           sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+          sub_parser.removeErrorListeners()
           sub_ast = ASTBuilder().visit(sub_parser.program())
           sub_checker = TypeChecker(source_file_path=target_file)
           try:

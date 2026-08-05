@@ -60,8 +60,10 @@ class TestASTBuilder(unittest.TestCase):
     """Helper to parse a Sapphire code string and return the Program AST Node."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     builder = ASTBuilder()
     return builder.visit(tree)
@@ -306,8 +308,10 @@ class TestASTBuilder(unittest.TestCase):
     """Verifies direct invocation of visitStatement on ASTBuilder."""
     input_stream = InputStream("let x = 1;")
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     stmt_ctx = parser.statement()
     builder = ASTBuilder()
     stmt_node = builder.visitStatement(stmt_ctx)
@@ -408,8 +412,10 @@ class TestASTBuilder(unittest.TestCase):
     """Verifies that an export block with a trailing semicolon causes a syntax error."""
     input_stream = InputStream("export { A };")
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     parser.program()
     self.assertGreater(parser.getNumberOfSyntaxErrors(), 0)
 

@@ -14,8 +14,10 @@ from src.code_gen.lua_transpiler import LuaTranspiler
 def parse_and_check(code: str):
   input_stream = InputStream(code)
   lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
   stream = CommonTokenStream(lexer)
   parser = SapphireParser(stream)
+  parser.removeErrorListeners()
   tree = parser.program()
   builder = ASTBuilder()
   ast = builder.visit(tree)

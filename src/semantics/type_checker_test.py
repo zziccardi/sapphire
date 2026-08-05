@@ -5,6 +5,7 @@ rules, struct constructor initialization, and inheritance casting restrictions.
 """
 
 import unittest
+from testing.test_utils import suppress_output
 from antlr4 import InputStream, CommonTokenStream
 
 try:
@@ -30,8 +31,10 @@ class TestTypeChecker(unittest.TestCase):
     """Helper to parse and run the semantic check on a code string."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
@@ -309,7 +312,7 @@ class TestTypeChecker(unittest.TestCase):
     """Enforces that impl of a trait must implement all methods of the trait."""
     code = """
     trait Target {
-      func resolve(): int;
+      func resolve(): int
     }
     struct Runner {}
     impl Target for Runner {
@@ -324,7 +327,7 @@ class TestTypeChecker(unittest.TestCase):
     """Enforces that impl methods of a trait must match trait signatures exactly."""
     code = """
     trait Target {
-      func resolve(x: int): int;
+      func resolve(x: int): int
     }
     struct Runner {}
     impl Target for Runner {
@@ -2150,22 +2153,24 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError):
       self._check("""
       export {
-        unimported.Symbol,
-      };
+        unimported.Symbol
+      }
       """)
 
     # 2. Export non-existent symbol from imported module with populated exports
     code = """
     import lib.love2d.enums;
     export {
-      enums.MissingSymbol,
-    };
+      enums.MissingSymbol
+    }
     """
     checker = TypeChecker()
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     ast = ASTBuilder().visit(tree)
 
@@ -2331,7 +2336,8 @@ class TestTypeChecker(unittest.TestCase):
       ast2 = ASTBuilder().visit(tree2)
 
       checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
-      checker2.check(ast2)
+      with suppress_output():
+        checker2.check(ast2)
 
   def test_import_module_without_export_block(self):
     """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
@@ -2362,7 +2368,7 @@ class TestTypeChecker(unittest.TestCase):
         Status.NotFound -> {
           yield "Not Found";
         },
-        ... -> "Generic Error",
+        ... -> "Generic Error"
       };
       return msg;
     }
@@ -2374,7 +2380,7 @@ class TestTypeChecker(unittest.TestCase):
         },
         ... -> {
           let y = 2;
-        },
+        }
       };
     }
     """
@@ -2384,7 +2390,7 @@ class TestTypeChecker(unittest.TestCase):
     enum Status { Ok, NotFound, Error }
     func test_bad(s: Status) {
       let x = match s {
-        Status.Ok -> 1,
+        Status.Ok -> 1
       };
     }
     """
@@ -2430,7 +2436,7 @@ class TestTypeChecker(unittest.TestCase):
     func test_enum_pat(s: Status): int {
       return match s {
         Status.Ok -> 1,
-        Status.NotFound -> 2,
+        Status.NotFound -> 2
       };
     }
     """)
@@ -2442,7 +2448,7 @@ class TestTypeChecker(unittest.TestCase):
       func test_item(i: Item) {
         let x = match i {
           i.id -> 1,
-          ... -> 0,
+          ... -> 0
         };
       }
       """)
@@ -2455,7 +2461,7 @@ class TestTypeChecker(unittest.TestCase):
         let b = 2;
         let x = match n {
           "invalid" -> 1,
-          ... -> 0,
+          ... -> 0
         };
       }
       """)
@@ -2466,7 +2472,7 @@ class TestTypeChecker(unittest.TestCase):
     func test_enum_name(s: Status): int {
       return match s {
         Status -> 1,
-        ... -> 0,
+        ... -> 0
       };
     }
     """)
@@ -2476,7 +2482,7 @@ class TestTypeChecker(unittest.TestCase):
     func test_opt_fall(n: int): int? {
       return match n {
         1 -> 10,
-        ... -> none,
+        ... -> none
       };
     }
     """)

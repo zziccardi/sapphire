@@ -37,8 +37,10 @@ class TestPythonTranspiler(unittest.TestCase):
   def _transpile(self, code: str) -> str:
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
     stream = CommonTokenStream(lexer)
     parser = SapphireParser(stream)
+    parser.removeErrorListeners()
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
