@@ -21,15 +21,14 @@ from src.parser.ast import FuncDeclNode, StructDeclNode, AnnotationNode, BlockNo
 from src.semantics.type_checker import SemanticError
 
 try:
-  from testing.test_utils import QuietTestCase
+  from testing.test_utils import suppress_output
 except ModuleNotFoundError:  # pragma: no cover
-  from src.testing.test_utils import QuietTestCase
+  from src.testing.test_utils import suppress_output
 
 
-class TestRunnerEngineTest(QuietTestCase):
+class TestRunnerEngineTest(unittest.TestCase):
 
   def setUp(self):
-    super().setUp()
     self.temp_dir = tempfile.mkdtemp()
     self.sample_sp = os.path.join(self.temp_dir, "test_sample.sp")
     with open(self.sample_sp, "w", encoding="utf-8") as f:
@@ -160,22 +159,24 @@ impl t.TestCase for BadSetupTest {
     ast = parse_ast(self.sample_sp)
     standalone, suites = discover_tests(ast)
 
-    # Test passing filter
-    passed, failed, _ = run_tests_python(
-        self.sample_sp, standalone, suites, filter_pattern="pass"
-    )
-    self.assertGreater(passed, 0)
-    self.assertEqual(failed, 0)
+    with suppress_output():
+      # Test passing filter
+      passed, failed, _ = run_tests_python(
+          self.sample_sp, standalone, suites, filter_pattern="pass"
+      )
+      self.assertGreater(passed, 0)
+      self.assertEqual(failed, 0)
 
-    # Test failing run
-    passed, failed, _ = run_tests_python(self.sample_sp, standalone, suites)
-    self.assertGreater(passed, 0)
-    self.assertGreater(failed, 0)
+      # Test failing run
+      passed, failed, _ = run_tests_python(self.sample_sp, standalone, suites)
+      self.assertGreater(passed, 0)
+      self.assertGreater(failed, 0)
 
   def test_run_tests_python_setup_failure(self):
     ast = parse_ast(self.fail_setup_sp)
     standalone, suites = discover_tests(ast)
-    passed, failed, _ = run_tests_python(self.fail_setup_sp, standalone, suites)
+    with suppress_output():
+      passed, failed, _ = run_tests_python(self.fail_setup_sp, standalone, suites)
     self.assertEqual(passed, 0)
     self.assertGreater(failed, 0)
 
@@ -183,35 +184,37 @@ impl t.TestCase for BadSetupTest {
     ast = parse_ast(self.sample_sp)
     standalone, suites = discover_tests(ast)
 
-    # Test passing filter
-    p_fail, p_pass, _ = run_tests_lua(
-        self.sample_sp, standalone, suites, filter_pattern="pass"
-    )
-    self.assertEqual(p_fail, 0)
+    with suppress_output():
+      # Test passing filter
+      p_fail, p_pass, _ = run_tests_lua(
+          self.sample_sp, standalone, suites, filter_pattern="pass"
+      )
+      self.assertEqual(p_fail, 0)
 
-    # Test full run with failures
-    p_fail, p_pass, _ = run_tests_lua(self.sample_sp, standalone, suites)
-    self.assertGreater(p_fail, 0)
+      # Test full run with failures
+      p_fail, p_pass, _ = run_tests_lua(self.sample_sp, standalone, suites)
+      self.assertGreater(p_fail, 0)
 
   def test_run_tests_cli_facade(self):
-    # Test directory run
-    res_dir = run_tests(self.temp_dir, target="python", filter_pattern="pass")
-    self.assertEqual(res_dir, 0)
+    with suppress_output():
+      # Test directory run
+      res_dir = run_tests(self.temp_dir, target="python", filter_pattern="pass")
+      self.assertEqual(res_dir, 0)
 
-    # Test file with no tests
-    res_no_tests = run_tests(self.no_tests_sp, target="python")
-    self.assertEqual(res_no_tests, 0)
+      # Test file with no tests
+      res_no_tests = run_tests(self.no_tests_sp, target="python")
+      self.assertEqual(res_no_tests, 0)
 
-    # Test syntax error file
-    res_syntax = run_tests(self.syntax_error_sp, target="python")
-    self.assertEqual(res_syntax, 0)
+      # Test syntax error file
+      res_syntax = run_tests(self.syntax_error_sp, target="python")
+      self.assertEqual(res_syntax, 0)
 
-    # Test Lua target run
-    res_lua_pass = run_tests(self.sample_sp, target="lua", filter_pattern="pass")
-    self.assertEqual(res_lua_pass, 0)
+      # Test Lua target run
+      res_lua_pass = run_tests(self.sample_sp, target="lua", filter_pattern="pass")
+      self.assertEqual(res_lua_pass, 0)
 
-    res_lua_fail = run_tests(self.sample_sp, target="lua")
-    self.assertEqual(res_lua_fail, 1)
+      res_lua_fail = run_tests(self.sample_sp, target="lua")
+      self.assertEqual(res_lua_fail, 1)
 
   def test_transpiler_edge_cases(self):
     # Test LuaTranspiler @test function filtering & declared_symbols

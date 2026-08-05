@@ -1227,6 +1227,43 @@ func main() {
     labels_impl = {item.label for item in res_impl.items}
     self.assertIn("impl_k", labels_impl)
 
+  def test_impl_block_node_position_missing_fallback(self):
+    """Verifies hover on ImplBlockNode gracefully handles missing position metadata."""
+    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
+    try:
+      from lsp.server import hover
+      from parser.ast import ImplBlockNode
+    except ImportError:
+      from src.lsp.server import hover
+      from src.parser.ast import ImplBlockNode
+
+    doc_uri = "file:///impl_fallback.sp"
+    doc_text = """
+    struct Dummy {}
+    impl Dummy {}
+    """
+    validate_source(self.ls, doc_uri, doc_text)
+
+    # Remove position attributes from ImplBlockNode
+    ast = self.ls.ast_cache.get(doc_uri)
+    for decl in getattr(ast, "declarations", []):
+      if isinstance(decl, ImplBlockNode):
+        if hasattr(decl, "struct_name_line"):
+          delattr(decl, "struct_name_line")
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Hover on impl block
+    res_hover = hover(self.ls, HoverParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=9)
+    ))
+    self.assertIsNotNone(res_hover)
+    self.assertIn("Dummy", res_hover.contents.value)
+
 
 if __name__ == "__main__":
   unittest.main()

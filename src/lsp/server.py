@@ -283,10 +283,16 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     elif isinstance(node, TraitDeclNode) and uri in ls.symbol_table_cache:
       node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
     elif isinstance(node, ImplBlockNode) and uri in ls.symbol_table_cache:
-      if node.struct_name_line == line and node.struct_name_column <= col < node.struct_name_column + node.struct_name_length:
-        node_type = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
-      elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
+      s_line = getattr(node, "struct_name_line", None)
+      s_col = getattr(node, "struct_name_column", None)
+      s_len = getattr(node, "struct_name_length", None)
+      t_line = getattr(node, "trait_name_line", None)
+      t_col = getattr(node, "trait_name_column", None)
+      t_len = getattr(node, "trait_name_length", None)
+      if node.trait_name and t_line is not None and t_col is not None and t_len is not None and t_line == line and t_col <= col < t_col + t_len:
         node_type = ls.symbol_table_cache[uri].lookup_type(node.trait_name)
+      elif s_line is None or (s_col is not None and s_len is not None and s_line == line and s_col <= col < s_col + s_len):
+        node_type = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
 
   if not node_type and type(node).__name__ != "AnnotationNode":
     return None
@@ -381,13 +387,19 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     node_name = node.name
     category = "trait"
   elif isinstance(node, ImplBlockNode):
-    if node.struct_name_line == line and node.struct_name_column <= col < node.struct_name_column + node.struct_name_length:
+    s_line = getattr(node, "struct_name_line", None)
+    s_col = getattr(node, "struct_name_column", None)
+    s_len = getattr(node, "struct_name_length", None)
+    t_line = getattr(node, "trait_name_line", None)
+    t_col = getattr(node, "trait_name_column", None)
+    t_len = getattr(node, "trait_name_length", None)
+    if node.trait_name and t_line is not None and t_col is not None and t_len is not None and t_line == line and t_col <= col < t_col + t_len:
+      node_name = node.trait_name
+      category = "trait"
+    elif s_line is None or (s_col is not None and s_len is not None and s_line == line and s_col <= col < s_col + s_len):
       node_name = node.struct_name
       st = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
       category = "proto" if getattr(st, "is_prototype", False) else "struct"
-    elif node.trait_name and node.trait_name_line == line and node.trait_name_column <= col < node.trait_name_column + node.trait_name_length:
-      node_name = node.trait_name
-      category = "trait"
 
   elif isinstance(node, ParameterNode):
     category = "parameter"

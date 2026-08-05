@@ -603,7 +603,10 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_guard_statement_ast(self):
     """Verifies AST construction for guard statements with semicolon clause separation and multi-variable binding."""
-    from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    try:
+      from parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    except ModuleNotFoundError:
+      from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
     code = """
     func test() {
       guard let x ?= opt; let a, b ?= get_pair(); x > 0 else {
