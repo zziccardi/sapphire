@@ -1,38 +1,51 @@
-// Demonstration of map literal syntax and map indexing in Sapphire
+// Map Built-in Instance Methods Demo
 
-enum Direction {
-  North,
-  South,
-  East,
-  West,
-}
+func main() {
+  print("=== Sapphire Map Built-in Methods Demo ===");
 
-func main(): int {
-  // 1. String-keyed map with trailing commas
   let scores = {
     "alice": 100,
-    "bob": 95,
-    "charlie": 90,
+    "bob": 85,
+    "charlie": 70,
   };
 
-  // 2. Int-keyed map
-  let status_codes = {
-    200: "OK",
-    404: "Not Found",
-    500: "Internal Error",
+  let empty_map: [String: int] = {};
+
+  // 1. Query & Inspection
+  print("Map size: " + String.from(scores.size()));
+  print("Is scores empty: " + String.from(scores.empty()));
+  print("Is empty_map empty: " + String.from(empty_map.empty()));
+  print("Contains 'alice': " + String.from(scores.contains("alice")));
+  print("Contains 'david': " + String.from(scores.contains("david")));
+
+  // 2. Extractions: keys() & values()
+  let k_arr: [String] = scores.keys();
+  print("Keys size: " + String.from(k_arr.size()));
+
+  let v_arr: [int] = scores.values();
+  print("Values size: " + String.from(v_arr.size()));
+
+  // 3. Mutating Methods on var [K: V]
+  var mut_map = {
+    "alpha": 1,
+    "beta": 2,
   };
 
-  // 3. Enum-keyed map
-  let direction_speeds = {
-    Direction.North: 10,
-    Direction.South: 5,
-    Direction.East: 8,
-    Direction.West: 8,
-  };
+  let ins_val = mut_map.insert("gamma", 3);
+  let ins_named = mut_map.insert(key = "delta", value = 4);
+  print("Inserted gamma: " + String.from(ins_val) + ", map size: " + String.from(mut_map.size()));
 
-  // Map access via indexing
-  let alice_score: int = scores["alice"];
-  let speed: int = direction_speeds[Direction.North];
+  if let rem_val ?= mut_map.remove("beta") {
+    print("Removed beta val: " + String.from(rem_val));
+  }
 
-  return alice_score + speed;
+  let missing_rem = mut_map.remove("nonexistent");
+  print("Missing remove is none: " + String.from(missing_rem == none));
+
+  mut_map.clear();
+  print("After clear, size: " + String.from(mut_map.size()));
+
+  print("=== Demo Complete ===");
 }
+
+main();

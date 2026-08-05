@@ -523,6 +523,18 @@ ARRAY_METHODS: Dict[str, bool] = {
     "clear": True,
 }
 
+
+MAP_METHODS: Dict[str, bool] = {
+    "size": True,
+    "empty": True,
+    "contains": True,
+    "keys": True,
+    "values": True,
+    "insert": True,
+    "remove": True,
+    "clear": True,
+}
+
 # ==========================================
 # Symbol Representations
 # ==========================================

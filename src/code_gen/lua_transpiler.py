@@ -420,6 +420,55 @@ local _sapphire_array_clear = function(arr)
   end
 end
 
+local _sapphire_map_size = function(m)
+  local count = 0
+  for _ in pairs(m) do
+    count = count + 1
+  end
+  return count
+end
+
+local _sapphire_map_empty = function(m)
+  return next(m) == nil
+end
+
+local _sapphire_map_contains = function(m, k)
+  return m[k] ~= nil
+end
+
+local _sapphire_map_keys = function(m)
+  local res = {}
+  for k in pairs(m) do
+    table.insert(res, k)
+  end
+  return res
+end
+
+local _sapphire_map_values = function(m)
+  local res = {}
+  for _, v in pairs(m) do
+    table.insert(res, v)
+  end
+  return res
+end
+
+local _sapphire_map_insert = function(m, k, v)
+  m[k] = v
+  return v
+end
+
+local _sapphire_map_remove = function(m, k)
+  local val = m[k]
+  m[k] = nil
+  return val
+end
+
+local _sapphire_map_clear = function(m)
+  for k in pairs(m) do
+    m[k] = nil
+  end
+end
+
 local _sapphire_iter_array = function(arr)
   if type(arr) ~= "table" then return ipairs({}) end
   local meta = getmetatable(arr)
@@ -1702,6 +1751,69 @@ class LuaTranspiler(BaseTranspiler):
         return
       elif method == "clear":
         self.emit("_sapphire_array_clear(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
+      method = node.callee.map_method
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("_sapphire_map_size(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("_sapphire_map_empty(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("_sapphire_map_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "keys":
+        self.emit("_sapphire_map_keys(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "values":
+        self.emit("_sapphire_map_values(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "insert":
+        self.emit("_sapphire_map_insert(")
+        self.visit(receiver)
+        key_expr = None
+        val_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "key":
+            key_expr = arg.expr
+          elif arg.name == "value":
+            val_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            key_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            val_expr = arg.expr
+        self.emit(", ")
+        self.visit(key_expr)
+        self.emit(", ")
+        self.visit(val_expr)
+        self.emit(")")
+        return
+      elif method == "remove":
+        self.emit("_sapphire_map_remove(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "clear":
+        self.emit("_sapphire_map_clear(")
         self.visit(receiver)
         self.emit(")")
         return

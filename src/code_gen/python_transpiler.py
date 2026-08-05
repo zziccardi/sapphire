@@ -399,6 +399,31 @@ def _sapphire_array_remove(arr, index):
 
 def _sapphire_array_clear(arr):
   arr.clear()
+
+def _sapphire_map_size(m):
+  return len(m)
+
+def _sapphire_map_empty(m):
+  return len(m) == 0
+
+def _sapphire_map_contains(m, k):
+  return k in m
+
+def _sapphire_map_keys(m):
+  return list(m.keys())
+
+def _sapphire_map_values(m):
+  return list(m.values())
+
+def _sapphire_map_insert(m, k, v):
+  m[k] = v
+  return v
+
+def _sapphire_map_remove(m, k):
+  return m.pop(k, None)
+
+def _sapphire_map_clear(m):
+  m.clear()
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
@@ -1425,6 +1450,69 @@ class PythonTranspiler(BaseTranspiler):
         return
       elif method == "clear":
         self.emit("_sapphire_array_clear(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
+      method = node.callee.map_method
+      receiver = node.callee.receiver
+      if method == "size":
+        self.emit("_sapphire_map_size(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "empty":
+        self.emit("_sapphire_map_empty(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "contains":
+        self.emit("_sapphire_map_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "keys":
+        self.emit("_sapphire_map_keys(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "values":
+        self.emit("_sapphire_map_values(")
+        self.visit(receiver)
+        self.emit(")")
+        return
+      elif method == "insert":
+        self.emit("_sapphire_map_insert(")
+        self.visit(receiver)
+        key_expr = None
+        val_expr = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "key":
+            key_expr = arg.expr
+          elif arg.name == "value":
+            val_expr = arg.expr
+          elif idx == 0 and not arg.name:
+            key_expr = arg.expr
+          elif idx == 1 and not arg.name:
+            val_expr = arg.expr
+        self.emit(", ")
+        self.visit(key_expr)
+        self.emit(", ")
+        self.visit(val_expr)
+        self.emit(")")
+        return
+      elif method == "remove":
+        self.emit("_sapphire_map_remove(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "clear":
+        self.emit("_sapphire_map_clear(")
         self.visit(receiver)
         self.emit(")")
         return

@@ -3543,6 +3543,170 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Array has no method 'non_existent_method'", str(ctx.exception))
 
+  def test_map_builtin_methods(self):
+    """Verifies type checking for Map built-in methods (size, empty, contains, keys, values, insert, remove, clear)."""
+    self._check("""
+    func main() {
+      let m = {"a": 1, "b": 2};
+      let sz: int = m.size();
+      let is_empty: bool = m.empty();
+      let has_a: bool = m.contains("a");
+      let k_list: [String] = m.keys();
+      let v_list: [int] = m.values();
+
+      var mut_m = {"x": 10};
+      let ins_val: int = mut_m.insert("y", 20);
+      let ins_named: int = mut_m.insert(key = "z", value = 30);
+      let rem_val: int? = mut_m.remove("x");
+      mut_m.clear();
+    }
+    """)
+
+    # Invalid Map methods & mutability error checks
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.size(123);
+      }
+      """)
+    self.assertIn(".size() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.empty(123);
+      }
+      """)
+    self.assertIn(".empty() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.contains("a", "b");
+      }
+      """)
+    self.assertIn(".contains() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.contains(123);
+      }
+      """)
+    self.assertIn("Argument type mismatch in .contains()", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.keys(123);
+      }
+      """)
+    self.assertIn(".keys() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.values(123);
+      }
+      """)
+    self.assertIn(".values() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.insert("b", 2);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'insert' on constant variable 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.insert("b");
+      }
+      """)
+    self.assertIn(".insert() requires mandatory 'key' and 'value' arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.insert(123, 2);
+      }
+      """)
+    self.assertIn("Argument 'key' in .insert() must be 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.insert("b", "not_int");
+      }
+      """)
+    self.assertIn("Argument 'value' in .insert() must be 'int'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.remove("a");
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'remove' on constant variable 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.remove();
+      }
+      """)
+    self.assertIn(".remove() requires exactly 1 argument", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.remove(123);
+      }
+      """)
+    self.assertIn("Argument 'key' in .remove() must be 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.clear();
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'clear' on constant variable 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m = {"a": 1};
+        m.clear(123);
+      }
+      """)
+    self.assertIn(".clear() takes no arguments", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m = {"a": 1};
+        m.invalid_map_method();
+      }
+      """)
+    self.assertIn("Map has no method 'invalid_map_method'", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

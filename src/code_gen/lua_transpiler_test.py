@@ -968,6 +968,35 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_array_remove(mut_arr, 1)", lua)
     self.assertIn("_sapphire_array_clear(mut_arr)", lua)
 
+  def test_map_methods_lua(self):
+    """Verifies Lua transpilation of map built-in methods."""
+    code = """
+    func main() {
+      let m = {"a": 10, "b": 20};
+      let sz = m.size();
+      let is_empty = m.empty();
+      let has_a = m.contains("a");
+      let k_list = m.keys();
+      let v_list = m.values();
+
+      var mut_m = {"x": 100};
+      let ins_val = mut_m.insert("y", 200);
+      let ins_named = mut_m.insert(key = "z", value = 300);
+      let rem_val = mut_m.remove("x");
+      mut_m.clear();
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("_sapphire_map_size(m)", lua)
+    self.assertIn("_sapphire_map_empty(m)", lua)
+    self.assertIn("_sapphire_map_contains(m, \"a\")", lua)
+    self.assertIn("_sapphire_map_keys(m)", lua)
+    self.assertIn("_sapphire_map_values(m)", lua)
+    self.assertIn("_sapphire_map_insert(mut_m, \"y\", 200)", lua)
+    self.assertIn("_sapphire_map_insert(mut_m, \"z\", 300)", lua)
+    self.assertIn("_sapphire_map_remove(mut_m, \"x\")", lua)
+    self.assertIn("_sapphire_map_clear(mut_m)", lua)
+
   def test_interpolated_string(self):
     """Verifies transpilation of f-strings to Lua string concatenation."""
     code = """

@@ -38,6 +38,7 @@ try:
       ModuleSymbol,
       STRING_METHODS,
       ARRAY_METHODS,
+      MAP_METHODS,
   )
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
@@ -69,6 +70,7 @@ except ModuleNotFoundError:  # pragma: no cover
       ModuleSymbol,
       STRING_METHODS,
       ARRAY_METHODS,
+      MAP_METHODS,
   )
 
 
@@ -1835,6 +1837,89 @@ class TypeChecker:
             self.error(f"Delimiter 'sep' in .join() must be 'String', got '{sep_t}'.")
         return PrimitiveType("String")
 
+    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
+      method = node.callee.map_method
+      receiver_type = node.callee.map_receiver_type
+      k_type = receiver_type.key_type
+      v_type = receiver_type.value_type
+
+      if method in ("insert", "remove", "clear"):
+        receiver = node.callee.receiver
+        if isinstance(receiver, IdentifierNode):
+          sym = self.symbol_table.lookup(receiver.name)
+          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+            self.error(f"Cannot invoke mutating method '{method}' on constant variable '{receiver.name}'.")
+
+      if method == "size":
+        if node.arguments:
+          self.error(".size() takes no arguments.")
+        return PrimitiveType("int")
+
+      elif method == "empty":
+        if node.arguments:
+          self.error(".empty() takes no arguments.")
+        return PrimitiveType("bool")
+
+      elif method == "contains":
+        if len(node.arguments) != 1:
+          self.error(".contains() requires exactly 1 argument (key).")
+          return PrimitiveType("bool")
+        key_arg_type = self.visit(node.arguments[0].expr)
+        if not key_arg_type.is_compatible(k_type):
+          self.error(f"Argument type mismatch in .contains(). Expected '{k_type}', got '{key_arg_type}'.")
+        return PrimitiveType("bool")
+
+      elif method == "keys":
+        if node.arguments:
+          self.error(".keys() takes no arguments.")
+        return ArrayType(k_type)
+
+      elif method == "values":
+        if node.arguments:
+          self.error(".values() takes no arguments.")
+        return ArrayType(v_type)
+
+      elif method == "insert":
+        key_arg = None
+        val_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "key":
+            key_arg = arg
+          elif arg.name == "value":
+            val_arg = arg
+          elif idx == 0 and not arg.name:
+            key_arg = arg
+          elif idx == 1 and not arg.name:
+            val_arg = arg
+
+        if not key_arg or not val_arg:
+          self.error(".insert() requires mandatory 'key' and 'value' arguments.")
+          return v_type
+
+        k_arg_type = self.visit(key_arg.expr)
+        if not k_arg_type.is_compatible(k_type):
+          self.error(f"Argument 'key' in .insert() must be '{k_type}', got '{k_arg_type}'.")
+
+        v_arg_type = self.visit(val_arg.expr)
+        if not v_arg_type.is_compatible(v_type):
+          self.error(f"Argument 'value' in .insert() must be '{v_type}', got '{v_arg_type}'.")
+
+        return v_type
+
+      elif method == "remove":
+        if len(node.arguments) != 1:
+          self.error(".remove() requires exactly 1 argument (key).")
+          return OptionalType(v_type)
+        k_arg_type = self.visit(node.arguments[0].expr)
+        if not k_arg_type.is_compatible(k_type):
+          self.error(f"Argument 'key' in .remove() must be '{k_type}', got '{k_arg_type}'.")
+        return OptionalType(v_type)
+
+      elif method == "clear":
+        if node.arguments:
+          self.error(".clear() takes no arguments.")
+        return PrimitiveType("none")
+
     signature = None
     is_constructor = False
 
@@ -1974,6 +2059,32 @@ class TypeChecker:
         elif node.member == "clear":
           return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
       self.error(f"Array has no method '{node.member}'.")
+      return PrimitiveType("none")
+
+    if isinstance(receiver_type, MapType):
+      if node.member in MAP_METHODS:
+        node.is_map_method = True
+        node.map_method = node.member
+        node.map_receiver_type = receiver_type
+        k_type = receiver_type.key_type
+        v_type = receiver_type.value_type
+        if node.member == "size":
+          return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
+        elif node.member == "empty":
+          return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
+        elif node.member == "contains":
+          return FunctionType([receiver_type, k_type], PrimitiveType("bool"), param_names=["self", "key"], has_self=True)
+        elif node.member == "keys":
+          return FunctionType([receiver_type], ArrayType(k_type), param_names=["self"], has_self=True)
+        elif node.member == "values":
+          return FunctionType([receiver_type], ArrayType(v_type), param_names=["self"], has_self=True)
+        elif node.member == "insert":
+          return FunctionType([receiver_type, k_type, v_type], v_type, param_names=["self", "key", "value"], has_self=True)
+        elif node.member == "remove":
+          return FunctionType([receiver_type, k_type], OptionalType(v_type), param_names=["self", "key"], has_self=True)
+        elif node.member == "clear":
+          return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
+      self.error(f"Map has no method '{node.member}'.")
       return PrimitiveType("none")
 
     assertion_names = (

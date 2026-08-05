@@ -185,6 +185,7 @@ let dir_str: String = Direction.North as String;  // "North"
   let alice_score = scores["alice"];
   ```
   * **Compile-time key validation**: Indexing map literals directly with a constant literal key validates key existence at compile time; accessing a non-existent literal key emits a compile-time error.
+* **Map built-in methods**: `Map` instances support `size(): int`, `empty(): bool`, `contains(key: K): bool`, `keys(): [K]`, `values(): [V]`, and mutating methods `insert(key: K, value: V): V`, `remove(key: K): V?`, and `clear(): void` on mutable map instances (`var`).
 * **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
   ```
   let name = target?.get_name();

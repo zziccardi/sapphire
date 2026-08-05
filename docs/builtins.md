@@ -498,6 +498,83 @@ Maps in Sapphire are strongly typed, key–value associative arrays.
 1. **Key restriction**: Map keys must be `String`, `int`, or an `enum`. Floating-point numbers (`float`), optionals, structs, and collections are disallowed as map keys.
 2. **Homogeneity**: All keys within a map instance must share the exact same key type `K`, and all values must share the exact same value type `V`. Mixed key or value types are prohibited.
 
+#### Built-in methods
+
+Sapphire provides standard built-in instance methods on `Map` instances (`[K: V]`).
+
+| Method signature | Description |
+| :--- | :--- |
+| `size(): int` | Returns the total number of entries in the map. |
+| `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
+| `contains(key: K): bool` | Returns `true` if `key` exists in the map, otherwise `false`. |
+| `keys(): [K]` | Returns a dynamic array `[K]` containing all keys in the map. |
+| `values(): [V]` | Returns a dynamic array `[V]` containing all values in the map. |
+| `insert(key: K, value: V): V` | Inserts or updates `key` with `value` in a mutable map (`var [K: V]`) and returns `value`. |
+| `remove(key: K): V?` | Removes entry for `key` in a mutable map (`var [K: V]`) and returns `V?` (`none` if missing). |
+| `clear(): void` | Clears all key-value entries from a mutable map (`var [K: V]`). |
+
+##### Detailed method behavior
+
+* **`size(): int`**
+
+  Returns the total number of key-value entries in the map.
+  ```sapphire
+  let roles = { "admin": 100, "user": 10 };
+  let count = roles.size();  // 2
+  ```
+
+* **`empty(): bool`**
+
+  Returns `true` if the map contains no entries (`size() == 0`).
+  ```sapphire
+  let is_empty = {}.empty();  // true
+  ```
+
+* **`contains(key: K): bool`**
+
+  Returns `true` if `key` is present in the map.
+  ```sapphire
+  let has_admin = roles.contains("admin");  // true
+  ```
+
+* **`keys(): [K]`**
+
+  Returns a dynamic array containing all keys in the map.
+  ```sapphire
+  let k = roles.keys();  // ["admin", "user"]
+  ```
+
+* **`values(): [V]`**
+
+  Returns a dynamic array containing all values in the map.
+  ```sapphire
+  let v = roles.values();  // [100, 10]
+  ```
+
+* **`insert(key: K, value: V): V`**
+
+  Inserts or updates `key` with `value` on a mutable map instance (`var`) and returns `value`.
+  ```sapphire
+  var scores = { "alice": 90 };
+  let new_score = scores.insert("bob", 95);  // scores is now {"alice": 90, "bob": 95}, new_score is 95
+  ```
+
+* **`remove(key: K): V?`**
+
+  Removes `key` from a mutable map instance (`var`) and returns its associated value as `V?`, or `none` if the key was missing.
+  ```sapphire
+  var scores = { "alice": 90, "bob": 95 };
+  let removed = scores.remove("bob");  // 95 (as int?)
+  ```
+
+* **`clear(): void`**
+
+  Clears all key-value entries from a mutable map instance (`var`).
+  ```sapphire
+  var scores = { "alice": 90 };
+  scores.clear();  // scores is now {}
+  ```
+
 #### Operations and capabilities
 
 | Operation | Syntax / example | Description |
@@ -530,6 +607,14 @@ let status_codes = {
 
 let admin_role: String = user_roles["admin"];
 let active_code: int = status_codes[Status.Active];
+
+// Built-in map methods
+let all_roles = user_roles.keys();
+let has_guest = user_roles.contains("guest");
+
+var mut_scores = { "alice": 100 };
+mut_scores.insert("bob", 90);
+mut_scores.remove("alice");
 
 // Iterating over key-value pairs
 for role, title in user_roles {

@@ -1130,6 +1130,36 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_array_ops()")
     self.assertTrue(res)
 
+  def test_map_methods_python(self):
+    """Verifies Python transpilation and execution of map built-in methods."""
+    code = """
+    func test_map_ops(): bool {
+      let m = {"a": 10, "b": 20};
+      let sz = m.size();
+      let is_empty = m.empty();
+      let has_a = m.contains("a");
+      let has_z = m.contains("z");
+      let k_list = m.keys();
+      let v_list = m.values();
+
+      var mut_m = {"x": 100};
+      let ins_val = mut_m.insert("y", 200);
+      let ins_named = mut_m.insert(key = "z", value = 300);
+      let rem_val = mut_m.remove("x") ?? 0;
+      let missing_rem = mut_m.remove("nonexistent") == none;
+      mut_m.clear();
+
+      let c1 = sz == 2 && is_empty == false;
+      let c2 = has_a == true && has_z == false;
+      let c3 = k_list.size() == 2 && v_list.size() == 2;
+      let c4 = ins_val == 200 && ins_named == 300 && rem_val == 100 && missing_rem == true && mut_m.empty() == true;
+
+      return c1 && c2 && c3 && c4;
+    }
+    """
+    res = self._transpile_and_run(code, "test_map_ops()")
+    self.assertTrue(res)
+
   def test_interpolated_string_python(self):
     """Verifies Python transpilation and execution of f-strings."""
     code = """
