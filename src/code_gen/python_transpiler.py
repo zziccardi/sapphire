@@ -11,10 +11,10 @@ from typing import Any, Dict, List, Optional
 
 try:
   from parser.ast import *
-  from code_gen.base_transpiler import BaseTranspiler
+  from code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
-  from src.code_gen.base_transpiler import BaseTranspiler
+  from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 
 
 # ==========================================
@@ -661,10 +661,11 @@ class PythonTranspiler(BaseTranspiler):
           self.newline()
           self.emit(f"{p}.__init__(self, *args, **kwargs)")
       for f in node.fields:
-        if f.default_expr:
+        default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+        if default_expr:
           self.newline()
           temp = PythonTranspiler()
-          temp.visit(f.default_expr)
+          temp.visit(default_expr)
           self.emit(f"self.{f.name} = {temp.get_output()}")
       self.newline()
       self.emit("for k, v in kwargs.items():")
@@ -685,10 +686,11 @@ class PythonTranspiler(BaseTranspiler):
           self.newline()
           self.emit(f"{p}.__init__(self, *args, **kwargs)")
       for f in node.fields:
-        if f.default_expr:
+        default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+        if default_expr:
           self.newline()
           temp = PythonTranspiler()
-          temp.visit(f.default_expr)
+          temp.visit(default_expr)
           self.emit(f"self.{f.name} = {temp.get_output()}")
       self.newline()
       self.emit("for k, v in kwargs.items():")
@@ -828,7 +830,17 @@ class PythonTranspiler(BaseTranspiler):
           self.emit(", ")
         self.visit(expr)
     else:
-      self.emit(" = " + ", ".join(["None"] * len(node.names)))
+      defaults = []
+      for idx, name in enumerate(node.names):
+        val_type = node.val_types[idx] if idx < len(node.val_types) else None
+        default_expr = get_default_value_for_type_node(val_type)
+        if default_expr:
+          temp = PythonTranspiler()
+          temp.visit(default_expr)
+          defaults.append(temp.get_output())
+        else:
+          defaults.append("None")
+      self.emit(" = " + ", ".join(defaults))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)

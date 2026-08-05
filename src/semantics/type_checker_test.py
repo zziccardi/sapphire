@@ -1472,19 +1472,19 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_struct_initialization_checking(self):
     """Verifies semantic checking of struct initializers."""
-    # 1. Missing required field
+    # 1. Missing required field (non-primitive, non-optional reference type)
     code_missing = """
     struct Point {
       var x: int;
-      var y: int;
+      var owner: String;
     }
     func test() {
-      let p = Point { x = 10 }; // Missing required field y
+      let p = Point { x = 10 }; // Missing required field owner
     }
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code_missing)
-    self.assertIn("Struct initializer for 'Point' is missing required field 'y'", str(context.exception))
+    self.assertIn("Struct initializer for 'Point' is missing required field 'owner'", str(context.exception))
 
     # 2. Type mismatch
     code_mismatch = """
@@ -2491,6 +2491,23 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot return a reference to an object allocated in local arena", str(ctx.exception))
+
+  def test_struct_field_implicit_defaults(self):
+    """Verifies that fields of type int, float, bool, and T? implicitly default and can be omitted from initializers."""
+    self._check("""
+    struct Entity {
+      var id: int;
+      var speed: float;
+      var is_alive: bool;
+      var target: String?;
+      let name: String;
+    }
+
+    func test() {
+      // id, speed, is_alive, and target can all be omitted because they have implicit defaults
+      let e = Entity { name = "Hero" };
+    }
+    """)
 
   def test_compiler_fixes_and_inference(self):
     """Verifies parenthesized types, optional lambda parameter inference, and struct initializer context propagation."""

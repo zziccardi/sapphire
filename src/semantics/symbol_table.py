@@ -174,11 +174,12 @@ class StructField:
   """Represents a field in a struct."""
 
   def __init__(self, name: str, field_type: Type, is_mutable: bool,
-               has_default: bool = False, comments: str = ""):
+               has_default: bool = False, has_explicit_default: bool = False, comments: str = ""):
     self.name = name
     self.field_type = field_type
     self.is_mutable = is_mutable
     self.has_default = has_default
+    self.has_explicit_default = has_explicit_default
     self.comments = comments
 
 

@@ -12,17 +12,21 @@ import unittest
 from antlr4 import InputStream, CommonTokenStream
 
 try:
+  from parser.ast import BasicTypeNode
   from parser.gen.SapphireLexer import SapphireLexer
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
   from code_gen.python_transpiler import PythonTranspiler, Transpiler
+  from code_gen.base_transpiler import get_default_value_for_type_node
   from code_gen.transpiler import transpile_file
   from semantics.type_checker import TypeChecker
 except ModuleNotFoundError:
+  from src.parser.ast import BasicTypeNode
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
+  from src.code_gen.base_transpiler import get_default_value_for_type_node
   from src.code_gen.transpiler import transpile_file
   from src.semantics.type_checker import TypeChecker
 
@@ -798,16 +802,59 @@ class TestPythonTranspiler(unittest.TestCase):
       self.assertTrue(os.path.exists(sub_py))
 
   def test_uninitialized_var_decl_python(self):
-    """Verifies that uninitialized variable declarations emit `= None` in Python."""
+    """Verifies that uninitialized variable declarations emit reasonable type defaults in Python."""
     code = """
     func test() {
-      var x: int;
-      var a: String, b: bool;
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+      var s: String;
     }
     """
     py = self._transpile(code)
-    self.assertIn("x = None", py)
-    self.assertIn("a, b = None, None", py)
+    self.assertIn("i = 0", py)
+    self.assertIn("f = 0.0", py)
+    self.assertIn("b = False", py)
+    self.assertIn("opt = None", py)
+    self.assertIn("s = None", py)
+    self.assertIsNone(get_default_value_for_type_node(None))
+    self.assertIsNone(get_default_value_for_type_node(BasicTypeNode("String")))
+
+  def test_implicit_struct_field_and_var_defaults_execution_python(self):
+    """Verifies runtime values for uninitialized struct fields (int=0, float=0.0, bool=False, T?=None)."""
+    code = """
+    struct DefaultsTest {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+    }
+
+    func get_i(): int {
+      var d = DefaultsTest {};
+      return d.i;
+    }
+
+    func get_f(): float {
+      var d = DefaultsTest {};
+      return d.f;
+    }
+
+    func get_b(): bool {
+      var d = DefaultsTest {};
+      return d.b;
+    }
+
+    func is_opt_none(): bool {
+      var d = DefaultsTest {};
+      return d.opt == none;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(code, "get_i()"), 0)
+    self.assertEqual(self._transpile_and_run(code, "get_f()"), 0.0)
+    self.assertEqual(self._transpile_and_run(code, "get_b()"), False)
+    self.assertEqual(self._transpile_and_run(code, "is_opt_none()"), True)
 
 
   def test_match_expression_transpilation_and_execution(self):

@@ -227,7 +227,10 @@ class TypeChecker:
     # Resolve fields for monomorphized struct
     for f in cloned_decl.fields:
       ftype = self._resolve_type_node(f.field_type)
-      mono_struct_type.fields[f.name] = StructField(f.name, ftype, f.is_mutable, f.default_expr is not None)
+      has_default = f.default_expr is not None or self._has_implicit_default_value(ftype)
+      mono_struct_type.fields[f.name] = StructField(
+          f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
+      )
 
     # Instantiate generic impl blocks matching generic_struct_type.name
     if hasattr(self, "program") and self.program:
@@ -527,13 +530,23 @@ class TypeChecker:
         ftype = self._resolve_type_node(f.field_type)
         if f.name in struct_type.fields:
           self.error(f"Field '{f.name}' in struct '{node.name}' shadows inherited parent field.")
-        struct_type.fields[f.name] = StructField(f.name, ftype, f.is_mutable, f.default_expr is not None)
+        has_default = f.default_expr is not None or self._has_implicit_default_value(ftype)
+        struct_type.fields[f.name] = StructField(
+            f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
+        )
 
       visiting.remove(node.name)
       processed.add(node.name)
 
     for s in structs_to_process:
       process_struct(s)
+
+  def _has_implicit_default_value(self, ftype: Type) -> bool:
+    if isinstance(ftype, OptionalType):
+      return True
+    if isinstance(ftype, PrimitiveType) and ftype.name in ("int", "float", "bool"):
+      return True
+    return False
 
   def _get_impl_type_params(self, decl: ImplBlockNode) -> List[str]:
     return list(decl.type_params) if decl.type_params else []
@@ -779,7 +792,7 @@ class TypeChecker:
       for f_name, f_obj in struct_type.fields.items():
         if (f_name not in self.initialized_fields 
             and not isinstance(f_obj.field_type, OptionalType)
-            and not f_obj.has_default):
+            and not f_obj.has_explicit_default):
           self.error(f"Constructor '__init__' failed to initialize non-optional field '{f_name}'.")
 
     # Restore constructor contexts

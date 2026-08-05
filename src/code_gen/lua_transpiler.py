@@ -20,7 +20,7 @@ try:
   from semantics.type_checker import TypeChecker, SemanticError
   from semantics.symbol_table import MapType, RangeType
   from code_gen.source_map import SourceMapBuilder
-  from code_gen.base_transpiler import BaseTranspiler
+  from code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -29,7 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.semantics.type_checker import TypeChecker, SemanticError
   from src.semantics.symbol_table import MapType, RangeType
   from src.code_gen.source_map import SourceMapBuilder
-  from src.code_gen.base_transpiler import BaseTranspiler
+  from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
 
 
 # ==========================================
@@ -836,11 +836,12 @@ class LuaTranspiler(BaseTranspiler):
         self.newline()
         self.emit(f"if {p}._init_fields then {p}._init_fields(self) end")
     for f in node.fields:
-      if f.default_expr:
+      default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+      if default_expr:
         self.newline()
         temp = LuaTranspiler()
         temp.known_structs = self.known_structs
-        temp.visit(f.default_expr)
+        temp.visit(default_expr)
         self.emit(f"self.{f.name} = {temp.get_output()}")
     self.dedent()
     self.newline()
@@ -1049,6 +1050,23 @@ class LuaTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    else:
+      defaults = []
+      has_non_nil = False
+      for idx, name in enumerate(node.names):
+        val_type = node.val_types[idx] if idx < len(node.val_types) else None
+        default_expr = get_default_value_for_type_node(val_type)
+        if default_expr:
+          temp = LuaTranspiler()
+          temp.known_structs = self.known_structs
+          temp.visit(default_expr)
+          defaults.append(temp.get_output())
+          if default_expr.lit_type != "none":
+            has_non_nil = True
+        else:
+          defaults.append("nil")
+      if has_non_nil:
+        self.emit(" = " + ", ".join(defaults))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)

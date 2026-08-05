@@ -922,6 +922,32 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_enum_from(Status", lua)
     self.assertIn("_sapphire_enum_from(LogLevel", lua)
 
+  def test_implicit_struct_field_and_var_defaults_lua(self):
+    """Verifies Lua transpilation of implicit struct field defaults (int=0, float=0.0, bool=false, T?=nil)."""
+    code = """
+    struct DefaultsTest {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+    }
+
+    func test() {
+      var d = DefaultsTest {};
+      var local_i: int, local_s: String;
+      var local_f: float;
+      var local_b: bool;
+      var local_opt: String?;
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("self.i = 0", lua)
+    self.assertIn("self.f = 0.0", lua)
+    self.assertIn("self.b = false", lua)
+    self.assertIn("local local_i, local_s = 0, nil", lua)
+    self.assertIn("local local_f = 0.0", lua)
+    self.assertIn("local local_b = false", lua)
+
   def test_array_methods_lua(self):
     """Verifies transpilation of Array built-in methods to Lua."""
     code = """
