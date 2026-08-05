@@ -1424,13 +1424,51 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code_opt_chained_recv)
     self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
 
-    # 12. Direct test for _is_reference_type with NoneType (edge case coverage)
+    # 12. Direct test for _is_reference_type with all types
     try:
-      from semantics.symbol_table import NoneType
+      from semantics.symbol_table import (
+          PrimitiveType, ArrayType, MapType, ArenaType, RangeType,
+          StructType, OptionalType, NoneType
+      )
     except ImportError:
-      from src.semantics.symbol_table import NoneType
+      from src.semantics.symbol_table import (
+          PrimitiveType, ArrayType, MapType, ArenaType, RangeType,
+          StructType, OptionalType, NoneType
+      )
     checker = TypeChecker()
+    # Value types
+    self.assertFalse(checker._is_reference_type(PrimitiveType("int")))
+    self.assertFalse(checker._is_reference_type(PrimitiveType("float")))
+    self.assertFalse(checker._is_reference_type(PrimitiveType("bool")))
     self.assertFalse(checker._is_reference_type(NoneType()))
+    self.assertFalse(checker._is_reference_type(OptionalType(PrimitiveType("int"))))
+
+    # Reference types
+    self.assertTrue(checker._is_reference_type(PrimitiveType("String")))
+    self.assertTrue(checker._is_reference_type(ArrayType(PrimitiveType("int"))))
+    self.assertTrue(checker._is_reference_type(MapType(PrimitiveType("String"), PrimitiveType("int"))))
+    self.assertTrue(checker._is_reference_type(ArenaType()))
+    self.assertTrue(checker._is_reference_type(RangeType()))
+    self.assertTrue(checker._is_reference_type(StructType("Point")))
+    self.assertTrue(checker._is_reference_type(StructType("Enemy", is_prototype=True)))
+    self.assertTrue(checker._is_reference_type(OptionalType(PrimitiveType("String"))))
+
+    # 13. Verify aliasing conflicts for builtin reference types (String, Array, Map, Arena, Range)
+    code_builtin_ref_aliasing = """
+    func test_str(var a: String, b: String) {}
+    func test_arr(var a: [int], b: [int]) {}
+    func test_map(var a: [String: int], b: [String: int]) {}
+    func test_arena(var a: Arena, b: Arena) {}
+    func test_range(var a: Range, b: Range) {}
+
+    func run() {
+      var s = "hello";
+      test_str(a = s, b = s);
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_builtin_ref_aliasing)
+    self.assertIn("Aliasing conflict: variable 's'", str(context.exception))
 
   def test_struct_initialization_checking(self):
     """Verifies semantic checking of struct initializers."""

@@ -13,10 +13,11 @@ through four key pillars:
   completely eliminating virtual-method tables (vtables), pointer chasing, and
   object-slicing risks. Dynamic prototypal delegation is opt-in and data-only,
   and uses copy-on-write (CoW) to protect prototypes.
-* **Scope-bound memory safety**: Non-primitive types are passed by constant
-  reference by default. Compile-time scope-bound aliasing rules guarantee
-  memory safety and reference validity without the visual noise of Rust-style
-  lifetime annotations or C++ pointer syntax.
+* **Scope-bound memory safety**: Reference types (including `String`, `Array`,
+  `Map`, `Arena`, `Range`, and all user-defined `struct` and `proto` types) are
+  passed by constant reference by default. Compile-time scope-bound aliasing
+  rules guarantee memory safety and reference validity without the visual noise
+  of Rust-style lifetime annotations or C++ pointer syntax.
 * **Deterministic lifecycle control**: Opt-in dynamic prototypal references
   are allocated in managed, lexically scoped arenas. The compiler enforces
   strict escape-checking to automatically tear down allocations at scope
@@ -70,6 +71,11 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 
 * **`let`**: Declares a constant variable (immutable).
 * **`var`**: Declares a mutable variable.
+* **Value vs. reference types**: Primitive scalar types (`int`, `float`, `bool`)
+  and `none` are value types (copied on assignment and parameter passing).
+  Reference types – including `String`, `Array`, `Map`, `Arena`, `Range`, and
+  all user-defined `struct` and `proto` types – are passed by reference by
+  default.
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
 * **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
 * **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
@@ -406,13 +412,15 @@ let active_enemy = target ?? default_enemy;
 Named functions must fully declare the types of all parameters and the explicit
 return value(s) using colon syntax.
 
-* **Primitive types**: Assumed to be passed by **value** by default.
-* **Non-primitive types**: Assumed to be passed by **constant reference** by
-default.
+* **Primitive value types**: Primitive numeric/boolean types (`int`, `float`,
+  `bool`) and `none` are passed by **value** by default.
+* **Reference types**: Reference types – including `String`, `Array`, `Map`,
+  `Arena`, `Range`, and all user-defined `struct`s and `proto`s – are passed by
+  **constant reference** by default.
 * **Mutable references**: Indicated by prefixing the parameter with `var`,
-causing it to be passed by mutable reference. Callers may not pass variables
-declared with `let` to these parameters. This applies to both primitive and
-non-primitive types.
+  causing it to be passed by mutable reference. Callers may not pass variables
+  declared with `let` to these parameters. This applies to both primitive and
+  reference types.
 * **Named parameters**: Call-site arguments can be named explicitly using the
 `=` operator, mirroring assignment semantics and preserving the colon for types.
 * **Default parameters**: Parameters can define default values using the `=`
@@ -452,7 +460,10 @@ calculate_damage(current_player, target_enemy, is_critical = true);
 ### Scope-bound aliasing rules (borrow-checking)
 
 To guarantee reference safety and eliminate runtime aliasing logic bugs without introducing the visual overhead of Rust-style lifetime annotations, Sapphire's compiler enforces compile-time **scope-bound aliasing rules** at call sites:
-* **Reference types only**: Primitive types (`int`, `float`, `bool`) and `none` are value-copied and ignored by this check. User-defined `struct` types and `String` are reference-passed and validated.
+* **Reference types only**: Primitive value types (`int`, `float`, `bool`) and
+  `none` are value-copied and ignored by this check. All reference types
+  (`String`, `Array`, `Map`, `Arena`, `Range`, and user-defined `struct` and
+  `proto` types) are reference-passed and validated.
 * **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be mutably borrowed (`var` parameter) if it is already borrowed (either mutably or immutably) within the same call.
 * **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (borrowed mutably for mutable methods, or immutably for `const` methods).
 
