@@ -65,6 +65,36 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_upper": "HELLO",
         "test_lower": "hello",
     },
+    "arrays_test.sp": {
+        "test_array_indexing": 20,
+        "test_array_size": 5,
+        "test_array_mutation": 99,
+        "test_array_push": 3,
+        "test_array_contains": 1,
+    },
+    "expressions_and_casting_test.sp": {
+        "test_float_to_int_cast": 9,
+        "test_enum_to_int_cast": 1,
+        "test_ternary_expression": 100,
+        "test_optional_chaining": 42,
+        "test_optional_chaining_none": -1,
+    },
+    "functions_and_returns_test.sp": {
+        "test_default_parameter": 20,
+        "test_override_default_parameter": 30,
+        "test_named_parameters": 20,
+        "test_multiple_returns_destructuring": 40,
+    },
+    "guards_and_traits_test.sp": {
+        "test_guard_taken": 80,
+        "test_guard_else_branch": -1,
+        "test_trait_implementation": 50,
+    },
+    "prototypes_test.sp": {
+        "test_proto_delegation": 100,
+        "test_proto_shadowing": 250,
+        "test_live_proto_mutation": 30,
+    },
     "structs_and_methods_test.sp": {
         "test_default_fields": 0,
         "test_method_call": 2,
