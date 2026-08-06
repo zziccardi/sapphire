@@ -108,17 +108,22 @@ sapphire test
   (`lib/love2d/`).
 * `samples/`: Example scripts demonstrating core language features.
 * `src/`: Compiler pipeline and tooling:
-  * `cli/`: Unified `sapphire` CLI entry point (`sapphire.py`).
+  * `cli/`: Unified `sapphire` CLI entry point (`sapphire.py`) and test runner
+    (`test_runner.py`).
+  * `common/`: Domain exception hierarchy (`errors.py`).
   * `parser/`: AST definitions (`ast.py`), visitor builder (`ast_builder.py`),
-    and ANTLR-generated parser.
-  * `semantics/`: Symbol tables (`symbol_table.py`) and type-checking rules
-    (`type_checker.py`).
-  * `code_gen/`: Transpilers for Python (`python_transpiler.py`), Lua 5.1
-    (`lua_transpiler.py`), driver facade (`transpiler.py`), and source-map
-    generator (`source_map.py`).
+     centralized error listener (`error_listener.py`), and ANTLR-generated
+     parser.
+  * `semantics/`: Symbol tables (`symbol_table.py`), type checker
+    (`type_checker.py`), arena memory checks (`arena_checker.py`), and generic
+    substitution helpers (`generics_checker.py`).
+  * `code_gen/`: Transpiler driver (`transpiler.py`), target backend registry
+    (`transpiler_registry.py`), Python generator (`python_transpiler.py`),
+    Lua 5.1 generator (`lua_transpiler.py`), experimental LLVM IR generator
+    (`llvm_transpiler.py`), and source-map generator (`source_map.py`).
   * `lsp/`: Language Server Protocol (LSP) server providing diagnostics,
     autocompletion, hover info, and semantic tokens.
-* `testing/`: Test suite runner, test fixtures (`testing/fixtures/`), and test
-  utilities (`test_utils.py`).
+* `testing/`: Test suite runner, integration-test fixtures
+  (`testing/fixtures/`), and test utilities (`test_utils.py`).
 * `tools/`: Development tools including the
   [VS Code extension](tools/vscode-extension/).
