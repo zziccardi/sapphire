@@ -70,7 +70,7 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_integer_arithmetic(self):
     code = """
     func add(a: int, b: int): int {
-        return a + b;
+      return a + b;
     }
     """
     ir_out = self._parse_and_transpile(code)
@@ -82,7 +82,7 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_float_arithmetic(self):
     code = """
     func add_float(a: float, b: float): float {
-        return a + b;
+      return a + b;
     }
     """
     ir_out = self._parse_and_transpile(code)
@@ -93,9 +93,9 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_local_var_decl_and_assignment(self):
     code = """
     func compute(x: int): int {
-        var y: int = 10;
-        y = y + x;
-        return y;
+      var y: int = 10;
+      y = y + x;
+      return y;
     }
     """
     ir_out = self._parse_and_transpile(code)
@@ -108,8 +108,8 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_struct_declaration(self):
     code = """
     struct Player {
-        var hp: int;
-        var score: float;
+      var hp: int;
+      var score: float;
     }
     """
     ir_out = self._parse_and_transpile(code)

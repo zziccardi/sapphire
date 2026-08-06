@@ -1,4 +1,60 @@
-"""Experimental LLVM IR transpiler for Sapphire ASTs."""
+"""Experimental LLVM IR code-generation backend for Sapphire ASTs.
+
+Current state:
+  This module provides an experimental `LLVMTranspiler` that lowers type-checked
+  Sapphire AST nodes into LLVM IR using `llvmlite`. It supports top-level
+  declarations, functions, primitive types (`int` -> `i64`, `float` -> `double`,
+  `bool` -> `i1`, `void`), stack-allocated local variables (`alloca` / `load` /
+  `store`), integer/float arithmetic with implicit type promotion, basic block
+  termination safeguards, and struct aggregate types.
+
+  High-level features requiring dynamic runtime libraries (e.g. pattern
+  matching, traits, lambdas) are currently unimplemented and gracefully raise
+  `NotImplementedError`.
+
+Key benefits of outputting to LLVM IR:
+  1. Ahead-of-time (AOT) native compilation:
+    Allows compiling Sapphire programs directly into optimized machine code and
+    native standalone executables (via `clang` or `llc`), bypassing interpreter
+    overhead.
+  2. Just-in-time (JIT) execution:
+    Enables high-performance in-memory execution via `llvmlite.binding` or
+    LLVM's MCJIT/ORCJIT engine.
+  3. Production-grade LLVM optimization passes:
+    Unlocks LLVM's optimizer suite (e.g. `mem2reg` for promoting stack allocas
+    to SSA registers, auto-vectorization, dead-code elimination, and loop
+    unrolling).
+  4. Hardware portability & C interop:
+    Targets any architecture supported by LLVM (x86_64, ARM64/Apple Silicon,
+    RISC-V, WebAssembly) and enables low-overhead C ABI interoperability.
+
+Sample generated LLVM IR:
+  Given Sapphire source code:
+    ```
+    func add(a: int, b: int): int {
+      return a + b;
+    }
+    ```
+
+  Generated LLVM IR output:
+    ```
+    ; ModuleID = "sapphire_module"
+    target triple = "arm64-apple-macosx14.0.0"
+
+    define i64 @"add"(i64 %"a", i64 %"b")
+    {
+    entry:
+      %"a.1" = alloca i64
+      store i64 %"a", i64* %"a.1"
+      %"b.1" = alloca i64
+      store i64 %"b", i64* %"b.1"
+      %"a_val" = load i64, i64* %"a.1"
+      %"b_val" = load i64, i64* %"b.1"
+      %"addtmp" = add i64 %"a_val", %"b_val"
+      ret i64 %"addtmp"
+    }
+    ```
+"""
 
 from typing import Any, Dict, Optional
 
