@@ -41,6 +41,9 @@ from src.semantics.symbol_table import (
     MAP_METHODS,
 )
 from src.cli.diagnostics import format_diagnostic
+from src.common.errors import SapphireError, SapphireTypeError, SemanticError
+
+
 
 
 
@@ -309,48 +312,51 @@ class TypeChecker:
           break
 
       if target_file:
-        try:
-          with open(target_file, "r", encoding="utf-8") as f:
-            sub_code = f.read()
-          from src.parser.gen.SapphireLexer import SapphireLexer
-          from src.parser.gen.SapphireParser import SapphireParser
-          from src.parser.ast_builder import ASTBuilder
-
-          from antlr4 import InputStream, CommonTokenStream
-
-          sub_lexer = SapphireLexer(InputStream(sub_code))
-          sub_lexer.removeErrorListeners()
-          sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
-          sub_parser.removeErrorListeners()
-          sub_ast = ASTBuilder().visit(sub_parser.program())
-          sub_checker = TypeChecker(source_file_path=target_file)
           try:
-            sub_checker.check(sub_ast)
+            with open(target_file, "r", encoding="utf-8") as f:
+              sub_code = f.read()
+            from src.parser.gen.SapphireLexer import SapphireLexer
+            from src.parser.gen.SapphireParser import SapphireParser
+            from src.parser.ast_builder import ASTBuilder
+
+            from antlr4 import InputStream, CommonTokenStream
+
+            try:
+              sub_lexer = SapphireLexer(InputStream(sub_code))
+              sub_lexer.removeErrorListeners()
+              sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+              sub_parser.removeErrorListeners()
+              sub_ast = ASTBuilder().visit(sub_parser.program())
+              sub_checker = TypeChecker(source_file_path=target_file)
+              try:
+                sub_checker.check(sub_ast)
+              except Exception:
+                pass
+
+              # Populate mod_sym exports from sub_checker
+              if getattr(sub_ast, "export_block", None):
+                for spec in sub_ast.export_block.specifiers:
+                  export_name = spec.alias or spec.symbol
+                  if spec.module_prefix:
+                    prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
+                    if isinstance(prefix_sym, ModuleSymbol):
+                      exp = prefix_sym.lookup_export(spec.symbol)
+                      if exp:
+                        mod_sym.exports[export_name] = exp
+                  else:
+                    exp = sub_checker.symbol_table.lookup(spec.symbol) or sub_checker.symbol_table.lookup_type(spec.symbol)
+                    if exp:
+                      mod_sym.exports[export_name] = exp
+              else:
+                for name, sym in sub_checker.symbol_table.current_scope.symbols.items():
+                  mod_sym.exports[name] = sym
+                for name, t in sub_checker.symbol_table.current_scope.types.items():
+                  if name not in ("int", "float", "bool", "String", "none", "Arena"):
+                    mod_sym.exports[name] = t
+            except Exception:
+              pass
           except Exception:
             pass
-
-          # Populate mod_sym exports from sub_checker
-          if getattr(sub_ast, "export_block", None):
-            for spec in sub_ast.export_block.specifiers:
-              export_name = spec.alias or spec.symbol
-              if spec.module_prefix:
-                prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
-                if isinstance(prefix_sym, ModuleSymbol):
-                  exp = prefix_sym.lookup_export(spec.symbol)
-                  if exp:
-                    mod_sym.exports[export_name] = exp
-              else:
-                exp = sub_checker.symbol_table.lookup(spec.symbol) or sub_checker.symbol_table.lookup_type(spec.symbol)
-                if exp:
-                  mod_sym.exports[export_name] = exp
-          else:
-            for name, sym in sub_checker.symbol_table.current_scope.symbols.items():
-              mod_sym.exports[name] = sym
-            for name, t in sub_checker.symbol_table.current_scope.types.items():
-              if name not in ("int", "float", "bool", "String", "none", "Arena"):
-                mod_sym.exports[name] = t
-        except Exception:
-          pass
 
   def _declare_globals(self, program: ProgramNode) -> None:
     """Pre-pass to register types and global function symbols in the symbol table."""

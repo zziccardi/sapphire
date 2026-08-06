@@ -22,8 +22,14 @@ from src.cli.diagnostics import get_source_line, format_diagnostic
 
 
 
-class TestDiscoveryError(Exception):
+from src.common.errors import SapphireError
+
+
+class TestDiscoveryError(SapphireError):
+  """Raised when test discovery or test suite parsing encounters invalid states."""
+
   pass
+
 
 
 def find_sp_files(path: str) -> List[str]:

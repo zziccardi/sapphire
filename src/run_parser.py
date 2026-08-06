@@ -12,27 +12,8 @@ from src.cli.diagnostics import format_diagnostic
 
 
 
-class CustomErrorListener(ErrorListener):
-  def __init__(self, file_path=None, source_content=None):
-    super().__init__()
-    self.errors = 0
-    self.file_path = file_path
-    self.source_content = source_content
+from src.parser.error_listener import CustomErrorListener
 
-  def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
-    self.errors += 1
-    length = len(offendingSymbol.text) if (offendingSymbol and hasattr(offendingSymbol, "text") and offendingSymbol.text) else 1
-    source_content = str(self.source_content) if self.source_content is not None else None
-    diag = format_diagnostic(
-        error_type="Error",
-        message=msg,
-        file_path=self.file_path,
-        line=line,
-        column=column,
-        length=length,
-        source_content=source_content,
-    )
-    print(diag, file=sys.stderr)
 
 
 def main():

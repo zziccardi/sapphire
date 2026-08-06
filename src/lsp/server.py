@@ -628,8 +628,9 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
       for word in words:
         if len(word) > 1:
           add_item(word, 1, f"(text) {word}")
-  except Exception:  # pragma: no cover
+  except (AttributeError, KeyError, IndexError, TypeError):  # pragma: no cover
     pass
+
 
   return items
 
@@ -658,8 +659,9 @@ def completion(ls: SapphireLanguageServer,
       lines = source.splitlines()
       if 0 <= line - 1 < len(lines):
         line_text = lines[line - 1]
-  except Exception:  # pragma: no cover
+  except (AttributeError, KeyError, IndexError, TypeError):  # pragma: no cover
     pass
+
 
   text_before_cursor = line_text[:col]
   import re
