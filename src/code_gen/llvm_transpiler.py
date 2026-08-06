@@ -85,7 +85,12 @@ except Exception:  # pragma: no cover
   DEFAULT_TRIPLE = "x86_64-pc-linux-gnu"
 
 
+from src.code_gen.transpiler_registry import TranspilerRegistry
+
+
+@TranspilerRegistry.register(aliases=["llvm", "llvmir", "ir"], display_name="LLVM IR", default_extension=".ll")
 class LLVMTranspiler(BaseTranspiler):
+
   """Transpiles a type-checked Sapphire AST into LLVM IR."""
 
   def __init__(self, module_name="sapphire_module", target_triple=None):

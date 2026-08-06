@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional
 
 from src.parser.ast import *
 from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+from src.code_gen.transpiler_registry import TranspilerRegistry
+
+
 
 
 
@@ -439,7 +442,9 @@ def _sapphire_map_clear(m):
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
 
 
+@TranspilerRegistry.register(aliases=["python", "py"], display_name="Python", default_extension=".py")
 class PythonTranspiler(BaseTranspiler):
+
   """AST visitor to transpile Sapphire code to Python."""
 
   def __init__(self, test_mode: bool = False):

@@ -20,7 +20,9 @@ from src.semantics.type_checker import TypeChecker, SemanticError
 from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
 from src.code_gen.lua_transpiler import LuaTranspiler
 from src.code_gen.source_map import SourceMapBuilder
+from src.code_gen.transpiler_registry import TranspilerRegistry
 from src.parser.error_listener import CustomErrorListener, format_syntax_error_message
+
 
 
 
@@ -37,33 +39,24 @@ def transpile_file(
 
   Args:
     input_file: Path to the Sapphire source file (.sp).
-    output_file: Optional output path for generated code (.py or .lua). If None,
-      defaults to input_file with .py or .lua extension depending on target.
-    target: Code generation target ("python" or "lua" / "lua5.1").
-    visited: Set of already processed file paths to prevent recursion loops.
-    sourcemap: Whether to generate source map (.lua.map) for Lua target.
-    test_mode: Whether transpiling in test execution mode (includes @test functions).
-    quiet: Whether to suppress progress and status messages.
-
-  Returns:
-    The path to the generated output file.
   """
-
-  target_lower = target.lower()
-  ext = ".lua" if target_lower in ("lua", "lua5.1") else ".py"
-
-  if not output_file:
-    base_path, _ = os.path.splitext(input_file)
-    output_file = base_path + ext
-
   if visited is None:
+
     visited = set()
 
-  input_abs = os.path.abspath(input_file)
-  if input_abs in visited:
-    return output_file
-  visited.add(input_abs)
+  abs_input_file = os.path.abspath(input_file)
+  if abs_input_file in visited:
+    return output_file or ""
+  visited.add(abs_input_file)
 
+  target_info = TranspilerRegistry.get(target)
+  ext = target_info.default_extension
+
+  if not output_file:
+    base_name = os.path.splitext(input_file)[0]
+    output_file = base_name + ext
+
+  # 1. Lexical Analysis
   if not quiet:
     print(f"Reading source file: {input_file}...")
 
@@ -76,7 +69,6 @@ def transpile_file(
 
   error_listener = CustomErrorListener(file_path=input_file, source_content=input_stream, quiet=quiet)
 
-  # 1. Lexical Analysis
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
   lexer.addErrorListener(error_listener)
@@ -131,24 +123,23 @@ def transpile_file(
       sub_output = os.path.splitext(sub_source)[0] + ext
       transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, quiet=quiet)
 
-  # 6. Transpile
+  # 6. Transpile via TranspilerRegistry
   sm_builder = None
-  if target_lower in ("lua", "lua5.1"):
-    if not quiet:
-      print("Transpiling to Lua 5.1...")
-    src_filename = os.path.basename(input_file)
-    src_content = str(input_stream)
+  src_filename = os.path.basename(input_file)
+  src_content = str(input_stream)
+
+  if target_info.name == "lua":
     if sourcemap:
       sm_builder = SourceMapBuilder(src_filename, src_content)
-    transpiler = LuaTranspiler(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode)
-    generated_code = transpiler.transpile(ast)
-    target_name = "Lua 5.1"
+    transpiler = target_info.factory(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode)
   else:
-    if not quiet:
-      print("Transpiling to Python...")
-    transpiler = PythonTranspiler(test_mode=test_mode)
-    generated_code = transpiler.transpile(ast)
-    target_name = "Python"
+    transpiler = target_info.factory(test_mode=test_mode)
+
+  if not quiet:
+    print(f"Transpiling to {target_info.display_name}...")
+  generated_code = transpiler.transpile(ast)
+  target_name = target_info.display_name
+
 
   # Write generated code
   try:

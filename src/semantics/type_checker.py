@@ -42,14 +42,8 @@ from src.semantics.symbol_table import (
 )
 from src.cli.diagnostics import format_diagnostic
 from src.common.errors import SapphireError, SapphireTypeError, SemanticError
-
-
-
-
-
-class SemanticError(Exception):
-  """Exception raised for semantic or compile-time type errors."""
-  pass
+from src.semantics.arena_checker import ArenaChecker
+from src.semantics.generics_checker import GenericsChecker
 
 
 class TypeChecker:
@@ -71,27 +65,11 @@ class TypeChecker:
     self.loop_depth: int = 0
 
   def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
-    if isinstance(node, IdentifierNode):
-      symbol = self.symbol_table.lookup(node.name)
-      if isinstance(symbol, VariableSymbol):
-        return symbol.arena_dependency
-    elif isinstance(node, StructInitializerNode):
-      if node.arena_expr and isinstance(node.arena_expr, IdentifierNode):
-        return node.arena_expr.name
-    elif isinstance(node, CloneNode):
-      if node.arena_expr and isinstance(node.arena_expr, IdentifierNode):
-        return node.arena_expr.name
-      else:
-        return self._get_arena_dependency(node.expr)
-    return None
+    return ArenaChecker.get_arena_dependency(self.symbol_table, node)
 
   def _is_descendant_scope(self, child: Optional[object], parent: Optional[object]) -> bool:
-    curr = child
-    while curr:
-      if curr == parent:
-        return True
-      curr = curr.parent
-    return False
+    return ArenaChecker.is_descendant_scope(child, parent)
+
 
   def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
     if isinstance(target, IdentifierNode):
@@ -144,47 +122,11 @@ class TypeChecker:
       raise SemanticError("\n".join(self.errors))
 
   def _substitute_ast(self, node: Any, param_map: Dict[str, TypeNode]) -> Any:
-    """Recursively replaces generic parameter identifiers with concrete TypeNodes in an AST snippet."""
-    if node is None:
-      return None
-    if isinstance(node, BasicTypeNode):
-      if node.name in param_map:
-        return copy.deepcopy(param_map[node.name])
-      if node.type_args:
-        new_args = [self._substitute_ast(t, param_map) for t in node.type_args]
-        new_node = copy.deepcopy(node)
-        new_node.type_args = new_args
-        return new_node
-      return copy.deepcopy(node)
-    if isinstance(node, list):
-      return [self._substitute_ast(item, param_map) for item in node]
-    if isinstance(node, ASTNode):
-      new_node = copy.copy(node)
-      for k, v in node.__dict__.items():
-        if isinstance(v, (ASTNode, list)):
-          setattr(new_node, k, self._substitute_ast(v, param_map))
-        else:
-          setattr(new_node, k, v)
-      return new_node
-    return copy.deepcopy(node)
+    return GenericsChecker.substitute_ast(node, param_map)
 
   def _mangle_type_name(self, type_obj: Type) -> str:
-    """Recursively converts a semantic Type into a clean, valid identifier string component."""
-    if isinstance(type_obj, OptionalType):
-      return f"Opt_{self._mangle_type_name(type_obj.base_type)}"
-    elif isinstance(type_obj, ArrayType):
-      return f"Arr_{self._mangle_type_name(type_obj.element_type)}"
-    elif isinstance(type_obj, MapType):
-      return f"Map_{self._mangle_type_name(type_obj.key_type)}_{self._mangle_type_name(type_obj.value_type)}"
-    elif isinstance(type_obj, FunctionType):
-      p_str = "_".join(self._mangle_type_name(t) for t in type_obj.param_types)
-      r_str = "_".join(self._mangle_type_name(t) for t in type_obj.return_types)
-      return f"Fn_{p_str}_to_{r_str}"
-    else:
-      raw = str(type_obj)
-      clean = "".join(c if c.isalnum() else "_" for c in raw)
-      clean = "_".join(filter(None, clean.split("_")))
-      return clean or "type"
+    return GenericsChecker.mangle_type_name(type_obj)
+
 
   def _monomorphize_struct(
       self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
