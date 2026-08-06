@@ -19,6 +19,7 @@ try:
   from parser.ast import FuncDeclNode, ImplBlockNode, IdentifierNode
   from code_gen.transpiler import transpile_file
   from code_gen.source_map import SourceMapBuilder
+  from cli.diagnostics import get_source_line, format_diagnostic
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
@@ -26,6 +27,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import FuncDeclNode, ImplBlockNode, IdentifierNode
   from src.code_gen.transpiler import transpile_file
   from src.code_gen.source_map import SourceMapBuilder
+  from src.cli.diagnostics import get_source_line, format_diagnostic
 
 
 class TestDiscoveryError(Exception):

@@ -41,6 +41,7 @@ try:
       ARRAY_METHODS,
       MAP_METHODS,
   )
+  from cli.diagnostics import format_diagnostic
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.semantics.symbol_table import (
@@ -74,7 +75,7 @@ except ModuleNotFoundError:  # pragma: no cover
       ARRAY_METHODS,
       MAP_METHODS,
   )
-
+  from src.cli.diagnostics import format_diagnostic
 
 
 class SemanticError(Exception):
@@ -85,10 +86,11 @@ class SemanticError(Exception):
 class TypeChecker:
   """Walks the AST to perform type-checking and semantic validation."""
 
-  def __init__(self, source_file_path: Optional[str] = None):
+  def __init__(self, source_file_path: Optional[str] = None, source_content: Optional[Any] = None):
     self.symbol_table = SymbolTable()
     self.errors: List[str] = []
     self.source_file_path: Optional[str] = source_file_path
+    self.source_content: Optional[Any] = source_content
     self.current_function: Optional[FunctionType] = None
     self.current_struct: Optional[StructType] = None
     self.is_in_init: bool = False
@@ -131,9 +133,25 @@ class TypeChecker:
       return self._get_target_symbol(target.receiver)
     return None
 
-  def error(self, message: str) -> None:
+  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
     """Logs a semantic error."""
-    self.errors.append(message)
+    line = getattr(node, "start_line", None) if node else None
+    column = getattr(node, "start_column", None) if node else None
+    length = getattr(node, "length", None) if node else None
+
+    if line or self.source_file_path or self.source_content:
+      diag = format_diagnostic(
+          error_type="Semantic Error",
+          message=message,
+          file_path=self.source_file_path,
+          line=line,
+          column=column,
+          length=length,
+          source_content=self.source_content,
+      )
+      self.errors.append(diag)
+    else:
+      self.errors.append(message)
 
   def check(self, program: ProgramNode) -> None:
     """Executes semantic analysis on the program."""
@@ -879,20 +897,20 @@ class TypeChecker:
     self.expected_type = old_expected
 
     if len(rhs_types) != len(node.names):
-      self.error(f"Cannot unpack {len(rhs_types)} value(s) into {len(node.names)} variable(s).")
+      self.error(f"Cannot unpack {len(rhs_types)} value(s) into {len(node.names)} variable(s).", node=node)
       return
 
     for i, (name, val_type_node, expr_type) in enumerate(zip(node.names, node.val_types, rhs_types)):
       if val_type_node:
         val_type = self._resolve_type_node(val_type_node)
         if not expr_type.is_compatible(val_type):
-          self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.")
+          self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.", node=node)
         var_type = val_type
         if isinstance(var_type, ArrayType) and isinstance(expr_type, ArrayType) and expr_type.size is not None and var_type.size is None:
           var_type = ArrayType(var_type.element_type, size=expr_type.size)
       else:
         if isinstance(expr_type, NoneType):
-          self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.")
+          self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.", node=node)
           var_type = OptionalType(PrimitiveType("none"))
         else:
           var_type = expr_type
@@ -923,12 +941,12 @@ class TypeChecker:
       rhs_types = [self.visit(e) for e in node.exprs]
 
     if len(rhs_types) != len(target_types):
-      self.error(f"Cannot assign {len(rhs_types)} value(s) to {len(target_types)} target(s).")
+      self.error(f"Cannot assign {len(rhs_types)} value(s) to {len(target_types)} target(s).", node=node)
       return
 
     for i, (target, target_type, expr_type) in enumerate(zip(node.targets, target_types, rhs_types)):
       if not expr_type.is_compatible(target_type):
-        self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.")
+        self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.", node=node)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       arena_name = self._get_arena_dependency(expr_node)
@@ -939,7 +957,7 @@ class TypeChecker:
           arena_sym = self.symbol_table.lookup(arena_name)
           if arena_sym and arena_sym.scope_defined and target_sym.scope_defined:
             if self._is_descendant_scope(arena_sym.scope_defined, target_sym.scope_defined) and arena_sym.scope_defined != target_sym.scope_defined:
-              self.error(f"Variable '{target_sym.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
+              self.error(f"Variable '{target_sym.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.", node=node)
 
       if self.is_in_init and isinstance(target, MemberAccessNode):
         if isinstance(target.receiver, IdentifierNode) and target.receiver.name == "self":
@@ -950,13 +968,13 @@ class TypeChecker:
     if isinstance(node, IdentifierNode):
       sym = self.symbol_table.lookup(node.name)
       if not sym:
-        self.error(f"Undefined identifier '{node.name}'.")
+        self.error(f"Undefined identifier '{node.name}'.", node=node)
         return PrimitiveType("none")
       if not isinstance(sym, VariableSymbol):
-        self.error(f"Identifier '{node.name}' is not a mutable variable.")
+        self.error(f"Identifier '{node.name}' is not a mutable variable.", node=node)
         return sym.symbol_type
       if not sym.is_mutable and sym.name != "self":
-        self.error(f"Cannot assign to constant variable '{node.name}'.")
+        self.error(f"Cannot assign to constant variable '{node.name}'.", node=node)
       return sym.symbol_type
 
     if isinstance(node, MemberAccessNode):
@@ -966,13 +984,13 @@ class TypeChecker:
         receiver_type = receiver_type.base_type
 
       if not isinstance(receiver_type, StructType):
-        self.error("Property access target is not a struct.")
+        self.error("Property access target is not a struct.", node=node)
         return PrimitiveType("none")
 
       # Field access
       field = receiver_type.fields.get(node.member)
       if not field:
-        self.error(f"Struct '{receiver_type.name}' has no field '{node.member}'.")
+        self.error(f"Struct '{receiver_type.name}' has no field '{node.member}'.", node=node)
         return PrimitiveType("none")
 
       # Check field mutability or constructor exemption
@@ -980,37 +998,37 @@ class TypeChecker:
       is_self = isinstance(node.receiver, IdentifierNode) and node.receiver.name == "self"
       if not field.is_mutable:
         if not ((self.is_in_init or self.is_in_clone_init) and is_self):
-          self.error(f"Cannot assign to constant field '{node.member}' of '{receiver_type.name}'.")
+          self.error(f"Cannot assign to constant field '{node.member}' of '{receiver_type.name}'.", node=node)
 
       # Verify self constness
       if is_self:
         self_sym = self.symbol_table.lookup("self")
         if self_sym and not self_sym.is_mutable:
-          self.error(f"Cannot mutate field '{node.member}' within a constant method.")
+          self.error(f"Cannot mutate field '{node.member}' within a constant method.", node=node)
 
       return field.field_type
 
     if isinstance(node, IndexExprNode):
       array_type = self.visit(node.array)
       if not isinstance(array_type, ArrayType):
-        self.error("Cannot index non-array type.")
+        self.error("Cannot index non-array type.", node=node)
         return PrimitiveType("none")
 
       # Enforce that array target is a mutable variable
       if isinstance(node.array, IdentifierNode):
         sym = self.symbol_table.lookup(node.array.name)
         if sym and not sym.is_mutable:
-          self.error(f"Cannot assign to index of constant array '{sym.name}'.")
+          self.error(f"Cannot assign to index of constant array '{sym.name}'.", node=node)
 
       index_type = self.visit(node.index)
       if index_type != PrimitiveType("int"):
-        self.error("Array index must be of type 'int'.")
+        self.error("Array index must be of type 'int'.", node=node)
 
       self._check_array_bounds(node, array_type)
 
       return array_type.element_type
 
-    self.error("Invalid assignment target (not an lvalue).")
+    self.error("Invalid assignment target (not an lvalue).", node=node)
     return PrimitiveType("none")
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
@@ -1018,7 +1036,7 @@ class TypeChecker:
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     if not self.current_function:
-      self.error("Return statement outside function context.")
+      self.error("Return statement outside function context.", node=node)
       return
 
     expected_ret_types = self.current_function.return_types
@@ -1026,9 +1044,9 @@ class TypeChecker:
 
     if len(actual_ret_types) != len(expected_ret_types):
       if len(expected_ret_types) == 0:
-        self.error(f"Function with no return type cannot return {len(actual_ret_types)} values.")
+        self.error(f"Function with no return type cannot return {len(actual_ret_types)} values.", node=node)
       else:
-        self.error(f"Function expected {len(expected_ret_types)} return value(s), but return statement provided {len(actual_ret_types)} value(s).")
+        self.error(f"Function expected {len(expected_ret_types)} return value(s), but return statement provided {len(actual_ret_types)} value(s).", node=node)
       return
 
     for idx, (act, exp) in enumerate(zip(actual_ret_types, expected_ret_types)):
