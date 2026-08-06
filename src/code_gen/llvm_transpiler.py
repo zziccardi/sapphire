@@ -41,8 +41,7 @@ Sample generated LLVM IR:
     ; ModuleID = "sapphire_module"
     target triple = "arm64-apple-macosx14.0.0"
 
-    define i64 @"add"(i64 %"a", i64 %"b")
-    {
+    define i64 @"add"(i64 %"a", i64 %"b") {
     entry:
       %"a.1" = alloca i64
       store i64 %"a", i64* %"a.1"
