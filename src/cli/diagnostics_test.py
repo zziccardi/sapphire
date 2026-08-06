@@ -71,6 +71,26 @@ class TestDiagnostics(unittest.TestCase):
     )
     self.assertEqual(diag, "Error: test.sp:10:5 - Generic failure")
 
+  def test_get_source_line_filepath_exception_and_bounds(self):
+    import tempfile
+    import os
+    from unittest.mock import patch
+
+    with tempfile.NamedTemporaryFile("w+", delete=False) as f:
+      f.write("line 1\nline 2\n")
+      temp_path = f.name
+
+    try:
+      # Test line out of bounds for existing file
+      self.assertIsNone(get_source_line(temp_path, 10))
+
+      # Test open() raising Exception
+      with patch("builtins.open", side_effect=PermissionError("Denied")):
+        self.assertIsNone(get_source_line(temp_path, 1))
+    finally:
+      if os.path.exists(temp_path):
+        os.remove(temp_path)
+
 
 if __name__ == "__main__":
   unittest.main()

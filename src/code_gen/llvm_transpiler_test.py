@@ -130,6 +130,221 @@ class TestLLVMTranspiler(unittest.TestCase):
     res = transpiler.transpile(dummy_program)
     self.assertIn("target triple =", res)
 
+  def test_base_transpiler_formatting_methods(self):
+    transpiler = LLVMTranspiler()
+    transpiler.emit("test")
+    transpiler.newline()
+    transpiler.indent()
+    transpiler.dedent()
+    self.assertIn("target triple =", transpiler.get_output())
+
+  def test_generic_visit(self):
+    transpiler = LLVMTranspiler()
+    try:
+      from parser.ast import ASTNode
+    except ModuleNotFoundError:
+      from src.parser.ast import ASTNode
+
+    class UnknownNode(ASTNode):
+      pass
+
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit(UnknownNode())
+
+  def test_get_llvm_type(self):
+    transpiler = LLVMTranspiler()
+    self.assertEqual(
+        transpiler.get_llvm_type(BasicTypeNode("float")), transpiler.float_type
+    )
+    self.assertEqual(
+        transpiler.get_llvm_type(BasicTypeNode("bool")), transpiler.bool_type
+    )
+    self.assertEqual(
+        transpiler.get_llvm_type(BasicTypeNode("void")), transpiler.void_type
+    )
+    self.assertEqual(transpiler.get_llvm_type(None), transpiler.void_type)
+
+    transpiler.struct_types["MyStruct"] = transpiler.int_type
+    self.assertEqual(
+        transpiler.get_llvm_type(BasicTypeNode("MyStruct")),
+        transpiler.int_type.as_pointer(),
+    )
+
+    with self.assertRaises(NotImplementedError):
+      transpiler.get_llvm_type(BasicTypeNode("UnknownType"))
+
+  def test_match_type(self):
+    transpiler = LLVMTranspiler()
+    import llvmlite.ir as ir
+
+    func_type = ir.FunctionType(transpiler.void_type, [])
+    func = ir.Function(transpiler.module, func_type, name="test_match")
+    entry = func.append_basic_block(name="entry")
+    transpiler.builder = ir.IRBuilder(entry)
+
+    c_int = ir.Constant(transpiler.int_type, 5)
+    matched = transpiler._match_type(c_int, transpiler.float_type)
+    self.assertEqual(matched.type, transpiler.float_type)
+
+    c_float = ir.Constant(transpiler.float_type, 5.0)
+    matched_same = transpiler._match_type(c_float, transpiler.float_type)
+    self.assertEqual(matched_same, c_float)
+
+    matched_unhandled = transpiler._match_type(c_float, transpiler.int_type)
+    self.assertEqual(matched_unhandled, c_float)
+
+  def test_implicit_returns_for_various_types(self):
+    code_int = "func f_int(): int {}"
+    code_float = "func f_float(): float {}"
+    code_bool = "func f_bool(): bool {}"
+    code_struct = "struct Point { var x: int; }\nfunc f_struct(): Point {}"
+
+    self.assertIn("ret i64 0", self._parse_and_transpile(code_int))
+    self.assertIn("ret double", self._parse_and_transpile(code_float))
+    self.assertIn("ret i1 0", self._parse_and_transpile(code_bool))
+    self.assertIn("ret void", self._parse_and_transpile(code_struct))
+
+  def test_block_and_expr_stmt(self):
+    code = """
+    func test_expr_stmt(): int {
+      1 + 2;
+      return 42;
+      3 + 4;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn("ret i64 42", ir_out)
+
+  def test_assignment_error_handling(self):
+    code_undefined = """
+    func test_bad_assign() {
+      x = 10;
+    }
+    """
+    with self.assertRaises(NameError):
+      self._parse_and_transpile(code_undefined)
+
+    transpiler = LLVMTranspiler()
+    import llvmlite.ir as ir
+    try:
+      from parser.ast import AssignmentNode, LiteralNode
+    except ModuleNotFoundError:
+      from src.parser.ast import AssignmentNode, LiteralNode
+
+    func_type = ir.FunctionType(transpiler.void_type, [])
+    func = ir.Function(transpiler.module, func_type, name="test_assign")
+    entry = func.append_basic_block(name="entry")
+    transpiler.builder = ir.IRBuilder(entry)
+
+    bad_assign = AssignmentNode(
+        targets=[LiteralNode(value=10, lit_type="int")],
+        op="=",
+        exprs=[LiteralNode(value=20, lit_type="int")],
+    )
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit(bad_assign)
+
+  def test_explicit_void_return(self):
+    code = """
+    func void_ret() {
+      return;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn("ret void", ir_out)
+
+  def test_literals_and_identifiers(self):
+    code = """
+    func literals(): bool {
+      var f: float = 2.5;
+      var b: bool = true;
+      return b;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn("store double", ir_out)
+
+    transpiler = LLVMTranspiler()
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit_LiteralNode(
+          LiteralNode(value="string_literal", lit_type="string")
+      )
+
+    transpiler.named_values["val"] = 10
+    self.assertEqual(
+        transpiler.visit_IdentifierNode(IdentifierNode(name="val")), 10
+    )
+
+    with self.assertRaises(NameError):
+      transpiler.visit_IdentifierNode(IdentifierNode(name="unknown"))
+
+  def test_binary_operators(self):
+    code = """
+    func ops(a: int, b: float): float {
+      var sub: int = 10 - 5;
+      var mul: int = 2 * 3;
+      var div: int = 10 / 2;
+      var cmp_int: bool = 5 > 2;
+
+      var mix_f1: float = b + a;
+      var mix_f2: float = a + b;
+      var fsub: float = b - 1.0;
+      var fmul: float = b * 2.0;
+      var fdiv: float = b / 2.0;
+      var cmp_f: bool = b <= 1.0;
+      return b;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn("sub i64", ir_out)
+    self.assertIn("mul i64", ir_out)
+    self.assertIn("sdiv i64", ir_out)
+    self.assertIn("icmp sgt", ir_out)
+    self.assertIn("fsub double", ir_out)
+    self.assertIn("fmul double", ir_out)
+    self.assertIn("fdiv double", ir_out)
+    self.assertIn("fcmp ole", ir_out)
+
+    transpiler = LLVMTranspiler()
+    import llvmlite.ir as ir
+    try:
+      from parser.ast import BinaryOpNode, LiteralNode
+    except ModuleNotFoundError:
+      from src.parser.ast import BinaryOpNode, LiteralNode
+
+    func_type = ir.FunctionType(transpiler.void_type, [])
+    func = ir.Function(transpiler.module, func_type, name="test_binop")
+    entry = func.append_basic_block(name="entry")
+    transpiler.builder = ir.IRBuilder(entry)
+
+    bad_op = BinaryOpNode(
+        left=LiteralNode(value=1, lit_type="int"),
+        op="%",
+        right=LiteralNode(value=2, lit_type="int"),
+    )
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit(bad_op)
+
+  def test_var_decl_type_fallbacks(self):
+    transpiler = LLVMTranspiler()
+    import llvmlite.ir as ir
+    try:
+      from parser.ast import VarDeclNode, BasicTypeNode
+    except ModuleNotFoundError:
+      from src.parser.ast import VarDeclNode, BasicTypeNode
+
+    func_type = ir.FunctionType(transpiler.void_type, [])
+    func = ir.Function(transpiler.module, func_type, name="test_vardecl")
+    entry = func.append_basic_block(name="entry")
+    transpiler.builder = ir.IRBuilder(entry)
+
+    node1 = VarDeclNode(is_mutable=True, names=["a"], val_type=BasicTypeNode("int"))
+    transpiler.visit(node1)
+
+    node2 = VarDeclNode(is_mutable=True, names=["b"])
+    node2.type_node = BasicTypeNode("float")
+    transpiler.visit(node2)
+
 
 if __name__ == "__main__":
   unittest.main()

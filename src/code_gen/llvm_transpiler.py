@@ -95,7 +95,6 @@ except ModuleNotFoundError:  # pragma: no cover
 from llvmlite import ir
 try:
   import llvmlite.binding as llvm
-  llvm.initialize()
   llvm.initialize_native_target()
   llvm.initialize_native_asmprinter()
   DEFAULT_TRIPLE = llvm.get_default_triple()
@@ -278,10 +277,14 @@ class LLVMTranspiler(BaseTranspiler):
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> ir.AllocaInstr:
     """Allocates a stack slot for a local variable and stores its initial value."""
-    name = getattr(node, "name", node.names[0] if hasattr(node, "names") and node.names else "")
-    val_type = getattr(node, "val_type", getattr(node, "type_node", None))
-    var_type = self.get_llvm_type(val_type) if val_type else self.int_type
+    val_type = getattr(node, "val_type", None)
+    if val_type is None and hasattr(node, "val_types") and node.val_types:
+      val_type = node.val_types[0]
+    if val_type is None:
+      val_type = getattr(node, "type_node", None)
 
+    name = getattr(node, "name", node.names[0] if hasattr(node, "names") and node.names else "")
+    var_type = self.get_llvm_type(val_type) if val_type else self.int_type
     alloca = self.builder.alloca(var_type, name=name)
 
     init_expr = getattr(node, "expr", getattr(node, "initializer", None))
@@ -324,12 +327,12 @@ class LLVMTranspiler(BaseTranspiler):
   # -------------------------------------------------------------------------
 
   def visit_LiteralNode(self, node: LiteralNode) -> ir.Constant:
-    if isinstance(node.value, int):
+    if isinstance(node.value, bool):
+      return ir.Constant(self.bool_type, int(node.value))
+    elif isinstance(node.value, int):
       return ir.Constant(self.int_type, node.value)
     elif isinstance(node.value, float):
       return ir.Constant(self.float_type, node.value)
-    elif isinstance(node.value, bool):
-      return ir.Constant(self.bool_type, int(node.value))
 
     raise NotImplementedError(f"Unsupported literal type: {type(node.value)}")
 
@@ -337,7 +340,7 @@ class LLVMTranspiler(BaseTranspiler):
     """Loads and returns the value stored in an identifier's stack location."""
     if node.name in self.named_values:
       val_or_ptr = self.named_values[node.name]
-      if isinstance(val_or_ptr.type, ir.PointerType):
+      if hasattr(val_or_ptr, "type") and isinstance(val_or_ptr.type, ir.PointerType):
         return self.builder.load(val_or_ptr, name=f"{node.name}_val")
       return val_or_ptr
 
