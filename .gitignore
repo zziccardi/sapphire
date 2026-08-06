@@ -10,7 +10,10 @@ tools/vscode-extension/sapphire-*.vsix
 .DS_Store
 .antlr/
 .coverage
+
+# Ignore machine-specific files and directories.
 .vscode/
+pyrightconfig.json
 
 *__pycache__*
 
