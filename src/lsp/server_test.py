@@ -3,28 +3,17 @@ from unittest.mock import MagicMock, patch
 from lsprotocol.types import SemanticTokensParams
 
 # Import server components
-try:
-  from lsp.server import (
-      SapphireLanguageServer,
-      ANTLRDiagnosticListener,
-      validate_source,
-      did_open,
-      did_change,
-      did_save,
-      semantic_tokens_full,
-      main,
-  )
-except ImportError:
-  from src.lsp.server import (
-      SapphireLanguageServer,
-      ANTLRDiagnosticListener,
-      validate_source,
-      did_open,
-      did_change,
-      did_save,
-      semantic_tokens_full,
-      main,
-  )
+from src.lsp.server import (
+    SapphireLanguageServer,
+    ANTLRDiagnosticListener,
+    validate_source,
+    did_open,
+    did_change,
+    did_save,
+    semantic_tokens_full,
+    main,
+)
+
 
 
 class TestLSPServer(unittest.TestCase):
@@ -131,10 +120,8 @@ class TestLSPServer(unittest.TestCase):
     self.assertEqual(call_arg.diagnostics, [])
 
     # 4. did_change_watched_files
-    try:
-      from lsp.server import did_change_watched_files
-    except ImportError:  # pragma: no cover
-      from src.lsp.server import did_change_watched_files
+    from src.lsp.server import did_change_watched_files
+
     did_change_watched_files(self.ls, params)
 
   def test_semantic_tokens_full(self):
@@ -644,8 +631,9 @@ class TestLSPServer(unittest.TestCase):
 
   def test_hover_and_completion_edge_cases(self):
     from lsprotocol.types import HoverParams, CompletionParams, Position, TextDocumentIdentifier
-    from parser.ast import ASTNode, IdentifierNode, ParameterNode, StructFieldNode, VarDeclNode, FuncDeclNode, BasicTypeNode
-    from semantics.symbol_table import SymbolTable, VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, StructType, StructField, StructMethod, FunctionType
+    from src.parser.ast import ASTNode, IdentifierNode, ParameterNode, StructFieldNode, VarDeclNode, FuncDeclNode, BasicTypeNode
+    from src.semantics.symbol_table import SymbolTable, VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, StructType, StructField, StructMethod, FunctionType
+
     from src.lsp.semantic_tokens import find_node_at_position
 
     # 1. Test find_node_at_position edge cases
@@ -731,7 +719,8 @@ class TestLSPServer(unittest.TestCase):
       self.assertIn("(struct)", res.contents.value)
 
       # Case E: sym is TraitSymbol
-      from semantics.symbol_table import TraitType
+      from src.semantics.symbol_table import TraitType
+
       sym_trait = TraitSymbol("x", TraitType("x"))
       sym_trait.symbol_type = "trait_type"
       sym_table.current_scope.symbols["x"] = sym_trait
@@ -804,12 +793,11 @@ class TestLSPServer(unittest.TestCase):
       mock_if_node.init_binding.let_name_column = 1
       mock_if_node.init_binding.let_name_length = 5
       mock_if_node.init_binding.expr = MagicMock()
-      try:
-        from lsp.semantic_tokens import SemanticTokensTypeChecker
-      except ImportError:
-        from src.lsp.semantic_tokens import SemanticTokensTypeChecker
+      from src.lsp.semantic_tokens import SemanticTokensTypeChecker
+
       checker = SemanticTokensTypeChecker()
-      from semantics.symbol_table import PrimitiveType
+      from src.semantics.symbol_table import PrimitiveType
+
       with patch.object(checker, "visit", return_value=PrimitiveType("int")):
         with patch.object(checker, "symbol_table") as mock_st:
           checker.visit_IfNode(mock_if_node)
@@ -858,10 +846,8 @@ class TestLSPServer(unittest.TestCase):
       self.assertEqual(len(res_comp.items), 2) # f1 and m1, __init__ skipped
       self.assertIsNone(next((item for item in res_comp.items if item.label == "__init__"), None))
 
-      try:
-        from semantics.symbol_table import StringType, VariableSymbol
-      except ImportError:
-        from src.semantics.symbol_table import StringType, VariableSymbol
+      from src.semantics.symbol_table import StringType, VariableSymbol
+
       sym_str = VariableSymbol("str_var", StringType(), is_mutable=False)
       sym_table.current_scope.symbols["str_var"] = sym_str
 
@@ -948,10 +934,8 @@ class TestLSPServer(unittest.TestCase):
   def test_enum_lsp_hover_and_completion(self):
     """Verifies LSP hover and completion for enums and enum members."""
     from lsprotocol.types import HoverParams, CompletionParams, TextDocumentIdentifier, Position
-    try:
-      from lsp.server import hover, completion, validate_source
-    except ImportError:  # pragma: no cover
-      from src.lsp.server import hover, completion, validate_source
+    from src.lsp.server import hover, completion, validate_source
+
 
     doc_uri = "file:///enum_test.sp"
     doc_text = """// Cardinal Directions
@@ -1060,7 +1044,8 @@ func test() {
 
     # 2. Hover on @extern
     from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position, CompletionParams
-    from lsp.server import hover, completion
+    from src.lsp.server import hover, completion
+
 
     mock_doc = MagicMock()
     mock_doc.uri = doc_uri
@@ -1184,10 +1169,8 @@ func main() {
   def test_map_for_loop_lsp_completion(self):
     """Verifies LSP completion for key_var and val_var inside map for loops."""
     from lsprotocol.types import CompletionParams, Position, TextDocumentIdentifier
-    try:
-      from lsp.server import completion
-    except ImportError:
-      from src.lsp.server import completion
+    from src.lsp.server import completion
+
 
     doc_uri = "file:///map_completion.sp"
     doc_text = """
@@ -1232,12 +1215,8 @@ func main() {
   def test_impl_block_node_position_missing_fallback(self):
     """Verifies hover on ImplBlockNode gracefully handles missing position metadata."""
     from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
-    try:
-      from lsp.server import hover
-      from parser.ast import ImplBlockNode
-    except ImportError:
-      from src.lsp.server import hover
-      from src.parser.ast import ImplBlockNode
+    from src.lsp.server import hover
+    from src.parser.ast import ImplBlockNode
 
     doc_uri = "file:///impl_fallback.sp"
     doc_text = """

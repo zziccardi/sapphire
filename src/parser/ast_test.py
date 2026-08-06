@@ -6,22 +6,14 @@ serialization to dictionaries work correctly.
 
 import unittest
 
-try:
-  from parser.ast import (
-      BasicTypeNode,
-      LiteralNode,
-      VarDeclNode,
-      BinaryOpNode,
-      IdentifierNode,
-  )
-except ModuleNotFoundError:
-  from src.parser.ast import (
-      BasicTypeNode,
-      LiteralNode,
-      VarDeclNode,
-      BinaryOpNode,
-      IdentifierNode,
-  )
+from src.parser.ast import (
+    BasicTypeNode,
+    LiteralNode,
+    VarDeclNode,
+    BinaryOpNode,
+    IdentifierNode,
+)
+
 
 
 class TestASTNodes(unittest.TestCase):
@@ -37,10 +29,8 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node_dict["name"], "int")
 
   def test_array_type_node(self):
-    try:
-      from parser.ast import ArrayTypeNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ArrayTypeNode
+    from src.parser.ast import ArrayTypeNode
+
     node = ArrayTypeNode(BasicTypeNode("int"))
     self.assertEqual(node.element_type.name, "int")
     node_dict = node.to_dict()
@@ -94,10 +84,8 @@ class TestASTNodes(unittest.TestCase):
 
   def test_list_serialization_and_repr(self):
     """Verifies that lists containing AST nodes and non-AST elements serialize, and repr works."""
-    try:
-      from parser.ast import ProgramNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ProgramNode
+    from src.parser.ast import ProgramNode
+
 
     node = ProgramNode(declarations=[BasicTypeNode("int"), "not-an-ast-node"])
     node_dict = node.to_dict()
@@ -117,18 +105,12 @@ class TestASTNodes(unittest.TestCase):
 
   def test_node_properties_and_backward_compatibility_to_dict(self):
     """Verifies backward compatible properties and to_dict methods on AST nodes."""
-    try:
-      from parser.ast import (
-          ASTNode, FunctionTypeNode, FuncDeclNode, TraitMemberNode, VarDeclNode,
-          AssignmentNode, ReturnNode, IdentifierNode, LiteralNode, BasicTypeNode,
-          ExprStmtNode
-      )
-    except ModuleNotFoundError:
-      from src.parser.ast import (
-          ASTNode, FunctionTypeNode, FuncDeclNode, TraitMemberNode, VarDeclNode,
-          AssignmentNode, ReturnNode, IdentifierNode, LiteralNode, BasicTypeNode,
-          ExprStmtNode
-      )
+    from src.parser.ast import (
+        ASTNode, FunctionTypeNode, FuncDeclNode, TraitMemberNode, VarDeclNode,
+        AssignmentNode, ReturnNode, IdentifierNode, LiteralNode, BasicTypeNode,
+        ExprStmtNode
+    )
+
 
     fn_type = FunctionTypeNode([BasicTypeNode("int")], BasicTypeNode("float"))
     self.assertEqual(fn_type.return_type.name, "float")
@@ -190,10 +172,8 @@ class TestASTNodes(unittest.TestCase):
 
   def test_struct_decl_node_parent_name(self):
     """Verifies StructDeclNode parent_name and parent_names initialization and property setter."""
-    try:
-      from parser.ast import StructDeclNode
-    except ModuleNotFoundError:
-      from src.parser.ast import StructDeclNode
+    from src.parser.ast import StructDeclNode
+
 
     node1 = StructDeclNode("Child", parent_name="Parent1")
     self.assertEqual(node1.parent_name, "Parent1")

@@ -7,14 +7,10 @@ by the Language Server Protocol.
 
 from typing import List, Tuple, Optional
 
-try:
-  from parser.ast import ASTNode
-  from semantics.type_checker import TypeChecker
-  from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType, ModuleSymbol, ModuleType
-except ImportError:  # pragma: no cover
-  from src.parser.ast import ASTNode
-  from src.semantics.type_checker import TypeChecker
-  from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType, ModuleSymbol, ModuleType
+from src.parser.ast import ASTNode
+from src.semantics.type_checker import TypeChecker
+from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, EnumSymbol, EnumType, ModuleSymbol, ModuleType
+
 
 # Legend mappings for the LSP client
 TOKEN_TYPES = [
@@ -317,10 +313,8 @@ class SemanticTokensTypeChecker(TypeChecker):
     if not is_method:
       sym = self.symbol_table.lookup(node.name)
       if sym:
-        try:
-          from semantics.symbol_table import FunctionType
-        except ImportError:  # pragma: no cover
-          from src.semantics.symbol_table import FunctionType
+        from src.semantics.symbol_table import FunctionType
+
         if isinstance(sym.symbol_type, FunctionType) and self.doc_text:
           comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
           if comments:
@@ -338,10 +332,8 @@ class SemanticTokensTypeChecker(TypeChecker):
     super().visit_ImplMemberNode(node)
     if self.current_struct and node.func_decl.name in self.current_struct.methods:
       method_type = self.current_struct.methods[node.func_decl.name].method_type
-      try:
-        from semantics.symbol_table import FunctionType
-      except ImportError:  # pragma: no cover
-        from src.semantics.symbol_table import FunctionType
+      from src.semantics.symbol_table import FunctionType
+
       if isinstance(method_type, FunctionType) and self.doc_text:
         comments = extract_comments_above(self.doc_text, getattr(node.func_decl, "start_line", None))
         if comments:
@@ -378,10 +370,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.add_token(node.init_binding.let_name_line, node.init_binding.let_name_column, node.init_binding.let_name_length, "variable", mods)
       # Calculate unwrapped type for hover info
       expr_type = self.visit(node.init_binding.expr)
-      try:
-        from semantics.symbol_table import OptionalType
-      except ImportError:  # pragma: no cover
-        from src.semantics.symbol_table import OptionalType
+      from src.semantics.symbol_table import OptionalType
+
       if node.init_binding.is_unwrap and isinstance(expr_type, OptionalType):
         unwrapped_type = expr_type.base_type
       else:
@@ -397,10 +387,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.add_token(node.init_binding.let_name_line, node.init_binding.let_name_column, node.init_binding.let_name_length, "variable", mods)
       # Calculate unwrapped type for hover info
       expr_type = self.visit(node.init_binding.expr)
-      try:
-        from semantics.symbol_table import OptionalType
-      except ImportError:  # pragma: no cover
-        from src.semantics.symbol_table import OptionalType
+      from src.semantics.symbol_table import OptionalType
+
       if node.init_binding.is_unwrap and isinstance(expr_type, OptionalType):
         unwrapped_type = expr_type.base_type
       else:
@@ -427,10 +415,8 @@ class SemanticTokensTypeChecker(TypeChecker):
 
     # Calculate loop var element type for hover info
     iter_type = self.visit(node.iterable)
-    try:
-      from semantics.symbol_table import ArrayType, MapType, PrimitiveType
-    except ImportError:  # pragma: no cover
-      from src.semantics.symbol_table import ArrayType, MapType, PrimitiveType
+    from src.semantics.symbol_table import ArrayType, MapType, PrimitiveType
+
     if isinstance(iter_type, ArrayType):
       elem_type = iter_type.element_type
     elif isinstance(iter_type, MapType):
@@ -490,10 +476,8 @@ class SemanticTokensTypeChecker(TypeChecker):
   def visit_BasicTypeNode(self, node):
     # Type reference
     if node.name not in ("int", "float", "bool", "none", "void"):
-      try:
-        from semantics.symbol_table import TraitType, GenericTypeParameter
-      except ImportError:  # pragma: no cover
-        from src.semantics.symbol_table import TraitType, GenericTypeParameter
+      from src.semantics.symbol_table import TraitType, GenericTypeParameter
+
       resolved = self.symbol_table.lookup_type(node.name)
       if resolved and isinstance(resolved, TraitType):
         self.add_token(node.name_line, node.name_column, node.name_length, "interface")
@@ -503,6 +487,7 @@ class SemanticTokensTypeChecker(TypeChecker):
         self.add_token(node.name_line, node.name_column, node.name_length, "struct")
     else:
       self.add_token(node.name_line, node.name_column, node.name_length, "type")
+
 
     for arg in getattr(node, "type_args", []):  # pragma: no cover
       self.visit(arg)

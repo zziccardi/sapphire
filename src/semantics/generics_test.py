@@ -3,22 +3,14 @@
 import unittest
 from antlr4 import InputStream, CommonTokenStream
 
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from semantics.type_checker import TypeChecker, SemanticError
-  from semantics.symbol_table import GenericTypeParameter, StructType, TraitType, PrimitiveType
-  from code_gen.python_transpiler import PythonTranspiler
-  from code_gen.lua_transpiler import LuaTranspiler
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.semantics.symbol_table import GenericTypeParameter, StructType, TraitType, PrimitiveType
-  from src.code_gen.python_transpiler import PythonTranspiler
-  from src.code_gen.lua_transpiler import LuaTranspiler
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.semantics.type_checker import TypeChecker, SemanticError
+from src.semantics.symbol_table import GenericTypeParameter, StructType, TraitType, PrimitiveType
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.code_gen.lua_transpiler import LuaTranspiler
+
 
 
 class TestGenerics(unittest.TestCase):
@@ -213,10 +205,8 @@ class TestGenerics(unittest.TestCase):
     """Verifies AST substitution on None and non-generic BasicTypeNode."""
     tc = TypeChecker()
     self.assertIsNone(tc._substitute_ast(None, {}))
-    try:
-      from parser.ast import BasicTypeNode
-    except ImportError:  # pragma: no cover
-      from src.parser.ast import BasicTypeNode
+    from src.parser.ast import BasicTypeNode
+
     btn = BasicTypeNode("int")
     sub = tc._substitute_ast(btn, {})
     self.assertEqual(sub.name, "int")
@@ -245,10 +235,8 @@ class TestGenerics(unittest.TestCase):
     self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))
 
   def test_mangle_type_name_complex_types(self):
-    try:
-      from semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType, StringType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType, StringType
+    from src.semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType, StringType
+
     tc = TypeChecker()
     arr_t = ArrayType(PrimitiveType("int"))
     map_t = MapType(StringType(), PrimitiveType("int"))

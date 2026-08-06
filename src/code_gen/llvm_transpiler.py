@@ -57,40 +57,23 @@ Sample generated LLVM IR:
 
 from typing import Any, Dict, Optional
 
-try:
-  from code_gen.base_transpiler import BaseTranspiler
-  from parser.ast import (
-      ASTNode,
-      AssignmentNode,
-      BasicTypeNode,
-      BinaryOpNode,
-      BlockNode,
-      ExprStmtNode,
-      FuncDeclNode,
-      IdentifierNode,
-      LiteralNode,
-      ProgramNode,
-      ReturnNode,
-      StructDeclNode,
-      VarDeclNode,
-  )
-except ModuleNotFoundError:  # pragma: no cover
-  from src.code_gen.base_transpiler import BaseTranspiler
-  from src.parser.ast import (
-      ASTNode,
-      AssignmentNode,
-      BasicTypeNode,
-      BinaryOpNode,
-      BlockNode,
-      ExprStmtNode,
-      FuncDeclNode,
-      IdentifierNode,
-      LiteralNode,
-      ProgramNode,
-      ReturnNode,
-      StructDeclNode,
-      VarDeclNode,
-  )
+from src.code_gen.base_transpiler import BaseTranspiler
+from src.parser.ast import (
+    ASTNode,
+    AssignmentNode,
+    BasicTypeNode,
+    BinaryOpNode,
+    BlockNode,
+    ExprStmtNode,
+    FuncDeclNode,
+    IdentifierNode,
+    LiteralNode,
+    ProgramNode,
+    ReturnNode,
+    StructDeclNode,
+    VarDeclNode,
+)
+
 
 from llvmlite import ir
 try:

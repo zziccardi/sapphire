@@ -8,74 +8,40 @@ Sapphire language.
 import copy
 from typing import Any, Dict, List, Optional
 
-try:
-  from parser.ast import *
-  from semantics.symbol_table import (
-      SymbolTable,
-      Type,
-      PrimitiveType,
-      StringType,
-      OptionalType,
-      FunctionType,
-      MultiReturnType,
-      StructField,
-      StructMethod,
-      StructType,
-      TraitType,
-      EnumType,
-      NoneType,
-      InferredType,
-      ArrayType,
-      MapType,
-      ArenaType,
-      RangeType,
-      ModuleType,
-      GenericTypeParameter,
-      VariableSymbol,
-      FunctionSymbol,
-      StructSymbol,
-      TraitSymbol,
-      EnumSymbol,
-      ModuleSymbol,
-      STRING_METHODS,
-      ARRAY_METHODS,
-      MAP_METHODS,
-  )
-  from cli.diagnostics import format_diagnostic
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.ast import *
-  from src.semantics.symbol_table import (
-      SymbolTable,
-      Type,
-      PrimitiveType,
-      StringType,
-      OptionalType,
-      FunctionType,
-      MultiReturnType,
-      StructField,
-      StructMethod,
-      StructType,
-      TraitType,
-      EnumType,
-      NoneType,
-      InferredType,
-      ArrayType,
-      MapType,
-      ArenaType,
-      RangeType,
-      ModuleType,
-      GenericTypeParameter,
-      VariableSymbol,
-      FunctionSymbol,
-      StructSymbol,
-      TraitSymbol,
-      EnumSymbol,
-      ModuleSymbol,
-      STRING_METHODS,
-      ARRAY_METHODS,
-      MAP_METHODS,
-  )
-  from src.cli.diagnostics import format_diagnostic
+from src.parser.ast import *
+from src.semantics.symbol_table import (
+    SymbolTable,
+    Type,
+    PrimitiveType,
+    StringType,
+    OptionalType,
+    FunctionType,
+    MultiReturnType,
+    StructField,
+    StructMethod,
+    StructType,
+    TraitType,
+    EnumType,
+    NoneType,
+    InferredType,
+    ArrayType,
+    MapType,
+    ArenaType,
+    RangeType,
+    ModuleType,
+    GenericTypeParameter,
+    VariableSymbol,
+    FunctionSymbol,
+    StructSymbol,
+    TraitSymbol,
+    EnumSymbol,
+    ModuleSymbol,
+    STRING_METHODS,
+    ARRAY_METHODS,
+    MAP_METHODS,
+)
+from src.cli.diagnostics import format_diagnostic
+
 
 
 class SemanticError(Exception):
@@ -346,14 +312,10 @@ class TypeChecker:
         try:
           with open(target_file, "r", encoding="utf-8") as f:
             sub_code = f.read()
-          try:
-            from parser.gen.SapphireLexer import SapphireLexer
-            from parser.gen.SapphireParser import SapphireParser
-            from parser.ast_builder import ASTBuilder
-          except ImportError:  # pragma: no cover
-            from src.parser.gen.SapphireLexer import SapphireLexer
-            from src.parser.gen.SapphireParser import SapphireParser
-            from src.parser.ast_builder import ASTBuilder
+          from src.parser.gen.SapphireLexer import SapphireLexer
+          from src.parser.gen.SapphireParser import SapphireParser
+          from src.parser.ast_builder import ASTBuilder
+
           from antlr4 import InputStream, CommonTokenStream
 
           sub_lexer = SapphireLexer(InputStream(sub_code))
@@ -2331,10 +2293,8 @@ class TypeChecker:
     self.symbol_table.enter_scope()
 
     expected_func = self.expected_type
-    try:
-      from semantics.symbol_table import OptionalType
-    except ImportError:  # pragma: no cover
-      from src.semantics.symbol_table import OptionalType
+    from src.semantics.symbol_table import OptionalType
+
     if isinstance(expected_func, OptionalType):
       expected_func = expected_func.base_type
 

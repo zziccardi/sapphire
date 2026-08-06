@@ -9,12 +9,9 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
-try:
-  from parser.ast import *
-  from code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.ast import *
-  from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+from src.parser.ast import *
+from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+
 
 
 # ==========================================

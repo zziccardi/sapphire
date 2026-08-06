@@ -10,18 +10,12 @@ import os
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from semantics.type_checker import TypeChecker, SemanticError
-  from cli.diagnostics import format_diagnostic
-except ModuleNotFoundError:
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.cli.diagnostics import format_diagnostic
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.semantics.type_checker import TypeChecker, SemanticError
+from src.cli.diagnostics import format_diagnostic
+
 
 
 class CustomErrorListener(ErrorListener):

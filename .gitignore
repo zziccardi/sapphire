@@ -13,7 +13,6 @@ tools/vscode-extension/sapphire-*.vsix
 
 # Ignore machine-specific files and directories.
 .vscode/
-pyrightconfig.json
 
 *__pycache__*
 

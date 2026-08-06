@@ -11,24 +11,15 @@ import tempfile
 import unittest
 from antlr4 import InputStream, CommonTokenStream
 
-try:
-  from parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from code_gen.python_transpiler import PythonTranspiler, Transpiler
-  from code_gen.base_transpiler import get_default_value_for_type_node
-  from code_gen.transpiler import transpile_file
-  from semantics.type_checker import TypeChecker
-except ModuleNotFoundError:
-  from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
-  from src.code_gen.base_transpiler import get_default_value_for_type_node
-  from src.code_gen.transpiler import transpile_file
-  from src.semantics.type_checker import TypeChecker
+from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
+from src.code_gen.base_transpiler import get_default_value_for_type_node
+from src.code_gen.transpiler import transpile_file
+from src.semantics.type_checker import TypeChecker
+
 
 
 class TestPythonTranspiler(unittest.TestCase):
@@ -376,10 +367,8 @@ class TestPythonTranspiler(unittest.TestCase):
 
   def test_direct_transpiler_visitors(self):
     """Directly tests transpiler visitors that are not invoked during standard program traversal."""
-    try:
-      from parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
-    except ModuleNotFoundError:
-      from src.parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
+    from src.parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
+
 
     transpiler = Transpiler()
 
@@ -952,10 +941,8 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertEqual(self._transpile_and_run(comp_code, "test_comp(1)"), 3)
 
     # Direct visitor calls
-    try:
-      from parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
-    except ModuleNotFoundError:
-      from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+    from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+
 
     pt = PythonTranspiler()
     pt.visit(MatchExprNode(LiteralNode(1, "int"), [MatchCaseNode(EllipsisPatternNode(), LiteralNode(2, "int"))]))
@@ -1449,16 +1436,11 @@ class TestSharedFixtures(unittest.TestCase):
   def _transpile_and_exec(self, source: str) -> dict:
     """Transpile *source* to Python, exec it, return {fn_name: result}."""
     input_stream = InputStream(source)
-    try:
-      from parser.gen.SapphireLexer import SapphireLexer as _Lexer
-      from parser.gen.SapphireParser import SapphireParser as _Parser
-      from parser.ast_builder import ASTBuilder as _Builder
-      from semantics.type_checker import TypeChecker as _Checker
-    except ModuleNotFoundError:
-      from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
-      from src.parser.gen.SapphireParser import SapphireParser as _Parser
-      from src.parser.ast_builder import ASTBuilder as _Builder
-      from src.semantics.type_checker import TypeChecker as _Checker
+    from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
+    from src.parser.gen.SapphireParser import SapphireParser as _Parser
+    from src.parser.ast_builder import ASTBuilder as _Builder
+    from src.semantics.type_checker import TypeChecker as _Checker
+
 
     lexer = _Lexer(input_stream)
     stream = CommonTokenStream(lexer)

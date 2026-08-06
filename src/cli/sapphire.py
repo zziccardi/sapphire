@@ -10,16 +10,15 @@ import shutil
 import sys
 import subprocess
 
-# Ensure `src` directory is in `sys.path` so submodules like `code_gen`, `parser`,
-# and `semantics` can be imported when running `sapphire` directly.
 src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+root_dir = os.path.abspath(os.path.join(src_dir, ".."))
+if root_dir not in sys.path:
+  sys.path.insert(0, root_dir)
 if src_dir not in sys.path:
   sys.path.insert(0, src_dir)
 
-try:
-  from code_gen.transpiler import transpile_file
-except ModuleNotFoundError:  # pragma: no cover
-  from src.code_gen.transpiler import transpile_file
+from src.code_gen.transpiler import transpile_file
+
 
 
 def run_command(args):
@@ -69,10 +68,7 @@ def build_command(args):
 
 def test_command(args):
   """Handles `test` subcommand: discovers and executes Sapphire tests."""
-  try:
-    from cli.test_runner import run_tests
-  except ModuleNotFoundError:  # pragma: no cover
-    from src.cli.test_runner import run_tests
+  from src.cli.test_runner import run_tests
 
   target = getattr(args, "target", "python").lower()
   source_path = getattr(args, "source", ".")

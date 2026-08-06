@@ -6,36 +6,21 @@ shadowing, and error handling for the Sapphire symbol table.
 
 import unittest
 
-try:
-  from semantics.symbol_table import (
-      SymbolTable,
-      PrimitiveType,
-      StringType,
-      OptionalType,
-      ArrayType,
-      NoneType,
-      VariableSymbol,
-      FunctionType,
-      StructType,
-      TraitType,
-      EnumType,
-      Type,
-  )
-except ModuleNotFoundError:
-  from src.semantics.symbol_table import (
-      SymbolTable,
-      PrimitiveType,
-      StringType,
-      OptionalType,
-      ArrayType,
-      NoneType,
-      VariableSymbol,
-      FunctionType,
-      StructType,
-      TraitType,
-      EnumType,
-      Type,
-  )
+from src.semantics.symbol_table import (
+    SymbolTable,
+    PrimitiveType,
+    StringType,
+    OptionalType,
+    ArrayType,
+    NoneType,
+    VariableSymbol,
+    FunctionType,
+    StructType,
+    TraitType,
+    EnumType,
+    Type,
+)
+
 
 
 class TestSymbolTable(unittest.TestCase):
@@ -186,10 +171,8 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_multi_return_type_methods(self):
     """Verifies MultiReturnType repr, equality, and FunctionType.return_types property."""
-    try:
-      from semantics.symbol_table import MultiReturnType, FunctionType, PrimitiveType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import MultiReturnType, FunctionType, PrimitiveType
+    from src.semantics.symbol_table import MultiReturnType, FunctionType, PrimitiveType
+
 
     m1 = MultiReturnType([PrimitiveType("float"), PrimitiveType("float")])
     m2 = MultiReturnType([PrimitiveType("float"), PrimitiveType("float")])
@@ -211,10 +194,8 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_module_symbol_and_type(self):
     """Verifies ModuleType repr and ModuleSymbol lookup_export."""
-    try:
-      from semantics.symbol_table import ModuleType, ModuleSymbol, PrimitiveType, VariableSymbol
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import ModuleType, ModuleSymbol, PrimitiveType, VariableSymbol
+    from src.semantics.symbol_table import ModuleType, ModuleSymbol, PrimitiveType, VariableSymbol
+
 
     mod_t = ModuleType("lib.love2d.enums")
     self.assertEqual(repr(mod_t), "module(lib.love2d.enums)")
@@ -226,10 +207,8 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_map_type_methods(self):
     """Verifies MapType __eq__, __repr__, and is_compatible methods."""
-    try:
-      from semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType
+    from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType
+
 
     m1 = MapType(StringType(), PrimitiveType("int"))
     m2 = MapType(StringType(), PrimitiveType("int"))
@@ -254,10 +233,8 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_struct_implements_trait(self):
     """Verifies StructType.implements_trait nominal and structural trait checks."""
-    try:
-      from semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType
+    from src.semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType
+
 
     st = StructType("MyStruct")
     tr = TraitType("MyTrait")
@@ -281,10 +258,8 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_struct_type_parent_name_and_get_method(self):
     """Verifies StructType parent_name getter/setter and recursive get_method with parent lookup."""
-    try:
-      from semantics.symbol_table import StructType, StructMethod, FunctionType, PrimitiveType, SymbolTable
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import StructType, StructMethod, FunctionType, PrimitiveType, SymbolTable
+    from src.semantics.symbol_table import StructType, StructMethod, FunctionType, PrimitiveType, SymbolTable
+
 
     st1 = StructType("Child", parent_name="Parent1")
     self.assertEqual(st1.parent_name, "Parent1")

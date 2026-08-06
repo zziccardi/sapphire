@@ -12,26 +12,16 @@ from typing import Optional
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
-try:
-  from parser.ast import *
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from semantics.type_checker import TypeChecker, SemanticError
-  from code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
-  from code_gen.lua_transpiler import LuaTranspiler
-  from code_gen.source_map import SourceMapBuilder
-  from cli.diagnostics import format_diagnostic
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.ast import *
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
-  from src.code_gen.lua_transpiler import LuaTranspiler
-  from src.code_gen.source_map import SourceMapBuilder
-  from src.cli.diagnostics import format_diagnostic
+from src.parser.ast import *
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.semantics.type_checker import TypeChecker, SemanticError
+from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.source_map import SourceMapBuilder
+from src.cli.diagnostics import format_diagnostic
+
 
 
 def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:

@@ -12,10 +12,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 if script_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, script_dir)
 
-try:
-  from code_gen.transpiler import transpile_file
-except ModuleNotFoundError:  # pragma: no cover
-  from src.code_gen.transpiler import transpile_file
+from src.code_gen.transpiler import transpile_file
+
 
 
 def main():

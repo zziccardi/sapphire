@@ -12,24 +12,15 @@ from typing import Any, Dict, List, Optional, Set
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
-try:
-  from parser.ast import *
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from semantics.type_checker import TypeChecker, SemanticError
-  from semantics.symbol_table import MapType, RangeType
-  from code_gen.source_map import SourceMapBuilder
-  from code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.ast import *
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.semantics.symbol_table import MapType, RangeType
-  from src.code_gen.source_map import SourceMapBuilder
-  from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+from src.parser.ast import *
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.semantics.type_checker import TypeChecker, SemanticError
+from src.semantics.symbol_table import MapType, RangeType
+from src.code_gen.source_map import SourceMapBuilder
+from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+
 
 
 # ==========================================
