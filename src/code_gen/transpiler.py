@@ -21,6 +21,7 @@ try:
   from code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
   from code_gen.lua_transpiler import LuaTranspiler
   from code_gen.source_map import SourceMapBuilder
+  from cli.diagnostics import format_diagnostic
 except ModuleNotFoundError:  # pragma: no cover
   from src.parser.ast import *
   from src.parser.gen.SapphireLexer import SapphireLexer
@@ -30,6 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover
   from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
   from src.code_gen.lua_transpiler import LuaTranspiler
   from src.code_gen.source_map import SourceMapBuilder
+  from src.cli.diagnostics import format_diagnostic
 
 
 def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
@@ -71,16 +73,29 @@ def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
 class CustomErrorListener(ErrorListener):
   """Custom ANTLR error listener to track and report syntax errors."""
 
-  def __init__(self, quiet: bool = False):
+  def __init__(self, file_path: Optional[str] = None, source_content: Optional[Any] = None, quiet: bool = False):
     super().__init__()
     self.errors = 0
+    self.file_path = file_path
+    self.source_content = source_content
     self.quiet = quiet
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1
     if not self.quiet:
       custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
-      print(f"Syntax Error: Line {line}:{column} - {custom_msg}", file=sys.stderr)
+      length = len(offendingSymbol.text) if (offendingSymbol and hasattr(offendingSymbol, "text") and offendingSymbol.text) else 1
+      source_content = str(self.source_content) if self.source_content is not None else None
+      diag = format_diagnostic(
+          error_type="Syntax Error",
+          message=custom_msg,
+          file_path=self.file_path,
+          line=line,
+          column=column,
+          length=length,
+          source_content=source_content,
+      )
+      print(diag, file=sys.stderr)
 
 
 def transpile_file(
@@ -133,7 +148,7 @@ def transpile_file(
       print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
 
-  error_listener = CustomErrorListener(quiet=quiet)
+  error_listener = CustomErrorListener(file_path=input_file, source_content=input_stream, quiet=quiet)
 
   # 1. Lexical Analysis
   lexer = SapphireLexer(input_stream)
@@ -165,7 +180,7 @@ def transpile_file(
   # 4. Semantic Analysis & Type Checking
   if not quiet:
     print("Running Semantic Analysis & Type Checker...")
-  checker = TypeChecker(source_file_path=input_file)
+  checker = TypeChecker(source_file_path=input_file, source_content=str(input_stream))
   try:
     checker.check(ast)
   except SemanticError as e:

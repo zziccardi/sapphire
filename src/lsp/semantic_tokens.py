@@ -106,7 +106,7 @@ class SemanticTokensTypeChecker(TypeChecker):
   """Subclass of TypeChecker that extracts semantic tokens during analysis."""
 
   def __init__(self, doc_text: Optional[str] = None):
-    super().__init__()
+    super().__init__(source_content=doc_text)
     self.doc_text = doc_text
     # List of raw tokens: (line, column, length, token_type, modifier_bitmask)
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
@@ -145,19 +145,19 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.node_types[node] = res
     return res
 
-  def error(self, message: str) -> None:
-    # Use position from current_node if available
-    node = self.current_node
+  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
+    # Use position from node or current_node if available
+    target_node = node or self.current_node
     line = 1
     col = 0
     length = 1
-    if node is not None:
-      if getattr(node, "start_line", None) is not None:
-        line = node.start_line
-      if getattr(node, "start_column", None) is not None:
-        col = node.start_column
-      if getattr(node, "length", None) is not None:
-        length = node.length
+    if target_node is not None:
+      if getattr(target_node, "start_line", None) is not None:
+        line = target_node.start_line
+      if getattr(target_node, "start_column", None) is not None:
+        col = target_node.start_column
+      if getattr(target_node, "length", None) is not None:
+        length = target_node.length
 
     diagnostic = {
         "range": {
@@ -169,7 +169,7 @@ class SemanticTokensTypeChecker(TypeChecker):
         "source": "sapphire-semantic",
     }
     self.lsp_errors.append(diagnostic)
-    super().error(message)
+    super().error(message, node=target_node)
 
   def add_token(self, line: Optional[int], col: Optional[int], length: Optional[int], token_type: str, modifiers: int = 0) -> None:
     """Adds a raw semantic token if the positioning info is valid."""

@@ -15,23 +15,38 @@ try:
   from parser.gen.SapphireParser import SapphireParser
   from parser.ast_builder import ASTBuilder
   from semantics.type_checker import TypeChecker, SemanticError
+  from cli.diagnostics import format_diagnostic
 except ModuleNotFoundError:
   from src.parser.gen.SapphireLexer import SapphireLexer
   from src.parser.gen.SapphireParser import SapphireParser
   from src.parser.ast_builder import ASTBuilder
   from src.semantics.type_checker import TypeChecker, SemanticError
+  from src.cli.diagnostics import format_diagnostic
 
 
 class CustomErrorListener(ErrorListener):
   """Custom ANTLR error listener to track and report syntax errors."""
 
-  def __init__(self):
+  def __init__(self, file_path=None, source_content=None):
     super().__init__()
     self.errors = 0
+    self.file_path = file_path
+    self.source_content = source_content
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1
-    print(f"Syntax Error: Line {line}:{column} - {msg}", file=sys.stderr)
+    length = len(offendingSymbol.text) if (offendingSymbol and hasattr(offendingSymbol, "text") and offendingSymbol.text) else 1
+    source_content = str(self.source_content) if self.source_content is not None else None
+    diag = format_diagnostic(
+        error_type="Syntax Error",
+        message=msg,
+        file_path=self.file_path,
+        line=line,
+        column=column,
+        length=length,
+        source_content=source_content,
+    )
+    print(diag, file=sys.stderr)
 
 
 def main():
@@ -50,7 +65,7 @@ def main():
     print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
 
-  error_listener = CustomErrorListener()
+  error_listener = CustomErrorListener(file_path=input_file, source_content=input_stream)
 
   # 1. Lexical Analysis
   lexer = SapphireLexer(input_stream)
@@ -78,7 +93,7 @@ def main():
 
   # 4. Semantic Analysis & Type Checking
   print("Running Semantic Analysis & Type Checker...")
-  checker = TypeChecker()
+  checker = TypeChecker(source_file_path=input_file, source_content=str(input_stream))
   try:
     checker.check(ast)
     print("\nSemantic Analysis completed successfully with 0 errors!")
