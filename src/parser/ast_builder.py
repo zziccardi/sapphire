@@ -7,14 +7,10 @@ ast.py.
 
 from typing import List
 
-try:
-  from parser.ast import *
-  from parser.gen.SapphireVisitor import SapphireVisitor
-  from parser.gen.SapphireParser import SapphireParser
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.ast import *
-  from src.parser.gen.SapphireVisitor import SapphireVisitor
-  from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast import *
+from src.parser.gen.SapphireVisitor import SapphireVisitor
+from src.parser.gen.SapphireParser import SapphireParser
+
 
 
 
@@ -686,14 +682,10 @@ class ASTBuilder(SapphireVisitor):
       return LiteralNode(None, "none")
 
   def _parse_interpolated_string(self, raw_text: str) -> InterpolatedStringNode:
-    try:
-      from antlr4 import InputStream, CommonTokenStream
-      from src.parser.gen.SapphireLexer import SapphireLexer
-      from src.parser.gen.SapphireParser import SapphireParser
-    except ModuleNotFoundError:  # pragma: no cover
-      from antlr4 import InputStream, CommonTokenStream
-      from parser.gen.SapphireLexer import SapphireLexer
-      from parser.gen.SapphireParser import SapphireParser
+    from antlr4 import InputStream, CommonTokenStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+
 
     parts = []
     current_lit = []

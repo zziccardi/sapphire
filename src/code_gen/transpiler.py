@@ -12,90 +12,18 @@ from typing import Optional
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
-try:
-  from parser.ast import *
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from semantics.type_checker import TypeChecker, SemanticError
-  from code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
-  from code_gen.lua_transpiler import LuaTranspiler
-  from code_gen.source_map import SourceMapBuilder
-  from cli.diagnostics import format_diagnostic
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.ast import *
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
-  from src.code_gen.lua_transpiler import LuaTranspiler
-  from src.code_gen.source_map import SourceMapBuilder
-  from src.cli.diagnostics import format_diagnostic
+from src.parser.ast import *
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.semantics.type_checker import TypeChecker, SemanticError
+from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.source_map import SourceMapBuilder
+from src.code_gen.transpiler_registry import TranspilerRegistry
+from src.parser.error_listener import CustomErrorListener, format_syntax_error_message
 
 
-def format_syntax_error_message(recognizer, offendingSymbol, msg: str) -> str:
-  """Customizes ANTLR syntax error messages for better developer ergonomics."""
-  if recognizer and offendingSymbol and hasattr(offendingSymbol, "tokenIndex"):
-    try:
-      stream = recognizer.getTokenStream()
-      if stream:
-        idx = offendingSymbol.tokenIndex
-        prev_idx = idx - 1
-        while prev_idx >= 0 and stream.get(prev_idx).channel != 0:
-          prev_idx -= 1  # pragma: no cover
-        
-        if prev_idx >= 0 and stream.get(prev_idx).text == "}":
-          depth = 1
-          curr = prev_idx - 1
-          while curr >= 0 and depth > 0:
-            tok_text = stream.get(curr).text
-            if tok_text == "}":
-              depth += 1
-            elif tok_text == "{":
-              depth -= 1
-            curr -= 1
-
-          search_limit = max(0, curr - 30)
-          while curr >= search_limit:
-            tok = stream.get(curr)
-            if tok.text == "match":
-              return (
-                  f"Missing semicolon ';' after closing brace '}}' of match expression. "
-                  f"Match expressions used as statements must end with a semicolon ';' (e.g. 'match ... }};')."
-              )
-            curr -= 1
-    except Exception:  # pragma: no cover
-      pass
-  return msg
-
-
-class CustomErrorListener(ErrorListener):
-  """Custom ANTLR error listener to track and report syntax errors."""
-
-  def __init__(self, file_path: Optional[str] = None, source_content: Optional[Any] = None, quiet: bool = False):
-    super().__init__()
-    self.errors = 0
-    self.file_path = file_path
-    self.source_content = source_content
-    self.quiet = quiet
-
-  def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
-    self.errors += 1
-    if not self.quiet:
-      custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
-      length = len(offendingSymbol.text) if (offendingSymbol and hasattr(offendingSymbol, "text") and offendingSymbol.text) else 1
-      source_content = str(self.source_content) if self.source_content is not None else None
-      diag = format_diagnostic(
-          error_type="Syntax Error",
-          message=custom_msg,
-          file_path=self.file_path,
-          line=line,
-          column=column,
-          length=length,
-          source_content=source_content,
-      )
-      print(diag, file=sys.stderr)
 
 
 def transpile_file(
@@ -111,33 +39,24 @@ def transpile_file(
 
   Args:
     input_file: Path to the Sapphire source file (.sp).
-    output_file: Optional output path for generated code (.py or .lua). If None,
-      defaults to input_file with .py or .lua extension depending on target.
-    target: Code generation target ("python" or "lua" / "lua5.1").
-    visited: Set of already processed file paths to prevent recursion loops.
-    sourcemap: Whether to generate source map (.lua.map) for Lua target.
-    test_mode: Whether transpiling in test execution mode (includes @test functions).
-    quiet: Whether to suppress progress and status messages.
-
-  Returns:
-    The path to the generated output file.
   """
-
-  target_lower = target.lower()
-  ext = ".lua" if target_lower in ("lua", "lua5.1") else ".py"
-
-  if not output_file:
-    base_path, _ = os.path.splitext(input_file)
-    output_file = base_path + ext
-
   if visited is None:
+
     visited = set()
 
-  input_abs = os.path.abspath(input_file)
-  if input_abs in visited:
-    return output_file
-  visited.add(input_abs)
+  abs_input_file = os.path.abspath(input_file)
+  if abs_input_file in visited:
+    return output_file or ""
+  visited.add(abs_input_file)
 
+  target_info = TranspilerRegistry.get(target)
+  ext = target_info.default_extension
+
+  if not output_file:
+    base_name = os.path.splitext(input_file)[0]
+    output_file = base_name + ext
+
+  # 1. Lexical Analysis
   if not quiet:
     print(f"Reading source file: {input_file}...")
 
@@ -150,7 +69,6 @@ def transpile_file(
 
   error_listener = CustomErrorListener(file_path=input_file, source_content=input_stream, quiet=quiet)
 
-  # 1. Lexical Analysis
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
   lexer.addErrorListener(error_listener)
@@ -205,24 +123,23 @@ def transpile_file(
       sub_output = os.path.splitext(sub_source)[0] + ext
       transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, quiet=quiet)
 
-  # 6. Transpile
+  # 6. Transpile via TranspilerRegistry
   sm_builder = None
-  if target_lower in ("lua", "lua5.1"):
-    if not quiet:
-      print("Transpiling to Lua 5.1...")
-    src_filename = os.path.basename(input_file)
-    src_content = str(input_stream)
+  src_filename = os.path.basename(input_file)
+  src_content = str(input_stream)
+
+  if target_info.name == "lua":
     if sourcemap:
       sm_builder = SourceMapBuilder(src_filename, src_content)
-    transpiler = LuaTranspiler(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode)
-    generated_code = transpiler.transpile(ast)
-    target_name = "Lua 5.1"
+    transpiler = target_info.factory(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode)
   else:
-    if not quiet:
-      print("Transpiling to Python...")
-    transpiler = PythonTranspiler(test_mode=test_mode)
-    generated_code = transpiler.transpile(ast)
-    target_name = "Python"
+    transpiler = target_info.factory(test_mode=test_mode)
+
+  if not quiet:
+    print(f"Transpiling to {target_info.display_name}...")
+  generated_code = transpiler.transpile(ast)
+  target_name = target_info.display_name
+
 
   # Write generated code
   try:

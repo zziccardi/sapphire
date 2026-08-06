@@ -11,14 +11,10 @@ production.
 import inspect
 import unittest
 
-try:
-  import parser.ast as ast_module
-  from code_gen.python_transpiler import PythonTranspiler
-  from code_gen.lua_transpiler import LuaTranspiler
-except ModuleNotFoundError:
-  import src.parser.ast as ast_module
-  from src.code_gen.python_transpiler import PythonTranspiler
-  from src.code_gen.lua_transpiler import LuaTranspiler
+import src.parser.ast as ast_module
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.code_gen.lua_transpiler import LuaTranspiler
+
 
 
 # AST node classes that are never dispatched to via the visit_* protocol.

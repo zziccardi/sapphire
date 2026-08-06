@@ -12,26 +12,14 @@ import sys
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-except ModuleNotFoundError:
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
 
 
-class CustomErrorListener(ErrorListener):
-  """Custom ANTLR error listener to track and report syntax errors."""
 
-  def __init__(self):
-    super().__init__()
-    self.errors = 0
+from src.parser.error_listener import CustomErrorListener
 
-  def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
-    self.errors += 1
-    print(f"Syntax Error: Line {line}:{column} - {msg}", file=sys.stderr)
 
 
 def main():

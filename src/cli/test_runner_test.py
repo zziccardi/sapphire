@@ -22,10 +22,8 @@ from src.code_gen.lua_transpiler import LuaTranspiler
 from src.parser.ast import FuncDeclNode, StructDeclNode, AnnotationNode, BlockNode
 from src.semantics.type_checker import SemanticError
 
-try:
-  from testing.test_utils import suppress_output
-except ModuleNotFoundError:  # pragma: no cover
-  from src.testing.test_utils import suppress_output
+from testing.test_utils import suppress_output
+
 
 
 class TestRunnerEngineTest(unittest.TestCase):

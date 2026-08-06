@@ -3,10 +3,8 @@
 import json
 import unittest
 
-try:
-  from code_gen.source_map import encode_vlq, SourceMapBuilder
-except ModuleNotFoundError:  # pragma: no cover
-  from src.code_gen.source_map import encode_vlq, SourceMapBuilder
+from src.code_gen.source_map import encode_vlq, SourceMapBuilder
+
 
 
 class TestSourceMap(unittest.TestCase):

@@ -7,50 +7,28 @@ ASTBuilder visitor, verifying the correctness of the translation.
 import unittest
 from antlr4 import InputStream, CommonTokenStream
 
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from parser.ast import (
-      ProgramNode,
-      VarDeclNode,
-      LiteralNode,
-      BasicTypeNode,
-      BinaryOpNode,
-      CastExprNode,
-      IfNode,
-      StructDeclNode,
-      StructInitializerNode,
-      CloneNode,
-      InterpolatedStringNode,
-      IdentifierNode,
-      ArrayTypeNode,
-      MapTypeNode,
-      BreakNode,
-      ContinueNode,
-  )
-except ModuleNotFoundError:
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.parser.ast import (
-      ProgramNode,
-      VarDeclNode,
-      LiteralNode,
-      BasicTypeNode,
-      BinaryOpNode,
-      CastExprNode,
-      IfNode,
-      StructDeclNode,
-      StructInitializerNode,
-      CloneNode,
-      InterpolatedStringNode,
-      IdentifierNode,
-      ArrayTypeNode,
-      MapTypeNode,
-      BreakNode,
-      ContinueNode,
-  )
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.parser.ast import (
+    ProgramNode,
+    VarDeclNode,
+    LiteralNode,
+    BasicTypeNode,
+    BinaryOpNode,
+    CastExprNode,
+    IfNode,
+    StructDeclNode,
+    StructInitializerNode,
+    CloneNode,
+    InterpolatedStringNode,
+    IdentifierNode,
+    ArrayTypeNode,
+    MapTypeNode,
+    BreakNode,
+    ContinueNode,
+)
+
 
 
 class TestASTBuilder(unittest.TestCase):
@@ -424,10 +402,8 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_match_expression_ast(self):
     """Verifies AST construction for match expressions, match cases, yield statements, and ellipsis patterns."""
-    try:
-      from parser.ast import MatchExprNode, MatchCaseNode, YieldNode, EllipsisPatternNode
-    except ModuleNotFoundError:
-      from src.parser.ast import MatchExprNode, MatchCaseNode, YieldNode, EllipsisPatternNode
+    from src.parser.ast import MatchExprNode, MatchCaseNode, YieldNode, EllipsisPatternNode
+
 
     ast = self._get_ast("""
     let res = match status {
@@ -455,10 +431,8 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_map_literal_parsing(self):
     """Verifies AST construction for map literals with colons, commas, and trailing commas."""
-    try:
-      from parser.ast import MapLiteralNode, MapEntryNode, LiteralNode
-    except ModuleNotFoundError:
-      from src.parser.ast import MapLiteralNode, MapEntryNode, LiteralNode
+    from src.parser.ast import MapLiteralNode, MapEntryNode, LiteralNode
+
 
     ast = self._get_ast("""
     let scores = {"alice": 100, "bob": 95,};
@@ -475,10 +449,8 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_map_for_loop_parsing(self):
     """Verifies AST construction for map for-in loop with key, val bindings."""
-    try:
-      from parser.ast import ForNode, FuncDeclNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ForNode, FuncDeclNode
+    from src.parser.ast import ForNode, FuncDeclNode
+
 
     ast = self._get_ast("""
     func test() {
@@ -497,10 +469,8 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_impl_block_generic_type_args(self):
     """Verifies AST construction for generic impl blocks with various type arguments."""
-    try:
-      from parser.ast import ImplBlockNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ImplBlockNode
+    from src.parser.ast import ImplBlockNode
+
 
     ast1 = self._get_ast("impl Trait<int> for Struct<float> {}")
     impl1 = ast1.declarations[0]
@@ -618,10 +588,8 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_guard_statement_ast(self):
     """Verifies AST construction for guard statements with semicolon clause separation and multi-variable binding."""
-    try:
-      from parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
-    except ModuleNotFoundError:
-      from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+
     code = """
     func test() {
       guard let x ?= opt; let a, b ?= get_pair(); x > 0 else {

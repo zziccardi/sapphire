@@ -8,20 +8,13 @@ import unittest
 from testing.test_utils import suppress_output
 from antlr4 import InputStream, CommonTokenStream
 
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode
-  from semantics.type_checker import TypeChecker, SemanticError
-  from semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
-except ModuleNotFoundError:
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode
-  from src.semantics.type_checker import TypeChecker, SemanticError
-  from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode
+from src.semantics.type_checker import TypeChecker, SemanticError
+from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
+
 
 
 class TestTypeChecker(unittest.TestCase):
@@ -691,10 +684,8 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
     # 11. InferredType direct API.
-    try:
-      from semantics.symbol_table import InferredType, PrimitiveType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import InferredType, PrimitiveType
+    from src.semantics.symbol_table import InferredType, PrimitiveType
+
     inf = InferredType()
     self.assertTrue(inf.is_compatible(PrimitiveType("int")))
     self.assertEqual(repr(inf), "<inferred>")
@@ -702,20 +693,13 @@ class TestTypeChecker(unittest.TestCase):
     # 12. Direct AST-level calls to _infer_lambda_param_type to cover the
     #     BlockNode, ReturnNode, VarDeclNode, ExprStmtNode, CallNode,
     #     TernaryExprNode, and None-node guard paths.
-    try:
-      from semantics.type_checker import TypeChecker
-      from parser.ast import (
-          BlockNode, ReturnNode, VarDeclNode, ExprStmtNode,
-          CallNode, ArgumentNode, TernaryExprNode,
-          BinaryOpNode, IdentifierNode, LiteralNode,
-      )
-    except ModuleNotFoundError:
-      from src.semantics.type_checker import TypeChecker
-      from src.parser.ast import (
-          BlockNode, ReturnNode, VarDeclNode, ExprStmtNode,
-          CallNode, ArgumentNode, TernaryExprNode,
-          BinaryOpNode, IdentifierNode, LiteralNode,
-      )
+    from src.semantics.type_checker import TypeChecker
+    from src.parser.ast import (
+        BlockNode, ReturnNode, VarDeclNode, ExprStmtNode,
+        CallNode, ArgumentNode, TernaryExprNode,
+        BinaryOpNode, IdentifierNode, LiteralNode,
+    )
+
 
     tc = TypeChecker()
     infer = tc._infer_lambda_param_type
@@ -884,12 +868,9 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_clone_check_proto_cycle_coverage(self):
     """Directly tests check_proto cycle protection in visit_CloneNode."""
-    try:
-      from semantics.symbol_table import StructType, VariableSymbol
-      from parser.ast import CloneNode, IdentifierNode
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import StructType, VariableSymbol
-      from src.parser.ast import CloneNode, IdentifierNode
+    from src.semantics.symbol_table import StructType, VariableSymbol
+    from src.parser.ast import CloneNode, IdentifierNode
+
 
     checker = TypeChecker()
     st_a = StructType("A", parent_names=["B"])
@@ -1106,10 +1087,8 @@ class TestTypeChecker(unittest.TestCase):
       """)
 
     # 27. Return mismatch and return outside function context
-    try:
-      from parser.ast import ReturnNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ReturnNode
+    from src.parser.ast import ReturnNode
+
     checker = TypeChecker()
     checker.visit(ReturnNode(None))
     self.assertTrue(len(checker.errors) > 0)
@@ -1157,10 +1136,8 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
     # 33. NotImplementedError in generic visit
-    try:
-      from parser.ast import ASTNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ASTNode
+    from src.parser.ast import ASTNode
+
     with self.assertRaises(NotImplementedError):
       checker = TypeChecker()
       checker.visit(ASTNode())
@@ -1173,14 +1150,9 @@ class TestTypeChecker(unittest.TestCase):
       """)
 
     # 35. Direct _resolve_type_node calls
-    try:
-      from semantics.symbol_table import PrimitiveType, FunctionType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import PrimitiveType, FunctionType
-    try:
-      from parser.ast import TypeNode
-    except ModuleNotFoundError:
-      from src.parser.ast import TypeNode
+    from src.semantics.symbol_table import PrimitiveType, FunctionType
+    from src.parser.ast import TypeNode
+
     checker = TypeChecker()
     self.assertEqual(checker._resolve_type_node(None), PrimitiveType("none"))
     self.assertEqual(checker._resolve_type_node(TypeNode()), PrimitiveType("none"))
@@ -1212,19 +1184,15 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
     # 39. visit_BinaryOpNode with invalid operator
-    try:
-      from parser.ast import BinaryOpNode, LiteralNode
-    except ModuleNotFoundError:
-      from src.parser.ast import BinaryOpNode, LiteralNode
+    from src.parser.ast import BinaryOpNode, LiteralNode
+
     bnode = BinaryOpNode(LiteralNode(1, "int"), "invalid-op", LiteralNode(2, "int"))
     checker = TypeChecker()
     self.assertEqual(checker.visit(bnode), PrimitiveType("none"))
 
     # 40. visit_UnaryOpNode with invalid operator
-    try:
-      from parser.ast import UnaryOpNode
-    except ModuleNotFoundError:
-      from src.parser.ast import UnaryOpNode
+    from src.parser.ast import UnaryOpNode
+
     unode = UnaryOpNode("invalid-op", LiteralNode(1, "int"))
     checker = TypeChecker()
     self.assertEqual(checker.visit(unode), PrimitiveType("none"))
@@ -1237,10 +1205,8 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
     # 42. Lambda with explicit return type and block body
-    try:
-      from parser.ast import LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode
-    except ModuleNotFoundError:
-      from src.parser.ast import LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode
+    from src.parser.ast import LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode
+
     lnode = LambdaNode(
         parameters=[LambdaParamNode("x", None)],
         return_type=BasicTypeNode("int"),
@@ -1430,16 +1396,11 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Aliasing conflict: variable 'player' (or a sub-field) is mutably borrowed", str(context.exception))
 
     # 12. Direct test for _is_reference_type with all types
-    try:
-      from semantics.symbol_table import (
-          PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
-          StructType, OptionalType, NoneType
-      )
-    except ImportError:
-      from src.semantics.symbol_table import (
-          PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
-          StructType, OptionalType, NoneType
-      )
+    from src.semantics.symbol_table import (
+        PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
+        StructType, OptionalType, NoneType
+    )
+
     checker = TypeChecker()
     # Value types
     self.assertFalse(checker._is_reference_type(PrimitiveType("int")))
@@ -1564,12 +1525,9 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_struct_initializer_positional_arg_error(self):
     """Verifies that positional arguments in struct initializers (constructed programmatically) trigger a semantic error."""
-    try:
-      from parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
-      from semantics.symbol_table import StructType
-    except ModuleNotFoundError:
-      from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
-      from src.semantics.symbol_table import StructType
+    from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
+    from src.semantics.symbol_table import StructType
+
     
     checker = TypeChecker()
     struct_type = StructType("Point")
@@ -1763,12 +1721,9 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Variable 'out' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
 
     # 8. Programmatic test for VarDeclNode arena escape (covers type_checker.py line 418)
-    try:
-      from parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
-      from semantics.symbol_table import VariableSymbol, StructType, ArenaType
-    except ImportError:
-      from src.parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
-      from src.semantics.symbol_table import VariableSymbol, StructType, ArenaType
+    from src.parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
+    from src.semantics.symbol_table import VariableSymbol, StructType, ArenaType
+
     
     checker = TypeChecker()
     # Define parent and nested scopes
@@ -2024,14 +1979,10 @@ class TestTypeChecker(unittest.TestCase):
     self._check(uninit_block)
 
     # _resolve_type_node(None) test
-    try:
-      from semantics.type_checker import TypeChecker
-      from semantics.symbol_table import PrimitiveType
-      from parser.ast import BasicTypeNode
-    except ModuleNotFoundError:
-      from src.semantics.type_checker import TypeChecker
-      from src.semantics.symbol_table import PrimitiveType
-      from src.parser.ast import BasicTypeNode
+    from src.semantics.type_checker import TypeChecker
+    from src.semantics.symbol_table import PrimitiveType
+    from src.parser.ast import BasicTypeNode
+
 
     tc = TypeChecker()
     self.assertEqual(tc._resolve_type_node(None), PrimitiveType("none"))
@@ -2146,10 +2097,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_module_export_errors_and_type_resolution(self):
     """Verifies module type resolution and export error branches."""
-    try:
-      from semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+
 
     # 1. Export from non-imported module
     with self.assertRaises(SemanticError):
@@ -2186,10 +2135,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_module_qualified_type_and_member_access(self):
     """Verifies type resolution for dot-qualified types (enums.DrawMode) and member access."""
-    try:
-      from semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
-    except ModuleNotFoundError:
-      from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+
 
     code = """
     import lib.love2d.enums;
@@ -2735,12 +2682,9 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_array_type_node_resolution_and_none_inference(self):
     """Verifies ArrayTypeNode resolution and error when inferring type from none alone."""
-    try:
-      from parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
-      from semantics.symbol_table import ArrayType, PrimitiveType
-    except ModuleNotFoundError:
-      from src.parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
-      from src.semantics.symbol_table import ArrayType, PrimitiveType
+    from src.parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
+    from src.semantics.symbol_table import ArrayType, PrimitiveType
+
 
     checker = TypeChecker()
     res = checker._resolve_type_node(ArrayTypeNode(BasicTypeNode("int")))

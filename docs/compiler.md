@@ -52,10 +52,12 @@ The Symbol Table defined in [symbol_table.py](src/semantics/symbol_table.py) man
 - **Type System**: Standardizes compiler types: `PrimitiveType`, `OptionalType`, `FunctionType`, `StructType`, `TraitType`, and `ArrayType`.
 - **Compatibility checking (`is_compatible`)**: Enforces assignability constraints (e.g. allowing assigning `int` to `float`, assigning `none` to an optional type `T?`, and assigning non-optional `T` to `T?` while rejecting reverse optional-to-non-optional casting).
 
-### 2. Semantic Analysis Rules (`type_checker.py`)
-The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) traverses the AST and implements the following checks:
+### 2. Semantic Analysis Rules (`type_checker.py`, `arena_checker.py`, `generics_checker.py`)
+The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) traverses the AST and orchestrates semantic checks, delegating specialized constraints to dedicated domain checkers:
+- **Arena & Lifetime Checker (`arena_checker.py`)**: Validates arena allocation scope chains, reference lifetime dependencies, and prevents nested arena reference escapes to outer scopes.
+- **Generics & Monomorphization Checker (`generics_checker.py`)**: Manages recursive AST parameter substitution and type mangling for generic struct and `impl` monomorphization.
 - **Global Pre-declarations**: Registers all structs, traits, and global functions first to support mutual recursion and forward-references.
-- **Static Layout Copying**: Copies layout fields and methods from parent struct to child struct for static inheritance, and enforces that **no up-casting** is allowed (a child type cannot be assigned to a parent type).
+- **Static Layout Copying**: Copies layout fields and methods from parent struct to child struct for static inheritance, and enforces that no up-casting is allowed (a child type cannot be assigned to a parent type).
 - **Immutability Checking**: Enforces that constants declared with `let` cannot be reassigned.
 - **Method & Constructor Safety**:
   - Verifies that methods called on constant objects are marked `const`.
@@ -64,9 +66,12 @@ The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) trav
 - **Conditional Bindings & Optional Safety**: Validates unwrapping (`let x ?= optional`) and init statements where variables are registered inside the nested control-flow scope.
 - **Bidirectional Lambda Inference**: Resolves types of lambda parameters without annotations (e.g. `x -> x * 2`) by matching them against expected function types (like `(int) -> int`) in assignments or call sites.
 
-## Stage 3: Code Generation (Transpilation)
+## Stage 3: Code Generation & Target Registry
 
-Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), mapping Sapphire semantics to the target runtime environment.
+Stage 3 compiles the typed AST into target language code, mapping Sapphire semantics to target runtimes.
+
+### Open/Closed Target Backend Registry (`transpiler_registry.py`)
+Target code generators register dynamically with `TranspilerRegistry` in [transpiler_registry.py](src/code_gen/transpiler_registry.py) using the `@TranspilerRegistry.register(aliases=[...], display_name=..., default_extension=...)` decorator. This decouples code generation dispatch from `transpile_file`, adhering to the Open/Closed Principle.
 
 ### Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
@@ -88,8 +93,10 @@ Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), ma
 - **Supported Primitive & Stack Operations**: Handles primitive types (`int` -> `i64`, `float` -> `double`, `bool` -> `i1`, `void`), function declarations, stack-allocated variables (`alloca`/`load`/`store`), integer/float arithmetic with implicit promotion, basic block returns, and struct definitions.
 - **AOT & JIT Foundation**: Lays the foundation for Ahead-Of-Time (AOT) native executable compilation via `clang`/`llc` and in-memory Just-In-Time (JIT) execution. Unimplemented high-level features gracefully raise `NotImplementedError`.
 
-### High-Level Compiler Driver API (`transpile_file`)
-The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full compilation pipeline and dispatches AST code generation to Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
+### High-Level Compiler Driver API & Error Listeners
+- **Centralized ANTLR Error Listener**: Defined in [error_listener.py](src/parser/error_listener.py), `CustomErrorListener` captures ANTLR syntax errors and formats detailed diagnostics with source code snippets.
+- **Domain Exception Hierarchy**: Defined in [errors.py](src/common/errors.py), standard exceptions (`SapphireSyntaxError`, `SapphireTypeError`, `SapphireTranspileError`, `SapphireLSPError`) extend `SapphireError` for uniform error reporting.
+- **Compiler Driver (`transpile_file`)**: The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates parsing, semantic analysis, and target backend resolution via `TranspilerRegistry.get(target)`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and test runner (`src/cli/test_runner.py`) invoke `transpile_file` directly.
 
 ## Stage 4: Source Map Generation & Love2D Debugging
 

@@ -12,26 +12,24 @@ from typing import List, Tuple, Dict, Any, Optional
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from parser.ast import FuncDeclNode, ImplBlockNode, IdentifierNode
-  from code_gen.transpiler import transpile_file
-  from code_gen.source_map import SourceMapBuilder
-  from cli.diagnostics import get_source_line, format_diagnostic
-except ModuleNotFoundError:  # pragma: no cover
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.parser.ast import FuncDeclNode, ImplBlockNode, IdentifierNode
-  from src.code_gen.transpiler import transpile_file
-  from src.code_gen.source_map import SourceMapBuilder
-  from src.cli.diagnostics import get_source_line, format_diagnostic
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.parser.ast import FuncDeclNode, ImplBlockNode, IdentifierNode
+from src.code_gen.transpiler import transpile_file
+from src.code_gen.source_map import SourceMapBuilder
+from src.cli.diagnostics import get_source_line, format_diagnostic
 
 
-class TestDiscoveryError(Exception):
+
+from src.common.errors import SapphireError
+
+
+class TestDiscoveryError(SapphireError):
+  """Raised when test discovery or test suite parsing encounters invalid states."""
+
   pass
+
 
 
 def find_sp_files(path: str) -> List[str]:

@@ -1,10 +1,8 @@
 """Unit tests for the diagnostic error formatting module (diagnostics.py)."""
 
 import unittest
-try:
-  from cli.diagnostics import get_source_line, format_diagnostic
-except ModuleNotFoundError:
-  from src.cli.diagnostics import get_source_line, format_diagnostic
+from src.cli.diagnostics import get_source_line, format_diagnostic
+
 
 
 class TestDiagnostics(unittest.TestCase):

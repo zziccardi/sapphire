@@ -13,60 +13,33 @@ import tempfile
 import unittest
 from antlr4 import InputStream, CommonTokenStream
 
-try:
-  from parser.ast import (
-      ASTNode,
-      ArgumentNode,
-      BinaryOpNode,
-      BlockNode,
-      CallNode,
-      ExprStmtNode,
-      GuardClauseNode,
-      HeaderBindingNode,
-      IdentifierNode,
-      LambdaNode,
-      LambdaParamNode,
-      LiteralNode,
-      MemberAccessNode,
-      StructFieldNode,
-      StructInitializerNode,
-      TraitDeclNode,
-      UnaryOpNode,
-  )
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from code_gen.lua_transpiler import LuaTranspiler
-  from code_gen.transpiler import transpile_file
-  from code_gen.source_map import SourceMapBuilder
-  from semantics.type_checker import TypeChecker
-except ModuleNotFoundError:
-  from src.parser.ast import (
-      ASTNode,
-      ArgumentNode,
-      BinaryOpNode,
-      BlockNode,
-      CallNode,
-      ExprStmtNode,
-      GuardClauseNode,
-      HeaderBindingNode,
-      IdentifierNode,
-      LambdaNode,
-      LambdaParamNode,
-      LiteralNode,
-      MemberAccessNode,
-      StructFieldNode,
-      StructInitializerNode,
-      TraitDeclNode,
-      UnaryOpNode,
-  )
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.code_gen.lua_transpiler import LuaTranspiler
-  from src.code_gen.transpiler import transpile_file
-  from src.code_gen.source_map import SourceMapBuilder
-  from src.semantics.type_checker import TypeChecker
+from src.parser.ast import (
+    ASTNode,
+    ArgumentNode,
+    BinaryOpNode,
+    BlockNode,
+    CallNode,
+    ExprStmtNode,
+    GuardClauseNode,
+    HeaderBindingNode,
+    IdentifierNode,
+    LambdaNode,
+    LambdaParamNode,
+    LiteralNode,
+    MemberAccessNode,
+    StructFieldNode,
+    StructInitializerNode,
+    TraitDeclNode,
+    UnaryOpNode,
+)
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.transpiler import transpile_file
+from src.code_gen.source_map import SourceMapBuilder
+from src.semantics.type_checker import TypeChecker
+
 
 
 class DummyNode(ASTNode):
@@ -117,10 +90,8 @@ class TestLuaTranspiler(unittest.TestCase):
 
     # visit_ImplMemberNode raises when called directly (impl members are emitted
     # via visit_StructDeclNode in the Lua backend, not standalone)
-    try:
-      from parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+    from src.parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+
     _dummy_func = _FuncDeclNode("do_thing", [], None, _BlockNode([]), [])
     with self.assertRaises(NotImplementedError):
       LuaTranspiler().visit_ImplMemberNode(_ImplMemberNode(_dummy_func, None))
@@ -792,12 +763,9 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("x = x + _match_res_", lua_out7)
 
     # Direct visitor calls
-    try:
-      from parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
-      from code_gen.lua_transpiler import LuaTranspiler
-    except ModuleNotFoundError:
-      from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
-      from src.code_gen.lua_transpiler import LuaTranspiler
+    from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+    from src.code_gen.lua_transpiler import LuaTranspiler
+
 
     lt = LuaTranspiler()
     lt.visit(MatchExprNode(LiteralNode(1, "int"), [MatchCaseNode(EllipsisPatternNode(), LiteralNode(2, "int"))]))
@@ -1129,12 +1097,9 @@ class TestLuaTranspiler(unittest.TestCase):
 
   def test_has_continue_node_nested_and_private_attr(self):
     """Verifies _has_continue_node behavior for nested loops and private attributes."""
-    try:
-      from code_gen.lua_transpiler import _has_continue_node
-      from parser.ast import BlockNode
-    except ImportError:
-      from src.code_gen.lua_transpiler import _has_continue_node
-      from src.parser.ast import BlockNode
+    from src.code_gen.lua_transpiler import _has_continue_node
+    from src.parser.ast import BlockNode
+
 
     code_nested = """
     func test_nested() {
@@ -1262,16 +1227,11 @@ class TestSharedFixtures(unittest.TestCase):
 
   def _transpile_fixture(self, source: str) -> str:
     """Parse *source* and return the generated Lua code string."""
-    try:
-      from parser.gen.SapphireLexer import SapphireLexer as _Lexer
-      from parser.gen.SapphireParser import SapphireParser as _Parser
-      from parser.ast_builder import ASTBuilder as _Builder
-      from semantics.type_checker import TypeChecker as _Checker
-    except ModuleNotFoundError:
-      from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
-      from src.parser.gen.SapphireParser import SapphireParser as _Parser
-      from src.parser.ast_builder import ASTBuilder as _Builder
-      from src.semantics.type_checker import TypeChecker as _Checker
+    from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
+    from src.parser.gen.SapphireParser import SapphireParser as _Parser
+    from src.parser.ast_builder import ASTBuilder as _Builder
+    from src.semantics.type_checker import TypeChecker as _Checker
+
 
     input_stream = InputStream(source)
     lexer = _Lexer(input_stream)

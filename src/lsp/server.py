@@ -42,28 +42,17 @@ from lsprotocol.types import (
 from pygls.lsp.server import LanguageServer
 
 # Imports from compiler codebase
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from lsp.semantic_tokens import (
-      SemanticTokensTypeChecker,
-      encode_semantic_tokens,
-      TOKEN_TYPES,
-      TOKEN_MODIFIERS,
-      find_node_at_position,
-  )
-except ImportError:  # pragma: no cover
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.lsp.semantic_tokens import (
-      SemanticTokensTypeChecker,
-      encode_semantic_tokens,
-      TOKEN_TYPES,
-      TOKEN_MODIFIERS,
-      find_node_at_position,
-  )
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.lsp.semantic_tokens import (
+    SemanticTokensTypeChecker,
+    encode_semantic_tokens,
+    TOKEN_TYPES,
+    TOKEN_MODIFIERS,
+    find_node_at_position,
+)
+
 
 
 class SapphireLanguageServer(LanguageServer):
@@ -94,10 +83,8 @@ class ANTLRDiagnosticListener(ErrorListener):
         offendingSymbol.text):
       length = len(offendingSymbol.text)
 
-    try:
-      from code_gen.transpiler import format_syntax_error_message
-    except ImportError:  # pragma: no cover
-      from src.code_gen.transpiler import format_syntax_error_message
+    from src.code_gen.transpiler import format_syntax_error_message
+
 
     custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
 
@@ -267,10 +254,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
   node_type = node_types.get(node)
   if not node_type:
-    try:
-      from parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode
-    except ImportError:  # pragma: no cover
-      from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode
+    from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode
+
 
     if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
@@ -297,44 +282,25 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   if not node_type and type(node).__name__ != "AnnotationNode":
     return None
 
-  try:
-    from parser.ast import (
-        IdentifierNode,
-        MemberAccessNode,
-        FuncDeclNode,
-        VarDeclNode,
-        ParameterNode,
-        StructFieldNode,
-        IfNode,
-        ForNode,
-        StructDeclNode,
-        EnumDeclNode,
-        EnumMemberNode,
-        TraitDeclNode,
-        ImplBlockNode,
-        BasicTypeNode,
-        TraitMemberNode,
-        HeaderBindingNode,
-    )
-  except ImportError:  # pragma: no cover
-    from src.parser.ast import (
-        IdentifierNode,
-        MemberAccessNode,
-        FuncDeclNode,
-        VarDeclNode,
-        ParameterNode,
-        StructFieldNode,
-        IfNode,
-        ForNode,
-        StructDeclNode,
-        EnumDeclNode,
-        EnumMemberNode,
-        TraitDeclNode,
-        ImplBlockNode,
-        BasicTypeNode,
-        TraitMemberNode,
-        HeaderBindingNode,
-    )
+  from src.parser.ast import (
+
+      IdentifierNode,
+      MemberAccessNode,
+      FuncDeclNode,
+      VarDeclNode,
+      ParameterNode,
+      StructFieldNode,
+      IfNode,
+      ForNode,
+      StructDeclNode,
+      EnumDeclNode,
+      EnumMemberNode,
+      TraitDeclNode,
+      ImplBlockNode,
+      BasicTypeNode,
+      TraitMemberNode,
+      HeaderBindingNode,
+  )
 
   node_name = ""
   category = "symbol"
@@ -344,22 +310,14 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     if uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
       if sym:
-        try:
-          from semantics.symbol_table import (
-              VariableSymbol,
-              FunctionSymbol,
-              StructSymbol,
-              TraitSymbol,
-              EnumSymbol,
-          )
-        except ImportError:  # pragma: no cover
-          from src.semantics.symbol_table import (
-              VariableSymbol,
-              FunctionSymbol,
-              StructSymbol,
-              TraitSymbol,
-              EnumSymbol,
-          )
+        from src.semantics.symbol_table import (
+            VariableSymbol,
+            FunctionSymbol,
+            StructSymbol,
+            TraitSymbol,
+            EnumSymbol,
+        )
+
         if isinstance(sym, VariableSymbol):
           category = "parameter" if sym.is_parameter else "variable"
         elif isinstance(sym, FunctionSymbol):
@@ -440,10 +398,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     node_name = node.name
 
   if category == "symbol" and node_type:
-    try:
-      from semantics.symbol_table import StructType, TraitType, EnumType
-    except ImportError:  # pragma: no cover
-      from src.semantics.symbol_table import StructType, TraitType, EnumType
+    from src.semantics.symbol_table import StructType, TraitType, EnumType
+
     if isinstance(node_type, StructType):
       category = "proto" if node_type.is_prototype else "struct"
     elif isinstance(node_type, EnumType):
@@ -451,10 +407,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     elif isinstance(node_type, TraitType):
       category = "trait"
 
-  try:
-    from semantics.symbol_table import FunctionType, StructType, TraitType, EnumType
-  except ImportError:  # pragma: no cover
-    from src.semantics.symbol_table import FunctionType, StructType, TraitType, EnumType
+  from src.semantics.symbol_table import FunctionType, StructType, TraitType, EnumType
+
 
   if isinstance(node_type, FunctionType):
     params_lines = []
@@ -518,10 +472,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     elif isinstance(node, MemberAccessNode) and uri in ls.symbol_table_cache:
       receiver_type = node_types.get(node.receiver)
       if receiver_type:
-        try:
-          from semantics.symbol_table import StructType
-        except ImportError:  # pragma: no cover
-          from src.semantics.symbol_table import StructType
+        from src.semantics.symbol_table import StructType
+
         if isinstance(receiver_type, StructType) and node.member in receiver_type.fields:
           field = receiver_type.fields[node.member]
           field_comments = getattr(field, "comments", "")
@@ -554,10 +506,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
   # 1. Local Scope AST Traversal
   declarations = getattr(ast, "declarations", [])
   for decl in declarations:
-    try:
-      from parser.ast import FuncDeclNode, ImplBlockNode, VarDeclNode, IfNode, ForNode
-    except ImportError:  # pragma: no cover
-      from src.parser.ast import FuncDeclNode, ImplBlockNode, VarDeclNode, IfNode, ForNode
+    from src.parser.ast import FuncDeclNode, ImplBlockNode, VarDeclNode, IfNode, ForNode
 
     if isinstance(decl, FuncDeclNode):
       s_start = getattr(decl, "start_line", None)
@@ -622,17 +571,16 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
                     val_var = getattr(stmt, "val_var", stmt.loop_var)
                     add_item(val_var, 6, f"(variable) {val_var}")
 
-  # 2. Symbols and Types from Symbol Table
   if uri in ls.symbol_table_cache:
     sym_table = ls.symbol_table_cache[uri]
     scope = getattr(sym_table, "current_scope", None)
     while scope:
-      try:
-        from semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
-      except ImportError:  # pragma: no cover
-        from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
+      from src.semantics.symbol_table import VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol
 
       for sym_name, sym in scope.symbols.items():
+
+
+
         if sym_name == "Arena":
           continue
         sym_kind = type(sym).__name__
@@ -680,8 +628,9 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
       for word in words:
         if len(word) > 1:
           add_item(word, 1, f"(text) {word}")
-  except Exception:  # pragma: no cover
+  except (AttributeError, KeyError, IndexError, TypeError):  # pragma: no cover
     pass
+
 
   return items
 
@@ -710,8 +659,9 @@ def completion(ls: SapphireLanguageServer,
       lines = source.splitlines()
       if 0 <= line - 1 < len(lines):
         line_text = lines[line - 1]
-  except Exception:  # pragma: no cover
+  except (AttributeError, KeyError, IndexError, TypeError):  # pragma: no cover
     pass
+
 
   text_before_cursor = line_text[:col]
   import re
@@ -748,11 +698,10 @@ def completion(ls: SapphireLanguageServer,
       receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
 
     if type(receiver_type).__name__ in ("StringType", "PrimitiveType") and getattr(receiver_type, "name", "") == "String":
-      try:
-        from semantics.symbol_table import STRING_METHODS
-      except ImportError:  # pragma: no cover
-        from src.semantics.symbol_table import STRING_METHODS
+      from src.semantics.symbol_table import STRING_METHODS
+
       items = []
+
       for m_name, sig in STRING_METHODS.items():
         items.append(
             CompletionItem(

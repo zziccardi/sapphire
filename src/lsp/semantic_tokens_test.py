@@ -12,22 +12,14 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from antlr4 import InputStream, CommonTokenStream
-try:
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from parser.ast_builder import ASTBuilder
-  from lsp.semantic_tokens import (
-      SemanticTokensTypeChecker,
-      encode_semantic_tokens,
-  )
-except ImportError:
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.parser.ast_builder import ASTBuilder
-  from src.lsp.semantic_tokens import (
-      SemanticTokensTypeChecker,
-      encode_semantic_tokens,
-  )
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.parser.ast_builder import ASTBuilder
+from src.lsp.semantic_tokens import (
+    SemanticTokensTypeChecker,
+    encode_semantic_tokens,
+)
+
 
 
 class TestSemanticTokens(unittest.TestCase):
@@ -114,7 +106,8 @@ class TestSemanticTokens(unittest.TestCase):
     self.assertEqual(checker.lsp_errors[0]["range"]["start"]["character"], 0)
 
     # 2. current_node is not None but lacks start_line
-    from parser.ast import ASTNode
+    from src.parser.ast import ASTNode
+
     node = ASTNode()
     checker.current_node = node
     checker.error("Test error 2")
@@ -187,7 +180,8 @@ class TestSemanticTokens(unittest.TestCase):
 
     checker = SemanticTokensTypeChecker()
     # Expected type error, check should raise SemanticError
-    from semantics.type_checker import SemanticError
+    from src.semantics.type_checker import SemanticError
+
     with self.assertRaises(SemanticError):
       checker.check(ast)
 
@@ -240,8 +234,9 @@ class TestSemanticTokens(unittest.TestCase):
 
   def test_mock_symbol_lookups(self):
     """Verifies VariableSymbol, TraitSymbol, FunctionSymbol and other lookups in visit_IdentifierNode."""
-    from parser.ast import IdentifierNode
-    from semantics.symbol_table import TraitSymbol, TraitType, FunctionSymbol, FunctionType, VariableSymbol, PrimitiveType
+    from src.parser.ast import IdentifierNode
+    from src.semantics.symbol_table import TraitSymbol, TraitType, FunctionSymbol, FunctionType, VariableSymbol, PrimitiveType
+
 
     checker = SemanticTokensTypeChecker()
     checker.symbol_table.enter_scope()

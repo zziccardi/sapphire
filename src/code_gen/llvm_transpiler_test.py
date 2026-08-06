@@ -7,36 +7,21 @@ to LLVM IR specification (instruction selection, stack allocations, returns).
 import unittest
 from antlr4 import CommonTokenStream, InputStream
 
-try:
-  from code_gen.base_transpiler import BaseTranspiler
-  from code_gen.llvm_transpiler import LLVMTranspiler
-  from parser.ast import (
-      BasicTypeNode,
-      FuncDeclNode,
-      IdentifierNode,
-      LiteralNode,
-      ProgramNode,
-      ReturnNode,
-  )
-  from parser.ast_builder import ASTBuilder
-  from parser.gen.SapphireLexer import SapphireLexer
-  from parser.gen.SapphireParser import SapphireParser
-  from semantics.type_checker import TypeChecker
-except ModuleNotFoundError:  # pragma: no cover
-  from src.code_gen.base_transpiler import BaseTranspiler
-  from src.code_gen.llvm_transpiler import LLVMTranspiler
-  from src.parser.ast import (
-      BasicTypeNode,
-      FuncDeclNode,
-      IdentifierNode,
-      LiteralNode,
-      ProgramNode,
-      ReturnNode,
-  )
-  from src.parser.ast_builder import ASTBuilder
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
-  from src.semantics.type_checker import TypeChecker
+from src.code_gen.base_transpiler import BaseTranspiler
+from src.code_gen.llvm_transpiler import LLVMTranspiler
+from src.parser.ast import (
+    BasicTypeNode,
+    FuncDeclNode,
+    IdentifierNode,
+    LiteralNode,
+    ProgramNode,
+    ReturnNode,
+)
+from src.parser.ast_builder import ASTBuilder
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.semantics.type_checker import TypeChecker
+
 
 
 class TestLLVMTranspiler(unittest.TestCase):
@@ -140,10 +125,8 @@ class TestLLVMTranspiler(unittest.TestCase):
 
   def test_generic_visit(self):
     transpiler = LLVMTranspiler()
-    try:
-      from parser.ast import ASTNode
-    except ModuleNotFoundError:
-      from src.parser.ast import ASTNode
+    from src.parser.ast import ASTNode
+
 
     class UnknownNode(ASTNode):
       pass
@@ -226,10 +209,8 @@ class TestLLVMTranspiler(unittest.TestCase):
 
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
-    try:
-      from parser.ast import AssignmentNode, LiteralNode
-    except ModuleNotFoundError:
-      from src.parser.ast import AssignmentNode, LiteralNode
+    from src.parser.ast import AssignmentNode, LiteralNode
+
 
     func_type = ir.FunctionType(transpiler.void_type, [])
     func = ir.Function(transpiler.module, func_type, name="test_assign")
@@ -307,10 +288,8 @@ class TestLLVMTranspiler(unittest.TestCase):
 
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
-    try:
-      from parser.ast import BinaryOpNode, LiteralNode
-    except ModuleNotFoundError:
-      from src.parser.ast import BinaryOpNode, LiteralNode
+    from src.parser.ast import BinaryOpNode, LiteralNode
+
 
     func_type = ir.FunctionType(transpiler.void_type, [])
     func = ir.Function(transpiler.module, func_type, name="test_binop")
@@ -328,10 +307,8 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_var_decl_type_fallbacks(self):
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
-    try:
-      from parser.ast import VarDeclNode, BasicTypeNode
-    except ModuleNotFoundError:
-      from src.parser.ast import VarDeclNode, BasicTypeNode
+    from src.parser.ast import VarDeclNode, BasicTypeNode
+
 
     func_type = ir.FunctionType(transpiler.void_type, [])
     func = ir.Function(transpiler.module, func_type, name="test_vardecl")
