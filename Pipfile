@@ -6,6 +6,7 @@ name = "pip_conf_index_global"
 [packages]
 antlr4-python3-runtime = "*"
 pygls = "*"
+llvmlite = "*"
 
 [dev-packages]
 coverage = "*"

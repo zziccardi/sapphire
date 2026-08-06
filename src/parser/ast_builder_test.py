@@ -65,6 +65,8 @@ class TestASTBuilder(unittest.TestCase):
     parser = SapphireParser(stream)
     parser.removeErrorListeners()
     tree = parser.program()
+    if parser.getNumberOfSyntaxErrors() > 0:
+      raise SyntaxError(f"Syntax error while parsing code string:\n{code}")
     builder = ASTBuilder()
     return builder.visit(tree)
 

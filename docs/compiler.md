@@ -17,8 +17,10 @@ graph TD
     sema --> checked_ast[Typed AST]
     checked_ast --> codegen_py[Python Transpiler]
     checked_ast --> codegen_lua[Lua 5.1 Transpiler]
+    checked_ast --> codegen_llvm[LLVM IR Transpiler\n*Experimental*]
     codegen_py --> py_source[Generated Python: .py]
     codegen_lua --> lua_source[Generated Lua: .lua]
+    codegen_llvm --> llvm_source[Generated LLVM IR: .ll]
 ```
 
 ## Stage 1: AST Design & Building
@@ -66,12 +68,12 @@ The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) trav
 
 Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), mapping Sapphire semantics to the target runtime environment.
 
-### 1. Python Target (`python_transpiler.py`)
+### Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
 - **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, conditional bindings to `None` checks, and `??` to inline lambdas.
 - **Annotation Erasure**: Erases `@extern var` declarations and cleanly strips `@export` target strings so cross-backend compilation remains functional.
 
-### 2. Lua 5.1 Target (`lua_transpiler.py`)
+### Lua 5.1 Target (`lua_transpiler.py`)
 - **Runtime Preamble**: Emits `Arena`, `_create_proto_object`, and `_clone_helper` using Lua's native `setmetatable` mechanism (`__index` fallback, `__proto`, `__shadow`).
 - **Array Indexing**: Maps Sapphire 0-based array indexing (`arr[i]`) to 1-based Lua table indexing (`arr[i + 1]`).
 - **Compound Assignment Expansion**: Expands compound assignment statements (`+=`, `-=`, `*=`, `/=`) into simple binary operation assignments (`x = x + y`).
@@ -81,8 +83,13 @@ Stage 3 compiles the typed AST into target language code (Python or Lua 5.1), ma
   - `@export("path")` functions generate global Lua function definitions (e.g., `function love.update(dt) ... end`).
   - Calls on host trait fields (e.g. `love.graphics.rectangle(...)`) transpile using dot notation (`.`) rather than colon (`:`) syntax.
 
-### 3. High-Level Compiler Driver API (`transpile_file`)
-The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full compilation pipeline and dispatches AST code generation to either Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
+### LLVM IR Target (Experimental – `llvm_transpiler.py`)
+- **Experimental Native Backend**: Defined in [llvm_transpiler.py](src/code_gen/llvm_transpiler.py), this backend lowers Sapphire AST nodes directly into LLVM IR text using `llvmlite`.
+- **Supported Primitive & Stack Operations**: Handles primitive types (`int` -> `i64`, `float` -> `double`, `bool` -> `i1`, `void`), function declarations, stack-allocated variables (`alloca`/`load`/`store`), integer/float arithmetic with implicit promotion, basic block returns, and struct definitions.
+- **AOT & JIT Foundation**: Lays the foundation for Ahead-Of-Time (AOT) native executable compilation via `clang`/`llc` and in-memory Just-In-Time (JIT) execution. Unimplemented high-level features gracefully raise `NotImplementedError`.
+
+### High-Level Compiler Driver API (`transpile_file`)
+The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates the full compilation pipeline and dispatches AST code generation to Python or Lua 5.1 depending on `target`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and script runner (`src/run_transpiler.py`) invoke `transpile_file` directly.
 
 ## Stage 4: Source Map Generation & Love2D Debugging
 
