@@ -1,0 +1,6 @@
+**/*.ts
+.coverage
+coverage/**
+node_modules/**
+scripts/**
+tsconfig.json

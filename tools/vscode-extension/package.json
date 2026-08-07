@@ -4,6 +4,10 @@
   "description": "Language support and semantic highlighting for the Sapphire programming language",
   "version": "0.1.0",
   "publisher": "zziccardi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zziccardi/sapphire.git"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
