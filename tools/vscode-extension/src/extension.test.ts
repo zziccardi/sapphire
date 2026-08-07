@@ -4,8 +4,7 @@ import * as path from 'path';
 // Mock vscode module
 let mockWorkspaceFolders: any = undefined;
 let mockConfig: Record<string, any> = {
-  'lsp.pythonPath': 'pipenv',
-  'lsp.serverPath': 'src/lsp/server.py'
+  'lsp.path': 'sapphire'
 };
 let lastErrorMessage = '';
 
@@ -70,8 +69,7 @@ describe('extension.ts', () => {
   beforeEach(() => {
     mockWorkspaceFolders = undefined;
     mockConfig = {
-      'lsp.pythonPath': 'pipenv',
-      'lsp.serverPath': 'src/lsp/server.py'
+      'lsp.path': 'sapphire'
     };
     lastErrorMessage = '';
     clientInstance = null;
@@ -91,23 +89,22 @@ describe('extension.ts', () => {
     expect(clientInstance).toBeNull();
   });
 
-  it('should activate successfully with default pipenv settings', () => {
+  it('should activate successfully with default sapphire CLI setting', () => {
     mockWorkspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
     activate({} as any);
     expect(clientInstance).not.toBeNull();
-    expect(clientInstance.serverOptions.run.command).toBe('pipenv');
-    expect(clientInstance.serverOptions.run.args).toEqual(['run', 'python', '/mock/workspace/src/lsp/server.py']);
+    expect(clientInstance.serverOptions.run.command).toBe('sapphire');
+    expect(clientInstance.serverOptions.run.args).toEqual(['lsp']);
     expect(startCalled).toBe(true);
   });
 
-  it('should activate successfully with custom Python interpreter and absolute path', () => {
+  it('should activate successfully with custom executable path', () => {
     mockWorkspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
-    mockConfig['lsp.pythonPath'] = '/usr/bin/python3';
-    mockConfig['lsp.serverPath'] = '/absolute/server.py';
+    mockConfig['lsp.path'] = '/usr/local/bin/sapphire';
     activate({} as any);
     expect(clientInstance).not.toBeNull();
-    expect(clientInstance.serverOptions.run.command).toBe('/usr/bin/python3');
-    expect(clientInstance.serverOptions.run.args).toEqual(['/absolute/server.py']);
+    expect(clientInstance.serverOptions.run.command).toBe('/usr/local/bin/sapphire');
+    expect(clientInstance.serverOptions.run.args).toEqual(['lsp']);
   });
 
   it('should show error message if LanguageClient fails to start', async () => {

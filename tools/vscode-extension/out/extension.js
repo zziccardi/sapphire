@@ -1,36 +1,21 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 let client;
 export function activate(context) {
     const config = vscode.workspace.getConfiguration('sapphire');
-    const pythonPath = config.get('lsp.pythonPath', 'pipenv');
-    const serverRelativePath = config.get('lsp.serverPath', 'src/lsp/server.py');
+    const lspPath = config.get('lsp.path', 'sapphire');
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders) {
         vscode.window.showErrorMessage('Sapphire LSP requires an open workspace.');
         return;
     }
     const workspaceRoot = workspaceFolders[0].uri.fsPath;
-    const serverPath = path.isAbsolute(serverRelativePath)
-        ? serverRelativePath
-        : path.join(workspaceRoot, serverRelativePath);
-    // Setup options for executing the Python background server
-    let executable;
-    if (pythonPath === 'pipenv') {
-        executable = {
-            command: 'pipenv',
-            args: ['run', 'python', serverPath],
-            options: { cwd: workspaceRoot }
-        };
-    }
-    else {
-        executable = {
-            command: pythonPath,
-            args: [serverPath],
-            options: { cwd: workspaceRoot }
-        };
-    }
+    // Setup options for executing the Sapphire LSP CLI server
+    const executable = {
+        command: lspPath,
+        args: ['lsp'],
+        options: { cwd: workspaceRoot }
+    };
     const serverOptions = {
         run: executable,
         debug: executable

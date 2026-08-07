@@ -78,6 +78,12 @@ def test_command(args):
   sys.exit(exit_code)
 
 
+def lsp_command(args):
+  """Handles `lsp` subcommand: starts the Sapphire LSP server over stdio."""
+  from src.lsp.server import main as lsp_main
+  lsp_main()
+
+
 def main():
   parser = argparse.ArgumentParser(
       prog="sapphire",
@@ -128,10 +134,15 @@ def main():
       help="Disable source map generation (.lua.map) for Lua targets")
   test_parser.set_defaults(func=test_command)
 
+  # `lsp` subcommand
+  lsp_parser = subparsers.add_parser(
+      "lsp", help="Start the Sapphire Language Server over stdio")
+  lsp_parser.set_defaults(func=lsp_command)
+
   # Handle shortcut invocation: if first argument is a file (e.g.
   # `sapphire samples/overview.sp`)
   if (len(sys.argv) > 1 and not sys.argv[1].startswith("-") and
-      sys.argv[1] not in ["build", "run", "test"]):
+      sys.argv[1] not in ["build", "run", "test", "lsp"]):
     sys.argv.insert(1, "run")
 
   args = parser.parse_args()
