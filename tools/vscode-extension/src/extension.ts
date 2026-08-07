@@ -50,8 +50,9 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   client.start().catch((error: any) => {
+    const msg = error.message || String(error);
     vscode.window.showErrorMessage(
-      `Failed to start Sapphire Language Server: ${error.message || error}`
+      `Failed to start Sapphire Language Server ('${lspPath} lsp'): ${msg}. Please ensure '${lspPath}' is installed on your system PATH or configure 'sapphire.lsp.path' in VS Code settings.`
     );
   });
 

@@ -113,7 +113,7 @@ describe('extension.ts', () => {
     activate({} as any);
     // Wait for the start promise rejection to handle
     await new Promise(resolve => setTimeout(resolve, 15));
-    expect(lastErrorMessage).toBe('Failed to start Sapphire Language Server: Start failed mock');
+    expect(lastErrorMessage).toBe("Failed to start Sapphire Language Server ('sapphire lsp'): Start failed mock. Please ensure 'sapphire' is installed on your system PATH or configure 'sapphire.lsp.path' in VS Code settings.");
   });
 
   it('should handle deactivate with active client', async () => {

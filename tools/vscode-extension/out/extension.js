@@ -31,7 +31,8 @@ export function activate(context) {
     // Create and start the Language Client
     client = new LanguageClient('sapphireLanguageServer', 'Sapphire Language Server', serverOptions, clientOptions);
     client.start().catch((error) => {
-        vscode.window.showErrorMessage(`Failed to start Sapphire Language Server: ${error.message || error}`);
+        const msg = error.message || String(error);
+        vscode.window.showErrorMessage(`Failed to start Sapphire Language Server ('${lspPath} lsp'): ${msg}. Please ensure '${lspPath}' is installed on your system PATH or configure 'sapphire.lsp.path' in VS Code settings.`);
     });
     console.log('Sapphire Language Support extension is now active!');
 }
