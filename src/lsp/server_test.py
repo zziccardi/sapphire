@@ -879,8 +879,11 @@ class TestLSPServer(unittest.TestCase):
         self.assertTrue(len(completion(self.ls, params_comp).items) > 0)
 
       # Completion fallback when get_text_document raises an exception
-      with patch("src.lsp.server.find_node_at_position", return_value=None):
-        self.ls.workspace.get_text_document.side_effect = Exception("Test get_text_document exception")
+      try:
+        self.ls.workspace.get_text_document.side_effect = KeyError("Test get_text_document exception")
+        completion(self.ls, params_comp)
+      finally:
+        self.ls.workspace.get_text_document.side_effect = None
   def test_completion_typing_between_statements(self):
     doc_uri = "file:///between_test.sp"
     doc_text_between = """
@@ -1069,7 +1072,7 @@ func test() {
     ))
     self.assertIsNotNone(hover_export)
     self.assertIn("@export", hover_export.contents.value)
-    self.assertIn("global callback", hover_export.contents.value)
+    self.assertIn("Exposes a function to the host runtime environment", hover_export.contents.value)
 
     # 4. Hover on extern variable love
     hover_love = hover(self.ls, HoverParams(
@@ -1878,6 +1881,372 @@ let field_ref = c_var.p.x;
     ))
     self.assertIsNone(res_not_fn)
 
+  def test_trait_method_completion(self):
+    """Verifies that LSP completion suggests all methods defined on a trait receiver."""
+    from src.lsp.server import completion, validate_source
+    from lsprotocol.types import CompletionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///test_trait_completion.sp"
+    code = """
+    trait Graphics {
+      func clear(r: float, g: float, b: float);
+      func setBackgroundColor(r: float, g: float, b: float);
+      func circle(x: float, y: float, r: float);
+    }
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+    func test(love: LoveEngine) {
+      love.graphics.
+    }
+    """
+    validate_source(self.ls, doc_uri, code)
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = code
+    with patch.object(self.ls.workspace, "get_text_document", return_value=mock_doc):
+      res = completion(self.ls, CompletionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=11, character=20)
+      ))
+      self.assertIsNotNone(res)
+      labels = {item.label for item in res.items}
+      self.assertIn("clear", labels)
+      self.assertIn("setBackgroundColor", labels)
+      self.assertIn("circle", labels)
+
+  def test_trait_method_signature_help_and_definition(self):
+    """Verifies signature help and go to definition for trait methods on member access receivers."""
+    from src.lsp.server import signature_help, definition, validate_source
+    from lsprotocol.types import SignatureHelpParams, DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///test_trait_sig_def.sp"
+    code = """
+    trait Graphics {
+      func rectangle(mode: int, x: float, y: float, w: float, h: float);
+    }
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+    func test(love: LoveEngine) {
+      love.graphics.rectangle(1, 10.0, 20.0, 30.0, 40.0);
+    }
+    """
+    validate_source(self.ls, doc_uri, code)
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = code
+    with patch.object(self.ls.workspace, "get_text_document", return_value=mock_doc):
+      # Test signature help at line 8 inside rectangle(
+      sig_res = signature_help(self.ls, SignatureHelpParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=8, character=30)
+      ))
+      self.assertIsNotNone(sig_res)
+      self.assertTrue(len(sig_res.signatures) > 0)
+      sig_label = sig_res.signatures[0].label
+      self.assertIn("rectangle", sig_label)
+      self.assertIn("mode: int", sig_label)
+      self.assertIn("x: float", sig_label)
+
+      # Test definition on 'rectangle' at line 8 character 22
+      def_res = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=8, character=22)
+      ))
+      self.assertIsNotNone(def_res)
+      # Definition should point to line 2 (0-indexed line 2: func rectangle...)
+      self.assertEqual(def_res.range.start.line, 2)
+
+
+  def test_definition_cross_file_modules(self):
+    """Verifies textDocument/definition for cross-file imports and module member navigation."""
+    import os
+    import tempfile
+    from pygls.uris import from_fs_path
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      # Setup directory structure: temp_dir/lib/love2d/enums.sp
+      lib_dir = os.path.join(temp_dir, "lib", "love2d")
+      os.makedirs(lib_dir, exist_ok=True)
+      enums_file = os.path.join(lib_dir, "enums.sp")
+      enums_code = """enum DrawMode {
+  Fill,
+  Line
+}"""
+      with open(enums_file, "w", encoding="utf-8") as f:
+        f.write(enums_code)
+
+      main_file = os.path.join(temp_dir, "main.sp")
+      main_code = """import lib.love2d.enums as enums;
+let mode: enums.DrawMode = enums.DrawMode.Fill;"""
+      with open(main_file, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      main_uri = from_fs_path(main_file)
+      enums_uri = from_fs_path(enums_file)
+
+      # Set workspace root_uri
+      self.ls.workspace.root_uri = from_fs_path(temp_dir)
+
+      validate_source(self.ls, main_uri, main_code)
+
+      mock_doc = MagicMock()
+      mock_doc.uri = main_uri
+      mock_doc.source = main_code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      # 1. Definition on import path 'lib.love2d.enums' (line 0, character 10)
+      def_import = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=0, character=10)
+      ))
+      self.assertIsNotNone(def_import)
+      self.assertEqual(def_import.uri, enums_uri)
+
+      # 3. Definition on MemberAccessNode on module symbol 'enums.DrawMode' (line 1, character 33)
+      def_enum_val = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=1, character=33)
+      ))
+      self.assertIsNotNone(def_enum_val)
+      self.assertEqual(def_enum_val.uri, enums_uri)
+
+      # 4. Test _resolve_module_path fallback and nonexistent paths
+      from src.lsp.server import _resolve_module_path
+      self.assertIsNone(_resolve_module_path(main_uri, "nonexistent.mod"))
+      self.assertIsNone(_resolve_module_path("invalid_uri", "nonexistent.mod"))
+
+      # 5. Create utils.sp with function and struct exports
+      utils_file = os.path.join(temp_dir, "utils.sp")
+      utils_code = """struct Point { var x: int; }
+func calculate() -> int { return 42; }"""
+      with open(utils_file, "w", encoding="utf-8") as f:
+        f.write(utils_code)
+      utils_uri = from_fs_path(utils_file)
+
+      # Create broken.sp with syntax error to hit exception handler during import preloading
+      broken_file = os.path.join(temp_dir, "broken.sp")
+      with open(broken_file, "w", encoding="utf-8") as f:
+        f.write("struct Broken { invalid syntax !!!")
+      broken_uri = from_fs_path(broken_file)
+
+      main_utils_code = """import utils as u;
+import broken;
+func run() {
+  u.calculate();
+  let p: u.Point;
+}"""
+      validate_source(self.ls, main_uri, main_utils_code)
+      mock_doc.source = main_utils_code
+
+      # Test function definition lookup 'u.calculate()' (line 3, character 4)
+      def_func = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=3, character=4)
+      ))
+      self.assertIsNotNone(def_func)
+      self.assertEqual(def_func.uri, utils_uri)
+
+      # Test struct type definition lookup 'u.Point' (line 4, character 12)
+      def_struct = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=4, character=12)
+      ))
+      self.assertIsNotNone(def_struct)
+      self.assertEqual(def_struct.uri, utils_uri)
+
+      # Test fallback target_uri matching when target_ast has no file_uri
+      from src.parser.ast import FuncDeclNode
+      dummy_func = FuncDeclNode("calculate", [], "int", None)
+      dummy_func.name_line = 1
+      dummy_func.name_column = 5
+      dummy_func.name_length = 9
+
+      # Ensure utils_uri is in ast_cache (it should be after validate_source preloads imports)
+      if utils_uri not in self.ls.ast_cache:
+        # Manually load it for the fallback test
+        from antlr4 import InputStream, CommonTokenStream
+        from src.parser.gen.SapphireLexer import SapphireLexer
+        from src.parser.gen.SapphireParser import SapphireParser
+        from src.parser.ast_builder import ASTBuilder
+        sub_stream = InputStream(utils_code)
+        sub_lexer = SapphireLexer(sub_stream)
+        sub_lexer.removeErrorListeners()
+        sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+        sub_parser.removeErrorListeners()
+        sub_tree = sub_parser.program()
+        sub_ast = ASTBuilder().visit(sub_tree)
+        sub_ast.file_uri = utils_uri
+        self.ls.ast_cache[utils_uri] = sub_ast
+
+      self.ls.ast_cache[utils_uri].declarations.append(dummy_func)
+      # Remove file_uri from dummy_func to force c_decl matching fallback
+      if hasattr(dummy_func, "file_uri"):
+        delattr(dummy_func, "file_uri")
+
+      # Member access with target_ast lacking file_uri
+      from src.semantics.symbol_table import FunctionSymbol, FunctionType, PrimitiveType
+      fn_sym = FunctionSymbol("calculate", FunctionType([], PrimitiveType("int"), ast_decl=dummy_func))
+      mod_u = self.ls.symbol_table_cache[main_uri].lookup("u")
+      if mod_u:
+        mod_u.exports["calculate"] = fn_sym
+
+      def_fallback = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=3, character=5)
+      ))
+      self.assertIsNotNone(def_fallback)
+      self.assertEqual(def_fallback.uri, utils_uri)
+
+  def test_server_remaining_coverage_branches(self):
+    """Hits remaining uncovered lines in server.py to achieve 100% test coverage."""
+    import os
+    import tempfile
+    from pygls.uris import from_fs_path
+    from lsprotocol.types import (
+        DefinitionParams,
+        TextDocumentIdentifier,
+        Position,
+        SignatureHelpParams,
+    )
+    from src.lsp.server import _resolve_module_path, validate_source, definition, signature_help
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      ws_dir = os.path.join(temp_dir, "ws")
+      os.makedirs(ws_dir, exist_ok=True)
+      doc_dir = os.path.join(temp_dir, "doc")
+      os.makedirs(doc_dir, exist_ok=True)
+
+      doc_file = os.path.join(doc_dir, "test.sp")
+      doc_uri = from_fs_path(doc_file)
+      ws_uri = from_fs_path(ws_dir)
+
+      # 1. Hit _resolve_module_path workspace_root branch (line 131)
+      res_path = _resolve_module_path(doc_uri, "foo.bar", workspace_root=ws_uri)
+      self.assertIsNone(res_path)
+
+      # 2. Hit validate_source import error handling (lines 217-218)
+      # Create an unreadable directory with module name to throw OSError during open
+      unreadable_dir = os.path.join(doc_dir, "badmod.sp")
+      os.makedirs(unreadable_dir, exist_ok=True)
+      code_bad_imp = "import badmod;"
+      validate_source(self.ls, doc_uri, code_bad_imp)
+
+      # 3. Hit struct constructor signature help (lines 983, 986-987)
+      struct_code = """struct Vec { var x: int; var y: float; }
+func test() {
+  let v = Vec(;
+}"""
+      validate_source(self.ls, doc_uri, struct_code)
+      mock_doc = MagicMock()
+      mock_doc.uri = doc_uri
+      mock_doc.source = struct_code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      sig_res = signature_help(self.ls, SignatureHelpParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=2, character=14)
+      ))
+      self.assertIsNotNone(sig_res)
+
+      # Signature help on invalid callee (line 987 return None)
+      sig_none = signature_help(self.ls, SignatureHelpParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=2, character=8)
+      ))
+      self.assertIsNone(sig_none)
+
+      # 4. MemberAccess & BasicTypeNode ModuleSymbol fallback branches
+      # Create module file helper.sp
+      helper_file = os.path.join(doc_dir, "helper.sp")
+      helper_code = """struct Config { var debug: bool; }
+func helper_fn() {}"""
+      with open(helper_file, "w", encoding="utf-8") as f:
+        f.write(helper_code)
+      helper_uri = from_fs_path(helper_file)
+
+      main_code = """import helper as h;
+func run() {
+  h.helper_fn();
+  let cfg: h.Config;
+}"""
+      validate_source(self.ls, doc_uri, main_code)
+      mock_doc.source = main_code
+
+      # Member access definition
+      def_h_fn = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=2, character=5)
+      ))
+      self.assertIsNotNone(def_h_fn)
+
+      # BasicType definition
+      def_h_cfg = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=3, character=14)
+      ))
+      self.assertIsNotNone(def_h_cfg)
+
+  def test_love2d_demo_definition_navigation(self):
+    """Verifies Go to Definition for love.graphics.setBackgroundColor in samples/love2d_demo.sp."""
+    import os
+    from pygls.uris import from_fs_path
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    demo_file = os.path.join(repo_root, "samples", "love2d_demo.sp")
+    graphics_file = os.path.join(repo_root, "lib", "love2d", "graphics.sp")
+
+    if os.path.exists(demo_file) and os.path.exists(graphics_file):
+      demo_uri = from_fs_path(demo_file)
+      graphics_uri = from_fs_path(graphics_file)
+
+      self.ls.workspace.root_uri = from_fs_path(repo_root)
+
+      with open(demo_file, "r", encoding="utf-8") as f:
+        demo_code = f.read()
+
+      validate_source(self.ls, demo_uri, demo_code)
+
+      mock_doc = MagicMock()
+      mock_doc.uri = demo_uri
+      mock_doc.source = demo_code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      # Line 18 (0-based): '  love.graphics.setBackgroundColor(r = 0.1, g = 0.1, b = 0.15);'
+      # Position on 'setBackgroundColor' (col 18)
+      def_res = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=demo_uri),
+          position=Position(line=18, character=18)
+      ))
+      self.assertIsNotNone(def_res)
+      self.assertEqual(def_res.uri, graphics_uri)
+      self.assertEqual(def_res.range.start.line, 51)  # line 52 in 1-based indexing
+
+      enums_file = os.path.join(repo_root, "lib", "love2d", "enums.sp")
+      enums_uri = from_fs_path(enums_file)
+
+      # Character 34 is on 'enums'
+      def_enums_mod = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=demo_uri),
+          position=Position(line=43, character=34)
+      ))
+      self.assertIsNotNone(def_enums_mod)
+      self.assertEqual(def_enums_mod.uri, enums_uri)
+
+      # Character 40 is on 'DrawMode'
+      def_enum_type = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=demo_uri),
+          position=Position(line=43, character=40)
+      ))
+      self.assertIsNotNone(def_enum_type)
+      self.assertTrue(def_enum_type.uri.startswith("file:///"))
+      self.assertEqual(def_enum_type.uri, enums_uri)
+      self.assertEqual(def_enum_type.range.start.line, 11)  # line 12 in enums.sp: 'enum DrawMode {'
+
 
 if __name__ == "__main__":
   unittest.main()
+

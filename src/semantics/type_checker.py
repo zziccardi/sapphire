@@ -269,12 +269,29 @@ class TypeChecker:
               sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
               sub_parser.removeErrorListeners()
               sub_ast = ASTBuilder().visit(sub_parser.program())
+              mod_file_path = os.path.abspath(target_file)
+              from pygls.uris import from_fs_path
+              mod_file_uri = from_fs_path(mod_file_path)
+              def _mark_file_uri(node):
+                if isinstance(node, ASTNode):
+                  node.file_uri = mod_file_uri
+                  for v in node.__dict__.values():
+                    if isinstance(v, list):
+                      for item in v:
+                        if isinstance(item, ASTNode):
+                          _mark_file_uri(item)
+                    elif isinstance(v, ASTNode):
+                      _mark_file_uri(v)
+              if sub_ast:
+                _mark_file_uri(sub_ast)
+
               sub_checker = TypeChecker(source_file_path=target_file)
               try:
                 sub_checker.check(sub_ast)
               except Exception:
                 pass
 
+              mod_sym.file_path = os.path.abspath(target_file)
               # Populate mod_sym exports from sub_checker
               if getattr(sub_ast, "export_block", None):
                 for spec in sub_ast.export_block.specifiers:
@@ -290,9 +307,12 @@ class TypeChecker:
                     if exp:
                       mod_sym.exports[export_name] = exp
               else:
-                for name, sym in sub_checker.symbol_table.current_scope.symbols.items():
+                sub_root = sub_checker.symbol_table.current_scope
+                while sub_root.parent:
+                  sub_root = sub_root.parent
+                for name, sym in sub_root.symbols.items():
                   mod_sym.exports[name] = sym
-                for name, t in sub_checker.symbol_table.current_scope.types.items():
+                for name, t in sub_root.types.items():
                   if name not in ("int", "float", "bool", "String", "none", "Arena"):
                     mod_sym.exports[name] = t
             except Exception:  # pragma: no cover
@@ -332,6 +352,7 @@ class TypeChecker:
           if isinstance(current_val, int):
             current_val += 1
         enum_type = EnumType(decl.name, variants)
+        enum_type.ast_decl = decl
         self.symbol_table.define_type(decl.name, enum_type)
         self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
 
@@ -370,6 +391,7 @@ class TypeChecker:
               has_self=has_self,
               extern_name=extern_name,
               num_defaults=num_defaults,
+              ast_decl=member,
           )
           trait_type.methods[member.name] = fn_type
         if decl.type_params:

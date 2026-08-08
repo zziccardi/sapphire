@@ -101,8 +101,8 @@ def extract_comments_above(doc_text: str, start_line: Optional[int]) -> str:
 class SemanticTokensTypeChecker(TypeChecker):
   """Subclass of TypeChecker that extracts semantic tokens during analysis."""
 
-  def __init__(self, doc_text: Optional[str] = None):
-    super().__init__(source_content=doc_text)
+  def __init__(self, doc_text: Optional[str] = None, source_file_path: Optional[str] = None):
+    super().__init__(source_content=doc_text, source_file_path=source_file_path)
     self.doc_text = doc_text
     # List of raw tokens: (line, column, length, token_type, modifier_bitmask)
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []

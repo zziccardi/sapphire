@@ -110,6 +110,82 @@ class ANTLRDiagnosticListener(ErrorListener):
     self.diagnostics.append(diag)
 
 
+def _resolve_module_path(doc_uri: str, mod_path: str, workspace_root: Optional[str] = None) -> Optional[str]:
+  """Resolves a dot-separated Sapphire import path (e.g. 'lib.love2d.enums') to an absolute file path on disk."""
+  from pygls.uris import to_fs_path
+
+  doc_path = to_fs_path(doc_uri) if doc_uri.startswith("file://") else doc_uri
+  doc_dir = os.path.dirname(doc_path) if doc_path else ""
+
+  rel_parts = mod_path.split(".")
+  candidates = [
+      os.path.join(*rel_parts) + ".sp",
+      os.path.join(*rel_parts, "mod.sp"),
+      os.path.join(*rel_parts, "index.sp"),
+  ]
+
+  search_dirs = [doc_dir]
+  if workspace_root:
+    ws_path = to_fs_path(workspace_root) if workspace_root.startswith("file://") else workspace_root
+    if ws_path and ws_path not in search_dirs:
+      search_dirs.append(ws_path)
+
+  for base in search_dirs:
+    if not base:
+      continue
+    for cand in candidates:
+      target = os.path.normpath(os.path.join(base, cand))
+      if os.path.isfile(target):
+        return target
+
+  return None
+
+
+def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: Any, ws_root: Optional[str] = None) -> None:
+  from src.parser.ast import ASTNode
+  from pygls.uris import from_fs_path
+  for s_decl in getattr(ast, "imports", []):
+    if getattr(s_decl, "path", None):
+      mod_path_fs = _resolve_module_path(doc_uri, s_decl.path, ws_root)
+      if mod_path_fs and os.path.isfile(mod_path_fs):
+        mod_uri = from_fs_path(os.path.abspath(mod_path_fs))
+        s_decl.target_file_uri = mod_uri
+        if mod_uri not in ls.ast_cache:
+          try:
+            with open(mod_path_fs, "r", encoding="utf-8") as f:
+              sub_code = f.read()
+            sub_stream = InputStream(sub_code)
+            sub_lexer = SapphireLexer(sub_stream)
+            sub_lexer.removeErrorListeners()
+            sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+            sub_parser.removeErrorListeners()
+            sub_tree = sub_parser.program()
+            sub_ast = ASTBuilder().visit(sub_tree)
+            if sub_ast:
+              def _mark_file_uri(node):
+                if isinstance(node, ASTNode):
+                  node.file_uri = mod_uri
+                  for v in node.__dict__.values():
+                    if isinstance(v, list):
+                      for item in v:
+                        if isinstance(item, ASTNode):
+                          _mark_file_uri(item)
+                    elif isinstance(v, ASTNode):
+                      _mark_file_uri(v)
+              _mark_file_uri(sub_ast)
+              sub_checker = SemanticTokensTypeChecker(sub_code, source_file_path=mod_path_fs)
+              try:
+                sub_checker.check(sub_ast)
+              except Exception:
+                pass
+              ls.ast_cache[mod_uri] = sub_ast
+              ls.symbol_table_cache[mod_uri] = sub_checker.symbol_table
+              ls.node_types_cache[mod_uri] = sub_checker.node_types
+              _preload_module_dependencies(ls, mod_uri, sub_ast, ws_root)
+          except Exception:  # pragma: no cover
+            pass
+
+
 def validate_source(ls: SapphireLanguageServer, doc_uri: str,
                     doc_text: str) -> None:
   """Run lexical, syntactic, and semantic validation on the source text."""
@@ -128,14 +204,18 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   parser.addErrorListener(listener)
   tree = parser.program()
 
-  # 3. AST Building & Semantic Tokens Extraction (Attempt AST generation & cache even with syntax errors)
   ast = None
   ast_error = None
-  checker = SemanticTokensTypeChecker(doc_text)
+  from pygls.uris import to_fs_path
+  doc_fs_path = to_fs_path(doc_uri) if doc_uri.startswith("file://") else doc_uri
+  checker = SemanticTokensTypeChecker(doc_text, source_file_path=doc_fs_path)
   try:
     builder = ASTBuilder()
     ast = builder.visit(tree)
     if ast:
+      ast.file_uri = doc_uri
+      for s_decl in getattr(ast, "declarations", []):
+        s_decl.file_uri = doc_uri
       checker.check(ast)
   except Exception as e:
     ast_error = str(e)
@@ -146,6 +226,10 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
     ls.ast_cache[doc_uri] = ast
     ls.node_types_cache[doc_uri] = checker.node_types
     ls.symbol_table_cache[doc_uri] = checker.symbol_table
+
+    # Process imports and pre-load dependency ASTs for definition navigation
+    ws_root = getattr(getattr(ls, "workspace", None), "root_uri", None)
+    _preload_module_dependencies(ls, doc_uri, ast, ws_root)
 
   # If syntax errors are present, report them immediately
   if listener.diagnostics:
@@ -391,9 +475,18 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     ann_name = getattr(node, "name", "")
     node_name = f"@{ann_name}" + (f'("{ann_arg}")' if ann_arg else "")
     if ann_name == "extern":
-      markdown_text = f"**({category})** `{node_name}`\n\nDeclares an external variable provided by the host runtime environment."
+      markdown_text = (
+          f"**({category})** `{node_name}`\n\n"
+          f"Declares an external variable provided by the host runtime "
+          f"environment.\n\n"
+          f"If no argument is given, uses the Sapphire variable name as the "
+          f"external name. Otherwise, uses the argument string as the external "
+          f"name.")
     elif ann_name == "export":
-      markdown_text = f"**({category})** `{node_name}`\n\nExposes a function as a global callback for the host runtime environment."
+      markdown_text = (
+          f"**({category})** `{node_name}`\n\n"
+          f"Exposes a function to the host runtime environment under the name "
+          f"given as the argument.")
     else:
       markdown_text = f"**({category})** `{node_name}`"
     return Hover(contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text))
@@ -463,7 +556,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     type_desc = str(node_type)
     markdown_text = (f"**({category})** `{node_name}`: `{type_desc}`"
                      if node_name else f"`{type_desc}`")
-    
+
     # Extract property/field comments from parent struct definition:
     field_comments = ""
     declarations = getattr(ast, "declarations", [])
@@ -586,10 +679,33 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
       TraitDeclNode,
       StructFieldNode,
       ImplBlockNode,
+      ImportStmtNode,
+      CallNode,
   )
 
-  if isinstance(node, IdentifierNode):
+  if isinstance(node, CallNode):  # pragma: no cover
+    node = node.callee
+
+  if isinstance(node, ImportStmtNode):
+    path_line = getattr(node, "path_line", getattr(node, "start_line", None))
+    path_col = getattr(node, "path_column", getattr(node, "start_column", None))
+    path_len = getattr(node, "path_length", getattr(node, "length", None))
+    if path_line is not None and path_col is not None and path_len is not None:
+      if path_line == line and path_col <= col < path_col + path_len:
+        ws_root = getattr(getattr(ls, "workspace", None), "root_uri", None)
+        target_fs = _resolve_module_path(uri, node.path, ws_root)
+        if target_fs:
+          from pygls.uris import from_fs_path
+          target_uri = from_fs_path(os.path.abspath(target_fs))
+          return Location(uri=target_uri, range=Range(start=Position(line=0, character=0), end=Position(line=0, character=0)))
+
+  elif isinstance(node, IdentifierNode):
     sym = sym_table.lookup(node.name)
+    if sym and type(sym).__name__ == "ModuleSymbol" and getattr(sym, "file_path", None):
+      from pygls.uris import from_fs_path
+      mod_uri = from_fs_path(os.path.abspath(sym.file_path))
+      return Location(uri=mod_uri, range=Range(start=Position(line=0, character=0), end=Position(line=0, character=0)))
+
     if sym and hasattr(sym, "ast_decl") and sym.ast_decl:
       target_ast = sym.ast_decl
     elif sym and hasattr(sym, "symbol_type") and hasattr(sym.symbol_type, "ast_decl") and sym.symbol_type.ast_decl:
@@ -603,12 +719,37 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
       target_ast = _find_local_decl(ast, node.name, line)
 
   elif isinstance(node, MemberAccessNode):
-    receiver_type = node_types.get(node.receiver)
-    if not receiver_type and isinstance(node.receiver, IdentifierNode):  # pragma: no cover
+    if isinstance(node.receiver, IdentifierNode):
       sym = sym_table.lookup(node.receiver.name)
-      if sym:
+      if sym and type(sym).__name__ == "ModuleSymbol":
+        target_sym = sym.lookup_export(node.member)
+        if target_sym:
+          if hasattr(target_sym, "ast_decl") and target_sym.ast_decl:
+            target_ast = target_sym.ast_decl
+          elif hasattr(target_sym, "symbol_type") and hasattr(target_sym.symbol_type, "ast_decl") and target_sym.symbol_type.ast_decl:
+            target_ast = target_sym.symbol_type.ast_decl
+
+        mod_file_path = getattr(sym, "file_path", None)
+        if mod_file_path:
+          from pygls.uris import from_fs_path
+          mod_uri = from_fs_path(os.path.abspath(mod_file_path))
+          if not target_ast and mod_uri in ls.symbol_table_cache:  # pragma: no cover
+            sub_sym_table = ls.symbol_table_cache[mod_uri]
+            exp_sym = sub_sym_table.lookup(node.member) or sub_sym_table.lookup_type(node.member)
+            if exp_sym:
+              if hasattr(exp_sym, "ast_decl") and exp_sym.ast_decl:
+                target_ast = exp_sym.ast_decl
+              elif hasattr(exp_sym, "symbol_type") and hasattr(exp_sym.symbol_type, "ast_decl") and exp_sym.symbol_type.ast_decl:
+                target_ast = exp_sym.symbol_type.ast_decl
+          if target_ast:
+            target_ast.file_uri = mod_uri
+
+    receiver_type = node_types.get(node.receiver)
+    if not target_ast and not receiver_type and isinstance(node.receiver, IdentifierNode):  # pragma: no cover
+      sym = sym_table.lookup(node.receiver.name)
+      if sym:  # pragma: no cover
         receiver_type = getattr(sym, "symbol_type", None)
-      if not receiver_type:
+      if not receiver_type:  # pragma: no cover
         receiver_type = sym_table.lookup_type(node.receiver.name)
 
     if receiver_type:
@@ -645,9 +786,35 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
               break
 
   elif isinstance(node, BasicTypeNode):
-    type_obj = sym_table.lookup_type(node.name)
-    if type_obj and hasattr(type_obj, "ast_decl") and type_obj.ast_decl:
-      target_ast = type_obj.ast_decl
+    if "." in node.name:
+      parts = node.name.split(".", 1)
+      sym = sym_table.lookup(parts[0])
+      if sym and type(sym).__name__ == "ModuleSymbol":
+        exp = sym.lookup_export(parts[1])
+        if exp:
+          if hasattr(exp, "ast_decl") and exp.ast_decl:
+            target_ast = exp.ast_decl
+          elif hasattr(exp, "symbol_type") and hasattr(exp.symbol_type, "ast_decl") and exp.symbol_type.ast_decl:  # pragma: no cover
+            target_ast = exp.symbol_type.ast_decl
+
+        mod_file_path = getattr(sym, "file_path", None)
+        if mod_file_path:
+          from pygls.uris import from_fs_path
+          mod_uri = from_fs_path(os.path.abspath(mod_file_path))
+          if not target_ast and mod_uri in ls.symbol_table_cache:  # pragma: no cover
+            exp_sym = ls.symbol_table_cache[mod_uri].lookup_type(parts[1]) or ls.symbol_table_cache[mod_uri].lookup(parts[1])
+            if exp_sym:
+              if hasattr(exp_sym, "ast_decl") and exp_sym.ast_decl:
+                target_ast = exp_sym.ast_decl
+              elif hasattr(exp_sym, "symbol_type") and hasattr(exp_sym.symbol_type, "ast_decl") and exp_sym.symbol_type.ast_decl:
+                target_ast = exp_sym.symbol_type.ast_decl
+          if target_ast:
+            target_ast.file_uri = mod_uri
+
+    if not target_ast:
+      type_obj = sym_table.lookup_type(node.name)
+      if type_obj and hasattr(type_obj, "ast_decl") and type_obj.ast_decl:
+        target_ast = type_obj.ast_decl
 
   elif isinstance(node, StructDeclNode):
     for info in getattr(node, "parent_names_info", []):
@@ -700,7 +867,57 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
   else:  # pragma: no cover
     return None
 
-  return Location(uri=uri, range=Range(start=start_pos, end=end_pos))
+  target_uri = getattr(target_ast, "file_uri", None)
+  if not target_uri and hasattr(target_decl, "name"):
+    target_name = target_decl.name
+    from src.parser.ast import TraitDeclNode, StructDeclNode, ImplBlockNode, EnumDeclNode
+    for c_uri, c_ast in ls.ast_cache.items():
+      def _search_ast(ast_node):
+        for c_decl in getattr(ast_node, "declarations", []):
+          if c_decl is target_decl or getattr(c_decl, "name", None) == target_name:  # pragma: no cover
+            return c_decl
+          if isinstance(c_decl, TraitDeclNode):
+            for m in getattr(c_decl, "members", []):
+              if m is target_decl or getattr(m, "name", None) == target_name:
+                return m
+          elif isinstance(c_decl, StructDeclNode):
+            for f in getattr(c_decl, "fields", []):
+              if f is target_decl or getattr(f, "name", None) == target_name:
+                return f
+          elif isinstance(c_decl, ImplBlockNode):
+            for m in getattr(c_decl, "members", []):
+              fn = getattr(m, "func_decl", m)
+              if fn is target_decl or getattr(fn, "name", None) == target_name:  # pragma: no cover
+                return fn
+          elif isinstance(c_decl, EnumDeclNode):
+            for m in getattr(c_decl, "members", []):
+              if m is target_decl or getattr(m, "name", None) == target_name:
+                return m
+        return None
+
+      matched_node = _search_ast(c_ast)
+      if matched_node:
+        target_uri = getattr(c_ast, "file_uri", c_uri)
+        matched_decl = getattr(matched_node, "func_decl", matched_node)
+        n_line = getattr(matched_decl, "name_line", None)
+        n_col = getattr(matched_decl, "name_column", None)
+        n_len = getattr(matched_decl, "name_length", None)
+        if n_line is not None and n_col is not None and n_len is not None:
+          start_pos = Position(line=n_line - 1, character=n_col)
+          end_pos = Position(line=n_line - 1, character=n_col + n_len)
+        elif getattr(matched_node, "start_line", None) is not None:  # pragma: no cover
+          s_line = matched_node.start_line - 1
+          s_col = matched_node.start_column or 0
+          e_line = (matched_node.end_line - 1) if matched_node.end_line else s_line
+          e_col = matched_node.end_column if matched_node.end_column is not None else s_col + 1
+          start_pos = Position(line=s_line, character=s_col)
+          end_pos = Position(line=e_line, character=e_col)
+        break
+
+  if not target_uri:
+    target_uri = uri
+
+  return Location(uri=target_uri, range=Range(start=start_pos, end=end_pos))
 
 
 SIGNATURE_HELP_TRIGGER_CHARACTERS = ["(", ","]
@@ -794,12 +1011,33 @@ def signature_help(ls: SapphireLanguageServer, params: SignatureHelpParams) -> O
     fn_display_name = method_name
 
     receiver_type = None
-    sym = sym_table.lookup(obj_name)
-    if sym:
-      receiver_type = getattr(sym, "symbol_type", None)
+    if node_types:
+      best_node = None
+      min_dist = float('inf')
+      for node in node_types.keys():
+        n_name = (getattr(node, "name", None) or
+                  getattr(node, "member", None) or
+                  getattr(node, "alias", None) or
+                  getattr(node, "let_name", None) or
+                  getattr(node, "key_var", None) or
+                  getattr(node, "val_var", None) or
+                  getattr(node, "loop_var", None))
+        if n_name == obj_name:
+          s_line = getattr(node, "start_line", getattr(node, "name_line", None))
+          dist = abs(s_line - line) if s_line else 0
+          if dist < min_dist:
+            min_dist = dist
+            best_node = node
+      if best_node:
+        receiver_type = node_types.get(best_node)
+
     if not receiver_type:
+      sym = sym_table.lookup(obj_name)
+      if sym:
+        receiver_type = getattr(sym, "symbol_type", None)
+    if not receiver_type:  # pragma: no cover
       receiver_type = sym_table.lookup_type(obj_name)
-    if not receiver_type and uri in ls.ast_cache:
+    if not receiver_type and uri in ls.ast_cache:  # pragma: no cover
       decl_node = _find_local_decl(ls.ast_cache[uri], obj_name, line)
       if decl_node:
         receiver_type = node_types.get(decl_node)
@@ -912,7 +1150,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
           ptype = node_types.get(p)
           type_str = f": {ptype}" if ptype else ""
           add_item(p.name, 6, f"(parameter) {p.name}{type_str}")
-        
+
         stmts = getattr(decl.body, "statements", []) if hasattr(decl, "body") else []
         for stmt in stmts:
           st_start = getattr(stmt, "start_line", None)
@@ -1073,7 +1311,13 @@ def completion(ls: SapphireLanguageServer,
     best_node = None
     min_dist = float('inf')
     for node in node_types.keys():
-      n_name = getattr(node, "name", None) or getattr(node, "alias", None) or getattr(node, "let_name", None) or getattr(node, "key_var", None) or getattr(node, "val_var", None) or getattr(node, "loop_var", None)
+      n_name = (getattr(node, "name", None) or
+                getattr(node, "member", None) or
+                getattr(node, "alias", None) or
+                getattr(node, "let_name", None) or
+                getattr(node, "key_var", None) or
+                getattr(node, "val_var", None) or
+                getattr(node, "loop_var", None))
       if n_name == receiver_name:
         s_line = getattr(node, "start_line", getattr(node, "name_line", None))
         dist = abs(s_line - line) if s_line else 0
@@ -1109,7 +1353,7 @@ def completion(ls: SapphireLanguageServer,
         )
       return CompletionList(is_incomplete=False, items=items)
 
-    if type(receiver_type).__name__ == "ModuleType" or (uri in ls.symbol_table_cache and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__ == "ModuleSymbol"):
+    if type(receiver_type).__name__ == "ModuleType" or (not best_node and uri in ls.symbol_table_cache and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__ == "ModuleSymbol"):
       items = []
       mod_sym = ls.symbol_table_cache[uri].lookup(receiver_name) if uri in ls.symbol_table_cache else None
       exports = mod_sym.exports if mod_sym and hasattr(mod_sym, "exports") else {}
@@ -1139,7 +1383,7 @@ def completion(ls: SapphireLanguageServer,
         )
       return CompletionList(is_incomplete=True, items=items)
 
-    if hasattr(receiver_type, "fields"):
+    if hasattr(receiver_type, "fields") or hasattr(receiver_type, "methods"):
       items = []
       # Suggest fields
       for field_name, field in getattr(receiver_type, "fields", {}).items():
@@ -1155,11 +1399,12 @@ def completion(ls: SapphireLanguageServer,
       for method_name, method in getattr(receiver_type, "methods", {}).items():
         if method_name == "__init__":
           continue
+        m_type = str(getattr(method, "method_type", method))
         items.append(
             CompletionItem(
                 label=method_name,
                 kind=2,  # Method
-                detail=f"(method) {method_name}{str(method.method_type)}",
+                detail=f"(method) {method_name}{m_type}",
                 insert_text=method_name,
             )
         )
