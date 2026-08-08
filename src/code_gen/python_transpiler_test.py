@@ -847,6 +847,24 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertEqual(self._transpile_and_run(code, "get_b()"), False)
     self.assertEqual(self._transpile_and_run(code, "is_opt_none()"), True)
 
+  def test_python_match_empty_and_multi_yield(self):
+    """Verifies Python transpilation of empty yield and multi-yield inline match expressions."""
+    code = """
+    func test_yields(val: int): int, int {
+      let res = (match val {
+        1 -> { yield 10, 20; },
+        2 -> { yield; },
+        ... -> { yield 30, 40; }
+      });
+      return match val {
+        1 -> { yield 10, 20; },
+        ... -> { yield 30, 40; }
+      };
+    }
+    """
+    py = self._transpile(code)
+    self.assertIn("None", py)
+
 
   def test_match_expression_transpilation_and_execution(self):
     """Verifies Python transpilation and execution of match expressions."""

@@ -4011,6 +4011,18 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Cannot resolve imported module 'game.entities.enums'. Module file not found.", str(ctx.exception))
 
 
+  def test_match_empty_and_single_yield_context(self):
+    """Verifies type checking of empty yield statements inside match."""
+    self._check("""
+    func test_empty_yield(x: int) {
+      let r = match x {
+        1 -> { yield; },
+        ... -> { yield; }
+      };
+    }
+    """)
+
+
 if __name__ == "__main__":
   unittest.main()
 

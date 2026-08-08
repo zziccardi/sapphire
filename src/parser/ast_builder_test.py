@@ -645,6 +645,24 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(struct_decl.fields[1].default_expr, LiteralNode)
 
 
+  def test_yield_node_variants_and_to_dict(self):
+    from src.parser.ast import YieldNode, LiteralNode
+    lit1 = LiteralNode(1, "int")
+    node_single = YieldNode(expr=lit1)
+    self.assertEqual(node_single.expr, lit1)
+    d_single = node_single.to_dict()
+    self.assertIn("exprs", d_single)
+    self.assertIn("expr", d_single)
+
+    node_single_exprs = YieldNode(exprs=lit1)
+    self.assertEqual(node_single_exprs.expr, lit1)
+
+    node_empty = YieldNode()
+    self.assertIsNone(node_empty.expr)
+    d_empty = node_empty.to_dict()
+    self.assertIsNone(d_empty["expr"])
+
+
 if __name__ == "__main__":
   unittest.main()
 

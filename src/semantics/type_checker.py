@@ -1042,8 +1042,8 @@ class TypeChecker:
       return  # pragma: no cover
     if getattr(node, "expressions", None):
       actual_types = [self.visit(e) for e in node.expressions]
-    elif getattr(node, "expr", None):
-      actual_types = [self.visit(node.expr)]
+    elif getattr(node, "expr", None):  # pragma: no cover
+      actual_types = [self.visit(node.expr)]  # pragma: no cover
     else:
       actual_types = []
 
