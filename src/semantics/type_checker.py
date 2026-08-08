@@ -155,7 +155,7 @@ class TypeChecker:
 
     # Resolve fields for monomorphized struct
     for f in cloned_decl.fields:
-      ftype = self._resolve_type_node(f.field_type)
+      ftype = self._resolve_field_type(f, mono_struct_type.name)
       has_default = f.default_expr is not None or self._has_implicit_default_value(ftype)
       mono_struct_type.fields[f.name] = StructField(
           f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
@@ -457,7 +457,7 @@ class TypeChecker:
                 struct_type.fields[field_name] = field_obj
 
       for f in node.fields:
-        ftype = self._resolve_type_node(f.field_type)
+        ftype = self._resolve_field_type(f, node.name)
         if f.name in struct_type.fields:
           self.error(f"Field '{f.name}' in struct '{node.name}' shadows inherited parent field.")
         has_default = f.default_expr is not None or self._has_implicit_default_value(ftype)
@@ -470,6 +470,34 @@ class TypeChecker:
 
     for s in structs_to_process:
       process_struct(s)
+
+  def _resolve_field_type(self, f: StructFieldNode, struct_name: str) -> Type:
+    """Resolves struct field type from explicit annotation or infers it from default expression."""
+    if f.field_type:
+      ftype = self._resolve_type_node(f.field_type)
+      if f.default_expr:
+        expr_type = self.visit(f.default_expr)
+        if not expr_type.is_compatible(ftype):
+          self.error(
+              f"Default expression of type '{expr_type}' is not compatible with field '{f.name}' of type '{ftype}'.",
+              node=f,
+          )
+      return ftype
+    elif f.default_expr:
+      ftype = self.visit(f.default_expr)
+      if isinstance(ftype, NoneType):
+        self.error(
+            f"Cannot infer type of struct field '{f.name}' from 'none' alone. Specify an explicit type annotation.",
+            node=f,
+        )
+        return PrimitiveType("none")
+      return ftype
+    else:
+      self.error(
+          f"Struct field '{f.name}' in struct '{struct_name}' requires an explicit type annotation or a default value.",
+          node=f,
+      )
+      return PrimitiveType("none")
 
   def _has_implicit_default_value(self, ftype: Type) -> bool:
     if isinstance(ftype, OptionalType):
@@ -784,7 +812,11 @@ class TypeChecker:
     # 2. Evaluate expressions and resolve RHS types
     if not node.exprs:
       for name, val_type_node in zip(node.names, node.val_types):
-        v_type = self._resolve_type_node(val_type_node) if val_type_node else PrimitiveType("none")
+        if not val_type_node:
+          self.error(f"Variable '{name}' requires an explicit type annotation or an initial value.", node=node)
+          v_type = PrimitiveType("none")
+        else:
+          v_type = self._resolve_type_node(val_type_node)
         sym = VariableSymbol(name, v_type, node.is_mutable)
         self.symbol_table.define(name, sym)
       return

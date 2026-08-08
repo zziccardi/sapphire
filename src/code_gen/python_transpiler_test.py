@@ -1464,6 +1464,25 @@ class TestSharedFixtures(unittest.TestCase):
         results[name] = val
     return results
 
+  def test_omitted_type_annotations_transpilation(self):
+    """Verifies Python transpilation and execution of structs and global variables with omitted explicit types."""
+    code = """
+    let OFFSET = 50;
+    var FACTOR = 2;
+
+    struct Config {
+      var base = 10;
+      let multiplier = 3;
+    }
+
+    func test_compute(): int {
+      let cfg = Config {};
+      return (cfg.base * cfg.multiplier) + OFFSET * FACTOR;
+    }
+    """
+    res = self._transpile_and_exec(code)["test_compute"]
+    self.assertEqual(res, 130)
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):
