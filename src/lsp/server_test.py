@@ -2225,6 +2225,27 @@ func run() {
       self.assertEqual(def_res.uri, graphics_uri)
       self.assertEqual(def_res.range.start.line, 51)  # line 52 in 1-based indexing
 
+      enums_file = os.path.join(repo_root, "lib", "love2d", "enums.sp")
+      enums_uri = from_fs_path(enums_file)
+
+      # Character 34 is on 'enums'
+      def_enums_mod = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=demo_uri),
+          position=Position(line=43, character=34)
+      ))
+      self.assertIsNotNone(def_enums_mod)
+      self.assertEqual(def_enums_mod.uri, enums_uri)
+
+      # Character 40 is on 'DrawMode'
+      def_enum_type = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=demo_uri),
+          position=Position(line=43, character=40)
+      ))
+      self.assertIsNotNone(def_enum_type)
+      self.assertTrue(def_enum_type.uri.startswith("file:///"))
+      self.assertEqual(def_enum_type.uri, enums_uri)
+      self.assertEqual(def_enum_type.range.start.line, 11)  # line 12 in enums.sp: 'enum DrawMode {'
+
 
 if __name__ == "__main__":
   unittest.main()

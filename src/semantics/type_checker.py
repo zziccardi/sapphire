@@ -291,7 +291,7 @@ class TypeChecker:
               except Exception:
                 pass
 
-              mod_sym.file_path = target_file
+              mod_sym.file_path = os.path.abspath(target_file)
               # Populate mod_sym exports from sub_checker
               if getattr(sub_ast, "export_block", None):
                 for spec in sub_ast.export_block.specifiers:

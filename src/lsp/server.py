@@ -148,7 +148,7 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
     if getattr(s_decl, "path", None):
       mod_path_fs = _resolve_module_path(doc_uri, s_decl.path, ws_root)
       if mod_path_fs and os.path.isfile(mod_path_fs):
-        mod_uri = from_fs_path(mod_path_fs)
+        mod_uri = from_fs_path(os.path.abspath(mod_path_fs))
         s_decl.target_file_uri = mod_uri
         if mod_uri not in ls.ast_cache:
           try:
@@ -696,11 +696,16 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
         target_fs = _resolve_module_path(uri, node.path, ws_root)
         if target_fs:
           from pygls.uris import from_fs_path
-          target_uri = from_fs_path(target_fs)
+          target_uri = from_fs_path(os.path.abspath(target_fs))
           return Location(uri=target_uri, range=Range(start=Position(line=0, character=0), end=Position(line=0, character=0)))
 
   elif isinstance(node, IdentifierNode):
     sym = sym_table.lookup(node.name)
+    if sym and type(sym).__name__ == "ModuleSymbol" and getattr(sym, "file_path", None):
+      from pygls.uris import from_fs_path
+      mod_uri = from_fs_path(os.path.abspath(sym.file_path))
+      return Location(uri=mod_uri, range=Range(start=Position(line=0, character=0), end=Position(line=0, character=0)))
+
     if sym and hasattr(sym, "ast_decl") and sym.ast_decl:
       target_ast = sym.ast_decl
     elif sym and hasattr(sym, "symbol_type") and hasattr(sym.symbol_type, "ast_decl") and sym.symbol_type.ast_decl:
@@ -727,7 +732,7 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
         mod_file_path = getattr(sym, "file_path", None)
         if mod_file_path:
           from pygls.uris import from_fs_path
-          mod_uri = from_fs_path(mod_file_path)
+          mod_uri = from_fs_path(os.path.abspath(mod_file_path))
           if not target_ast and mod_uri in ls.symbol_table_cache:  # pragma: no cover
             sub_sym_table = ls.symbol_table_cache[mod_uri]
             exp_sym = sub_sym_table.lookup(node.member) or sub_sym_table.lookup_type(node.member)
@@ -795,7 +800,7 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
         mod_file_path = getattr(sym, "file_path", None)
         if mod_file_path:
           from pygls.uris import from_fs_path
-          mod_uri = from_fs_path(mod_file_path)
+          mod_uri = from_fs_path(os.path.abspath(mod_file_path))
           if not target_ast and mod_uri in ls.symbol_table_cache:  # pragma: no cover
             exp_sym = ls.symbol_table_cache[mod_uri].lookup_type(parts[1]) or ls.symbol_table_cache[mod_uri].lookup(parts[1])
             if exp_sym:
