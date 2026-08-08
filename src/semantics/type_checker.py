@@ -225,6 +225,8 @@ class TypeChecker:
   def _declare_imports(self, program: ProgramNode) -> None:
     """Pre-pass to register imported module symbols."""
     import os
+    from src.semantics.module_resolver import resolve_module_path
+
     for imp in getattr(program, "imports", []):
       module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
       existing = self.symbol_table.lookup_current_scope(module_name)
@@ -240,25 +242,7 @@ class TypeChecker:
         mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
 
       # Resolve imported module file path on disk
-      possible_paths = [
-          imp.path.replace(".", "/") + ".sp",
-          os.path.join(os.getcwd(), imp.path.replace(".", "/") + ".sp"),
-      ]
-      root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-      lib_dir = os.path.join(root_dir, "lib")
-      possible_paths.append(os.path.join(lib_dir, imp.path.replace(".", "/") + ".sp"))
-      if imp.path.startswith("std."):
-        possible_paths.append(os.path.join(lib_dir, "std", imp.path[4:].replace(".", "/") + ".sp"))
-
-      if getattr(self, "source_file_path", None):
-        base_dir = os.path.dirname(self.source_file_path)
-        possible_paths.insert(0, os.path.join(base_dir, imp.path.replace(".", "/") + ".sp"))
-
-      target_file = None
-      for p in possible_paths:
-        if os.path.exists(p):
-          target_file = p
-          break
+      target_file = resolve_module_path(imp.path, source_file_path=getattr(self, "source_file_path", None))
 
       is_builtin = (imp.path == "std.testing" or imp.path.startswith("std.testing"))
       if not target_file and not is_builtin and not is_predefined:
@@ -314,7 +298,7 @@ class TypeChecker:
                       if exp:
                         mod_sym.exports[export_name] = exp
                   else:
-                    exp = sub_checker.symbol_table.lookup(spec.symbol) or sub_checker.symbol_table.lookup_type(spec.symbol)
+                    exp = sub_checker.symbol_table.lookup_type(spec.symbol) or sub_checker.symbol_table.lookup(spec.symbol)
                     if exp:
                       mod_sym.exports[export_name] = exp
               else:
@@ -326,6 +310,8 @@ class TypeChecker:
                 for name, t in sub_root.types.items():
                   if name not in ("int", "float", "bool", "String", "none", "Arena"):
                     mod_sym.exports[name] = t
+              if is_builtin:
+                mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
             except Exception:  # pragma: no cover
               pass
           except Exception:  # pragma: no cover

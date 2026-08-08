@@ -107,18 +107,12 @@ def transpile_file(
     sys.exit(1)
 
   # 5. Transitive Module Dependencies Transpilation
+  from src.semantics.module_resolver import resolve_module_path
+
   for imp in getattr(ast, "imports", []):
-    rel_path = imp.path.replace(".", "/") + ".sp"
-    possible_sources = [
-        rel_path,
-        os.path.join(os.path.dirname(input_file), rel_path),
-        os.path.join(os.getcwd(), rel_path),
-    ]
-    sub_source = None
-    for p in possible_sources:
-      if os.path.exists(p):
-        sub_source = p
-        break
+    if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+      continue
+    sub_source = resolve_module_path(imp.path, source_file_path=input_file)
     if sub_source:
       sub_output = os.path.splitext(sub_source)[0] + ext
       transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, quiet=quiet)

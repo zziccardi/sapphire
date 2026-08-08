@@ -673,6 +673,8 @@ class Scope:
         exp = mod_sym.lookup_export(parts[1])
         if isinstance(exp, Type):
           return exp
+        elif hasattr(exp, "symbol_type") and isinstance(exp.symbol_type, Type):
+          return exp.symbol_type
     if name in self.types:
       return self.types[name]
     if self.parent:
