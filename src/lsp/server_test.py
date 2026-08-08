@@ -1878,6 +1878,42 @@ let field_ref = c_var.p.x;
     ))
     self.assertIsNone(res_not_fn)
 
+  def test_trait_method_completion(self):
+    """Verifies that LSP completion suggests all methods defined on a trait receiver."""
+    from src.lsp.server import completion, validate_source
+    from lsprotocol.types import CompletionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///test_trait_completion.sp"
+    code = """
+    trait Graphics {
+      func clear(r: float, g: float, b: float);
+      func setBackgroundColor(r: float, g: float, b: float);
+      func circle(x: float, y: float, r: float);
+    }
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+    func test(love: LoveEngine) {
+      love.graphics.
+    }
+    """
+    validate_source(self.ls, doc_uri, code)
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = code
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Position at line 11 (1-indexed: 12), after 'love.graphics.'
+    res = completion(self.ls, CompletionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=11, character=20)
+    ))
+    self.assertIsNotNone(res)
+    labels = {item.label for item in res.items}
+    self.assertIn("clear", labels)
+    self.assertIn("setBackgroundColor", labels)
+    self.assertIn("circle", labels)
+
 
 if __name__ == "__main__":
   unittest.main()

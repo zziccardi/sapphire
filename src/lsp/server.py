@@ -1073,7 +1073,13 @@ def completion(ls: SapphireLanguageServer,
     best_node = None
     min_dist = float('inf')
     for node in node_types.keys():
-      n_name = getattr(node, "name", None) or getattr(node, "alias", None) or getattr(node, "let_name", None) or getattr(node, "key_var", None) or getattr(node, "val_var", None) or getattr(node, "loop_var", None)
+      n_name = (getattr(node, "name", None) or
+                getattr(node, "member", None) or
+                getattr(node, "alias", None) or
+                getattr(node, "let_name", None) or
+                getattr(node, "key_var", None) or
+                getattr(node, "val_var", None) or
+                getattr(node, "loop_var", None))
       if n_name == receiver_name:
         s_line = getattr(node, "start_line", getattr(node, "name_line", None))
         dist = abs(s_line - line) if s_line else 0
@@ -1109,7 +1115,7 @@ def completion(ls: SapphireLanguageServer,
         )
       return CompletionList(is_incomplete=False, items=items)
 
-    if type(receiver_type).__name__ == "ModuleType" or (uri in ls.symbol_table_cache and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__ == "ModuleSymbol"):
+    if type(receiver_type).__name__ == "ModuleType" or (not best_node and uri in ls.symbol_table_cache and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__ == "ModuleSymbol"):
       items = []
       mod_sym = ls.symbol_table_cache[uri].lookup(receiver_name) if uri in ls.symbol_table_cache else None
       exports = mod_sym.exports if mod_sym and hasattr(mod_sym, "exports") else {}
@@ -1139,7 +1145,7 @@ def completion(ls: SapphireLanguageServer,
         )
       return CompletionList(is_incomplete=True, items=items)
 
-    if hasattr(receiver_type, "fields"):
+    if hasattr(receiver_type, "fields") or hasattr(receiver_type, "methods"):
       items = []
       # Suggest fields
       for field_name, field in getattr(receiver_type, "fields", {}).items():
@@ -1155,11 +1161,12 @@ def completion(ls: SapphireLanguageServer,
       for method_name, method in getattr(receiver_type, "methods", {}).items():
         if method_name == "__init__":
           continue
+        m_type = str(getattr(method, "method_type", method))
         items.append(
             CompletionItem(
                 label=method_name,
                 kind=2,  # Method
-                detail=f"(method) {method_name}{str(method.method_type)}",
+                detail=f"(method) {method_name}{m_type}",
                 insert_text=method_name,
             )
         )
