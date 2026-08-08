@@ -154,6 +154,18 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(player_decl.parent_names_info[0]["name"], "Position")
     self.assertEqual(player_decl.parent_names_info[1]["name"], "Health")
 
+  def test_dotted_parent_struct_declaration(self):
+    """Verifies parsing of struct declarations inheriting from imported modules (e.g. struct Character: entity.Entity)."""
+    ast = self._get_ast("""
+    struct Character: entity.Entity { var x: float; }
+    """)
+    char_decl = ast.declarations[0]
+    self.assertEqual(char_decl.name, "Character")
+    self.assertEqual(char_decl.parent_names, ["entity.Entity"])
+    self.assertEqual(char_decl.parent_name, "entity.Entity")
+    self.assertEqual(len(char_decl.parent_names_info), 1)
+    self.assertEqual(char_decl.parent_names_info[0]["name"], "entity.Entity")
+
   def test_additional_syntax(self):
     """Verifies parsing of standard if/else, multi-parameter lambdas, and other literals/expressions."""
     ast = self._get_ast("""

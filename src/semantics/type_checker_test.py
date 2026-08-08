@@ -3971,6 +3971,37 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot return value of type 'String' for return value #2 (expected 'int').", str(ctx.exception))
 
+  def test_imported_parent_struct_inheritance(self):
+    """Verifies that structs statically inheriting from imported module structs (e.g. struct Character: entity.Entity) inherit fields properly."""
+    from antlr4 import InputStream, CommonTokenStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+    from src.parser.ast_builder import ASTBuilder
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+
+    code = """
+    struct Character: entity.Entity {
+      var x: float = 0.0;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    mod_sym = ModuleSymbol("entity", "game/entities/entity.sp")
+    entity_struct = StructType("Entity")
+    entity_struct.fields["entity_id"] = StructField("entity_id", PrimitiveType("int"), True)
+    mod_sym.exports["Entity"] = entity_struct
+    checker.symbol_table.define("entity", mod_sym)
+
+    checker.check(ast)
+    char_struct = checker.symbol_table.lookup_type("Character")
+    self.assertIsNotNone(char_struct)
+    self.assertIn("entity_id", char_struct.fields)
+    self.assertIn("x", char_struct.fields)
+
 
 if __name__ == "__main__":
   unittest.main()
