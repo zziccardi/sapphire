@@ -4023,6 +4023,36 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
 
+  def test_invalid_prefix_import_error(self):
+    """Regression test: verifies that importing with invalid path prefix (e.g. game.entities.character when only character.sp exists) fails with a compiler error."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+      char_sp = os.path.join(tmpdir, "character.sp")
+      with open(char_sp, "w") as f:
+        f.write("export { Character }; struct Character {}\n")
+
+      enemy_sp = os.path.join(tmpdir, "enemy.sp")
+      code = "import game.entities.character;\n"
+
+      lexer = SapphireLexer(InputStream(code))
+      parser = SapphireParser(CommonTokenStream(lexer))
+      tree = parser.program()
+      ast = ASTBuilder().visit(tree)
+
+      checker = TypeChecker(source_file_path=enemy_sp)
+      with self.assertRaises(SemanticError) as ctx:
+        checker.check(ast)
+      self.assertIn("Cannot resolve imported module 'game.entities.character'. Module file not found.", str(ctx.exception))
+
+      code_valid = "import character;\n"
+      lexer_v = SapphireLexer(InputStream(code_valid))
+      parser_v = SapphireParser(CommonTokenStream(lexer_v))
+      tree_v = parser_v.program()
+      ast_v = ASTBuilder().visit(tree_v)
+      checker_v = TypeChecker(source_file_path=enemy_sp)
+      checker_v.check(ast_v)
+
+
 if __name__ == "__main__":
   unittest.main()
 
