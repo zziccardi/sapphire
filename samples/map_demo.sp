@@ -33,7 +33,8 @@ func main() {
 
   let ins_val = mut_map.insert("gamma", 3);
   let ins_named = mut_map.insert(key = "delta", value = 4);
-  print("Inserted gamma: " + String.from(ins_val) + ", map size: " + String.from(mut_map.size()));
+  print("Inserted gamma: " + String.from(ins_val) + ", map size: " +
+        String.from(mut_map.size()));
 
   if let rem_val ?= mut_map.remove("beta") {
     print("Removed beta val: " + String.from(rem_val));
