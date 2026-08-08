@@ -3,12 +3,12 @@
 import lib.love2d.enums;
 
 export {
+  Canvas,
   Color,
-  ImageHandle,
-  CanvasHandle,
-  FontHandle,
-  QuadHandle,
+  Font,
   Graphics,
+  Image,
+  Quad,
 }
 
 struct Color {
@@ -18,7 +18,7 @@ struct Color {
   var a: float = 1.0;
 }
 
-trait ImageHandle {
+trait Image {
   func draw(self, x: float, y: float);
 
   @export("draw")
@@ -31,18 +31,18 @@ trait ImageHandle {
   func setFilter(self, min: enums.FilterMode, mag: enums.FilterMode);
 }
 
-trait CanvasHandle {
+trait Canvas {
   func getWidth(self): float;
   func getHeight(self): float;
   func getDimensions(self): float, float;
 }
 
-trait FontHandle {
+trait Font {
   func getHeight(self): float;
   func getWidth(self, text: String): float;
 }
 
-trait QuadHandle {
+trait Quad {
   func getViewport(self): float, float, float, float;
   func setViewport(self, x: float, y: float, w: float, h: float);
 }
@@ -53,9 +53,8 @@ trait Graphics {
   func present();
 
   @export("setColor")
-  func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
+  func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
-  @export("rectangle")
   func rectangle(mode: enums.DrawMode, x: float, y: float,
                  width: float, height: float);
 
@@ -68,12 +67,12 @@ trait Graphics {
   func line(x1: float, y1: float, x2: float, y2: float);
   func print(text: String, x: float, y: float);
 
-  func newImage(path: String): ImageHandle;
-  func newCanvas(width: float = 0.0, height: float = 0.0): CanvasHandle;
-  func newFont(path: String, size: int = 12): FontHandle;
+  func newImage(path: String): Image;
+  func newCanvas(width: float = 0.0, height: float = 0.0): Canvas;
+  func newFont(path: String, size: int = 12): Font;
   func newQuad(x: float, y: float, w: float, h: float,
-               sw: float, sh: float): QuadHandle;
+               sw: float, sh: float): Quad;
 
-  func setCanvas(canvas: CanvasHandle? = none);
-  func setFont(font: FontHandle);
+  func setCanvas(canvas: Canvas? = none);
+  func setFont(font: Font);
 }

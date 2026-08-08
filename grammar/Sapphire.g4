@@ -61,7 +61,7 @@ typeArgumentList
     ;
 
 structDeclaration
-    : (STRUCT | PROTO_KEYWORD) IDENTIFIER typeParamList? (COLON IDENTIFIER (COMMA IDENTIFIER)*)? LBRACE structField* RBRACE
+    : (STRUCT | PROTO_KEYWORD) IDENTIFIER typeParamList? (COLON identifierPath (COMMA identifierPath)*)? LBRACE structField* RBRACE
     ;
 
 structField
@@ -152,7 +152,7 @@ continueStatement
     ;
 
 yieldStatement
-    : YIELD expression SEMICOLON
+    : YIELD (expression (COMMA expression)*)? SEMICOLON
     ;
 
 matchExpression

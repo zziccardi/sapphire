@@ -89,6 +89,16 @@ class TestDiagnostics(unittest.TestCase):
       if os.path.exists(temp_path):
         os.remove(temp_path)
 
+  def test_format_diagnostic_no_loc(self):
+    diag = format_diagnostic(
+        error_type="Error",
+        file_path=None,
+        line=None,
+        column=None,
+        message="Global failure",
+    )
+    self.assertEqual(diag, "Error: Global failure")
+
 
 if __name__ == "__main__":
   unittest.main()

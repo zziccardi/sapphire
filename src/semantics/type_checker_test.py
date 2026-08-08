@@ -3886,6 +3886,142 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Default expression of type 'String' is not compatible with field 'x' of type 'int'.", str(ctx.exception))
 
+  def test_impl_method_multiple_return_values(self):
+    """Verifies that impl methods returning multiple values type check correctly and enforce return counts/types."""
+    # 1. Valid multiple return values from impl method
+    self._check("""
+    struct Entity {
+      var tile_x = 0;
+      var tile_y = 0;
+    }
+
+    impl Entity {
+      const func get_tile_position(): int, int {
+        return self.tile_x, self.tile_y;
+      }
+    }
+    """)
+
+    # 2. Return count mismatch in impl method (providing 1 value when 2 expected)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Entity {
+        var tile_x = 0;
+      }
+
+      impl Entity {
+        const func get_tile_position(): int, int {
+          return self.tile_x;
+        }
+      }
+      """)
+    self.assertIn("Function expected 2 return value(s), but return statement provided 1 value(s).", str(ctx.exception))
+
+    # 3. Return type mismatch in impl method
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Entity {
+        var tile_x = 0;
+      }
+
+      impl Entity {
+        const func get_tile_position(): int, int {
+          return self.tile_x, "invalid";
+        }
+      }
+      """)
+    self.assertIn("Cannot return value of type 'String' for return value #2 (expected 'int').", str(ctx.exception))
+
+  def test_match_multiple_yield_values(self):
+    """Verifies type checking of match expressions yielding multiple values."""
+    # 1. Valid multiple yield values in match returned directly
+    self._check("""
+    enum Direction { North, South }
+
+    func get_offset(d: Direction): int, int {
+      return match d {
+        Direction.North -> { yield 0, 1; },
+        Direction.South -> { yield 0, -1; },
+      };
+    }
+    """)
+
+    # 2. Unpacking match expression yielding multiple values into variable declaration
+    self._check("""
+    enum Direction { North }
+
+    func main() {
+      let d = Direction.North;
+      let dx, dy = match d {
+        Direction.North -> { yield 1, 2; },
+      };
+    }
+    """)
+
+    # 3. Type mismatch in multiple yield values
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Direction { North }
+
+      func get_offset(d: Direction): int, int {
+        return match d {
+          Direction.North -> { yield 0, "invalid"; },
+        };
+      }
+      """)
+    self.assertIn("Cannot return value of type 'String' for return value #2 (expected 'int').", str(ctx.exception))
+
+  def test_imported_parent_struct_inheritance(self):
+    """Verifies that structs statically inheriting from imported module structs (e.g. struct Character: entity.Entity) inherit fields properly."""
+    from antlr4 import InputStream, CommonTokenStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+    from src.parser.ast_builder import ASTBuilder
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+
+    code = """
+    struct Character: entity.Entity {
+      var x: float = 0.0;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    mod_sym = ModuleSymbol("entity", "game/entities/entity.sp")
+    entity_struct = StructType("Entity")
+    entity_struct.fields["entity_id"] = StructField("entity_id", PrimitiveType("int"), True)
+    mod_sym.exports["Entity"] = entity_struct
+    checker.symbol_table.define("entity", mod_sym)
+
+    checker.check(ast)
+    char_struct = checker.symbol_table.lookup_type("Character")
+    self.assertIsNotNone(char_struct)
+    self.assertIn("entity_id", char_struct.fields)
+    self.assertIn("x", char_struct.fields)
+
+  def test_import_non_existent_module_error(self):
+    """Verifies that attempting to import a non-existent module raises a SemanticError."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      import game.entities.enums;
+      """)
+    self.assertIn("Cannot resolve imported module 'game.entities.enums'. Module file not found.", str(ctx.exception))
+
+
+  def test_match_empty_and_single_yield_context(self):
+    """Verifies type checking of empty yield statements inside match."""
+    self._check("""
+    func test_empty_yield(x: int) {
+      let r = match x {
+        1 -> { yield; },
+        ... -> { yield; }
+      };
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

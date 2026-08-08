@@ -121,32 +121,32 @@ class ASTBuilder(SapphireVisitor):
     return [self.visit(t) for t in ctx.type_()]
 
   def visitStructDeclaration(self, ctx: SapphireParser.StructDeclarationContext) -> StructDeclNode:
-    name = ctx.IDENTIFIER(0).getText()
-    parent_tokens = ctx.IDENTIFIER()[1:] if len(ctx.IDENTIFIER()) > 1 else []
-    parent_names = [t.getText() for t in parent_tokens]
+    name = ctx.IDENTIFIER().getText()
+    parent_paths = ctx.identifierPath() if ctx.identifierPath() else []
+    parent_names = [p.getText() for p in parent_paths]
     type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     fields = [self.visit(field) for field in ctx.structField()] if ctx.structField() else []
     is_prototype = ctx.PROTO_KEYWORD() is not None
     node = StructDeclNode(name, parent_names, fields, is_prototype, type_params=type_params)
     # Positioning for Language Server:
-    name_token = ctx.IDENTIFIER(0).getSymbol()
+    name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line
     node.name_column = name_token.column
     node.name_length = len(name_token.text)
     node.parent_names_info = []
-    for pt in parent_tokens:
-      sym = pt.getSymbol()
+    for p in parent_paths:
+      start_sym = p.start
       node.parent_names_info.append({
-          "name": sym.text,
-          "line": sym.line,
-          "column": sym.column,
-          "length": len(sym.text),
+          "name": p.getText(),
+          "line": start_sym.line,
+          "column": start_sym.column,
+          "length": len(p.getText()),
       })
-    if parent_tokens:
-      first_sym = parent_tokens[0].getSymbol()
+    if parent_paths:
+      first_sym = parent_paths[0].start
       node.parent_name_line = first_sym.line
       node.parent_name_column = first_sym.column
-      node.parent_name_length = len(first_sym.text)
+      node.parent_name_length = len(parent_paths[0].getText())
     return node
 
   def visitEnumDeclaration(self, ctx: SapphireParser.EnumDeclarationContext) -> EnumDeclNode:
@@ -309,8 +309,8 @@ class ASTBuilder(SapphireVisitor):
       name = "self"
       name_token = ctx.SELF().getSymbol()
     else:
-      name = ctx.IDENTIFIER().getText()
-      name_token = ctx.IDENTIFIER().getSymbol()
+      name_token = ctx.IDENTIFIER().getSymbol() if ctx.IDENTIFIER() else ctx.start
+      name = name_token.text if hasattr(name_token, "text") and name_token.text else "p"
 
     param_type = self.visit(ctx.type_()) if ctx.type_() else None
     default_expr = self.visit(ctx.expression()) if ctx.expression() else None
@@ -318,7 +318,7 @@ class ASTBuilder(SapphireVisitor):
     # Positioning for Language Server:
     node.name_line = name_token.line
     node.name_column = name_token.column
-    node.name_length = len(name_token.text)
+    node.name_length = len(name_token.text) if hasattr(name_token, "text") and name_token.text else len(name)
     return node
 
   def visitType(self, ctx: SapphireParser.TypeContext) -> TypeNode:
@@ -826,8 +826,8 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitYieldStatement(self, ctx: SapphireParser.YieldStatementContext) -> YieldNode:
-    expr = self.visit(ctx.expression())
-    return YieldNode(expr)
+    exprs = [self.visit(e) for e in ctx.expression()] if ctx.expression() else []
+    return YieldNode(exprs)
 
   def visitMatchExpression(self, ctx: SapphireParser.MatchExpressionContext) -> MatchExprNode:
     subject = self.visit(ctx.expression())

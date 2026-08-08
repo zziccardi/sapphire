@@ -40,22 +40,22 @@ func draw() {
   love.graphics.clear(r = 0.1, g = 0.15, b = 0.2);
 
   // Draw background playing arena
-  love.graphics.setColorRGBA(0.2, 0.7, 0.5);
+  love.graphics.setColorRgba(0.2, 0.7, 0.5);
   love.graphics.rectangle(mode = enums.DrawMode.Fill, x = 50.0, y = 50.0,
                           width = 700.0, height = 500.0);
 
   // Draw mock hero character procedurally (in practice use image asset)
-  love.graphics.setColorRGBA(0.9, 0.3, 0.4);
+  love.graphics.setColorRgba(0.9, 0.3, 0.4);
   love.graphics.circle(mode = enums.DrawMode.Fill, x = hero_x, y = hero_y,
                        radius = 24.0);
 
   // Draw hero outline
-  love.graphics.setColorRGBA(1.0, 1.0, 1.0);
+  love.graphics.setColorRgba(1.0, 1.0, 1.0);
   love.graphics.circle(mode = enums.DrawMode.Line, x = hero_x, y = hero_y,
                        radius = 24.0);
 
   // Draw HUD information & Controls
-  love.graphics.setColorRGBA(1.0, 1.0, 1.0);
+  love.graphics.setColorRgba(1.0, 1.0, 1.0);
   let fps_str = "FPS: " + love.timer.getFPS();
   love.graphics.print(text = fps_str, x = 10.0, y = 10.0);
   love.graphics.print(text = "Move with WASD or Arrow Keys",

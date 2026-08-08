@@ -154,6 +154,18 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(player_decl.parent_names_info[0]["name"], "Position")
     self.assertEqual(player_decl.parent_names_info[1]["name"], "Health")
 
+  def test_dotted_parent_struct_declaration(self):
+    """Verifies parsing of struct declarations inheriting from imported modules (e.g. struct Character: entity.Entity)."""
+    ast = self._get_ast("""
+    struct Character: entity.Entity { var x: float; }
+    """)
+    char_decl = ast.declarations[0]
+    self.assertEqual(char_decl.name, "Character")
+    self.assertEqual(char_decl.parent_names, ["entity.Entity"])
+    self.assertEqual(char_decl.parent_name, "entity.Entity")
+    self.assertEqual(len(char_decl.parent_names_info), 1)
+    self.assertEqual(char_decl.parent_names_info[0]["name"], "entity.Entity")
+
   def test_additional_syntax(self):
     """Verifies parsing of standard if/else, multi-parameter lambdas, and other literals/expressions."""
     ast = self._get_ast("""
@@ -631,6 +643,24 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(struct_decl.fields[1].name, "name")
     self.assertIsNone(struct_decl.fields[1].field_type)
     self.assertIsInstance(struct_decl.fields[1].default_expr, LiteralNode)
+
+
+  def test_yield_node_variants_and_to_dict(self):
+    from src.parser.ast import YieldNode, LiteralNode
+    lit1 = LiteralNode(1, "int")
+    node_single = YieldNode(expr=lit1)
+    self.assertEqual(node_single.expr, lit1)
+    d_single = node_single.to_dict()
+    self.assertIn("exprs", d_single)
+    self.assertIn("expr", d_single)
+
+    node_single_exprs = YieldNode(exprs=lit1)
+    self.assertEqual(node_single_exprs.expr, lit1)
+
+    node_empty = YieldNode()
+    self.assertIsNone(node_empty.expr)
+    d_empty = node_empty.to_dict()
+    self.assertIsNone(d_empty["expr"])
 
 
 if __name__ == "__main__":

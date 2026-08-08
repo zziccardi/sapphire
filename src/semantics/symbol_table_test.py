@@ -205,6 +205,17 @@ class TestSymbolTable(unittest.TestCase):
     self.assertEqual(mod_sym.lookup_export("x"), sym_x)
     self.assertIsNone(mod_sym.lookup_export("y"))
 
+  def test_lookup_type_dotted_wrapped_symbol(self):
+    """Verifies that lookup_type unwraps exp.symbol_type when exported item is a StructSymbol."""
+    from src.semantics.symbol_table import SymbolTable, ModuleSymbol, StructSymbol, StructType
+    st = SymbolTable()
+    s_type = StructType("Entity")
+    s_sym = StructSymbol("Entity", s_type)
+    mod_sym = ModuleSymbol("entity", "game.entities.entity", exports={"Entity": s_sym})
+    st.define("entity", mod_sym)
+    resolved = st.lookup_type("entity.Entity")
+    self.assertEqual(resolved, s_type)
+
   def test_map_type_methods(self):
     """Verifies MapType __eq__, __repr__, and is_compatible methods."""
     from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType

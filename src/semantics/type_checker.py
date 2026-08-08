@@ -225,10 +225,13 @@ class TypeChecker:
   def _declare_imports(self, program: ProgramNode) -> None:
     """Pre-pass to register imported module symbols."""
     import os
+    from src.semantics.module_resolver import resolve_module_path
+
     for imp in getattr(program, "imports", []):
       module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
       existing = self.symbol_table.lookup_current_scope(module_name)
-      if not existing or not isinstance(existing, ModuleSymbol):
+      is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
+      if not is_predefined:
         mod_sym = ModuleSymbol(module_name, imp.path)
         self.symbol_table.define(module_name, mod_sym)
         self.symbol_table.define_type(module_name, ModuleType(imp.path))
@@ -239,19 +242,11 @@ class TypeChecker:
         mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
 
       # Resolve imported module file path on disk
-      possible_paths = [
-          imp.path.replace(".", "/") + ".sp",
-          os.path.join(os.getcwd(), imp.path.replace(".", "/") + ".sp"),
-      ]
-      if getattr(self, "source_file_path", None):
-        base_dir = os.path.dirname(self.source_file_path)
-        possible_paths.insert(0, os.path.join(base_dir, imp.path.replace(".", "/") + ".sp"))
+      target_file = resolve_module_path(imp.path, source_file_path=getattr(self, "source_file_path", None))
 
-      target_file = None
-      for p in possible_paths:
-        if os.path.exists(p):
-          target_file = p
-          break
+      is_builtin = (imp.path == "std.testing" or imp.path.startswith("std.testing"))
+      if not target_file and not is_builtin and not is_predefined:
+        self.error(f"Cannot resolve imported module '{imp.path}'. Module file not found.", node=imp)
 
       if target_file:
           try:
@@ -303,7 +298,7 @@ class TypeChecker:
                       if exp:
                         mod_sym.exports[export_name] = exp
                   else:
-                    exp = sub_checker.symbol_table.lookup(spec.symbol) or sub_checker.symbol_table.lookup_type(spec.symbol)
+                    exp = sub_checker.symbol_table.lookup_type(spec.symbol) or sub_checker.symbol_table.lookup(spec.symbol)
                     if exp:
                       mod_sym.exports[export_name] = exp
               else:
@@ -315,6 +310,8 @@ class TypeChecker:
                 for name, t in sub_root.types.items():
                   if name not in ("int", "float", "bool", "String", "none", "Arena"):
                     mod_sym.exports[name] = t
+              if is_builtin:
+                mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
             except Exception:  # pragma: no cover
               pass
           except Exception:  # pragma: no cover
@@ -383,6 +380,7 @@ class TypeChecker:
               extern_name = ann.arg
               break
           num_defaults = sum(1 for p in member.parameters if getattr(p, "default_expr", None) is not None)
+          param_defaults = [getattr(p, "default_expr", None) for p in member.parameters]
           fn_type = FunctionType(
               p_types,
               ret_t,
@@ -391,6 +389,7 @@ class TypeChecker:
               has_self=has_self,
               extern_name=extern_name,
               num_defaults=num_defaults,
+              param_defaults=param_defaults,
               ast_decl=member,
           )
           trait_type.methods[member.name] = fn_type
@@ -417,12 +416,14 @@ class TypeChecker:
         if decl.type_params:
           self.symbol_table.exit_scope()
         num_defaults = sum(1 for p in decl.parameters if getattr(p, "default_expr", None) is not None)
+        param_defaults = [getattr(p, "default_expr", None) for p in decl.parameters]
         signature = FunctionType(
             param_types,
             ret_type,
             param_mutabilities,
             param_names=[p.name for p in decl.parameters],
             num_defaults=num_defaults,
+            param_defaults=param_defaults,
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
 
@@ -754,11 +755,11 @@ class TypeChecker:
     # Save function signature context
     resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
     param_mutabilities = [p.is_mutable for p in func_decl.parameters]
-    ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
+    ret_types = self._resolve_return_types(func_decl)
     num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
     self.current_function = FunctionType(
         resolved_params,
-        ret_type,
+        ret_types,
         param_mutabilities,
         param_names=[p.name for p in func_decl.parameters],
         num_defaults=num_defaults,
@@ -1004,7 +1005,16 @@ class TypeChecker:
       return
 
     expected_ret_types = self.current_function.return_types
-    actual_ret_types = [self.visit(e) for e in node.expressions] if node.expressions else []
+    actual_ret_types = []
+    if node.expressions:
+      if len(node.expressions) == 1:
+        single_type = self.visit(node.expressions[0])
+        if isinstance(single_type, MultiReturnType):
+          actual_ret_types = single_type.types
+        else:
+          actual_ret_types = [single_type]
+      else:
+        actual_ret_types = [self.visit(e) for e in node.expressions]
 
     if len(actual_ret_types) != len(expected_ret_types):
       if len(expected_ret_types) == 0:
@@ -1030,8 +1040,19 @@ class TypeChecker:
     if not self._match_stack:
       self.error("Yield statement outside match context.")  # pragma: no cover
       return  # pragma: no cover
-    expr_type = self.visit(node.expr)
-    self._match_stack[-1].append(expr_type)
+    if getattr(node, "expressions", None):
+      actual_types = [self.visit(e) for e in node.expressions]
+    elif getattr(node, "expr", None):  # pragma: no cover
+      actual_types = [self.visit(node.expr)]  # pragma: no cover
+    else:
+      actual_types = []
+
+    if len(actual_types) == 1:
+      self._match_stack[-1].append(actual_types[0])
+    elif len(actual_types) > 1:
+      self._match_stack[-1].append(MultiReturnType(actual_types))
+    else:
+      self._match_stack[-1].append(PrimitiveType("none"))
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
     subject_type = self.visit(node.subject)

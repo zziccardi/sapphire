@@ -454,10 +454,28 @@ class ReturnNode(StmtNode):
 
 
 class YieldNode(StmtNode):
-  """Represents a yield statement (e.g. 'yield "Success";')."""
+  """Represents a yield statement, supporting single or multiple yielded expressions."""
 
-  def __init__(self, expr: ASTNode):
-    self.expr = expr
+  def __init__(self, exprs: Optional[Union[ASTNode, List[ASTNode]]] = None, expr: Optional[ASTNode] = None):
+    if exprs is not None:
+      if isinstance(exprs, list):
+        self.expressions = exprs
+      else:
+        self.expressions = [exprs]
+    elif expr is not None:
+      self.expressions = [expr]
+    else:
+      self.expressions = []
+
+  @property
+  def expr(self) -> Optional[ASTNode]:
+    return self.expressions[0] if self.expressions else None
+
+  def to_dict(self) -> Dict[str, Any]:
+    res = super().to_dict()
+    res["exprs"] = [e.to_dict() for e in self.expressions]
+    res["expr"] = self.expr.to_dict() if self.expressions else None
+    return res
 
 
 class BreakNode(StmtNode):

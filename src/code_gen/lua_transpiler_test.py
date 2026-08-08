@@ -1074,6 +1074,25 @@ class TestLuaTranspiler(unittest.TestCase):
     lt = LuaTranspiler()
     lt._lift_match_expressions(None)
 
+  def test_lua_match_empty_and_multi_yield_inline(self):
+    """Verifies Lua transpilation of empty yield and multi-yield inline match expressions."""
+    code = """
+    func test_yields(val: int): int, int {
+      let res = (match val {
+        1 -> { yield 10, 20; },
+        2 -> { yield; },
+        ... -> { yield 30, 40; }
+      });
+      return match val {
+        1 -> { yield 10, 20; },
+        ... -> { yield 30, 40; }
+      };
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("table.unpack", lua)
+    self.assertIn("nil", lua)
+
   def test_break_and_continue_lua(self):
     """Verifies Lua transpilation of break and continue statements in while and for loops."""
     code = """
