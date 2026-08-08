@@ -370,6 +370,7 @@ class TypeChecker:
               has_self=has_self,
               extern_name=extern_name,
               num_defaults=num_defaults,
+              ast_decl=member,
           )
           trait_type.methods[member.name] = fn_type
         if decl.type_params:

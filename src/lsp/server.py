@@ -794,9 +794,30 @@ def signature_help(ls: SapphireLanguageServer, params: SignatureHelpParams) -> O
     fn_display_name = method_name
 
     receiver_type = None
-    sym = sym_table.lookup(obj_name)
-    if sym:
-      receiver_type = getattr(sym, "symbol_type", None)
+    if node_types:
+      best_node = None
+      min_dist = float('inf')
+      for node in node_types.keys():
+        n_name = (getattr(node, "name", None) or
+                  getattr(node, "member", None) or
+                  getattr(node, "alias", None) or
+                  getattr(node, "let_name", None) or
+                  getattr(node, "key_var", None) or
+                  getattr(node, "val_var", None) or
+                  getattr(node, "loop_var", None))
+        if n_name == obj_name:
+          s_line = getattr(node, "start_line", getattr(node, "name_line", None))
+          dist = abs(s_line - line) if s_line else 0
+          if dist < min_dist:
+            min_dist = dist
+            best_node = node
+      if best_node:
+        receiver_type = node_types.get(best_node)
+
+    if not receiver_type:
+      sym = sym_table.lookup(obj_name)
+      if sym:
+        receiver_type = getattr(sym, "symbol_type", None)
     if not receiver_type:
       receiver_type = sym_table.lookup_type(obj_name)
     if not receiver_type and uri in ls.ast_cache:

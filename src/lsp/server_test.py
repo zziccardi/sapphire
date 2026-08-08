@@ -879,8 +879,11 @@ class TestLSPServer(unittest.TestCase):
         self.assertTrue(len(completion(self.ls, params_comp).items) > 0)
 
       # Completion fallback when get_text_document raises an exception
-      with patch("src.lsp.server.find_node_at_position", return_value=None):
-        self.ls.workspace.get_text_document.side_effect = Exception("Test get_text_document exception")
+      try:
+        self.ls.workspace.get_text_document.side_effect = KeyError("Test get_text_document exception")
+        completion(self.ls, params_comp)
+      finally:
+        self.ls.workspace.get_text_document.side_effect = None
   def test_completion_typing_between_statements(self):
     doc_uri = "file:///between_test.sp"
     doc_text_between = """
@@ -1901,18 +1904,59 @@ let field_ref = c_var.p.x;
     mock_doc = MagicMock()
     mock_doc.uri = doc_uri
     mock_doc.source = code
-    self.ls.workspace.get_text_document.return_value = mock_doc
+    with patch.object(self.ls.workspace, "get_text_document", return_value=mock_doc):
+      res = completion(self.ls, CompletionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=11, character=20)
+      ))
+      self.assertIsNotNone(res)
+      labels = {item.label for item in res.items}
+      self.assertIn("clear", labels)
+      self.assertIn("setBackgroundColor", labels)
+      self.assertIn("circle", labels)
 
-    # Position at line 11 (1-indexed: 12), after 'love.graphics.'
-    res = completion(self.ls, CompletionParams(
-        text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=11, character=20)
-    ))
-    self.assertIsNotNone(res)
-    labels = {item.label for item in res.items}
-    self.assertIn("clear", labels)
-    self.assertIn("setBackgroundColor", labels)
-    self.assertIn("circle", labels)
+  def test_trait_method_signature_help_and_definition(self):
+    """Verifies signature help and go to definition for trait methods on member access receivers."""
+    from src.lsp.server import signature_help, definition, validate_source
+    from lsprotocol.types import SignatureHelpParams, DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///test_trait_sig_def.sp"
+    code = """
+    trait Graphics {
+      func rectangle(mode: int, x: float, y: float, w: float, h: float);
+    }
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+    func test(love: LoveEngine) {
+      love.graphics.rectangle(1, 10.0, 20.0, 30.0, 40.0);
+    }
+    """
+    validate_source(self.ls, doc_uri, code)
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = code
+    with patch.object(self.ls.workspace, "get_text_document", return_value=mock_doc):
+      # Test signature help at line 8 inside rectangle(
+      sig_res = signature_help(self.ls, SignatureHelpParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=8, character=30)
+      ))
+      self.assertIsNotNone(sig_res)
+      self.assertTrue(len(sig_res.signatures) > 0)
+      sig_label = sig_res.signatures[0].label
+      self.assertIn("rectangle", sig_label)
+      self.assertIn("mode: int", sig_label)
+      self.assertIn("x: float", sig_label)
+
+      # Test definition on 'rectangle' at line 8 character 22
+      def_res = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=8, character=22)
+      ))
+      self.assertIsNotNone(def_res)
+      # Definition should point to line 2 (0-indexed line 2: func rectangle...)
+      self.assertEqual(def_res.range.start.line, 2)
 
 
 if __name__ == "__main__":

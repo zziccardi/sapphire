@@ -122,6 +122,7 @@ class FunctionType(Type):
       has_self: bool = False,
       extern_name: Optional[str] = None,
       num_defaults: int = 0,
+      ast_decl: Optional[Any] = None,
   ):
     self.param_types = param_types
     if isinstance(return_type, list):
@@ -139,6 +140,7 @@ class FunctionType(Type):
         has_self or (bool(self.param_names) and self.param_names[0] == "self"))
     self.extern_name = extern_name
     self.num_defaults = num_defaults
+    self.ast_decl = ast_decl
 
   @property
   def return_types(self) -> List[Type]:
