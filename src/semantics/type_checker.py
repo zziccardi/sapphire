@@ -383,6 +383,7 @@ class TypeChecker:
               extern_name = ann.arg
               break
           num_defaults = sum(1 for p in member.parameters if getattr(p, "default_expr", None) is not None)
+          param_defaults = [getattr(p, "default_expr", None) for p in member.parameters]
           fn_type = FunctionType(
               p_types,
               ret_t,
@@ -391,6 +392,7 @@ class TypeChecker:
               has_self=has_self,
               extern_name=extern_name,
               num_defaults=num_defaults,
+              param_defaults=param_defaults,
               ast_decl=member,
           )
           trait_type.methods[member.name] = fn_type
@@ -417,12 +419,14 @@ class TypeChecker:
         if decl.type_params:
           self.symbol_table.exit_scope()
         num_defaults = sum(1 for p in decl.parameters if getattr(p, "default_expr", None) is not None)
+        param_defaults = [getattr(p, "default_expr", None) for p in decl.parameters]
         signature = FunctionType(
             param_types,
             ret_type,
             param_mutabilities,
             param_names=[p.name for p in decl.parameters],
             num_defaults=num_defaults,
+            param_defaults=param_defaults,
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
 

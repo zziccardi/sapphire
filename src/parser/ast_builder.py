@@ -309,8 +309,8 @@ class ASTBuilder(SapphireVisitor):
       name = "self"
       name_token = ctx.SELF().getSymbol()
     else:
-      name = ctx.IDENTIFIER().getText()
-      name_token = ctx.IDENTIFIER().getSymbol()
+      name_token = ctx.IDENTIFIER().getSymbol() if ctx.IDENTIFIER() else ctx.start
+      name = name_token.text if hasattr(name_token, "text") and name_token.text else "p"
 
     param_type = self.visit(ctx.type_()) if ctx.type_() else None
     default_expr = self.visit(ctx.expression()) if ctx.expression() else None
@@ -318,7 +318,7 @@ class ASTBuilder(SapphireVisitor):
     # Positioning for Language Server:
     node.name_line = name_token.line
     node.name_column = name_token.column
-    node.name_length = len(name_token.text)
+    node.name_length = len(name_token.text) if hasattr(name_token, "text") and name_token.text else len(name)
     return node
 
   def visitType(self, ctx: SapphireParser.TypeContext) -> TypeNode:

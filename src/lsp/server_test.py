@@ -2246,7 +2246,88 @@ func run() {
       self.assertEqual(def_enum_type.uri, enums_uri)
       self.assertEqual(def_enum_type.range.start.line, 11)  # line 12 in enums.sp: 'enum DrawMode {'
 
+  def test_hover_parameter_default_values(self):
+    """Verifies that hover on functions/methods displays default values for parameters."""
+    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
+    from pygls.uris import from_fs_path
+    from src.lsp.server import hover, validate_source
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      self.ls.workspace.root_uri = from_fs_path(os.getcwd())
+      doc_file = os.path.realpath(os.path.join(temp_dir, "hover_default_test.sp"))
+      doc_uri = from_fs_path(doc_file)
+      code = """func test_defaults(
+    a: int = 1 + 2,
+    b: bool = true,
+    c: String = "default",
+    d: float = -5.0,
+) {}
+
+func set_speed(multiplier: float = 1.5, name: String = "hero") {}
+
+func main() {
+  set_speed(1.5, "hero");
+  test_defaults(3, true, "default", -5.0);
+}"""
+      with open(doc_file, "w", encoding="utf-8") as f:
+        f.write(code)
+
+      validate_source(self.ls, doc_uri, code)
+      mock_doc = MagicMock()
+      mock_doc.uri = doc_uri
+      mock_doc.source = code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      # Hover on set_speed declaration (line 7, character 7)
+      res_hover = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=7, character=7)
+      ))
+      self.assertIsNotNone(res_hover)
+      self.assertIn("multiplier: float = 1.5", res_hover.contents.value)
+      self.assertIn('name: String = "hero"', res_hover.contents.value)
+
+      # Hover on test_defaults declaration (line 0, character 7)
+      res_defaults = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=0, character=7)
+      ))
+      self.assertIsNotNone(res_defaults)
+      self.assertIn("a: int = 1 + 2", res_defaults.contents.value)
+      self.assertIn("b: bool = true", res_defaults.contents.value)
+      self.assertIn('c: String = "default"', res_defaults.contents.value)
+      self.assertIn("d: float = -5.0", res_defaults.contents.value)
+
+  def test_format_ast_expr(self):
+    """Tests _format_ast_expr helper on various AST node types."""
+    from src.lsp.server import _format_ast_expr
+    from src.parser.ast import (
+        LiteralNode,
+        IdentifierNode,
+        MemberAccessNode,
+        UnaryOpNode,
+        BinaryOpNode,
+        CallNode,
+        ArgumentNode,
+        BasicTypeNode,
+    )
+
+    self.assertEqual(_format_ast_expr(None), "")
+    self.assertEqual(_format_ast_expr(LiteralNode(None, "none")), "none")
+    self.assertEqual(_format_ast_expr(LiteralNode(False, "bool")), "false")
+    self.assertEqual(_format_ast_expr(IdentifierNode("my_var")), "my_var")
+    
+    opt_mem = MemberAccessNode(IdentifierNode("obj"), "field", True)
+    self.assertEqual(_format_ast_expr(opt_mem), "obj?.field")
+
+    call_node = CallNode(IdentifierNode("my_func"), [ArgumentNode("val", LiteralNode(123, "int"))])
+    self.assertEqual(_format_ast_expr(call_node), "my_func(val = 123)")
+
+    self.assertEqual(_format_ast_expr(BasicTypeNode("int")), "int")
+    self.assertEqual(_format_ast_expr("raw_fallback"), "raw_fallback")
+
 
 if __name__ == "__main__":
   unittest.main()
-

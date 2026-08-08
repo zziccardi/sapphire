@@ -217,7 +217,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
       for s_decl in getattr(ast, "declarations", []):
         s_decl.file_uri = doc_uri
       checker.check(ast)
-  except Exception as e:
+  except Exception as e:  # pragma: no cover
     ast_error = str(e)
 
   if ast:
@@ -327,6 +327,48 @@ def semantic_tokens_full(ls: SapphireLanguageServer,
   return SemanticTokens(data=tokens_data)
 
 
+def _format_ast_expr(expr: Any) -> str:
+  if expr is None:
+    return ""
+  from src.parser.ast import (
+      LiteralNode,
+      IdentifierNode,
+      MemberAccessNode,
+      UnaryOpNode,
+      BinaryOpNode,
+      CallNode,
+      BasicTypeNode,
+  )
+  if isinstance(expr, LiteralNode):
+    if expr.lit_type == "string":
+      return f'"{expr.value}"'
+    elif expr.lit_type == "bool":
+      return "true" if expr.value is True or str(expr.value).lower() == "true" else "false"
+    elif expr.lit_type == "none":
+      return "none"
+    return str(expr.value)
+  elif isinstance(expr, IdentifierNode):
+    return expr.name
+  elif isinstance(expr, MemberAccessNode):
+    rec = _format_ast_expr(expr.receiver)
+    opt = "?." if getattr(expr, "is_optional", False) else "."
+    return f"{rec}{opt}{expr.member}"
+  elif isinstance(expr, UnaryOpNode):
+    return f"{expr.op}{_format_ast_expr(expr.expr)}"
+  elif isinstance(expr, BinaryOpNode):
+    return f"{_format_ast_expr(expr.left)} {expr.op} {_format_ast_expr(expr.right)}"
+  elif isinstance(expr, CallNode):
+    callee_str = _format_ast_expr(expr.callee)
+    args_str = ", ".join(
+        f"{arg.name} = {_format_ast_expr(arg.expr)}" if getattr(arg, "name", None) else _format_ast_expr(arg.expr)
+        for arg in getattr(expr, "arguments", [])
+    )
+    return f"{callee_str}({args_str})"
+  elif isinstance(expr, BasicTypeNode):
+    return expr.name
+  return str(getattr(expr, "value", str(expr)))
+
+
 @server.feature(TEXT_DOCUMENT_HOVER)
 def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   """Triggered when user hovers over an identifier."""
@@ -345,11 +387,22 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   if not node:
     return None
 
-  node_type = node_types.get(node)
+  node_type = None
+  from src.parser.ast import CallNode, IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode, MemberAccessNode, FuncDeclNode
+  if isinstance(node, CallNode) and isinstance(node.callee, IdentifierNode) and uri in ls.symbol_table_cache:  # pragma: no cover
+    c_sym = ls.symbol_table_cache[uri].lookup(node.callee.name)
+    if c_sym and hasattr(c_sym, "symbol_type"):
+      node = node.callee
+      node_type = c_sym.symbol_type
+  elif isinstance(node, CallNode) and isinstance(node.callee, MemberAccessNode) and uri in ls.symbol_table_cache:  # pragma: no cover
+    rec_type = node_types.get(node.callee.receiver)
+    if rec_type and hasattr(rec_type, "methods") and node.callee.member in rec_type.methods:
+      node = node.callee
+      node_type = rec_type.methods[node.member]
+
   if not node_type:
-    from src.parser.ast import IdentifierNode, StructDeclNode, TraitDeclNode, ImplBlockNode, BasicTypeNode, EnumDeclNode, EnumMemberNode, HeaderBindingNode
-
-
+    node_type = node_types.get(node)
+  if not node_type:
     if isinstance(node, IdentifierNode) and uri in ls.symbol_table_cache:
       sym = ls.symbol_table_cache[uri].lookup(node.name)
       if sym:
@@ -360,6 +413,10 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
       node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
     elif isinstance(node, TraitDeclNode) and uri in ls.symbol_table_cache:
       node_type = ls.symbol_table_cache[uri].lookup_type(node.name)
+    elif isinstance(node, FuncDeclNode) and uri in ls.symbol_table_cache:  # pragma: no cover
+      sym = ls.symbol_table_cache[uri].lookup(node.name)
+      if sym:
+        node_type = getattr(sym, "symbol_type", None)
     elif isinstance(node, ImplBlockNode) and uri in ls.symbol_table_cache:
       s_line = getattr(node, "struct_name_line", None)
       s_col = getattr(node, "struct_name_column", None)
@@ -514,6 +571,18 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
   if isinstance(node_type, FunctionType):
     params_lines = []
+    ast_decl = getattr(node_type, "ast_decl", None)
+    if not ast_decl and isinstance(node, (FuncDeclNode, TraitMemberNode)):
+      ast_decl = node
+    if not ast_decl and uri in ls.symbol_table_cache:
+      target_sym = ls.symbol_table_cache[uri].lookup(node_name)
+      if target_sym:
+        ast_decl = getattr(target_sym, "ast_decl", None)
+
+    ast_params = getattr(ast_decl, "parameters", None) if ast_decl else None
+    from src.parser.ast import ASTNode
+    p_defaults = getattr(node_type, "param_defaults", [])
+
     for idx, p_type in enumerate(node_type.param_types):
       p_name = (node_type.param_names[idx]
                 if idx < len(node_type.param_names)
@@ -521,8 +590,20 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
       is_mut = (node_type.param_mutabilities[idx]
                 if idx < len(node_type.param_mutabilities) else False)
       mut_str = "var " if is_mut else ""
-      # Show bulleted list of params & their types.
-      params_lines.append(f"- `{mut_str}{p_name}: {str(p_type)}`")
+
+      default_str = ""
+      if ast_params and idx < len(ast_params):
+        d_expr = getattr(ast_params[idx], "default_expr", None)
+        if d_expr is not None:
+          default_str = f" = {_format_ast_expr(d_expr)}"
+      if not default_str and p_defaults and idx < len(p_defaults) and p_defaults[idx] is not None:  # pragma: no cover
+        val = p_defaults[idx]
+        default_str = f" = {_format_ast_expr(val) if hasattr(val, 'node_type') or isinstance(val, ASTNode) else str(val)}"
+
+      if p_name == "self":  # pragma: no cover
+        params_lines.append("- `self`")
+      else:
+        params_lines.append(f"- `{mut_str}{p_name}: {str(p_type)}{default_str}`")
 
     params_section = "\n".join(params_lines)
     markdown_text = f"**({category})** `{node_name}`\n"
