@@ -2189,6 +2189,42 @@ func run() {
       ))
       self.assertIsNotNone(def_h_cfg)
 
+  def test_love2d_demo_definition_navigation(self):
+    """Verifies Go to Definition for love.graphics.setBackgroundColor in samples/love2d_demo.sp."""
+    import os
+    from pygls.uris import from_fs_path
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    demo_file = os.path.join(repo_root, "samples", "love2d_demo.sp")
+    graphics_file = os.path.join(repo_root, "lib", "love2d", "graphics.sp")
+
+    if os.path.exists(demo_file) and os.path.exists(graphics_file):
+      demo_uri = from_fs_path(demo_file)
+      graphics_uri = from_fs_path(graphics_file)
+
+      self.ls.workspace.root_uri = from_fs_path(repo_root)
+
+      with open(demo_file, "r", encoding="utf-8") as f:
+        demo_code = f.read()
+
+      validate_source(self.ls, demo_uri, demo_code)
+
+      mock_doc = MagicMock()
+      mock_doc.uri = demo_uri
+      mock_doc.source = demo_code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      # Line 18 (0-based): '  love.graphics.setBackgroundColor(r = 0.1, g = 0.1, b = 0.15);'
+      # Position on 'setBackgroundColor' (col 18)
+      def_res = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=demo_uri),
+          position=Position(line=18, character=18)
+      ))
+      self.assertIsNotNone(def_res)
+      self.assertEqual(def_res.uri, graphics_uri)
+      self.assertEqual(def_res.range.start.line, 51)  # line 52 in 1-based indexing
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -269,6 +269,22 @@ class TypeChecker:
               sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
               sub_parser.removeErrorListeners()
               sub_ast = ASTBuilder().visit(sub_parser.program())
+              mod_file_path = os.path.abspath(target_file)
+              from pygls.uris import from_fs_path
+              mod_file_uri = from_fs_path(mod_file_path)
+              def _mark_file_uri(node):
+                if isinstance(node, ASTNode):
+                  node.file_uri = mod_file_uri
+                  for v in node.__dict__.values():
+                    if isinstance(v, list):
+                      for item in v:
+                        if isinstance(item, ASTNode):
+                          _mark_file_uri(item)
+                    elif isinstance(v, ASTNode):
+                      _mark_file_uri(v)
+              if sub_ast:
+                _mark_file_uri(sub_ast)
+
               sub_checker = TypeChecker(source_file_path=target_file)
               try:
                 sub_checker.check(sub_ast)

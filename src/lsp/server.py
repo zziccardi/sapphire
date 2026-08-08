@@ -141,6 +141,51 @@ def _resolve_module_path(doc_uri: str, mod_path: str, workspace_root: Optional[s
   return None
 
 
+def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: Any, ws_root: Optional[str] = None) -> None:
+  from src.parser.ast import ASTNode
+  from pygls.uris import from_fs_path
+  for s_decl in getattr(ast, "imports", []):
+    if getattr(s_decl, "path", None):
+      mod_path_fs = _resolve_module_path(doc_uri, s_decl.path, ws_root)
+      if mod_path_fs and os.path.isfile(mod_path_fs):
+        mod_uri = from_fs_path(mod_path_fs)
+        s_decl.target_file_uri = mod_uri
+        if mod_uri not in ls.ast_cache:
+          try:
+            with open(mod_path_fs, "r", encoding="utf-8") as f:
+              sub_code = f.read()
+            sub_stream = InputStream(sub_code)
+            sub_lexer = SapphireLexer(sub_stream)
+            sub_lexer.removeErrorListeners()
+            sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+            sub_parser.removeErrorListeners()
+            sub_tree = sub_parser.program()
+            sub_ast = ASTBuilder().visit(sub_tree)
+            if sub_ast:
+              def _mark_file_uri(node):
+                if isinstance(node, ASTNode):
+                  node.file_uri = mod_uri
+                  for v in node.__dict__.values():
+                    if isinstance(v, list):
+                      for item in v:
+                        if isinstance(item, ASTNode):
+                          _mark_file_uri(item)
+                    elif isinstance(v, ASTNode):
+                      _mark_file_uri(v)
+              _mark_file_uri(sub_ast)
+              sub_checker = SemanticTokensTypeChecker(sub_code, source_file_path=mod_path_fs)
+              try:
+                sub_checker.check(sub_ast)
+              except Exception:
+                pass
+              ls.ast_cache[mod_uri] = sub_ast
+              ls.symbol_table_cache[mod_uri] = sub_checker.symbol_table
+              ls.node_types_cache[mod_uri] = sub_checker.node_types
+              _preload_module_dependencies(ls, mod_uri, sub_ast, ws_root)
+          except Exception:  # pragma: no cover
+            pass
+
+
 def validate_source(ls: SapphireLanguageServer, doc_uri: str,
                     doc_text: str) -> None:
   """Run lexical, syntactic, and semantic validation on the source text."""
@@ -184,48 +229,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
 
     # Process imports and pre-load dependency ASTs for definition navigation
     ws_root = getattr(getattr(ls, "workspace", None), "root_uri", None)
-    from src.parser.ast import ImportStmtNode
-    from pygls.uris import from_fs_path
-    for s_decl in getattr(ast, "imports", []):
-      if getattr(s_decl, "path", None):
-        mod_path_fs = _resolve_module_path(doc_uri, s_decl.path, ws_root)
-        if mod_path_fs and os.path.isfile(mod_path_fs):
-          mod_uri = from_fs_path(mod_path_fs)
-          s_decl.target_file_uri = mod_uri
-          if mod_uri not in ls.ast_cache:
-            try:
-              with open(mod_path_fs, "r", encoding="utf-8") as f:
-                sub_code = f.read()
-              sub_stream = InputStream(sub_code)
-              sub_lexer = SapphireLexer(sub_stream)
-              sub_lexer.removeErrorListeners()
-              sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
-              sub_parser.removeErrorListeners()
-              sub_tree = sub_parser.program()
-              sub_ast = ASTBuilder().visit(sub_tree)
-              if sub_ast:
-                from src.parser.ast import ASTNode
-                def _mark_file_uri(node):
-                  if isinstance(node, ASTNode):
-                    node.file_uri = mod_uri
-                    for v in node.__dict__.values():
-                      if isinstance(v, list):
-                        for item in v:
-                          if isinstance(item, ASTNode):
-                            _mark_file_uri(item)
-                      elif isinstance(v, ASTNode):
-                        _mark_file_uri(v)
-                _mark_file_uri(sub_ast)
-                sub_checker = SemanticTokensTypeChecker(sub_code, source_file_path=mod_path_fs)
-                try:
-                  sub_checker.check(sub_ast)
-                except Exception:
-                  pass
-                ls.ast_cache[mod_uri] = sub_ast
-                ls.symbol_table_cache[mod_uri] = sub_checker.symbol_table
-                ls.node_types_cache[mod_uri] = sub_checker.node_types
-            except Exception:  # pragma: no cover
-              pass
+    _preload_module_dependencies(ls, doc_uri, ast, ws_root)
 
   # If syntax errors are present, report them immediately
   if listener.diagnostics:
@@ -858,7 +862,56 @@ def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional
   else:  # pragma: no cover
     return None
 
-  target_uri = getattr(target_ast, "file_uri", uri)
+  target_uri = getattr(target_ast, "file_uri", None)
+  if not target_uri and hasattr(target_decl, "name"):
+    target_name = target_decl.name
+    from src.parser.ast import TraitDeclNode, StructDeclNode, ImplBlockNode, EnumDeclNode
+    for c_uri, c_ast in ls.ast_cache.items():
+      def _search_ast(ast_node):
+        for c_decl in getattr(ast_node, "declarations", []):
+          if c_decl is target_decl or getattr(c_decl, "name", None) == target_name:  # pragma: no cover
+            return c_decl
+          if isinstance(c_decl, TraitDeclNode):
+            for m in getattr(c_decl, "members", []):
+              if m is target_decl or getattr(m, "name", None) == target_name:
+                return m
+          elif isinstance(c_decl, StructDeclNode):
+            for f in getattr(c_decl, "fields", []):
+              if f is target_decl or getattr(f, "name", None) == target_name:
+                return f
+          elif isinstance(c_decl, ImplBlockNode):
+            for m in getattr(c_decl, "members", []):
+              fn = getattr(m, "func_decl", m)
+              if fn is target_decl or getattr(fn, "name", None) == target_name:  # pragma: no cover
+                return fn
+          elif isinstance(c_decl, EnumDeclNode):
+            for m in getattr(c_decl, "members", []):
+              if m is target_decl or getattr(m, "name", None) == target_name:
+                return m
+        return None
+
+      matched_node = _search_ast(c_ast)
+      if matched_node:
+        target_uri = getattr(c_ast, "file_uri", c_uri)
+        matched_decl = getattr(matched_node, "func_decl", matched_node)
+        n_line = getattr(matched_decl, "name_line", None)
+        n_col = getattr(matched_decl, "name_column", None)
+        n_len = getattr(matched_decl, "name_length", None)
+        if n_line is not None and n_col is not None and n_len is not None:
+          start_pos = Position(line=n_line - 1, character=n_col)
+          end_pos = Position(line=n_line - 1, character=n_col + n_len)
+        elif getattr(matched_node, "start_line", None) is not None:  # pragma: no cover
+          s_line = matched_node.start_line - 1
+          s_col = matched_node.start_column or 0
+          e_line = (matched_node.end_line - 1) if matched_node.end_line else s_line
+          e_col = matched_node.end_column if matched_node.end_column is not None else s_col + 1
+          start_pos = Position(line=s_line, character=s_col)
+          end_pos = Position(line=e_line, character=e_col)
+        break
+
+  if not target_uri:
+    target_uri = uri
+
   return Location(uri=target_uri, range=Range(start=start_pos, end=end_pos))
 
 
