@@ -4,8 +4,8 @@
  * control flow.
  */
 
-// Global compile-time constant
-let MAX_PLAYERS: int = 100;
+// Global compile-time constant with inferred type (int)
+let MAX_PLAYERS = 100;
 
 // 1. Traits defining contracts
 trait Damageable {

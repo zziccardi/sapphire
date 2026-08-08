@@ -155,6 +155,14 @@ class SapphireCLITest(unittest.TestCase):
     self.assertEqual(res.returncode, 0)
     self.assertNotIn("ModuleNotFoundError", res.stderr)
 
+  def test_lsp_subcommand(self):
+    """Verifies that `sapphire lsp` invokes the LSP server entrypoint."""
+    test_args = ["sapphire", "lsp"]
+    with patch.object(sys, "argv", test_args):
+      with patch("src.lsp.server.main") as mock_lsp_main:
+        main()
+        mock_lsp_main.assert_called_once()
+
 
 if __name__ == "__main__":
   unittest.main()

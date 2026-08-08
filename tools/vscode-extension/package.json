@@ -4,6 +4,10 @@
   "description": "Language support and semantic highlighting for the Sapphire programming language",
   "version": "0.1.0",
   "publisher": "zziccardi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zziccardi/sapphire.git"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -47,15 +51,10 @@
       "type": "object",
       "title": "Sapphire",
       "properties": {
-        "sapphire.lsp.pythonPath": {
+        "sapphire.lsp.path": {
           "type": "string",
-          "default": "pipenv",
-          "description": "Path to the python executable or virtualenv manager (e.g. 'pipenv' or 'python3') to run the language server."
-        },
-        "sapphire.lsp.serverPath": {
-          "type": "string",
-          "default": "src/lsp/server.py",
-          "description": "Path to the Python LSP server file relative to the workspace root."
+          "default": "sapphire",
+          "description": "Path or executable name for the Sapphire CLI (e.g. 'sapphire' or '/usr/local/bin/sapphire')."
         }
       }
     }

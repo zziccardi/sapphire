@@ -65,7 +65,7 @@ structDeclaration
     ;
 
 structField
-    : (LET | VAR) IDENTIFIER COLON type (ASSIGN expression)? SEMICOLON
+    : (LET | VAR) IDENTIFIER (COLON type)? (ASSIGN expression)? SEMICOLON
     ;
 
 implBlock

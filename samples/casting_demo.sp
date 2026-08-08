@@ -44,7 +44,8 @@ print("String.from(false): " + str_bool);
 print("String.from(Direction.South): " + str_enum);
 
 
-// 3. Fallible String Parsing Instance Methods (`.to_int()`, `.to_float()`, `.to_bool()`)
+// 3. Fallible String Parsing Instance Methods (`.to_int()`, `.to_float()`,
+// `.to_bool()`)
 print("\n--- 3. Fallible String Parsing Methods ---");
 
 // Parsing Integer with default (base 10) and custom radix

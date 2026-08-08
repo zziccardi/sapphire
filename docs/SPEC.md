@@ -46,7 +46,9 @@ either `snake_case` or `PascalCase` but should be consistent.
 * **Primitive types**: Lowercase naming (e.g., `int`, `float`, `bool`).
 * **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`, `Vector2`) for both built-in and user-defined types.
 * Comments on the same line as code should have two spaces before the `//`.
-* Constant params should precede mutable params in function definitions.
+* Constant params should generally precede mutable params in function
+  definitions. The exception is params with default values, which should come
+  last.
 
 ### Comments
 

@@ -25,6 +25,8 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 2. **Semantic tokens**: Rich syntax highlighting. An AST-walking semantic subclass of `TypeChecker` maps identifiers and definitions to semantic types (e.g. `struct`, `interface`, `parameter`, `variable`, `function`, `method`, `property`) and modifier states (e.g. `declaration`, `static`, `readonly`), delta-encoding them for the editor.
 3. **Hover**: Displays type signatures, parameter scopes, and declaration kind metadata when hovering over variables, functions, structs, fields, parameters, or traits.
 4. **Member auto-completion**: Auto-suggests fields and methods of a struct when the user types a dot `.` on a variable or inside `self` methods.
+5. **Go to Definition**: Jump directly to variable, function, struct, trait, enum, field, or inheritance declaration locations (`F12` / `Cmd+Click`).
+6. **Signature Help**: Parameter hints, docstrings, and active parameter tracking when invoking functions, constructors, or methods.
 
 ## Requirements
 

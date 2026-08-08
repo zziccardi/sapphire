@@ -1,4 +1,3 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   LanguageClient,
@@ -11,8 +10,7 @@ let client: LanguageClient;
 
 export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration('sapphire');
-  const pythonPath = config.get<string>('lsp.pythonPath', 'pipenv');
-  const serverRelativePath = config.get<string>('lsp.serverPath', 'src/lsp/server.py');
+  const lspPath = config.get<string>('lsp.path', 'sapphire');
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) {
@@ -21,26 +19,13 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   const workspaceRoot = workspaceFolders[0].uri.fsPath;
-  const serverPath = path.isAbsolute(serverRelativePath)
-    ? serverRelativePath
-    : path.join(workspaceRoot, serverRelativePath);
 
-  // Setup options for executing the Python background server
-  let executable: Executable;
-
-  if (pythonPath === 'pipenv') {
-    executable = {
-      command: 'pipenv',
-      args: ['run', 'python', serverPath],
-      options: { cwd: workspaceRoot }
-    };
-  } else {
-    executable = {
-      command: pythonPath,
-      args: [serverPath],
-      options: { cwd: workspaceRoot }
-    };
-  }
+  // Setup options for executing the Sapphire LSP CLI server
+  const executable: Executable = {
+    command: lspPath,
+    args: ['lsp'],
+    options: { cwd: workspaceRoot }
+  };
 
   const serverOptions: ServerOptions = {
     run: executable,
@@ -65,8 +50,9 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   client.start().catch((error: any) => {
+    const msg = error.message || String(error);
     vscode.window.showErrorMessage(
-      `Failed to start Sapphire Language Server: ${error.message || error}`
+      `Failed to start Sapphire Language Server ('${lspPath} lsp'): ${msg}. Please ensure '${lspPath}' is installed on your system PATH or configure 'sapphire.lsp.path' in VS Code settings.`
     );
   });
 

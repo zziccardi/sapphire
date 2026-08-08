@@ -11,6 +11,8 @@ from src.lsp.server import (
     did_change,
     did_save,
     semantic_tokens_full,
+    definition,
+    signature_help,
     main,
 )
 
@@ -1244,6 +1246,637 @@ func main() {
     ))
     self.assertIsNotNone(res_hover)
     self.assertIn("Dummy", res_hover.contents.value)
+
+  def test_definition_variable_and_function(self):
+    """Verifies Go to Definition for functions, parameters, and local variables."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_test1.sp"
+    doc_text = """func add(x: int, y: int) -> int {
+  return x + y;
+}
+let total: int = add(10, 20);"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Go to Definition for 'add' on line 3 (0-indexed line 3, col 18)
+    res_def = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=18)
+    ))
+    self.assertIsNotNone(res_def)
+    self.assertEqual(res_def.uri, doc_uri)
+    self.assertEqual(res_def.range.start.line, 0)
+    self.assertEqual(res_def.range.start.character, 5)
+
+    # Go to Definition for 'x' on line 1 (col 9)
+    res_x = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=9)
+    ))
+    self.assertIsNotNone(res_x)
+    self.assertEqual(res_x.range.start.line, 0)
+    self.assertEqual(res_x.range.start.character, 9)
+
+  def test_definition_struct_field_and_inheritance(self):
+    """Verifies Go to Definition for struct types, fields, and inheritance parents."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_test2.sp"
+    doc_text = """struct Animal {
+  var age: int;
+}
+struct Dog : Animal {
+  var breed: String;
+}
+let d = Dog();
+let a = d.age;"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Definition for 'Dog' on line 6 ('Dog()')
+    res_dog = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=9)
+    ))
+    self.assertIsNotNone(res_dog)
+    self.assertEqual(res_dog.range.start.line, 3)
+
+    # Definition for 'Animal' parent on line 3 ('struct Dog : Animal')
+    res_animal = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=14)
+    ))
+    self.assertIsNotNone(res_animal)
+    self.assertEqual(res_animal.range.start.line, 0)
+
+    # Definition for field access 'age' on line 7 ('d.age')
+    res_age = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=11)
+    ))
+    self.assertIsNotNone(res_age)
+    self.assertEqual(res_age.range.start.line, 1)
+
+  def test_definition_enum_and_trait(self):
+    """Verifies Go to Definition for enum types and enum variants."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_test3.sp"
+    doc_text = """enum Color { Red, Green, Blue }
+let c = Color.Green;"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Definition for 'Color' on line 1
+    res_color = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=9)
+    ))
+    self.assertIsNotNone(res_color)
+    self.assertEqual(res_color.range.start.line, 0)
+
+    # Definition for 'Color.Green' member on line 1
+    res_green = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=15)
+    ))
+    self.assertIsNotNone(res_green)
+    self.assertEqual(res_green.range.start.line, 0)
+
+  def test_definition_none_for_missing(self):
+    """Verifies definition returns None when symbol is unknown or position invalid."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_missing.sp"
+    doc_text = "let x = 42;"
+    validate_source(self.ls, doc_uri, doc_text)
+
+    # Non-existent URI
+    res_bad = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri="file:///nonexistent.sp"),
+        position=Position(line=0, character=0)
+    ))
+    self.assertIsNone(res_bad)
+
+    # Out of bounds position
+    res_oob = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=100, character=100)
+    ))
+    self.assertIsNone(res_oob)
+
+  def test_signature_help_function_call(self):
+    """Verifies signature help for function calls and active parameter tracking."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_test1.sp"
+    doc_text = """func calculate(a: int, b: float, msg: String): bool {
+  return true;
+}
+let res = calculate(10, 3.14, "hello");"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Signature help at parameter 0 ('calculate(10,')
+    res_sig0 = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=22)
+    ))
+    self.assertIsNotNone(res_sig0)
+    self.assertEqual(len(res_sig0.signatures), 1)
+    self.assertEqual(res_sig0.active_parameter, 0)
+    self.assertIn("calculate(a: int, b: float, msg: String) -> bool", res_sig0.signatures[0].label)
+
+    # Signature help at parameter 1 ('calculate(10, 3.14,')
+    res_sig1 = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=28)
+    ))
+    self.assertIsNotNone(res_sig1)
+    self.assertEqual(res_sig1.active_parameter, 1)
+
+  def test_signature_help_method_call(self):
+    """Verifies signature help for method calls with 'self' parameter excluded."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_test2.sp"
+    doc_text = """struct Point {
+  var x: float;
+  var y: float;
+}
+impl Point {
+  func move(var self, dx: float, dy: float) {
+    self.x = self.x + dx;
+  }
+}
+let p = Point(1.0, 2.0);
+p.move(5.0, 10.0);"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Signature help at parameter 1 in 'p.move(5.0, 10.0)'
+    res_sig = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=13)
+    ))
+    self.assertIsNotNone(res_sig)
+    self.assertEqual(res_sig.active_parameter, 1)
+    # Check parameters count is 2 (dx, dy; self is excluded)
+    params_labels = [p.label for p in res_sig.signatures[0].parameters]
+    self.assertEqual(params_labels, ["dx: float", "dy: float"])
+
+  def test_signature_help_constructor_and_none(self):
+    """Verifies signature help for struct constructors and fallback when not in a call."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_test3.sp"
+    doc_text = """struct Point {
+  var x: float;
+  var y: float;
+}
+let p = Point(1.0, 2.0);"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Signature help for struct constructor 'Point(1.0,'
+    from src.semantics.symbol_table import StructType, StructField, PrimitiveType
+    validate_source(self.ls, doc_uri, doc_text)
+    custom_st = StructType("OnlyType")
+    custom_st.fields["val"] = StructField("val", PrimitiveType("int"), False)
+    self.ls.symbol_table_cache[doc_uri].define_type("OnlyType", custom_st)
+
+    res_ctor = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=4, character=17)
+    ))
+    self.assertIsNotNone(res_ctor)
+    self.assertEqual(len(res_ctor.signatures[0].parameters), 2)
+
+    # Signature help outside any call
+    res_none = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=0)
+    ))
+    self.assertIsNone(res_none)
+
+  def test_definition_additional_branches(self):
+    """Cover additional definition branches (BasicTypeNode, ImplBlockNode, fallback positions, local declarations)."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_branches.sp"
+    doc_text = """struct Item { var id: int; }
+trait Action { func do_it(self); }
+impl Action for Item {
+  func do_it(self) {
+    let internal_val = 100;
+    let copy_val = internal_val;
+    let opt_val: Item? = self;
+    if let active ?= opt_val {
+      let active_use = active;
+    }
+    let list = [1, 2];
+    for elem in list {
+      let elem_use = elem;
+    }
+  }
+}
+let item_var: Item = Item(1);
+let test_action: Action = item_var;
+item_var.do_it();"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # 1. BasicTypeNode annotation 'Action' on line 17 ('let test_action: Action = ...')
+    res_type = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=17, character=18)
+    ))
+    self.assertIsNotNone(res_type)
+    self.assertEqual(res_type.range.start.line, 1)
+
+    # 2. Local variable 'internal_val' on line 5
+    res_local = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=5, character=20)
+    ))
+    self.assertIsNotNone(res_local)
+    self.assertEqual(res_local.range.start.line, 4)
+
+    # 3. IfNode init binding 'active' on line 8
+    res_active = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=8, character=24)
+    ))
+    self.assertIsNotNone(res_active)
+    self.assertEqual(res_active.range.start.line, 7)
+
+    # 4. ForNode loop var 'elem' on line 12
+    res_elem = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=12, character=22)
+    ))
+    self.assertIsNotNone(res_elem)
+    self.assertEqual(res_elem.range.start.line, 11)
+
+    # 5. Method call 'item_var.do_it()' on line 18
+    res_method = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=18, character=11)
+    ))
+    self.assertIsNotNone(res_method)
+
+    # 6. ImplBlockNode trait name 'Action' on line 2
+    res_impl_trait = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=7)
+    ))
+    self.assertIsNotNone(res_impl_trait)
+
+    # 7. ImplBlockNode struct name 'Item' on line 2
+    res_impl_struct = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=2, character=18)
+    ))
+    self.assertIsNotNone(res_impl_struct)
+
+    # 8. Fallback positioning when target_ast has no name_line
+    ast = self.ls.ast_cache.get(doc_uri)
+    for decl in getattr(ast, "declarations", []):
+      if hasattr(decl, "name_line"):
+        delattr(decl, "name_line")
+    res_fallback = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=17, character=15)
+    ))
+    self.assertIsNotNone(res_fallback)
+
+  def test_signature_help_additional_branches(self):
+    """Cover string methods, constructor lookup, string quotes, and nested parens/brackets."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_branches.sp"
+    doc_text = """struct Config {
+  var port: int;
+}
+func calc(a: int, b: int): int { return a + b; }
+func test() {
+  let s = "hello world";
+  s.split(",");
+  let c = Config(8080);
+  calc([1, 2], "esc\\\"quote", 3);
+}"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # 1. String built-in method 's.split(",")'
+    res_str = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=10)
+    ))
+    self.assertIsNotNone(res_str)
+    self.assertIn("split", res_str.signatures[0].label)
+
+    # 2. Constructor lookup by type name 'Config(8080)'
+    res_ctor = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=17)
+    ))
+    self.assertIsNotNone(res_ctor)
+    self.assertEqual(len(res_ctor.signatures[0].parameters), 1)
+
+    # 3. String quotes with escaped quotes and bracket balance 'calc([1, 2], "esc\"quote", 3)'
+    res_esc = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=8, character=30)
+    ))
+    self.assertIsNotNone(res_esc)
+    self.assertEqual(res_esc.active_parameter, 2)
+
+    # 4. Invalid callee regex match (e.g. + ( 10, ))
+    mock_doc.source = "let x = + (10, 20);"
+    res_invalid = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=15)
+    ))
+    self.assertIsNone(res_invalid)
+
+  def test_server_100_percent_coverage(self):
+    """Hits all remaining lines in server.py to reach 100% test coverage."""
+    from lsprotocol.types import DefinitionParams, SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///cov100.sp"
+    doc_text = """struct Point {
+  var x: int;
+}
+struct Container {
+  var p: Point;
+}
+func top_process(p_param: Point) {
+  let top_a = 1, top_b = 2;
+  let top_c = top_a;
+  while let active ?= p_param {
+    let active_val = active;
+  }
+  let m = [1: 2];
+  for k, v in m {
+    let k_val = k;
+    let v_val = v;
+  }
+}
+impl Point {
+  func process(p_param: Point) {
+    let a = 1, b = 2;
+    let c = a;
+    while let active ?= p_param {
+      let active_val = active;
+    }
+    let m = [1: 2];
+    for k, v in m {
+      let k_val = k;
+      let v_val = v;
+    }
+  }
+}
+let pt_var = Point(10);
+let c_var = Container(pt_var);
+let field_ref = c_var.p.x;
+"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # 1. Top-level func WhileNode in _find_local_decl (lines 518-520)
+    res_top_while = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=23)
+    ))
+    self.assertIsNotNone(res_top_while)
+
+    # 2. Top-level func ForNode in _find_local_decl (lines 522-524)
+    res_top_k = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=14, character=18)
+    ))
+    self.assertIsNotNone(res_top_k)
+    res_top_v = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=15, character=18)
+    ))
+    self.assertIsNotNone(res_top_v)
+
+    # 3. Top-level VarDeclNode match in _find_local_decl (lines 551-553)
+    res_top_b = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=8, character=16)
+    ))
+    self.assertIsNotNone(res_top_b)
+
+    # 4. sym.symbol_type.ast_decl when sym has no ast_decl (line 596)
+    from src.semantics.symbol_table import VariableSymbol
+    st_point = self.ls.symbol_table_cache[doc_uri].lookup_type("Point")
+    sym_no_ast = VariableSymbol("var_no_ast", st_point, is_mutable=False)
+    self.ls.symbol_table_cache[doc_uri].define("var_no_ast", sym_no_ast)
+
+    mock_doc.source = "let use_no_ast = var_no_ast;"
+    res_sym_type_ast = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=20)
+    ))
+    self.assertIsNotNone(res_sym_type_ast)
+
+    # 5. Multi-name VarDeclNode inside func ('let c = a;')
+    mock_doc.source = doc_text
+    res_b = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=21, character=12)
+    ))
+    self.assertIsNotNone(res_b)
+
+    # 6. WhileNode in _find_local_decl inside func ('let active_val = active;')
+    res_while = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=23, character=23)
+    ))
+    self.assertIsNotNone(res_while)
+
+    # 7. ForNode in _find_local_decl inside func ('let k_val = k;' and 'let v_val = v;')
+    res_k = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=27, character=18)
+    ))
+    self.assertIsNotNone(res_k)
+    res_v = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=28, character=18)
+    ))
+    self.assertIsNotNone(res_v)
+
+    # 4. ImplBlockNode parameter match in _find_local_decl ('while let active ?= p_param')
+    res_p_param = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=24)
+    ))
+    self.assertIsNotNone(res_p_param)
+
+    # 5. sym.symbol_type.ast_decl ('let c_var = Container(pt_var)')
+    res_sym_type = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=21, character=5)
+    ))
+    self.assertIsNotNone(res_sym_type)
+
+    # 6. MemberAccessNode receiver symbol lookup & field match ('c_var.p.x')
+    res_field = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=22, character=24)
+    ))
+    self.assertIsNotNone(res_field)
+
+    # 7. StructDeclNode fallback target_ast = node
+    res_struct = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=7)
+    ))
+    self.assertIsNotNone(res_struct)
+
+    # 8. ImplBlockNode parameter match in _find_local_decl (line 534)
+    res_p_param_impl = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=22, character=24)
+    ))
+    self.assertIsNotNone(res_p_param_impl)
+
+    # 9. sym.symbol_type.ast_decl when sym has no ast_decl (line 596)
+    from src.semantics.symbol_table import VariableSymbol, StructType
+    from src.parser.ast import StructDeclNode
+    mock_doc.source = "let use_no_ast = var_no_ast;"
+    validate_source(self.ls, doc_uri, mock_doc.source)
+
+    target_struct = StructDeclNode("Point", [], [])
+    target_struct.name_line = 1
+    target_struct.name_column = 0
+    target_struct.name_length = 5
+    st_point = StructType("Point", ast_decl=target_struct)
+
+    sym_no_ast = VariableSymbol("var_no_ast", st_point, is_mutable=False)
+    self.ls.symbol_table_cache[doc_uri].define("var_no_ast", sym_no_ast)
+
+    res_sym_type_ast = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=17)
+    ))
+    self.assertIsNotNone(res_sym_type_ast)
+
+    # 10. Direct _find_local_decl test for top-level VarDeclNode & missing variable (lines 551-553)
+    from src.lsp.server import _find_local_decl
+    from src.parser.ast import VarDeclNode
+    top_var_decl = VarDeclNode(False, ["top_g1", "top_g2"], [], [])
+    top_ast = self.ls.ast_cache[doc_uri]
+    top_ast.declarations.append(top_var_decl)
+    res_local_top = _find_local_decl(top_ast, "top_g2", 1)
+    self.assertEqual(res_local_top, top_var_decl)
+    res_none_local = _find_local_decl(top_ast, "nonexistent_var_123", 1)
+    self.assertIsNone(res_none_local)
+
+    # 11. Direct _find_local_decl test for ImplBlockNode parameter (line 534)
+    validate_source(self.ls, doc_uri, doc_text)
+    impl_ast = self.ls.ast_cache[doc_uri]
+    res_impl_p = _find_local_decl(impl_ast, "p_param", 20)
+    self.assertIsNotNone(res_impl_p)
+
+    # 11. MemberAccessNode struct field match (lines 620-621)
+    mock_doc.source = doc_text
+    validate_source(self.ls, doc_uri, doc_text)
+    res_field_match = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=34, character=24)
+    ))
+    self.assertIsNotNone(res_field_match)
+
+    # 12. SignatureHelp constructor lookup by lookup_type (lines 836-841)
+    from src.semantics.symbol_table import StructType, StructField, PrimitiveType
+    mock_doc.source = "OnlyType("
+    validate_source(self.ls, doc_uri, mock_doc.source)
+
+    custom_st = StructType("OnlyType")
+    custom_st.fields["val"] = StructField("val", PrimitiveType("int"), False)
+    self.ls.symbol_table_cache[doc_uri].define_type("OnlyType", custom_st)
+
+    res_ctor = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=9)
+    ))
+    self.assertIsNotNone(res_ctor)
+
+    # 9. SignatureHelp method lookup via receiver_type.methods without get_method (lines 813-814)
+    from src.semantics.symbol_table import VariableSymbol, FunctionType, PrimitiveType
+    class SimpleObj:
+      def __init__(self):
+        fn_t = FunctionType([PrimitiveType("int")], PrimitiveType("none"), param_names=["x"])
+        self.methods = {"simple_m": fn_t}
+
+    sym_simple = VariableSymbol("obj_simple", SimpleObj(), is_mutable=False)
+    self.ls.symbol_table_cache[doc_uri].define("obj_simple", sym_simple)
+
+    mock_doc.source = "obj_simple.simple_m("
+    res_simple_m = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=20)
+    ))
+    self.assertIsNotNone(res_simple_m)
+
+    # 10. SignatureHelp fallback when func_type is None/invalid (line 844)
+    mock_doc.source = "let dummy = 5;\ndummy("
+    res_not_fn = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=6)
+    ))
+    self.assertIsNone(res_not_fn)
 
 
 if __name__ == "__main__":

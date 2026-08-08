@@ -150,9 +150,9 @@ class ProgramNode(ASTNode):
 
 
 class StructFieldNode(ASTNode):
-  """Represents a single field in a struct declaration (e.g. 'var x: float;')."""
+  """Represents a single field in a struct declaration (e.g. 'var x: float;' or 'var x = 0;')."""
 
-  def __init__(self, is_mutable: bool, name: str, field_type: TypeNode, default_expr: Optional[ASTNode] = None):
+  def __init__(self, is_mutable: bool, name: str, field_type: Optional[TypeNode] = None, default_expr: Optional[ASTNode] = None):
     self.is_mutable = is_mutable
     self.name = name
     self.field_type = field_type

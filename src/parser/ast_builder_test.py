@@ -616,6 +616,23 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsNotNone(guard_node.clauses[2].condition)
 
 
+  def test_struct_field_omitted_type(self):
+    """Verifies AST building for struct fields with omitted explicit types when assigned default values."""
+    ast = self._get_ast('struct Point { var x = 10; let name = "origin"; }')
+    struct_decl = ast.declarations[0]
+    self.assertIsInstance(struct_decl, StructDeclNode)
+    self.assertEqual(len(struct_decl.fields), 2)
+    self.assertTrue(struct_decl.fields[0].is_mutable)
+    self.assertEqual(struct_decl.fields[0].name, "x")
+    self.assertIsNone(struct_decl.fields[0].field_type)
+    self.assertIsInstance(struct_decl.fields[0].default_expr, LiteralNode)
+
+    self.assertFalse(struct_decl.fields[1].is_mutable)
+    self.assertEqual(struct_decl.fields[1].name, "name")
+    self.assertIsNone(struct_decl.fields[1].field_type)
+    self.assertIsInstance(struct_decl.fields[1].default_expr, LiteralNode)
+
+
 if __name__ == "__main__":
   unittest.main()
 

@@ -20,7 +20,7 @@ from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
 class TestTypeChecker(unittest.TestCase):
   """Suite of unit tests verifying semantic and type constraints in Sapphire."""
 
-  def _check(self, code: str) -> None:
+  def _check(self, code: str) -> TypeChecker:
     """Helper to parse and run the semantic check on a code string."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
@@ -35,6 +35,7 @@ class TestTypeChecker(unittest.TestCase):
     ast = builder.visit(tree)
     checker = TypeChecker()
     checker.check(ast)
+    return checker
 
   def test_valid_variables(self):
     """Verifies that correct type declarations and assignments within functions pass."""
@@ -3807,6 +3808,83 @@ class TestTypeChecker(unittest.TestCase):
       return a_val + m_val;
     }
     """)
+
+  def test_struct_field_omitted_type_inference(self):
+    """Verifies type inference for struct fields when explicit types are omitted."""
+    # 1. Inferred primitive types
+    checker = self._check("""
+    struct Point {
+      var x = 10;
+      var y = 20;
+      let name = "origin";
+    }
+
+    func test(): int {
+      let p = Point { x = 5, y = 15, name = "custom" };
+      return p.x + p.y;
+    }
+    """)
+    struct_type = checker.symbol_table.lookup_type("Point")
+    self.assertEqual(struct_type.fields["x"].field_type.name, "int")
+    self.assertEqual(struct_type.fields["y"].field_type.name, "int")
+    self.assertEqual(struct_type.fields["name"].field_type.name, "String")
+
+  def test_struct_field_omitted_type_errors(self):
+    """Verifies error reporting for struct fields with omitted types."""
+    # 1. Missing type and missing default value
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Bad {
+        var x;
+      }
+      """)
+    self.assertIn("Struct field 'x' in struct 'Bad' requires an explicit type annotation or a default value.", str(ctx.exception))
+
+    # 2. Inferred from 'none' alone
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Bad {
+        var x = none;
+      }
+      """)
+    self.assertIn("Cannot infer type of struct field 'x' from 'none' alone. Specify an explicit type annotation.", str(ctx.exception))
+
+  def test_global_variable_omitted_type_inference(self):
+    """Verifies type inference for variables declared outside functions."""
+    checker = self._check("""
+    let GLOBAL_OFFSET = 100;
+    var global_flag = true;
+
+    func get_total(x: int): int {
+      if global_flag {
+        return x + GLOBAL_OFFSET;
+      }
+      return x;
+    }
+    """)
+    offset_sym = checker.symbol_table.lookup("GLOBAL_OFFSET")
+    self.assertEqual(offset_sym.symbol_type.name, "int")
+    flag_sym = checker.symbol_table.lookup("global_flag")
+    self.assertEqual(flag_sym.symbol_type.name, "bool")
+
+  def test_global_variable_omitted_type_errors(self):
+    """Verifies error reporting for global variables without explicit type and initial value."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      let global_x;
+      """)
+    self.assertIn("Variable 'global_x' requires an explicit type annotation or an initial value.", str(ctx.exception))
+
+
+  def test_struct_field_default_expr_type_mismatch(self):
+    """Verifies error reporting when struct field default expression type does not match explicit annotation."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int = "invalid_string";
+      }
+      """)
+    self.assertIn("Default expression of type 'String' is not compatible with field 'x' of type 'int'.", str(ctx.exception))
 
 
 if __name__ == "__main__":
