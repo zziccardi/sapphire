@@ -275,6 +275,7 @@ class TypeChecker:
               except Exception:
                 pass
 
+              mod_sym.file_path = target_file
               # Populate mod_sym exports from sub_checker
               if getattr(sub_ast, "export_block", None):
                 for spec in sub_ast.export_block.specifiers:
@@ -290,9 +291,12 @@ class TypeChecker:
                     if exp:
                       mod_sym.exports[export_name] = exp
               else:
-                for name, sym in sub_checker.symbol_table.current_scope.symbols.items():
+                sub_root = sub_checker.symbol_table.current_scope
+                while sub_root.parent:
+                  sub_root = sub_root.parent
+                for name, sym in sub_root.symbols.items():
                   mod_sym.exports[name] = sym
-                for name, t in sub_checker.symbol_table.current_scope.types.items():
+                for name, t in sub_root.types.items():
                   if name not in ("int", "float", "bool", "String", "none", "Arena"):
                     mod_sym.exports[name] = t
             except Exception:  # pragma: no cover
@@ -332,6 +336,7 @@ class TypeChecker:
           if isinstance(current_val, int):
             current_val += 1
         enum_type = EnumType(decl.name, variants)
+        enum_type.ast_decl = decl
         self.symbol_table.define_type(decl.name, enum_type)
         self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
 

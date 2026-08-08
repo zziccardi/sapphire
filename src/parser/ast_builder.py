@@ -56,7 +56,13 @@ class ASTBuilder(SapphireVisitor):
   def visitImportStatement(self, ctx: SapphireParser.ImportStatementContext) -> ImportStmtNode:
     path = ctx.identifierPath().getText()
     alias = ctx.IDENTIFIER().getText() if ctx.IDENTIFIER() else None
-    return ImportStmtNode(path=path, alias=alias)
+    node = ImportStmtNode(path=path, alias=alias)
+    if ctx.identifierPath():
+      token = ctx.identifierPath().start
+      node.path_line = token.line
+      node.path_column = token.column
+      node.path_length = len(ctx.identifierPath().getText())
+    return node
 
   def visitExportStatement(self, ctx: SapphireParser.ExportStatementContext) -> ExportStmtNode:
     specifiers = [self.visit(spec) for spec in ctx.exportSpecifier()]

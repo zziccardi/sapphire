@@ -1072,7 +1072,7 @@ func test() {
     ))
     self.assertIsNotNone(hover_export)
     self.assertIn("@export", hover_export.contents.value)
-    self.assertIn("global callback", hover_export.contents.value)
+    self.assertIn("Exposes a function to the host runtime environment", hover_export.contents.value)
 
     # 4. Hover on extern variable love
     hover_love = hover(self.ls, HoverParams(
@@ -1959,5 +1959,237 @@ let field_ref = c_var.p.x;
       self.assertEqual(def_res.range.start.line, 2)
 
 
+  def test_definition_cross_file_modules(self):
+    """Verifies textDocument/definition for cross-file imports and module member navigation."""
+    import os
+    import tempfile
+    from pygls.uris import from_fs_path
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      # Setup directory structure: temp_dir/lib/love2d/enums.sp
+      lib_dir = os.path.join(temp_dir, "lib", "love2d")
+      os.makedirs(lib_dir, exist_ok=True)
+      enums_file = os.path.join(lib_dir, "enums.sp")
+      enums_code = """enum DrawMode {
+  Fill,
+  Line
+}"""
+      with open(enums_file, "w", encoding="utf-8") as f:
+        f.write(enums_code)
+
+      main_file = os.path.join(temp_dir, "main.sp")
+      main_code = """import lib.love2d.enums as enums;
+let mode: enums.DrawMode = enums.DrawMode.Fill;"""
+      with open(main_file, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      main_uri = from_fs_path(main_file)
+      enums_uri = from_fs_path(enums_file)
+
+      # Set workspace root_uri
+      self.ls.workspace.root_uri = from_fs_path(temp_dir)
+
+      validate_source(self.ls, main_uri, main_code)
+
+      mock_doc = MagicMock()
+      mock_doc.uri = main_uri
+      mock_doc.source = main_code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      # 1. Definition on import path 'lib.love2d.enums' (line 0, character 10)
+      def_import = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=0, character=10)
+      ))
+      self.assertIsNotNone(def_import)
+      self.assertEqual(def_import.uri, enums_uri)
+
+      # 3. Definition on MemberAccessNode on module symbol 'enums.DrawMode' (line 1, character 33)
+      def_enum_val = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=1, character=33)
+      ))
+      self.assertIsNotNone(def_enum_val)
+      self.assertEqual(def_enum_val.uri, enums_uri)
+
+      # 4. Test _resolve_module_path fallback and nonexistent paths
+      from src.lsp.server import _resolve_module_path
+      self.assertIsNone(_resolve_module_path(main_uri, "nonexistent.mod"))
+      self.assertIsNone(_resolve_module_path("invalid_uri", "nonexistent.mod"))
+
+      # 5. Create utils.sp with function and struct exports
+      utils_file = os.path.join(temp_dir, "utils.sp")
+      utils_code = """struct Point { var x: int; }
+func calculate() -> int { return 42; }"""
+      with open(utils_file, "w", encoding="utf-8") as f:
+        f.write(utils_code)
+      utils_uri = from_fs_path(utils_file)
+
+      # Create broken.sp with syntax error to hit exception handler during import preloading
+      broken_file = os.path.join(temp_dir, "broken.sp")
+      with open(broken_file, "w", encoding="utf-8") as f:
+        f.write("struct Broken { invalid syntax !!!")
+      broken_uri = from_fs_path(broken_file)
+
+      main_utils_code = """import utils as u;
+import broken;
+func run() {
+  u.calculate();
+  let p: u.Point;
+}"""
+      validate_source(self.ls, main_uri, main_utils_code)
+      mock_doc.source = main_utils_code
+
+      # Test function definition lookup 'u.calculate()' (line 3, character 4)
+      def_func = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=3, character=4)
+      ))
+      self.assertIsNotNone(def_func)
+      self.assertEqual(def_func.uri, utils_uri)
+
+      # Test struct type definition lookup 'u.Point' (line 4, character 12)
+      def_struct = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=4, character=12)
+      ))
+      self.assertIsNotNone(def_struct)
+      self.assertEqual(def_struct.uri, utils_uri)
+
+      # Test fallback target_uri matching when target_ast has no file_uri
+      from src.parser.ast import FuncDeclNode
+      dummy_func = FuncDeclNode("calculate", [], "int", None)
+      dummy_func.name_line = 1
+      dummy_func.name_column = 5
+      dummy_func.name_length = 9
+
+      # Ensure utils_uri is in ast_cache (it should be after validate_source preloads imports)
+      if utils_uri not in self.ls.ast_cache:
+        # Manually load it for the fallback test
+        from antlr4 import InputStream, CommonTokenStream
+        from src.parser.gen.SapphireLexer import SapphireLexer
+        from src.parser.gen.SapphireParser import SapphireParser
+        from src.parser.ast_builder import ASTBuilder
+        sub_stream = InputStream(utils_code)
+        sub_lexer = SapphireLexer(sub_stream)
+        sub_lexer.removeErrorListeners()
+        sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+        sub_parser.removeErrorListeners()
+        sub_tree = sub_parser.program()
+        sub_ast = ASTBuilder().visit(sub_tree)
+        sub_ast.file_uri = utils_uri
+        self.ls.ast_cache[utils_uri] = sub_ast
+
+      self.ls.ast_cache[utils_uri].declarations.append(dummy_func)
+      # Remove file_uri from dummy_func to force c_decl matching fallback
+      if hasattr(dummy_func, "file_uri"):
+        delattr(dummy_func, "file_uri")
+
+      # Member access with target_ast lacking file_uri
+      from src.semantics.symbol_table import FunctionSymbol, FunctionType, PrimitiveType
+      fn_sym = FunctionSymbol("calculate", FunctionType([], PrimitiveType("int"), ast_decl=dummy_func))
+      mod_u = self.ls.symbol_table_cache[main_uri].lookup("u")
+      if mod_u:
+        mod_u.exports["calculate"] = fn_sym
+
+      def_fallback = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=3, character=5)
+      ))
+      self.assertIsNotNone(def_fallback)
+      self.assertEqual(def_fallback.uri, utils_uri)
+
+  def test_server_remaining_coverage_branches(self):
+    """Hits remaining uncovered lines in server.py to achieve 100% test coverage."""
+    import os
+    import tempfile
+    from pygls.uris import from_fs_path
+    from lsprotocol.types import (
+        DefinitionParams,
+        TextDocumentIdentifier,
+        Position,
+        SignatureHelpParams,
+    )
+    from src.lsp.server import _resolve_module_path, validate_source, definition, signature_help
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      ws_dir = os.path.join(temp_dir, "ws")
+      os.makedirs(ws_dir, exist_ok=True)
+      doc_dir = os.path.join(temp_dir, "doc")
+      os.makedirs(doc_dir, exist_ok=True)
+
+      doc_file = os.path.join(doc_dir, "test.sp")
+      doc_uri = from_fs_path(doc_file)
+      ws_uri = from_fs_path(ws_dir)
+
+      # 1. Hit _resolve_module_path workspace_root branch (line 131)
+      res_path = _resolve_module_path(doc_uri, "foo.bar", workspace_root=ws_uri)
+      self.assertIsNone(res_path)
+
+      # 2. Hit validate_source import error handling (lines 217-218)
+      # Create an unreadable directory with module name to throw OSError during open
+      unreadable_dir = os.path.join(doc_dir, "badmod.sp")
+      os.makedirs(unreadable_dir, exist_ok=True)
+      code_bad_imp = "import badmod;"
+      validate_source(self.ls, doc_uri, code_bad_imp)
+
+      # 3. Hit struct constructor signature help (lines 983, 986-987)
+      struct_code = """struct Vec { var x: int; var y: float; }
+func test() {
+  let v = Vec(;
+}"""
+      validate_source(self.ls, doc_uri, struct_code)
+      mock_doc = MagicMock()
+      mock_doc.uri = doc_uri
+      mock_doc.source = struct_code
+      self.ls.workspace.get_text_document.return_value = mock_doc
+
+      sig_res = signature_help(self.ls, SignatureHelpParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=2, character=14)
+      ))
+      self.assertIsNotNone(sig_res)
+
+      # Signature help on invalid callee (line 987 return None)
+      sig_none = signature_help(self.ls, SignatureHelpParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=2, character=8)
+      ))
+      self.assertIsNone(sig_none)
+
+      # 4. MemberAccess & BasicTypeNode ModuleSymbol fallback branches
+      # Create module file helper.sp
+      helper_file = os.path.join(doc_dir, "helper.sp")
+      helper_code = """struct Config { var debug: bool; }
+func helper_fn() {}"""
+      with open(helper_file, "w", encoding="utf-8") as f:
+        f.write(helper_code)
+      helper_uri = from_fs_path(helper_file)
+
+      main_code = """import helper as h;
+func run() {
+  h.helper_fn();
+  let cfg: h.Config;
+}"""
+      validate_source(self.ls, doc_uri, main_code)
+      mock_doc.source = main_code
+
+      # Member access definition
+      def_h_fn = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=2, character=5)
+      ))
+      self.assertIsNotNone(def_h_fn)
+
+      # BasicType definition
+      def_h_cfg = definition(self.ls, DefinitionParams(
+          text_document=TextDocumentIdentifier(uri=doc_uri),
+          position=Position(line=3, character=14)
+      ))
+      self.assertIsNotNone(def_h_cfg)
+
+
 if __name__ == "__main__":
   unittest.main()
+
