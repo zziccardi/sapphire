@@ -216,10 +216,15 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.current_struct = old_struct
 
     super().visit_StructDeclNode(node)
-    if struct_type and self.doc_text:
-      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
-      if comments:
-        struct_type.comments = comments
+    if struct_type:
+      struct_type.ast_decl = node
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        sym.ast_decl = node
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          struct_type.comments = comments
 
   def visit_StructFieldNode(self, node) -> None:
     # Field declaration
@@ -249,10 +254,15 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.current_trait = old_trait
 
     super().visit_TraitDeclNode(node)
-    if trait_type and self.doc_text:
-      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
-      if comments:
-        trait_type.comments = comments
+    if trait_type:
+      trait_type.ast_decl = node
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        sym.ast_decl = node
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          trait_type.comments = comments
 
   def visit_TraitMemberNode(self, node) -> None:
     # Trait method declaration
@@ -278,10 +288,15 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.current_enum = old_enum
 
     super().visit_EnumDeclNode(node)
-    if enum_type and self.doc_text:
-      comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
-      if comments:
-        enum_type.comments = comments
+    if enum_type:
+      enum_type.ast_decl = node
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        sym.ast_decl = node
+      if self.doc_text:
+        comments = extract_comments_above(self.doc_text, getattr(node, "start_line", None))
+        if comments:
+          enum_type.comments = comments
 
   def visit_EnumMemberNode(self, node) -> None:
     # Enum member declaration (readonly)
@@ -320,6 +335,7 @@ class SemanticTokensTypeChecker(TypeChecker):
           if comments:
             sym.symbol_type.comments = comments
         self.node_types[node] = sym.symbol_type
+        sym.ast_decl = node
 
   def visit_ImplMemberNode(self, node) -> None:
     # Method declaration
@@ -331,7 +347,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.visit(p)
     super().visit_ImplMemberNode(node)
     if self.current_struct and node.func_decl.name in self.current_struct.methods:
-      method_type = self.current_struct.methods[node.func_decl.name].method_type
+      method_obj = self.current_struct.methods[node.func_decl.name]
+      method_type = method_obj.method_type
       from src.semantics.symbol_table import FunctionType
 
       if isinstance(method_type, FunctionType) and self.doc_text:
@@ -339,12 +356,16 @@ class SemanticTokensTypeChecker(TypeChecker):
         if comments:
           method_type.comments = comments
       self.node_types[node.func_decl] = method_type
+      method_obj.ast_decl = node.func_decl
 
   def visit_ParameterNode(self, node) -> None:
     mods = 1
     if not node.is_mutable:
       mods |= 4
     self.add_token(node.name_line, node.name_column, node.name_length, "parameter", mods)
+    sym = self.symbol_table.lookup(node.name)
+    if sym:
+      sym.ast_decl = node
     # No parent visitor exists for parameters
 
   def visit_VarDeclNode(self, node) -> None:
@@ -358,6 +379,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     sym = self.symbol_table.lookup(node.name)
     if sym:
       self.node_types[node] = sym.symbol_type
+      sym.ast_decl = node
 
   def visit_AssignmentNode(self, node) -> None:
     self.visit(node.target)

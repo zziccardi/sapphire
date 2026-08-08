@@ -11,6 +11,8 @@ from src.lsp.server import (
     did_change,
     did_save,
     semantic_tokens_full,
+    definition,
+    signature_help,
     main,
 )
 
@@ -1244,6 +1246,243 @@ func main() {
     ))
     self.assertIsNotNone(res_hover)
     self.assertIn("Dummy", res_hover.contents.value)
+
+  def test_definition_variable_and_function(self):
+    """Verifies Go to Definition for functions, parameters, and local variables."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_test1.sp"
+    doc_text = """func add(x: int, y: int) -> int {
+  return x + y;
+}
+let total: int = add(10, 20);"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Go to Definition for 'add' on line 3 (0-indexed line 3, col 18)
+    res_def = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=18)
+    ))
+    self.assertIsNotNone(res_def)
+    self.assertEqual(res_def.uri, doc_uri)
+    self.assertEqual(res_def.range.start.line, 0)
+    self.assertEqual(res_def.range.start.character, 5)
+
+    # Go to Definition for 'x' on line 1 (col 9)
+    res_x = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=9)
+    ))
+    self.assertIsNotNone(res_x)
+    self.assertEqual(res_x.range.start.line, 0)
+    self.assertEqual(res_x.range.start.character, 9)
+
+  def test_definition_struct_field_and_inheritance(self):
+    """Verifies Go to Definition for struct types, fields, and inheritance parents."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_test2.sp"
+    doc_text = """struct Animal {
+  var age: int;
+}
+struct Dog : Animal {
+  var breed: String;
+}
+let d = Dog();
+let a = d.age;"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Definition for 'Dog' on line 6 ('Dog()')
+    res_dog = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=6, character=9)
+    ))
+    self.assertIsNotNone(res_dog)
+    self.assertEqual(res_dog.range.start.line, 3)
+
+    # Definition for 'Animal' parent on line 3 ('struct Dog : Animal')
+    res_animal = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=14)
+    ))
+    self.assertIsNotNone(res_animal)
+    self.assertEqual(res_animal.range.start.line, 0)
+
+    # Definition for field access 'age' on line 7 ('d.age')
+    res_age = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=7, character=11)
+    ))
+    self.assertIsNotNone(res_age)
+    self.assertEqual(res_age.range.start.line, 1)
+
+  def test_definition_enum_and_trait(self):
+    """Verifies Go to Definition for enum types and enum variants."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_test3.sp"
+    doc_text = """enum Color { Red, Green, Blue }
+let c = Color.Green;"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Definition for 'Color' on line 1
+    res_color = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=9)
+    ))
+    self.assertIsNotNone(res_color)
+    self.assertEqual(res_color.range.start.line, 0)
+
+    # Definition for 'Color.Green' member on line 1
+    res_green = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=1, character=15)
+    ))
+    self.assertIsNotNone(res_green)
+    self.assertEqual(res_green.range.start.line, 0)
+
+  def test_definition_none_for_missing(self):
+    """Verifies definition returns None when symbol is unknown or position invalid."""
+    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///def_missing.sp"
+    doc_text = "let x = 42;"
+    validate_source(self.ls, doc_uri, doc_text)
+
+    # Non-existent URI
+    res_bad = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri="file:///nonexistent.sp"),
+        position=Position(line=0, character=0)
+    ))
+    self.assertIsNone(res_bad)
+
+    # Out of bounds position
+    res_oob = definition(self.ls, DefinitionParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=100, character=100)
+    ))
+    self.assertIsNone(res_oob)
+
+  def test_signature_help_function_call(self):
+    """Verifies signature help for function calls and active parameter tracking."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_test1.sp"
+    doc_text = """func calculate(a: int, b: float, msg: String): bool {
+  return true;
+}
+let res = calculate(10, 3.14, "hello");"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Signature help at parameter 0 ('calculate(10,')
+    res_sig0 = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=22)
+    ))
+    self.assertIsNotNone(res_sig0)
+    self.assertEqual(len(res_sig0.signatures), 1)
+    self.assertEqual(res_sig0.active_parameter, 0)
+    self.assertIn("calculate(a: int, b: float, msg: String) -> bool", res_sig0.signatures[0].label)
+
+    # Signature help at parameter 1 ('calculate(10, 3.14,')
+    res_sig1 = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=3, character=28)
+    ))
+    self.assertIsNotNone(res_sig1)
+    self.assertEqual(res_sig1.active_parameter, 1)
+
+  def test_signature_help_method_call(self):
+    """Verifies signature help for method calls with 'self' parameter excluded."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_test2.sp"
+    doc_text = """struct Point {
+  var x: float;
+  var y: float;
+}
+impl Point {
+  func move(var self, dx: float, dy: float) {
+    self.x = self.x + dx;
+  }
+}
+let p = Point(1.0, 2.0);
+p.move(5.0, 10.0);"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Signature help at parameter 1 in 'p.move(5.0, 10.0)'
+    res_sig = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=10, character=13)
+    ))
+    self.assertIsNotNone(res_sig)
+    self.assertEqual(res_sig.active_parameter, 1)
+    # Check parameters count is 2 (dx, dy; self is excluded)
+    params_labels = [p.label for p in res_sig.signatures[0].parameters]
+    self.assertEqual(params_labels, ["dx: float", "dy: float"])
+
+  def test_signature_help_constructor_and_none(self):
+    """Verifies signature help for struct constructors and fallback when not in a call."""
+    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+
+    doc_uri = "file:///sig_test3.sp"
+    doc_text = """struct Point {
+  var x: float;
+  var y: float;
+}
+let p = Point(1.0, 2.0);"""
+
+    validate_source(self.ls, doc_uri, doc_text)
+
+    mock_doc = MagicMock()
+    mock_doc.uri = doc_uri
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document.return_value = mock_doc
+
+    # Signature help for struct constructor 'Point(1.0,'
+    res_ctor = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=4, character=17)
+    ))
+    self.assertIsNotNone(res_ctor)
+    self.assertEqual(len(res_ctor.signatures[0].parameters), 2)
+
+    # Signature help outside any call
+    res_none = signature_help(self.ls, SignatureHelpParams(
+        text_document=TextDocumentIdentifier(uri=doc_uri),
+        position=Position(line=0, character=0)
+    ))
+    self.assertIsNone(res_none)
 
 
 if __name__ == "__main__":
