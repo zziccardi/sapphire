@@ -4002,6 +4002,14 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("entity_id", char_struct.fields)
     self.assertIn("x", char_struct.fields)
 
+  def test_import_non_existent_module_error(self):
+    """Verifies that attempting to import a non-existent module raises a SemanticError."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      import game.entities.enums;
+      """)
+    self.assertIn("Cannot resolve imported module 'game.entities.enums'. Module file not found.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

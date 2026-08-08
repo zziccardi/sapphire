@@ -228,7 +228,8 @@ class TypeChecker:
     for imp in getattr(program, "imports", []):
       module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
       existing = self.symbol_table.lookup_current_scope(module_name)
-      if not existing or not isinstance(existing, ModuleSymbol):
+      is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
+      if not is_predefined:
         mod_sym = ModuleSymbol(module_name, imp.path)
         self.symbol_table.define(module_name, mod_sym)
         self.symbol_table.define_type(module_name, ModuleType(imp.path))
@@ -243,6 +244,12 @@ class TypeChecker:
           imp.path.replace(".", "/") + ".sp",
           os.path.join(os.getcwd(), imp.path.replace(".", "/") + ".sp"),
       ]
+      root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+      lib_dir = os.path.join(root_dir, "lib")
+      possible_paths.append(os.path.join(lib_dir, imp.path.replace(".", "/") + ".sp"))
+      if imp.path.startswith("std."):
+        possible_paths.append(os.path.join(lib_dir, "std", imp.path[4:].replace(".", "/") + ".sp"))
+
       if getattr(self, "source_file_path", None):
         base_dir = os.path.dirname(self.source_file_path)
         possible_paths.insert(0, os.path.join(base_dir, imp.path.replace(".", "/") + ".sp"))
@@ -252,6 +259,10 @@ class TypeChecker:
         if os.path.exists(p):
           target_file = p
           break
+
+      is_builtin = (imp.path == "std.testing" or imp.path.startswith("std.testing"))
+      if not target_file and not is_builtin and not is_predefined:
+        self.error(f"Cannot resolve imported module '{imp.path}'. Module file not found.", node=imp)
 
       if target_file:
           try:
