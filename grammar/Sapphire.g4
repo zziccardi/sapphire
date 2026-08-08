@@ -298,7 +298,7 @@ mapEntry
     ;
 
 structInitializer
-    : IDENTIFIER typeArgumentList? LBRACE structInitFieldList? RBRACE (IN expression)?
+    : identifierPath typeArgumentList? LBRACE structInitFieldList? RBRACE (IN expression)?
     ;
 
 structInitFieldList

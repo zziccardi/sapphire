@@ -4052,6 +4052,29 @@ class TestTypeChecker(unittest.TestCase):
       checker_v = TypeChecker(source_file_path=enemy_sp)
       checker_v.check(ast_v)
 
+  def test_imported_module_struct_initializer(self):
+    """Verifies type checking of struct initializers using dotted imported module struct names (e.g. character.Unit { name = name })."""
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StringType
+
+    code = """
+    func test_init() {
+      let u = character.Unit { name = "Hero" };
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    mod_sym = ModuleSymbol("character", "game/entities/character.sp")
+    unit_struct = StructType("Unit")
+    unit_struct.fields["name"] = StructField("name", StringType(), False)
+    mod_sym.exports["Unit"] = unit_struct
+    checker.symbol_table.define("character", mod_sym)
+
+    checker.check(ast)
+
 
 if __name__ == "__main__":
   unittest.main()
