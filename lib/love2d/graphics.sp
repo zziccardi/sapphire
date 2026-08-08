@@ -53,9 +53,8 @@ trait Graphics {
   func present();
 
   @export("setColor")
-  func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
+  func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
-  @export("rectangle")
   func rectangle(mode: enums.DrawMode, x: float, y: float,
                  width: float, height: float);
 
