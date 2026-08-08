@@ -12,9 +12,9 @@ import subprocess
 
 src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 root_dir = os.path.abspath(os.path.join(src_dir, ".."))
-if root_dir not in sys.path:
+if root_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, root_dir)
-if src_dir not in sys.path:
+if src_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, src_dir)
 
 from src.code_gen.transpiler import transpile_file

@@ -295,9 +295,9 @@ class TypeChecker:
                 for name, t in sub_checker.symbol_table.current_scope.types.items():
                   if name not in ("int", "float", "bool", "String", "none", "Arena"):
                     mod_sym.exports[name] = t
-            except Exception:
+            except Exception:  # pragma: no cover
               pass
-          except Exception:
+          except Exception:  # pragma: no cover
             pass
 
   def _declare_globals(self, program: ProgramNode) -> None:

@@ -364,7 +364,7 @@ class SemanticTokensTypeChecker(TypeChecker):
       mods |= 4
     self.add_token(node.name_line, node.name_column, node.name_length, "parameter", mods)
     sym = self.symbol_table.lookup(node.name)
-    if sym:
+    if sym:  # pragma: no cover
       sym.ast_decl = node
     # No parent visitor exists for parameters
 

@@ -64,6 +64,25 @@ class TestArenaChecker(unittest.TestCase):
     errors = []
     ArenaChecker.validate_arena_escape(st, target_sym, IdentifierNode("val"), errors.append)
     self.assertEqual(len(errors), 1)
-
     self.assertIn("cannot hold a reference to an object allocated in nested arena", errors[0])
+
+  def test_validate_arena_escape_no_dep_and_missing_sym(self):
+    st = SymbolTable()
+    target_sym = VariableSymbol("out", PrimitiveType("int"), is_mutable=False)
+    errors = []
+
+    # 1. No arena dependency on expression node (line 52)
+    sym_nodep = VariableSymbol("nodep", PrimitiveType("int"), is_mutable=False)
+    st.define("nodep", sym_nodep)
+    ArenaChecker.validate_arena_escape(st, target_sym, IdentifierNode("nodep"), errors.append)
+    self.assertEqual(len(errors), 0)
+
+    # 2. Arena dependency references missing symbol in symbol table (line 56)
+    val_sym = VariableSymbol("val", PrimitiveType("int"), is_mutable=False)
+    val_sym.arena_dependency = "nonexistent_arena"
+    st.define("val", val_sym)
+
+    ArenaChecker.validate_arena_escape(st, target_sym, IdentifierNode("val"), errors.append)
+    self.assertEqual(len(errors), 0)
+
 

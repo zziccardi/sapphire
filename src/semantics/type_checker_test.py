@@ -3876,6 +3876,17 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Variable 'global_x' requires an explicit type annotation or an initial value.", str(ctx.exception))
 
 
+  def test_struct_field_default_expr_type_mismatch(self):
+    """Verifies error reporting when struct field default expression type does not match explicit annotation."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int = "invalid_string";
+      }
+      """)
+    self.assertIn("Default expression of type 'String' is not compatible with field 'x' of type 'int'.", str(ctx.exception))
+
+
 if __name__ == "__main__":
   unittest.main()
 
