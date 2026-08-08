@@ -826,8 +826,8 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitYieldStatement(self, ctx: SapphireParser.YieldStatementContext) -> YieldNode:
-    expr = self.visit(ctx.expression())
-    return YieldNode(expr)
+    exprs = [self.visit(e) for e in ctx.expression()] if ctx.expression() else []
+    return YieldNode(exprs)
 
   def visitMatchExpression(self, ctx: SapphireParser.MatchExpressionContext) -> MatchExprNode:
     subject = self.visit(ctx.expression())

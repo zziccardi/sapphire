@@ -1127,7 +1127,9 @@ class LuaTranspiler(BaseTranspiler):
     self.visit(node.subject)
 
     prev_target = getattr(self, "_current_match_target", None)
+    prev_match_node = getattr(self, "_current_match_node", None)
     self._current_match_target = target_var
+    self._current_match_node = node
 
     for idx, case in enumerate(node.cases):
       self.newline()
@@ -1161,21 +1163,39 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
     self.emit("end")
     self._current_match_target = prev_target
+    self._current_match_node = prev_match_node
     return target_var or ""
 
   def visit_YieldNode(self, node: YieldNode) -> None:
-    self._lift_match_expressions(node.expr)
+    exprs = getattr(node, "expressions", None) or ([node.expr] if node.expr else [])
+    self._lift_match_expressions(exprs)
     target = getattr(self, "_current_match_target", None)
+    match_node = getattr(self, "_current_match_node", None)
     self.newline()
     if target:
       self.emit(f"{target} = ")
-    self.visit(node.expr)
+    if not exprs:
+      self.emit("nil")
+    elif len(exprs) == 1:
+      self.visit(exprs[0])
+    else:
+      if match_node:
+        match_node._is_multi_yield = True
+      self.emit("{ ")
+      for idx, expr in enumerate(exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
+      self.emit(" }")
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
     if not getattr(node, "_is_lifted", False):
       node._is_lifted = True
       node._lifted_var = self._emit_match_statement(node)
-    self.emit(node._lifted_var)
+    if getattr(node, "_is_multi_yield", False):
+      self.emit(f"(table.unpack or unpack)({node._lifted_var})")
+    else:
+      self.emit(node._lifted_var)
 
   def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
     pass

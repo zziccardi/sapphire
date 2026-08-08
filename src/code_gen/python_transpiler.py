@@ -945,12 +945,21 @@ class PythonTranspiler(BaseTranspiler):
     return target_var or ""
 
   def visit_YieldNode(self, node: YieldNode) -> None:
-    self._lift_match_expressions(node.expr)
+    exprs = getattr(node, "expressions", None) or ([node.expr] if node.expr else [])
+    self._lift_match_expressions(exprs)
     target = getattr(self, "_current_match_target", None)
     self.newline()
     if target:
       self.emit(f"{target} = ")
-    self.visit(node.expr)
+    if not exprs:
+      self.emit("None")
+    elif len(exprs) == 1:
+      self.visit(exprs[0])
+    else:
+      for idx, expr in enumerate(exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
     if not getattr(node, "_is_lifted", False):

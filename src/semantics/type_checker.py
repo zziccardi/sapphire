@@ -1008,7 +1008,16 @@ class TypeChecker:
       return
 
     expected_ret_types = self.current_function.return_types
-    actual_ret_types = [self.visit(e) for e in node.expressions] if node.expressions else []
+    actual_ret_types = []
+    if node.expressions:
+      if len(node.expressions) == 1:
+        single_type = self.visit(node.expressions[0])
+        if isinstance(single_type, MultiReturnType):
+          actual_ret_types = single_type.types
+        else:
+          actual_ret_types = [single_type]
+      else:
+        actual_ret_types = [self.visit(e) for e in node.expressions]
 
     if len(actual_ret_types) != len(expected_ret_types):
       if len(expected_ret_types) == 0:
@@ -1034,8 +1043,19 @@ class TypeChecker:
     if not self._match_stack:
       self.error("Yield statement outside match context.")  # pragma: no cover
       return  # pragma: no cover
-    expr_type = self.visit(node.expr)
-    self._match_stack[-1].append(expr_type)
+    if getattr(node, "expressions", None):
+      actual_types = [self.visit(e) for e in node.expressions]
+    elif getattr(node, "expr", None):
+      actual_types = [self.visit(node.expr)]
+    else:
+      actual_types = []
+
+    if len(actual_types) == 1:
+      self._match_stack[-1].append(actual_types[0])
+    elif len(actual_types) > 1:
+      self._match_stack[-1].append(MultiReturnType(actual_types))
+    else:
+      self._match_stack[-1].append(PrimitiveType("none"))
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
     subject_type = self.visit(node.subject)

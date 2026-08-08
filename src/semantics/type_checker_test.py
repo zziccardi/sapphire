@@ -3932,6 +3932,45 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot return value of type 'String' for return value #2 (expected 'int').", str(ctx.exception))
 
+  def test_match_multiple_yield_values(self):
+    """Verifies type checking of match expressions yielding multiple values."""
+    # 1. Valid multiple yield values in match returned directly
+    self._check("""
+    enum Direction { North, South }
+
+    func get_offset(d: Direction): int, int {
+      return match d {
+        Direction.North -> { yield 0, 1; },
+        Direction.South -> { yield 0, -1; },
+      };
+    }
+    """)
+
+    # 2. Unpacking match expression yielding multiple values into variable declaration
+    self._check("""
+    enum Direction { North }
+
+    func main() {
+      let d = Direction.North;
+      let dx, dy = match d {
+        Direction.North -> { yield 1, 2; },
+      };
+    }
+    """)
+
+    # 3. Type mismatch in multiple yield values
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Direction { North }
+
+      func get_offset(d: Direction): int, int {
+        return match d {
+          Direction.North -> { yield 0, "invalid"; },
+        };
+      }
+      """)
+    self.assertIn("Cannot return value of type 'String' for return value #2 (expected 'int').", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -152,7 +152,7 @@ continueStatement
     ;
 
 yieldStatement
-    : YIELD expression SEMICOLON
+    : YIELD (expression (COMMA expression)*)? SEMICOLON
     ;
 
 matchExpression
