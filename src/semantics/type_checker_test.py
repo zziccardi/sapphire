@@ -3886,6 +3886,52 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Default expression of type 'String' is not compatible with field 'x' of type 'int'.", str(ctx.exception))
 
+  def test_impl_method_multiple_return_values(self):
+    """Verifies that impl methods returning multiple values type check correctly and enforce return counts/types."""
+    # 1. Valid multiple return values from impl method
+    self._check("""
+    struct Entity {
+      var tile_x = 0;
+      var tile_y = 0;
+    }
+
+    impl Entity {
+      const func get_tile_position(): int, int {
+        return self.tile_x, self.tile_y;
+      }
+    }
+    """)
+
+    # 2. Return count mismatch in impl method (providing 1 value when 2 expected)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Entity {
+        var tile_x = 0;
+      }
+
+      impl Entity {
+        const func get_tile_position(): int, int {
+          return self.tile_x;
+        }
+      }
+      """)
+    self.assertIn("Function expected 2 return value(s), but return statement provided 1 value(s).", str(ctx.exception))
+
+    # 3. Return type mismatch in impl method
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Entity {
+        var tile_x = 0;
+      }
+
+      impl Entity {
+        const func get_tile_position(): int, int {
+          return self.tile_x, "invalid";
+        }
+      }
+      """)
+    self.assertIn("Cannot return value of type 'String' for return value #2 (expected 'int').", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

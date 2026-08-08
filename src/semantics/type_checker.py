@@ -758,11 +758,11 @@ class TypeChecker:
     # Save function signature context
     resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
     param_mutabilities = [p.is_mutable for p in func_decl.parameters]
-    ret_type = self._resolve_type_node(func_decl.return_type) if func_decl.return_type else PrimitiveType("none")
+    ret_types = self._resolve_return_types(func_decl)
     num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
     self.current_function = FunctionType(
         resolved_params,
-        ret_type,
+        ret_types,
         param_mutabilities,
         param_names=[p.name for p in func_decl.parameters],
         num_defaults=num_defaults,
