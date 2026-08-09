@@ -79,14 +79,6 @@ def main():
   else:
     print(ast_json)
 
-  # Save the full AST JSON to the artifact scratch directory for review
-  scratch_dir = "/Users/zziccardi/.gemini/antigravity/brain/373bc435-5ba6-493f-8bc4-c64a75c0e480/scratch"
-  os.makedirs(scratch_dir, exist_ok=True)
-  output_json_path = os.path.join(scratch_dir, "sample_ast.json")
-  with open(output_json_path, "w", encoding="utf-8") as f:
-    f.write(ast_json)
-  print(f"\nFull AST JSON written to: {output_json_path}")
-
 
 if __name__ == "__main__":
   main()
