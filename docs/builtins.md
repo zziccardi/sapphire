@@ -98,7 +98,7 @@ The `String` type represents textual data encoded in UTF-8.
 
 * **Reference type**: Unlike primitive numeric types (`int`, `float`) and `bool` which have value semantics, `String` is a reference-passed type subject to Sapphire's borrow-checking rules.
 * **Immutability**: Strings in Sapphire are immutable once instantiated. String operations produce new string instances rather than mutating existing data.
-* **Enum interoperability**: Sapphire supports asymmetric string enum coercion. Any variant of a native `String` enum implicitly coerces to a `String` variable or parameter, whereas converting from `String` to an enum variant requires explicit fallible parsing via `EnumName.from(val)`.
+* **Enum conversions**: Converting an `enum` variant to `String` requires an explicit cast (`variant as String`) or `String.from(variant)`. Converting `String` to an enum variant requires explicit fallible parsing via `EnumName.from(val)`.
 
 #### Built-in methods
 
@@ -148,11 +148,11 @@ let invalid = Direction.from(99);  // none
 
 #### Conversions and casting for string-based enums
 
-String-based enums in Sapphire (enums whose variants are assigned string values) support both infallible static coercion to strings and fallible runtime parsing back into enum variants.
+String-based enums in Sapphire (enums whose variants are assigned string values) support explicit static casting to strings and fallible runtime parsing back into enum variants.
 
-##### 1. Infallible coercion to `String`
+##### 1. Explicit conversion to `String`
 
-Any variant of a string-based enum implicitly coerces to `String` where a string is expected (such as string concatenation, function parameters, or variable assignments). Explicit casting via `as String` or `String.from(variant)` is also supported and guaranteed:
+Converting a variant of a string-based enum to `String` requires explicit casting via `as String` or `String.from(variant)`:
 
 ```sapphire
 enum LogLevel {
@@ -162,6 +162,7 @@ enum LogLevel {
 }
 
 let level: LogLevel = LogLevel.Info;
+let level_str: String = level as String;
 
 // Implicit coercion to String
 let msg: String = "Level: " + level;  // "Level: INFO"
@@ -285,8 +286,8 @@ enum LogLevel {
   Error = "ERROR",
 }
 
-// Implicit coercion from String enum variant
-let prefix: String = LogLevel.Info;
+// Explicit conversion from String enum variant
+let prefix: String = LogLevel.Info as String;
 let message = "System initialized";
 let full_log = "[" + prefix + "] " + message;
 
@@ -692,6 +693,63 @@ func demo_arena() {
 
   // Leaving demo_arena tears down level_arena, deallocating spawn_pos, boss,
   // and minion
+}
+```
+
+## Standard library
+
+### Standard math module (`std.math`)
+
+The `std.math` standard-library module provides a set of generic mathematical functions operating on numeric types (`int` and `float`). To use the math module, import it using `import std.math;`.
+
+#### Available functions
+
+| Function signature | Description |
+| :--- | :--- |
+| `abs<T>(x: T): T` | Returns the absolute value of `x`. |
+| `sqrt<T>(x: T): float?` | Returns the square root of `x`. Returns `none` if `x < 0`. |
+| `min<T>(a: T, b: T): T` | Returns the minimum of `a` and `b`. |
+| `max<T>(a: T, b: T): T` | Returns the maximum of `a` and `b`. |
+| `safe_div<T>(a: T, b: T): T?` | Returns `a / b`. Returns `none` if `b == 0`. |
+| `log<T>(x: T, base: float? = none): float?` | Returns the logarithm of `x` (defaults to natural log `e` if `base` is omitted). Returns `none` if `x <= 0` or `base <= 0` or `base == 1`. |
+| `pow<T>(base: T, exp: T): float` | Raises `base` to the power of `exp`. |
+| `ceil<T>(x: T): int` | Returns the smallest integer greater than or equal to `x`. |
+| `floor<T>(x: T): int` | Returns the largest integer less than or equal to `x`. |
+
+#### Usage example
+
+```sapphire
+import std.math;
+
+func demo_math() {
+  // Absolute value & min/max
+  let abs_val  = math.abs(-42);         // 42
+  let smallest = math.min(10, 20);      // 10
+  let largest  = math.max(3.14, 2.71);  // 3.14
+
+  // Square root
+  if let root ?= math.sqrt(16.0) {
+    print(f"Square root: {root}");  // 4.0
+  }
+
+  // Exponentiation
+  let p = math.pow(2.0, 3.0);  // 8.0
+
+  // Safe division (returns `T?`)
+  if let res ?= math.safe_div(10, 2) {
+    print(f"10 / 2 = {res}");  // 5
+  }
+
+  let div_by_zero = math.safe_div(10, 0);  // none
+
+  // Logarithm
+  if let l10 ?= math.log(100, base = 10.0) {
+    print(f"log10(100) = {l10}");  // 2.0
+  }
+
+  // Ceiling and floor
+  let c = math.ceil(3.14);   // 4
+  let f = math.floor(3.89);  // 3
 }
 ```
 

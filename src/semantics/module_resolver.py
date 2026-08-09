@@ -5,11 +5,8 @@ from typing import Optional
 
 
 def resolve_module_path(import_path: str, source_file_path: Optional[str] = None) -> Optional[str]:
-  """Resolves a Sapphire module import path (e.g. 'game.entities.entity') to an absolute file path on disk."""
-  parts = import_path.split(".")
-  suffixes = []
-  for i in range(len(parts)):
-    suffixes.append("/".join(parts[i:]) + ".sp")
+  """Resolves a Sapphire module import path (e.g. 'entities.character' or 'constants') to an absolute file path on disk."""
+  rel_path = import_path.replace(".", "/") + ".sp"
 
   search_dirs = []
 
@@ -27,17 +24,14 @@ def resolve_module_path(import_path: str, source_file_path: Optional[str] = None
       search_dirs.append(curr)
     curr = os.path.dirname(curr)
 
-  # 3. Built-in library directory
+  # 3. Built-in library directories (lib, lib/std, lib/love2d)
   root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
   lib_dir = os.path.join(root_dir, "lib")
-  search_dirs.append(lib_dir)
-  if import_path.startswith("std."):
-    search_dirs.append(os.path.join(lib_dir, "std"))
+  search_dirs.extend([lib_dir, os.path.join(lib_dir, "std"), os.path.join(lib_dir, "love2d")])
 
   for d in search_dirs:
-    for suffix in suffixes:
-      candidate = os.path.join(d, suffix)
-      if os.path.isfile(candidate):
-        return os.path.abspath(candidate)
+    candidate = os.path.join(d, rel_path)
+    if os.path.isfile(candidate):
+      return os.path.abspath(candidate)
 
   return None

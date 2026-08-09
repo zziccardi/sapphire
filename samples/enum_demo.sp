@@ -16,7 +16,7 @@ enum HttpStatus {
 }
 
 func get_direction_code(dir: Direction): int {
-  let raw_val: int = dir;
+  let raw_val: int = dir as int;
   return raw_val;
 }
 
@@ -29,7 +29,7 @@ func main(): int {
 
   // Integer conversion / comparison
   let dir_code = get_direction_code(current_dir);
-  let status_code: int = status;
+  let status_code: int = status as int;
 
   return dir_code + status_code;
 }

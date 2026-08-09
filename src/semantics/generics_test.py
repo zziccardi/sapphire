@@ -244,3 +244,31 @@ class TestGenerics(unittest.TestCase):
     self.assertEqual(tc._mangle_type_name(arr_t), "Arr_int")
     self.assertEqual(tc._mangle_type_name(map_t), "Map_String_int")
     self.assertEqual(tc._mangle_type_name(fn_t), "Fn_int_to_float")
+
+  def test_imported_module_generic_function_call(self):
+    """Verifies monomorphization when calling a generic function exported by a module with explicit type args."""
+    from src.semantics.symbol_table import ModuleSymbol, FunctionSymbol, FunctionType, GenericTypeParameter
+    from src.parser.ast import FuncDeclNode, ParameterNode, BasicTypeNode, BlockNode
+
+    tc = TypeChecker()
+    mod_sym = ModuleSymbol("math_utils", "lib.math_utils")
+    fn_type = FunctionType([GenericTypeParameter("T")], GenericTypeParameter("T"))
+    func_ast = FuncDeclNode("identity", parameters=[ParameterNode(False, "x", BasicTypeNode("T"))], return_type=BasicTypeNode("T"), type_params=["T"], body=BlockNode([]))
+    fn_sym = FunctionSymbol("identity", fn_type, type_params=["T"], ast_decl=func_ast)
+    mod_sym.exports["identity"] = fn_sym
+    tc.symbol_table.define("math_utils", mod_sym)
+
+    code = """
+    func main() {
+      let x = math_utils.identity<int>(42);
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+    tc.check(ast)
+    self.assertIsNotNone(tc.symbol_table.lookup("identity__int"))
+    self.assertEqual(mod_sym.exports["identity__int"].name, "identity__int")

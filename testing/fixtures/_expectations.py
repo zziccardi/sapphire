@@ -11,6 +11,14 @@ are expected to perform that normalisation before comparing.
 """
 
 EXPECTATIONS: dict[str, dict[str, object]] = {
+    "math_test.sp": {
+        "test_abs": 1,
+        "test_sqrt": 4.0,
+        "test_min_max": 1,
+        "test_safe_div": 1,
+        "test_log": 2.0,
+        "test_pow_ceil_floor": 1,
+    },
     "arithmetic_test.sp": {
         "test_integer_arithmetic": 15,
         "test_integer_division": 4.25,

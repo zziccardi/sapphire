@@ -792,7 +792,7 @@ class ASTBuilder(SapphireVisitor):
     return MapEntryNode(key, value)
 
   def visitStructInitializer(self, ctx: SapphireParser.StructInitializerContext) -> StructInitializerNode:
-    struct_name = ctx.IDENTIFIER().getText()
+    struct_name = ctx.identifierPath().getText()
     type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []
     fields = []
     if ctx.structInitFieldList():
@@ -802,10 +802,10 @@ class ASTBuilder(SapphireVisitor):
       arena_expr = self.visit(ctx.expression())
     node = StructInitializerNode(struct_name, fields, arena_expr, type_args=type_args)
     # Positioning for Language Server:
-    name_token = ctx.IDENTIFIER().getSymbol()
-    node.name_line = name_token.line
-    node.name_column = name_token.column
-    node.name_length = len(name_token.text)
+    start_token = ctx.identifierPath().start
+    node.name_line = start_token.line
+    node.name_column = start_token.column
+    node.name_length = len(struct_name)
     return node
 
   def visitStructInitFieldList(self, ctx: SapphireParser.StructInitFieldListContext) -> List[ArgumentNode]:

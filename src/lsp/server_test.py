@@ -195,12 +195,12 @@ class TestLSPServer(unittest.TestCase):
     func test_func(char: Character) {
       let score: int = 100;
       char.health = char.health - 10;
-      
+
       let opt_char: Character? = char;
       if let active ?= opt_char {
         let h: int = active.health;
       }
-      
+
       let items = [1, 2, 3];
       for x in items {
         let val: int = x;
@@ -213,7 +213,7 @@ class TestLSPServer(unittest.TestCase):
       test_func(char);
     }
     // This comment is separated by an empty line
-    
+
     func no_param_func() {
     }
     """
@@ -487,7 +487,7 @@ class TestLSPServer(unittest.TestCase):
     res_completion_scope = completion(self.ls, params_completion_scope)
     self.assertIsNotNone(res_completion_scope)
     self.assertTrue(len(res_completion_scope.items) > 0)
-    
+
     labels = {item.label for item in res_completion_scope.items}
     self.assertIn("char", labels)
     self.assertIn("score", labels)
@@ -1008,7 +1008,7 @@ func test() {
     mock_doc_scope.uri = doc_uri
     mock_doc_scope.source = """enum Direction { North }
 func test() {
-    
+
 }"""
     self.ls.workspace.get_text_document.return_value = mock_doc_scope
     params_scope = CompletionParams(
@@ -2228,18 +2228,18 @@ func run() {
       enums_file = os.path.join(repo_root, "lib", "love2d", "enums.sp")
       enums_uri = from_fs_path(enums_file)
 
-      # Character 34 is on 'enums'
+      # Character 33 is on 'enums'
       def_enums_mod = definition(self.ls, DefinitionParams(
           text_document=TextDocumentIdentifier(uri=demo_uri),
-          position=Position(line=43, character=34)
+          position=Position(line=47, character=33)
       ))
       self.assertIsNotNone(def_enums_mod)
       self.assertEqual(def_enums_mod.uri, enums_uri)
 
-      # Character 40 is on 'DrawMode'
+      # Character 39 is on 'DrawMode'
       def_enum_type = definition(self.ls, DefinitionParams(
           text_document=TextDocumentIdentifier(uri=demo_uri),
-          position=Position(line=43, character=40)
+          position=Position(line=47, character=39)
       ))
       self.assertIsNotNone(def_enum_type)
       self.assertTrue(def_enum_type.uri.startswith("file:///"))
@@ -2318,7 +2318,7 @@ func main() {
     self.assertEqual(_format_ast_expr(LiteralNode(None, "none")), "none")
     self.assertEqual(_format_ast_expr(LiteralNode(False, "bool")), "false")
     self.assertEqual(_format_ast_expr(IdentifierNode("my_var")), "my_var")
-    
+
     opt_mem = MemberAccessNode(IdentifierNode("obj"), "field", True)
     self.assertEqual(_format_ast_expr(opt_mem), "obj?.field")
 

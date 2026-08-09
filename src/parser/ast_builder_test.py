@@ -213,6 +213,16 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(struct_init.fields[1].name, "durability")
     self.assertEqual(struct_init.fields[1].expr.value, 100)
 
+  def test_dotted_struct_initializer(self):
+    """Verifies parsing of struct initializers using dotted module names (e.g. character.Unit { name = name })."""
+    ast = self._get_ast("let u = character.Unit { name = name, stats = stats };")
+    decl = ast.declarations[0]
+    struct_init = decl.expr
+    self.assertIsInstance(struct_init, StructInitializerNode)
+    self.assertEqual(struct_init.struct_name, "character.Unit")
+    self.assertEqual(len(struct_init.fields), 2)
+    self.assertEqual(struct_init.fields[0].name, "name")
+
 
   def test_arena_parsing(self):
     """Verifies parsing of struct initializer and clone expressions with explicit arenas."""

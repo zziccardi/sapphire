@@ -312,6 +312,8 @@ def _sapphire_string_from(val):
     return "true"
   if val is False:
     return "false"
+  if isinstance(val, Enum):
+    return str(val.value)
   return str(val)
 
 def _sapphire_enum_from(enum_cls, val):
@@ -1209,7 +1211,7 @@ class PythonTranspiler(BaseTranspiler):
       self.visit(node.expr)
       self.emit(")")
     elif target == "String":
-      self.emit("str(")
+      self.emit("_sapphire_string_from(")
       self.visit(node.expr)
       self.emit(")")
     else:
