@@ -695,6 +695,63 @@ func demo_arena() {
 }
 ```
 
+## Standard library
+
+### Standard math module (`std.math`)
+
+The `std.math` standard-library module provides a set of generic mathematical functions operating on numeric types (`int` and `float`). To use the math module, import it using `import std.math;`.
+
+#### Available functions
+
+| Function signature | Description |
+| :--- | :--- |
+| `abs<T>(x: T): T` | Returns the absolute value of `x`. |
+| `sqrt<T>(x: T): float?` | Returns the square root of `x`. Returns `none` if `x < 0`. |
+| `min<T>(a: T, b: T): T` | Returns the minimum of `a` and `b`. |
+| `max<T>(a: T, b: T): T` | Returns the maximum of `a` and `b`. |
+| `safe_div<T>(a: T, b: T): T?` | Returns `a / b`. Returns `none` if `b == 0`. |
+| `log<T>(x: T, base: float? = none): float?` | Returns the logarithm of `x` (defaults to natural log `e` if `base` is omitted). Returns `none` if `x <= 0` or `base <= 0` or `base == 1`. |
+| `pow<T>(base: T, exp: T): float` | Raises `base` to the power of `exp`. |
+| `ceil<T>(x: T): int` | Returns the smallest integer greater than or equal to `x`. |
+| `floor<T>(x: T): int` | Returns the largest integer less than or equal to `x`. |
+
+#### Usage example
+
+```sapphire
+import std.math;
+
+func demo_math() {
+  // Absolute value & min/max
+  let abs_val  = math.abs(-42);         // 42
+  let smallest = math.min(10, 20);      // 10
+  let largest  = math.max(3.14, 2.71);  // 3.14
+
+  // Square root
+  if let root ?= math.sqrt(16.0) {
+    print(f"Square root: {root}");  // 4.0
+  }
+
+  // Exponentiation
+  let p = math.pow(2.0, 3.0);  // 8.0
+
+  // Safe division (returns `T?`)
+  if let res ?= math.safe_div(10, 2) {
+    print(f"10 / 2 = {res}");  // 5
+  }
+
+  let div_by_zero = math.safe_div(10, 0);  // none
+
+  // Logarithm
+  if let l10 ?= math.log(100, base = 10.0) {
+    print(f"log10(100) = {l10}");  // 2.0
+  }
+
+  // Ceiling and floor
+  let c = math.ceil(3.14);   // 4
+  let f = math.floor(3.89);  // 3
+}
+```
+
 ## Summary of built-in features
 
 | Built-in | Category | Key syntax / signature | Primary use case |

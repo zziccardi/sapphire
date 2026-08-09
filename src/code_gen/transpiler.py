@@ -110,7 +110,7 @@ def transpile_file(
   from src.semantics.module_resolver import resolve_module_path
 
   for imp in getattr(ast, "imports", []):
-    if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+    if imp.path in ("std.testing", "std.math") or imp.path.startswith("std.testing") or imp.path.startswith("std.math"):
       continue
     sub_source = resolve_module_path(imp.path, source_file_path=input_file)
     if sub_source:

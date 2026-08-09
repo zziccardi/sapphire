@@ -218,8 +218,10 @@ class TypeChecker:
     if hasattr(self, "program") and self.program:
       self.program.declarations.append(cloned_func)
 
+    saved_func = self.current_function
     # Type check the body of the monomorphized function
     self.visit_FuncDeclNode(cloned_func)
+    self.current_function = saved_func
     return mangled_name
 
   def _declare_imports(self, program: ProgramNode) -> None:
@@ -244,7 +246,7 @@ class TypeChecker:
       # Resolve imported module file path on disk
       target_file = resolve_module_path(imp.path, source_file_path=getattr(self, "source_file_path", None))
 
-      is_builtin = (imp.path == "std.testing" or imp.path.startswith("std.testing"))
+      is_builtin = (imp.path in ("std.testing", "std.math") or imp.path.startswith("std.testing") or imp.path.startswith("std.math"))
       if not target_file and not is_builtin and not is_predefined:
         self.error(f"Cannot resolve imported module '{imp.path}'. Module file not found.", node=imp)
 
@@ -1490,30 +1492,51 @@ class TypeChecker:
 
   def visit_CallNode(self, node: CallNode) -> Type:
     # Generic function resolution & monomorphization
+    sym = None
+    mod_sym = None
     if isinstance(node.callee, IdentifierNode):
       sym = self.symbol_table.lookup(node.callee.name)
-      if isinstance(sym, FunctionSymbol) and sym.type_params:
-        if node.type_args:
-          resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
-          mangled_name = self._monomorphize_function(sym, node.type_args, resolved_type_args)
+    elif isinstance(node.callee, MemberAccessNode) and isinstance(node.callee.receiver, IdentifierNode):
+      mod_sym = self.symbol_table.lookup(node.callee.receiver.name)
+      if isinstance(mod_sym, ModuleSymbol):
+        sym = mod_sym.lookup_export(node.callee.member)
+
+    if sym and isinstance(sym, FunctionSymbol) and sym.type_params:
+      if node.type_args:
+        resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+        mangled_name = self._monomorphize_function(sym, node.type_args, resolved_type_args)
+        if isinstance(node.callee, IdentifierNode):
           node.callee.name = mangled_name
         else:
-          inferred_map = {}
-          for idx, arg in enumerate(node.arguments):
-            if idx < len(sym.symbol_type.param_types):
-              param_t = sym.symbol_type.param_types[idx]
-              arg_t = self.visit(arg.expr)
-              if isinstance(param_t, GenericTypeParameter):
-                inferred_map[param_t.name] = arg_t
+          node.callee.member = mangled_name
+        if mod_sym:
+          mono_sym = self.symbol_table.lookup(mangled_name)
+          if mono_sym:
+            mod_sym.exports[mangled_name] = mono_sym
+      else:
+        inferred_map = {}
+        for idx, arg in enumerate(node.arguments):
+          if idx < len(sym.symbol_type.param_types):
+            param_t = sym.symbol_type.param_types[idx]
+            arg_t = self.visit(arg.expr)
+            if isinstance(param_t, GenericTypeParameter):
+              inferred_map[param_t.name] = arg_t
 
-          type_arg_nodes = []
-          resolved_type_args = []
-          for p_name in sym.type_params:
-            inf_t = inferred_map.get(p_name, PrimitiveType("int"))
-            resolved_type_args.append(inf_t)
-            type_arg_nodes.append(BasicTypeNode(str(inf_t)))
-          mangled_name = self._monomorphize_function(sym, type_arg_nodes, resolved_type_args)
+        type_arg_nodes = []
+        resolved_type_args = []
+        for p_name in sym.type_params:
+          inf_t = inferred_map.get(p_name, PrimitiveType("int"))
+          resolved_type_args.append(inf_t)
+          type_arg_nodes.append(BasicTypeNode(str(inf_t)))
+        mangled_name = self._monomorphize_function(sym, type_arg_nodes, resolved_type_args)
+        if isinstance(node.callee, IdentifierNode):
           node.callee.name = mangled_name
+        else:
+          node.callee.member = mangled_name
+        if mod_sym:
+          mono_sym = self.symbol_table.lookup(mangled_name)
+          if mono_sym:
+            mod_sym.exports[mangled_name] = mono_sym
 
     # 1. Resolve callee
     callee_type = self.visit(node.callee)
