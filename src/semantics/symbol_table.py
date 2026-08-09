@@ -31,12 +31,6 @@ class Type:
         and other.name == "float"
     ):
       return True
-    if (isinstance(self, EnumType) and isinstance(other, PrimitiveType) and
-        self.value_type.lower() == other.name.lower()):
-      return True
-    if (isinstance(self, EnumType) and isinstance(other, StringType) and
-        self.value_type == "String"):
-      return True
     if isinstance(other, TraitType) and isinstance(self, StructType):
       return self.implements_trait(other)
     return self == other

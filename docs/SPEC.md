@@ -665,11 +665,11 @@ enum HttpStatusCode {
   (e.g., `Direction` or `DrawMode`).
 * **Type inference**: Variable bindings assigned an enum variant automatically
   infer the enum type without requiring explicit type annotations.
-* **Asymmetric primitive interoperability**: Enum values can be implicitly
-  coerced to their underlying primitive types (e.g., assigning an enum variant
-  to an `int` or `String` variable). However, the reverse is not allowed: raw
-  primitive values cannot be implicitly assigned or passed where an enum type is
-  expected.
+* **Strict primitive separation**: Implicit coercion of `enum` values to
+  primitive `int` or `String` types is prohibited. Converting between an `enum`
+  variant and its primitive representation requires an explicit cast
+  (`enum_val as String` or `enum_val as int`) or explicit static constructor
+  (`String.from(enum_val)`).
 
 ```sapphire
 // Type inferred as `Direction`
@@ -677,13 +677,13 @@ let current_dir = Direction.North;
 
 let mode: DrawMode = DrawMode.Fill;
 
-// String enum interoperability (asymmetric)
-//
-// Allowed: Enum implicitly coerces to String
-let mode_str: String = DrawMode.Line;
+// Explicit cast required for enum to String/int conversion
+let mode_str: String = DrawMode.Line as String;
+let mode_str2: String = String.from(DrawMode.Line);
 
-// Compile error: Cannot assign String to DrawMode
-// let invalid: DrawMode = "fill";
+// Compile error: Cannot implicitly assign Enum to String or int
+// let invalid_str: String = DrawMode.Line;
+// let invalid_int: int = Direction.North;
 
 // Fallible conversion from String or int via EnumName.from
 if let mode ?= DrawMode.from("line") {

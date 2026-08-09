@@ -98,7 +98,7 @@ The `String` type represents textual data encoded in UTF-8.
 
 * **Reference type**: Unlike primitive numeric types (`int`, `float`) and `bool` which have value semantics, `String` is a reference-passed type subject to Sapphire's borrow-checking rules.
 * **Immutability**: Strings in Sapphire are immutable once instantiated. String operations produce new string instances rather than mutating existing data.
-* **Enum interoperability**: Sapphire supports asymmetric string enum coercion. Any variant of a native `String` enum implicitly coerces to a `String` variable or parameter, whereas converting from `String` to an enum variant requires explicit fallible parsing via `EnumName.from(val)`.
+* **Enum conversions**: Converting an `enum` variant to `String` requires an explicit cast (`variant as String`) or `String.from(variant)`. Converting `String` to an enum variant requires explicit fallible parsing via `EnumName.from(val)`.
 
 #### Built-in methods
 
@@ -148,11 +148,11 @@ let invalid = Direction.from(99);  // none
 
 #### Conversions and casting for string-based enums
 
-String-based enums in Sapphire (enums whose variants are assigned string values) support both infallible static coercion to strings and fallible runtime parsing back into enum variants.
+String-based enums in Sapphire (enums whose variants are assigned string values) support explicit static casting to strings and fallible runtime parsing back into enum variants.
 
-##### 1. Infallible coercion to `String`
+##### 1. Explicit conversion to `String`
 
-Any variant of a string-based enum implicitly coerces to `String` where a string is expected (such as string concatenation, function parameters, or variable assignments). Explicit casting via `as String` or `String.from(variant)` is also supported and guaranteed:
+Converting a variant of a string-based enum to `String` requires explicit casting via `as String` or `String.from(variant)`:
 
 ```sapphire
 enum LogLevel {
@@ -162,6 +162,7 @@ enum LogLevel {
 }
 
 let level: LogLevel = LogLevel.Info;
+let level_str: String = level as String;
 
 // Implicit coercion to String
 let msg: String = "Level: " + level;  // "Level: INFO"
@@ -285,8 +286,8 @@ enum LogLevel {
   Error = "ERROR",
 }
 
-// Implicit coercion from String enum variant
-let prefix: String = LogLevel.Info;
+// Explicit conversion from String enum variant
+let prefix: String = LogLevel.Info as String;
 let message = "System initialized";
 let full_log = "[" + prefix + "] " + message;
 

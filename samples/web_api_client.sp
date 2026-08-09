@@ -19,7 +19,7 @@ struct HttpRequest {
 }
 
 struct HttpResponse {
-  let status_code: int;
+  let status_code: HttpStatusCode;
   let payload: String?;
   let error_message: String? = none;
 }
@@ -97,7 +97,7 @@ if response.status_code == HttpStatusCode.Ok {
   }
 } else {
   if let err ?= response.error_message {
-    print("API Error [" + response.status_code + "]: " + err);
+    print("API Error [" + String.from(response.status_code) + "]: " + err);
   }
 }
 

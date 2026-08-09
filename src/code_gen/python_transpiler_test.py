@@ -545,8 +545,8 @@ class TestPythonTranspiler(unittest.TestCase):
     func check_direction(): int {
       let d = Direction.South;
       let s = Status.NotFound;
-      let val: int = d;
-      return val + s;
+      let val: int = d as int;
+      return val + (s as int);
     }
     """
     result = self._transpile_and_run(code, "check_direction()")

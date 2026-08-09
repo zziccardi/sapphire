@@ -167,7 +167,8 @@ class TestSymbolTable(unittest.TestCase):
     self.assertFalse(e1 == "not an EnumType")
     self.assertEqual(repr(e1), "Color")
     self.assertFalse(self.int_type.is_compatible(e1))
-    self.assertTrue(e1.is_compatible(self.int_type))
+    self.assertFalse(e1.is_compatible(self.int_type))
+    self.assertTrue(e1.is_compatible(e1))
 
   def test_multi_return_type_methods(self):
     """Verifies MultiReturnType repr, equality, and FunctionType.return_types property."""

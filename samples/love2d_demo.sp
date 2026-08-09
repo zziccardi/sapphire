@@ -21,16 +21,20 @@ func load() {
 
 @export("love.update")
 func update(dt: float) {
-  if love.keyboard.isDown("left") || love.keyboard.isDown("a") {
+  if love.keyboard.isDown(enums.KeyCode.Left) ||
+     love.keyboard.isDown(enums.KeyCode.A) {
     hero_x -= speed * dt;
   }
-  if love.keyboard.isDown("right") || love.keyboard.isDown("d") {
+  if love.keyboard.isDown(enums.KeyCode.Right) ||
+     love.keyboard.isDown(enums.KeyCode.D) {
     hero_x += speed * dt;
   }
-  if love.keyboard.isDown("up") || love.keyboard.isDown("w") {
+  if love.keyboard.isDown(enums.KeyCode.Up) ||
+     love.keyboard.isDown(enums.KeyCode.W) {
     hero_y -= speed * dt;
   }
-  if love.keyboard.isDown("down") || love.keyboard.isDown("s") {
+  if love.keyboard.isDown(enums.KeyCode.Down) ||
+     love.keyboard.isDown(enums.KeyCode.S) {
     hero_y += speed * dt;
   }
 }

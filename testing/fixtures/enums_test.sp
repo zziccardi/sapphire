@@ -18,7 +18,7 @@ enum Color {
 
 @test
 func test_int_enum_value(): int {
-  return Direction.South;
+  return Direction.South as int;
 }
 
 @test
@@ -32,5 +32,5 @@ func test_int_enum_comparison(): int {
 
 @test
 func test_string_enum_value(): String {
-  return Color.Green;
+  return Color.Green as String;
 }

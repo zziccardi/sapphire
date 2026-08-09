@@ -1767,7 +1767,7 @@ class TestTypeChecker(unittest.TestCase):
     func test() {
       let d = Direction.North;
       let d2: Direction = Direction.East;
-      let code: int = Direction.South;
+      let code: int = Direction.South as int;
       let s: Status = Status.Ok;
       if (d == Direction.North) {
         let x: int = 1;
@@ -1995,7 +1995,7 @@ class TestTypeChecker(unittest.TestCase):
     self.assertEqual(res_types, [PrimitiveType("int")])
 
   def test_string_enum_type_checking_valid(self):
-    """Verifies type compatibility for string-backed enums with string primitive values."""
+    """Verifies type compatibility for string-backed enums with explicit casts."""
     code = """
     enum Mode {
       Fill = "fill",
@@ -2005,10 +2005,32 @@ class TestTypeChecker(unittest.TestCase):
 
     func main() {
       let m: Mode = Mode.Fill;
-      let s: String = Mode.Line;
+      let s: String = Mode.Line as String;
     }
     """
     self._check(code)
+
+  def test_enum_implicit_coercion_prohibited(self):
+    """Verifies that implicit coercion of enums to String or int is prohibited."""
+    code1 = """
+    enum Mode { Fill = "fill" }
+    func main() {
+      let s: String = Mode.Fill;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code1)
+    self.assertIn("Cannot assign expression of type 'Mode' to variable 's' of type 'String'.", str(context.exception))
+
+    code2 = """
+    enum Direction { North }
+    func main() {
+      let i: int = Direction.North;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code2)
+    self.assertIn("Cannot assign expression of type 'Direction' to variable 'i' of type 'int'.", str(context.exception))
 
   def test_string_enum_type_checking_invalid(self):
     """Verifies that passing a primitive to a function expecting an enum fails."""
