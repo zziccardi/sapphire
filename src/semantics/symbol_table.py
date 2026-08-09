@@ -671,6 +671,10 @@ class Scope:
           return exp.symbol_type
     if name in self.types:
       return self.types[name]
+    if name in self.symbols:
+      sym = self.symbols[name]
+      if hasattr(sym, "symbol_type") and isinstance(sym.symbol_type, Type):
+        return sym.symbol_type
     if self.parent:
       return self.parent.lookup_type(name)
     return None

@@ -4097,6 +4097,32 @@ class TestTypeChecker(unittest.TestCase):
 
     checker.check(ast)
 
+  def test_top_level_let_type_alias_resolution(self):
+    """Verifies type checking of top-level let type aliases (e.g. let Unit = mod.Unit, let Local = Unit)."""
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StructSymbol, StringType
+
+    code = """
+    let Unit = mod.Unit;
+    let LocalUnit = Unit;
+
+    func process(u: LocalUnit): String {
+      return u.name;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    mod_sym = ModuleSymbol("mod", "mod.sp")
+    unit_struct = StructType("Unit")
+    unit_struct.fields["name"] = StructField("name", StringType(), False)
+    mod_sym.exports["Unit"] = StructSymbol("Unit", unit_struct)
+    checker.symbol_table.define("mod", mod_sym)
+
+    checker.check(ast)
+
 
 if __name__ == "__main__":
   unittest.main()

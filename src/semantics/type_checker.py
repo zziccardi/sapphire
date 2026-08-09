@@ -323,7 +323,7 @@ class TypeChecker:
     """Pre-pass to register types and global function symbols in the symbol table."""
     for decl in program.declarations:
       if isinstance(decl, StructDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
+        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         struct_type = StructType(decl.name, parent_names=decl.parent_names, is_prototype=decl.is_prototype, type_params=decl.type_params, ast_decl=decl)
@@ -331,7 +331,7 @@ class TypeChecker:
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
 
       elif isinstance(decl, EnumDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
+        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         current_val: Union[int, str] = 0
@@ -356,7 +356,7 @@ class TypeChecker:
         self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
 
       elif isinstance(decl, TraitDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
+        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         trait_type = TraitType(decl.name, type_params=decl.type_params, ast_decl=decl)
@@ -399,6 +399,40 @@ class TypeChecker:
           self.symbol_table.exit_scope()
         self.symbol_table.define_type(decl.name, trait_type)
         self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
+      elif isinstance(decl, VarDeclNode):
+        for i, name in enumerate(decl.names):
+          if self.symbol_table.lookup_current_scope(name):
+            self.error(f"Redefinition of identifier '{name}'.", node=decl)
+            continue
+          if any(a.name == "extern" for a in decl.annotations):
+            if decl.exprs:
+              self.error("An '@extern' variable declaration cannot have an initializer expression.", node=decl)
+            v_type = self._resolve_type_node(decl.val_types[i]) if (decl.val_types and i < len(decl.val_types) and decl.val_types[i]) else PrimitiveType("none")
+            if not decl.val_types or not decl.val_types[i]:
+              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.", node=decl)
+            sym = VariableSymbol(name, v_type, decl.is_mutable)
+            sym._from_declare_globals = True
+            self.symbol_table.define(name, sym)
+          elif decl.exprs and i < len(decl.exprs):
+            expr_node = decl.exprs[i]
+            val_t = None
+            if isinstance(expr_node, MemberAccessNode) and isinstance(expr_node.receiver, IdentifierNode):
+              mod_sym = self.symbol_table.lookup(expr_node.receiver.name)
+              if isinstance(mod_sym, ModuleSymbol):
+                exp = mod_sym.lookup_export(expr_node.member)
+                if isinstance(exp, Type):
+                  val_t = exp
+                elif hasattr(exp, "symbol_type") and isinstance(exp.symbol_type, Type):
+                  val_t = exp.symbol_type
+            elif isinstance(expr_node, IdentifierNode):
+              exp = self.symbol_table.lookup_type(expr_node.name)
+              if isinstance(exp, Type):
+                val_t = exp
+            if val_t:
+              sym = VariableSymbol(name, val_t, decl.is_mutable)
+              sym._from_declare_globals = True
+              self.symbol_table.define(name, sym)
+              self.symbol_table.define_type(name, val_t)
 
       elif isinstance(decl, FuncDeclNode):
         if self.symbol_table.lookup_current_scope(decl.name):
@@ -428,21 +462,6 @@ class TypeChecker:
             param_defaults=param_defaults,
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
-
-      elif isinstance(decl, VarDeclNode):
-        if any(a.name == "extern" for a in decl.annotations):
-          if decl.exprs:
-            self.error("An '@extern' variable declaration cannot have an initializer expression.")
-          for name, val_type_node in zip(decl.names, decl.val_types):
-            if self.symbol_table.lookup_current_scope(name):
-              self.error(f"Redefinition of identifier '{name}'.")
-              continue
-            if not val_type_node:
-              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.")
-              var_type = PrimitiveType("none")
-            else:
-              var_type = self._resolve_type_node(val_type_node)
-            self.symbol_table.define(name, VariableSymbol(name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
@@ -830,7 +849,8 @@ class TypeChecker:
 
     # 1. Namespace validation
     for name in node.names:
-      if self.symbol_table.lookup_current_scope(name):
+      existing = self.symbol_table.lookup_current_scope(name)
+      if existing and not getattr(existing, "_from_declare_globals", False):
         self.error(f"Identifier '{name}' is already defined in this scope.")
         return
 
