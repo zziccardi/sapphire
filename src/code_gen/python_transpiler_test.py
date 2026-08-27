@@ -1472,6 +1472,23 @@ class TestPythonTranspiler(unittest.TestCase):
       test_with_unwrap(ok = false);
       return events;
     }
+
+    func get_two(): [Resource] {
+      return [Resource { name = "p1" }, Resource { name = "p2" }];
+    }
+
+    func test_multi_and_raw(): int {
+      with Arena() {
+        events.push("raw_arena");
+      }
+      with let a, b = get_two() {
+        events.push(a.name + "+" + b.name);
+      }
+      with let opt_r ?= get_res(ok = true) {
+        events.push("no_else_unwrap");
+      }
+      return events.size();
+    }
     """
     py_code = self._transpile(code)
     self.assertIn("try:", py_code)
@@ -1485,6 +1502,19 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("unwrapped:opt_res", run_unwrap)
     self.assertIn("dispose:opt_res", run_unwrap)
     self.assertIn("unwrap_failed", run_unwrap)
+
+    run_multi = self._transpile_and_run(code, "test_multi_and_raw()")
+    self.assertGreater(run_multi, 0)
+
+    # Directly visit WithClauseNode to cover visitor
+    from src.parser.ast import WithClauseNode
+    w_clause1 = WithClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="r", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
+    w_clause2 = WithClauseNode(expr=LiteralNode(2, "int"))
+    tr = PythonTranspiler()
+    tr.visit_WithClauseNode(w_clause1)
+    tr.visit_WithClauseNode(w_clause2)
+    self.assertIn("1", tr.get_output())
+    self.assertIn("2", tr.get_output())
 
 
 # ---------------------------------------------------------------------------

@@ -2587,25 +2587,26 @@ class TypeChecker:
         else:
           base_t = expr_t
 
-        # Verify base_t implements Disposable
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        check_t = base_t.element_type if (len(let_names) > 1 and isinstance(base_t, ArrayType)) else base_t
+
+        # Verify check_t implements Disposable
         is_disposable = False
-        if isinstance(base_t, StructType):
-          if disposable_trait and base_t.implements_trait(disposable_trait, self.symbol_table):
+        if isinstance(check_t, StructType):
+          if disposable_trait and check_t.implements_trait(disposable_trait, self.symbol_table):
             is_disposable = True
-        elif isinstance(base_t, TraitType):
-          if base_t == disposable_trait or base_t.name == "Disposable":
+        elif isinstance(check_t, TraitType):
+          if check_t == disposable_trait or check_t.name == "Disposable":
             is_disposable = True
-        elif isinstance(base_t, ArenaType):
+        elif isinstance(check_t, ArenaType):
           is_disposable = True
 
         if not is_disposable:
-          self.error(f"Type '{base_t}' bound in with statement does not implement trait 'Disposable'.")
+          self.error(f"Type '{check_t}' bound in with statement does not implement trait 'Disposable'.")
 
-        let_names = getattr(binding, "let_names", [binding.let_name])
         if len(let_names) > 1:
-          elem_t = base_t.element_type if isinstance(base_t, ArrayType) else base_t
           for name in let_names:
-            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+            self.symbol_table.define(name, VariableSymbol(name, check_t, is_mutable=binding.is_mutable))
         else:
           name = binding.let_name
           self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))

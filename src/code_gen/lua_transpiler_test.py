@@ -1241,6 +1241,22 @@ class TestLuaTranspiler(unittest.TestCase):
         let err = 1;
       }
     }
+
+    func get_two(): [Resource] {
+      return [Resource { name = "p1" }, Resource { name = "p2" }];
+    }
+
+    func test_multi_and_raw() {
+      with Arena() {
+        let y = 1;
+      }
+      with let a, b = get_two() {
+        let z = 2;
+      }
+      with let opt_r ?= get_res(ok = true) {
+        let w = 3;
+      }
+    }
     """
     lua_code = self._transpile(code)
     self.assertIn("_sapphire_dispose(_with_res_1)", lua_code)

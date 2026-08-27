@@ -4118,8 +4118,20 @@ class TestTypeChecker(unittest.TestCase):
     mod_sym = ModuleSymbol("mod", "mod.sp")
     unit_struct = StructType("Unit")
     unit_struct.fields["name"] = StructField("name", StringType(), False)
+    mod_sym.exports["Unit"] = StructSymbol("Unit", unit_struct)
+    checker.symbol_table.define("mod", mod_sym)
+
+    checker.check(ast)
+
   def test_with_statement_type_checking(self):
     """Verifies type checking, Disposable trait requirement, optional unwrapping, and else-block semantics for with statements."""
+    from src.semantics.symbol_table import ArenaType, TraitType
+
+    # ArenaType.implements_trait coverage
+    arena_t = ArenaType()
+    self.assertTrue(arena_t.implements_trait(TraitType("Disposable")))
+    self.assertFalse(arena_t.implements_trait(TraitType("OtherTrait")))
+
     # 1. Valid with statement with Disposable struct
     self._check("""
     struct FileStream {
@@ -4135,11 +4147,14 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 2. Valid with statement with Arena
+    # 2. Valid with statement with Arena and raw expression
     self._check("""
     func main() {
       with let a = Arena() {
         let x = 10;
+      }
+      with Arena() {
+        let y = 20;
       }
     }
     """)
@@ -4164,7 +4179,34 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 4. Error: Non-disposable struct bound in with
+    # 4. Valid with statement with TraitType and multi-variable binding and raw struct/trait expressions
+    self._check("""
+    struct FileStream {
+      var path: String;
+    }
+    impl Disposable for FileStream {
+      func dispose(var self) {}
+    }
+    func get_two(): [FileStream] {
+      return [FileStream { path = "a" }, FileStream { path = "b" }];
+    }
+    func test_trait(d: Disposable) {
+      with let x = d {
+        let y = 1;
+      }
+      with d {
+        let y = 2;
+      }
+      with FileStream { path = "raw" } {
+        let y = 3;
+      }
+      with let a, b = get_two() {
+        let p = a.path;
+      }
+    }
+    """)
+
+    # 5. Error: Non-disposable struct bound in with
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       struct NonDisposable {
@@ -4178,7 +4220,18 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
 
-    # 5. Error: With else block without ?= unwrap
+    # 6. Error: Non-disposable raw expression in with
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        with 123 {
+          let y = 1;
+        }
+      }
+      """)
+    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+
+    # 7. Error: With else block without ?= unwrap
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       struct FileStream {
@@ -4197,7 +4250,7 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("must contain at least one '?=' unwrap clause", str(ctx.exception))
 
-    # 6. Error: Cannot unwrap non-optional type in with clause
+    # 8. Error: Cannot unwrap non-optional type in with clause
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       struct FileStream {

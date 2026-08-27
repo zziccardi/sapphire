@@ -340,9 +340,7 @@ class ArenaType(Type):
   """Represents the built-in Arena type."""
 
   def implements_trait(self, trait: "TraitType", symbol_table: Optional[Any] = None) -> bool:
-    if trait.name == "Disposable":
-      return True
-    return False
+    return getattr(trait, "name", "") == "Disposable"
 
   def __repr__(self) -> str:
     return "Arena"

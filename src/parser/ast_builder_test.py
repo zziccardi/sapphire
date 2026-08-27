@@ -708,6 +708,21 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(len(with_node.body.statements), 1)
     self.assertEqual(len(with_node.else_body.statements), 1)
 
+    # Raw expression in with clause
+    code_raw = """
+    func test() {
+      with Arena() {
+        let y = 2;
+      }
+    }
+    """
+    ast_raw = self._get_ast(code_raw)
+    with_raw_node = ast_raw.declarations[0].body.statements[0]
+    self.assertIsInstance(with_raw_node, WithStmtNode)
+    self.assertEqual(len(with_raw_node.clauses), 1)
+    self.assertIsNone(with_raw_node.clauses[0].binding)
+    self.assertIsNotNone(with_raw_node.clauses[0].expr)
+
 
 if __name__ == "__main__":
   unittest.main()
