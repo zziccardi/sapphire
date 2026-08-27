@@ -2567,6 +2567,77 @@ class TypeChecker:
 
     return PrimitiveType("none")
 
+  def visit_WithStmtNode(self, node: WithStmtNode) -> Type:
+    disposable_trait = self.symbol_table.lookup_type("Disposable")
+    has_unwrap = False
+
+    self.symbol_table.enter_scope()
+
+    for clause in node.clauses:
+      if clause.binding:
+        binding = clause.binding
+        expr_t = self.visit(binding.expr)
+        if binding.is_unwrap:
+          has_unwrap = True
+          if not isinstance(expr_t, OptionalType):
+            self.error(f"Cannot unwrap non-optional type '{expr_t}' in with clause.")
+            base_t = expr_t
+          else:
+            base_t = expr_t.base_type
+        else:
+          base_t = expr_t
+
+        # Verify base_t implements Disposable
+        is_disposable = False
+        if isinstance(base_t, StructType):
+          if disposable_trait and base_t.implements_trait(disposable_trait, self.symbol_table):
+            is_disposable = True
+        elif isinstance(base_t, TraitType):
+          if base_t == disposable_trait or base_t.name == "Disposable":
+            is_disposable = True
+        elif isinstance(base_t, ArenaType):
+          is_disposable = True
+
+        if not is_disposable:
+          self.error(f"Type '{base_t}' bound in with statement does not implement trait 'Disposable'.")
+
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        if len(let_names) > 1:
+          elem_t = base_t.element_type if isinstance(base_t, ArrayType) else base_t
+          for name in let_names:
+            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+        else:
+          name = binding.let_name
+          self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))
+
+      elif clause.expr:
+        expr_t = self.visit(clause.expr)
+        is_disposable = False
+        if isinstance(expr_t, StructType):
+          if disposable_trait and expr_t.implements_trait(disposable_trait, self.symbol_table):
+            is_disposable = True
+        elif isinstance(expr_t, TraitType):
+          if expr_t == disposable_trait or expr_t.name == "Disposable":
+            is_disposable = True
+        elif isinstance(expr_t, ArenaType):
+          is_disposable = True
+
+        if not is_disposable:
+          self.error(f"Expression type '{expr_t}' in with statement does not implement trait 'Disposable'.")
+
+    # Check body statements
+    self.visit(node.body)
+    self.symbol_table.exit_scope()
+
+    if node.else_body:
+      if not has_unwrap:
+        self.error("With statement with 'else' block must contain at least one '?=' unwrap clause.")
+      self.symbol_table.enter_scope()
+      self.visit(node.else_body)
+      self.symbol_table.exit_scope()
+
+    return PrimitiveType("none")
+
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:
     struct_type = self.symbol_table.lookup_type(node.struct_name)
     if not struct_type or not isinstance(struct_type, StructType):

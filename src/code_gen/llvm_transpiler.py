@@ -394,3 +394,5 @@ class LLVMTranspiler(BaseTranspiler):
   def visit_StructInitializerNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_GuardClauseNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_GuardStmtNode(self, node: Any) -> Any: return self.generic_visit(node)
+  def visit_WithClauseNode(self, node: Any) -> Any: return self.generic_visit(node)
+  def visit_WithStmtNode(self, node: Any) -> Any: return self.generic_visit(node)

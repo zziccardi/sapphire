@@ -459,6 +459,21 @@ class ASTBuilder(SapphireVisitor):
       condition = self.visit(ctx.expression())
       return GuardClauseNode(condition=condition)
 
+  def visitWithStatement(self, ctx: SapphireParser.WithStatementContext) -> WithStmtNode:
+    clauses = [self.visit(clause_ctx) for clause_ctx in ctx.withClause()]
+    blocks = ctx.block()
+    body = self.visit(blocks[0])
+    else_body = self.visit(blocks[1]) if len(blocks) > 1 else None
+    return WithStmtNode(clauses, body, else_body)
+
+  def visitWithClause(self, ctx: SapphireParser.WithClauseContext) -> WithClauseNode:
+    if ctx.letOrVarBinding():
+      binding = self.visit(ctx.letOrVarBinding())
+      return WithClauseNode(binding=binding)
+    else:
+      expr = self.visit(ctx.expression())
+      return WithClauseNode(expr=expr)
+
   def visitLetOrVarBinding(self, ctx: SapphireParser.LetOrVarBindingContext) -> HeaderBindingNode:
     is_mutable = ctx.VAR() is not None
     is_unwrap = ctx.UNWRAP_ASSIGN() is not None

@@ -516,6 +516,23 @@ class GuardStmtNode(StmtNode):
     self.else_block = else_block
 
 
+class WithClauseNode(ASTNode):
+  """Represents a single clause within a with statement (binding or standalone expression)."""
+
+  def __init__(self, binding: Optional[HeaderBindingNode] = None, expr: Optional[ASTNode] = None):
+    self.binding = binding
+    self.expr = expr
+
+
+class WithStmtNode(StmtNode):
+  """Represents a with statement (e.g. 'with let f ?= io.open("a.txt") { ... } else { ... }')."""
+
+  def __init__(self, clauses: List[WithClauseNode], body: BlockNode, else_body: Optional[BlockNode] = None):
+    self.clauses = clauses
+    self.body = body
+    self.else_body = else_body
+
+
 class IfNode(StmtNode):
   """Represents an if/else conditional statement, supporting init-statements."""
 

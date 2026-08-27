@@ -753,6 +753,39 @@ func demo_math() {
 }
 ```
 
+### Disposable
+
+The `Disposable` trait is a standard contract for any type whose instances require deterministic resource disposal (e.g. closing file descriptors, flushing buffers, releasing GPU resources, or tearing down memory arenas).
+
+#### Definition
+
+```sapphire
+trait Disposable {
+  func dispose(var self);
+}
+```
+
+#### Implementing `Disposable`
+
+```sapphire
+struct FileHandle {
+  var path: String;
+}
+
+impl Disposable for FileHandle {
+  func dispose(var self) {
+    print("Closing file: " + self.path);
+  }
+}
+
+func main() {
+  with let f = FileHandle { path = "data.csv" } {
+    print("Processing file: " + f.path);
+  }
+  // `f.dispose()` is automatically called upon leaving the `with` block
+}
+```
+
 ## Summary of built-in features
 
 | Built-in | Category | Key syntax / signature | Primary use case |
@@ -763,4 +796,5 @@ func demo_math() {
 | **`Array`** | Collection type | `[T]`, `[T; N]` | Sequential element collections with 0-based indexing |
 | **`Map`** | Collection type | `[K: V]` | Key–value associative lookup (`K`: String, int, or enum) |
 | **`Arena`** | Memory manager | `Arena()`, `expr in arena` | Scope-bound RAII memory allocation & safety control |
+| **`Disposable`** | Trait | `func dispose(var self);` | Deterministic RAII cleanup for `with` blocks |
 | **`Range`** | Iteration type | `Range()` | Type returned by `range()` for numeric iteration |

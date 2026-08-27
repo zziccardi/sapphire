@@ -1430,6 +1430,62 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_array_get", py_code)
     self.assertIn("_sapphire_map_get", py_code)
 
+  def test_with_statement_transpilation_python(self):
+    """Verifies that with statements transpile to Python try...finally blocks with LIFO disposal."""
+    code = """
+    var events: [String] = [];
+
+    struct Resource {
+      var name: String;
+    }
+    impl Disposable for Resource {
+      func dispose(var self) {
+        events.push("dispose:" + self.name);
+      }
+    }
+
+    func test_with(): int {
+      with let r1 = Resource { name = "r1" }; let r2 = Resource { name = "r2" } {
+        events.push("inside");
+      }
+      return events.size();
+    }
+
+    func get_res(ok: bool): Resource? {
+      if ok {
+        return Resource { name = "opt_res" };
+      }
+      return none;
+    }
+
+    func test_with_unwrap(ok: bool): int {
+      with let r ?= get_res(ok = ok) {
+        events.push("unwrapped:" + r.name);
+      } else {
+        events.push("unwrap_failed");
+      }
+      return events.size();
+    }
+
+    func test_all_unwrap(): [String] {
+      test_with_unwrap(ok = true);
+      test_with_unwrap(ok = false);
+      return events;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("try:", py_code)
+    self.assertIn("finally:", py_code)
+    self.assertIn("_sapphire_dispose(_with_res_", py_code)
+
+    res = self._transpile_and_run(code, "test_with()")
+    self.assertEqual(res, 3)
+
+    run_unwrap = self._transpile_and_run(code, "test_all_unwrap()")
+    self.assertIn("unwrapped:opt_res", run_unwrap)
+    self.assertIn("dispose:opt_res", run_unwrap)
+    self.assertIn("unwrap_failed", run_unwrap)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixture tests
@@ -1470,6 +1526,9 @@ class TestSharedFixtures(unittest.TestCase):
     except Exception:
       pass
     py_code = Transpiler(test_mode=True).transpile(ast)
+    lib_path = str(_FIXTURES_DIR.parent.parent / "lib")
+    if lib_path not in sys.path:
+      sys.path.insert(0, lib_path)
     ctx: dict = {}
     exec(py_code, ctx)  # pylint: disable=exec-used
     results = {}

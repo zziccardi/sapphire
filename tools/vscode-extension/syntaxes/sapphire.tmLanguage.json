@@ -66,7 +66,7 @@
       "patterns": [
         {
           "name": "keyword.control.sapphire",
-          "match": "\\b(as|break|clone|continue|else|export|for|guard|if|import|in|match|return|while|yield)\\b"
+          "match": "\\b(as|break|clone|continue|else|export|for|guard|if|import|in|match|return|while|with|yield)\\b"
         },
         {
           "name": "storage.modifier.sapphire",

@@ -34,7 +34,10 @@ def parse_antlr_grammar():
   types = ["void"]  # 'void' might not be in lexer rules but standard in types
   constants = []
 
-  control_words = {"if", "else", "while", "for", "in", "return", "match", "yield", "clone", "import", "export", "as"}
+  control_words = {
+      "if", "else", "guard", "with", "while", "for", "in", "break", "continue",
+      "return", "match", "yield", "clone", "import", "export", "as"
+  }
   modifier_words = {"static", "const", "proto", "struct", "enum", "impl", "trait", "func", "let", "var"}
 
   for name, val in matches:

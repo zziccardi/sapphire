@@ -48,12 +48,18 @@ class Arena:
       if hasattr(obj, '__shadow__'):
         obj.__shadow__.clear()
     self.objects.clear()
+  def dispose(self):
+    self.destroy()
   def __enter__(self):
     return self
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.destroy()
 
 _DEFAULT_ARENA = Arena()
+
+def _sapphire_dispose(obj):
+  if obj is not None and hasattr(obj, 'dispose') and callable(obj.dispose):
+    obj.dispose()
 
 class _LazyCoWProxy:
   def __init__(self, parent, name, target):
@@ -751,7 +757,8 @@ class PythonTranspiler(BaseTranspiler):
     if node.modifier != "static":
       params.append("self")
     for p in func.parameters:
-      params.append(self._format_param(p))
+      if p.name != "self":
+        params.append(self._format_param(p))
 
     self.emit(f"def {func_name}({', '.join(params)}):")
     self.indent()
@@ -1717,6 +1724,84 @@ class PythonTranspiler(BaseTranspiler):
         self.indent()
         self.visit(node.else_block)
         self.dedent()
+
+  def visit_WithClauseNode(self, node: WithClauseNode) -> None:
+    if node.binding:
+      self.visit(node.binding.expr)
+    elif node.expr:
+      self.visit(node.expr)
+
+  def visit_WithStmtNode(self, node: WithStmtNode) -> None:
+    self._temp_with_count = getattr(self, "_temp_with_count", 0)
+
+    # Collect clauses and bindings
+    clause_vars = []  # List of (tmp_var, is_unwrap, binding, expr)
+    for clause in node.clauses:
+      self._temp_with_count += 1
+      tmp_var = f"_with_res_{self._temp_with_count}"
+      if clause.binding:
+        binding = clause.binding
+        self._lift_match_expressions(binding.expr)
+        self.newline()
+        self.emit(f"{tmp_var} = ")
+        self.visit(binding.expr)
+        clause_vars.append((tmp_var, binding.is_unwrap, binding, None))
+      elif clause.expr:
+        self._lift_match_expressions(clause.expr)
+        self.newline()
+        self.emit(f"{tmp_var} = ")
+        self.visit(clause.expr)
+        clause_vars.append((tmp_var, False, None, clause.expr))
+
+    has_unwrap = any(is_unwrap for _, is_unwrap, _, _ in clause_vars)
+    unwrap_vars = [tmp_var for tmp_var, is_unwrap, _, _ in clause_vars if is_unwrap]
+
+    def emit_body_with_try_finally():
+      for tmp_var, _, binding, _ in clause_vars:
+        if binding:
+          let_names = getattr(binding, "let_names", [binding.let_name])
+          if len(let_names) > 1:
+            for idx, name in enumerate(let_names):
+              self.newline()
+              self.emit(f"{name} = {tmp_var}[{idx}]")
+          else:
+            self.newline()
+            self.emit(f"{binding.let_name} = {tmp_var}")
+
+      self.newline()
+      self.emit("try:")
+      self.indent()
+      self.visit(node.body)
+      self.dedent()
+      self.newline()
+      self.emit("finally:")
+      self.indent()
+      for tmp_var, _, _, _ in reversed(clause_vars):
+        self.newline()
+        self.emit(f"_sapphire_dispose({tmp_var})")
+      self.dedent()
+
+    if has_unwrap:
+      cond = " and ".join(f"{v} is not None" for v in unwrap_vars)
+      self.newline()
+      self.emit(f"if {cond}:")
+      self.indent()
+      emit_body_with_try_finally()
+      self.dedent()
+      self.newline()
+      self.emit("else:")
+      self.indent()
+      for tmp_var, _, _, _ in reversed(clause_vars):
+        self.newline()
+        self.emit(f"_sapphire_dispose({tmp_var})")
+      if node.else_body:
+        self.visit(node.else_body)
+      else:
+        self.newline()
+        self.emit("pass")
+      self.dedent()
+    else:
+      emit_body_with_try_finally()
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
     if node.arena_expr:
