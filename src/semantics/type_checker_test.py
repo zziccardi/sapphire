@@ -2115,8 +2115,31 @@ class TestTypeChecker(unittest.TestCase):
       NonExistentSymbol,
     }
     """
-    with self.assertRaises(SemanticError):
+    with self.assertRaises(SemanticError) as ctx:
       self._check(code)
+    self.assertIn("Exported symbol 'NonExistentSymbol' is not defined in module.", str(ctx.exception))
+
+  def test_undefined_export_symbol_with_defined_structs(self):
+    """Verifies that exporting an undefined symbol in a module with other defined structs raises a SemanticError."""
+    code = """
+    export {
+      PathNode,
+      Enemy,
+      create_enemy_archetype,
+    }
+
+    struct PathNode {
+      let x: int;
+      let y: int;
+    }
+
+    struct Enemy {
+      var id: int = 0;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("Exported symbol 'create_enemy_archetype' is not defined in module.", str(ctx.exception))
 
   def test_module_export_errors_and_type_resolution(self):
     """Verifies module type resolution and export error branches."""

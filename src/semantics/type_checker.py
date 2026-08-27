@@ -688,14 +688,14 @@ class TypeChecker:
       if spec.module_prefix:
         mod_sym = self.symbol_table.lookup(spec.module_prefix)
         if not mod_sym or not isinstance(mod_sym, ModuleSymbol):
-          self.error(f"Module '{spec.module_prefix}' is not imported.")
-        elif mod_sym.exports and spec.symbol not in mod_sym.exports:
-          self.error(f"Module '{spec.module_prefix}' does not export symbol '{spec.symbol}'.")
+          self.error(f"Module '{spec.module_prefix}' is not imported.", node=spec)
+        elif spec.symbol not in mod_sym.exports:
+          self.error(f"Module '{spec.module_prefix}' does not export symbol '{spec.symbol}'.", node=spec)
       else:
         sym = self.symbol_table.lookup(spec.symbol)
         type_sym = self.symbol_table.lookup_type(spec.symbol)
         if not sym and not type_sym:
-          self.error(f"Exported symbol '{spec.symbol}' is not defined in module.")
+          self.error(f"Exported symbol '{spec.symbol}' is not defined in module.", node=spec)
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Fields already verified in pre-pass

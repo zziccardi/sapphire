@@ -173,10 +173,6 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.raw_tokens.append((line, col, length, token_type, modifiers))
 
   def visit_ProgramNode(self, node) -> None:
-    for imp in getattr(node, "imports", []):
-      self.visit(imp)
-    if getattr(node, "export_block", None):
-      self.visit(node.export_block)
     super().visit_ProgramNode(node)
 
   def visit_ImportStmtNode(self, node) -> None:
@@ -186,6 +182,7 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.node_types[node] = sym.symbol_type
 
   def visit_ExportStmtNode(self, node) -> None:
+    super().visit_ExportStmtNode(node)
     for spec in node.specifiers:
       if spec.module_prefix:
         mod_sym = self.symbol_table.lookup(spec.module_prefix)
