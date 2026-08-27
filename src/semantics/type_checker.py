@@ -770,6 +770,8 @@ class TypeChecker:
 
     # Define parameters in scope
     for p in func_decl.parameters:
+      if p.name == "self":
+        continue
       ptype = self._resolve_type_node(p.param_type)
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
 
