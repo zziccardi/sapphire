@@ -438,6 +438,30 @@ func process_user(users: [String: User], id: String): int {
 * **Scope promotion**: Variables unwrapped inside `guard` clauses are bound in the **surrounding outer scope** for all statements following the `guard`.
 * **Control-flow termination**: The `else` block executes if any clause evaluates to `none` or `false`. The compiler statically verifies that every code path inside the `else` block terminates control flow via `return`, `break`, or `continue`.
 
+### With statements (`with ... { ... }`)
+Sapphire provides Python-style `with` statements for deterministic RAII resource acquisition and cleanup (e.g. file handles, sockets, database transactions, mutexes, arenas).
+
+```sapphire
+// Single or multiple semicolon-delimited resource bindings
+with let src ?= open_file("source.txt", "r");
+     let dst ?= open_file("dest.txt", "w") {
+  dst.write(src.read());
+} else {
+  print("Failed to open source or destination file");
+}
+```
+
+* **Disposable trait**: Any resource bound inside a `with` statement must implement the built-in `Disposable` trait:
+  ```sapphire
+  trait Disposable {
+    func dispose(var self);
+  }
+  ```
+  `Arena` and any struct or trait explicitly implementing `Disposable` are valid disposable resources.
+* **Deterministic LIFO teardown**: Acquired resources are automatically disposed via `.dispose()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on error/exception.
+* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly disposed before executing the optional `else` block.
+* **Lexical scoping**: Variables bound in `with` clauses are scoped strictly to the `with` body block.
+
 ## 8. Functions & closures
 
 Named functions must fully declare the types of all parameters and the explicit

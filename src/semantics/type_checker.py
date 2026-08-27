@@ -323,7 +323,7 @@ class TypeChecker:
     """Pre-pass to register types and global function symbols in the symbol table."""
     for decl in program.declarations:
       if isinstance(decl, StructDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
+        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         struct_type = StructType(decl.name, parent_names=decl.parent_names, is_prototype=decl.is_prototype, type_params=decl.type_params, ast_decl=decl)
@@ -331,7 +331,7 @@ class TypeChecker:
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
 
       elif isinstance(decl, EnumDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
+        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         current_val: Union[int, str] = 0
@@ -356,7 +356,7 @@ class TypeChecker:
         self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
 
       elif isinstance(decl, TraitDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
+        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         trait_type = TraitType(decl.name, type_params=decl.type_params, ast_decl=decl)
@@ -399,6 +399,40 @@ class TypeChecker:
           self.symbol_table.exit_scope()
         self.symbol_table.define_type(decl.name, trait_type)
         self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
+      elif isinstance(decl, VarDeclNode):
+        for i, name in enumerate(decl.names):
+          if self.symbol_table.lookup_current_scope(name):
+            self.error(f"Redefinition of identifier '{name}'.", node=decl)
+            continue
+          if any(a.name == "extern" for a in decl.annotations):
+            if decl.exprs:
+              self.error("An '@extern' variable declaration cannot have an initializer expression.", node=decl)
+            v_type = self._resolve_type_node(decl.val_types[i]) if (decl.val_types and i < len(decl.val_types) and decl.val_types[i]) else PrimitiveType("none")
+            if not decl.val_types or not decl.val_types[i]:
+              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.", node=decl)
+            sym = VariableSymbol(name, v_type, decl.is_mutable)
+            sym._from_declare_globals = True
+            self.symbol_table.define(name, sym)
+          elif decl.exprs and i < len(decl.exprs):
+            expr_node = decl.exprs[i]
+            val_t = None
+            if isinstance(expr_node, MemberAccessNode) and isinstance(expr_node.receiver, IdentifierNode):
+              mod_sym = self.symbol_table.lookup(expr_node.receiver.name)
+              if isinstance(mod_sym, ModuleSymbol):
+                exp = mod_sym.lookup_export(expr_node.member)
+                if isinstance(exp, Type):
+                  val_t = exp
+                elif hasattr(exp, "symbol_type") and isinstance(exp.symbol_type, Type):
+                  val_t = exp.symbol_type
+            elif isinstance(expr_node, IdentifierNode):
+              exp = self.symbol_table.lookup_type(expr_node.name)
+              if isinstance(exp, Type):
+                val_t = exp
+            if val_t:
+              sym = VariableSymbol(name, val_t, decl.is_mutable)
+              sym._from_declare_globals = True
+              self.symbol_table.define(name, sym)
+              self.symbol_table.define_type(name, val_t)
 
       elif isinstance(decl, FuncDeclNode):
         if self.symbol_table.lookup_current_scope(decl.name):
@@ -428,21 +462,6 @@ class TypeChecker:
             param_defaults=param_defaults,
         )
         self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
-
-      elif isinstance(decl, VarDeclNode):
-        if any(a.name == "extern" for a in decl.annotations):
-          if decl.exprs:
-            self.error("An '@extern' variable declaration cannot have an initializer expression.")
-          for name, val_type_node in zip(decl.names, decl.val_types):
-            if self.symbol_table.lookup_current_scope(name):
-              self.error(f"Redefinition of identifier '{name}'.")
-              continue
-            if not val_type_node:
-              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.")
-              var_type = PrimitiveType("none")
-            else:
-              var_type = self._resolve_type_node(val_type_node)
-            self.symbol_table.define(name, VariableSymbol(name, var_type, decl.is_mutable))
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
@@ -669,14 +688,14 @@ class TypeChecker:
       if spec.module_prefix:
         mod_sym = self.symbol_table.lookup(spec.module_prefix)
         if not mod_sym or not isinstance(mod_sym, ModuleSymbol):
-          self.error(f"Module '{spec.module_prefix}' is not imported.")
-        elif mod_sym.exports and spec.symbol not in mod_sym.exports:
-          self.error(f"Module '{spec.module_prefix}' does not export symbol '{spec.symbol}'.")
+          self.error(f"Module '{spec.module_prefix}' is not imported.", node=spec)
+        elif spec.symbol not in mod_sym.exports:
+          self.error(f"Module '{spec.module_prefix}' does not export symbol '{spec.symbol}'.", node=spec)
       else:
         sym = self.symbol_table.lookup(spec.symbol)
         type_sym = self.symbol_table.lookup_type(spec.symbol)
         if not sym and not type_sym:
-          self.error(f"Exported symbol '{spec.symbol}' is not defined in module.")
+          self.error(f"Exported symbol '{spec.symbol}' is not defined in module.", node=spec)
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Fields already verified in pre-pass
@@ -751,6 +770,8 @@ class TypeChecker:
 
     # Define parameters in scope
     for p in func_decl.parameters:
+      if p.name == "self":
+        continue
       ptype = self._resolve_type_node(p.param_type)
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
 
@@ -830,7 +851,8 @@ class TypeChecker:
 
     # 1. Namespace validation
     for name in node.names:
-      if self.symbol_table.lookup_current_scope(name):
+      existing = self.symbol_table.lookup_current_scope(name)
+      if existing and not getattr(existing, "_from_declare_globals", False):
         self.error(f"Identifier '{name}' is already defined in this scope.")
         return
 
@@ -2544,6 +2566,78 @@ class TypeChecker:
 
     if not self._block_terminates(node.else_block):
       self.error("Guard else block must terminate control flow (via return, break, or continue).")
+
+    return PrimitiveType("none")
+
+  def visit_WithStmtNode(self, node: WithStmtNode) -> Type:
+    disposable_trait = self.symbol_table.lookup_type("Disposable")
+    has_unwrap = False
+
+    self.symbol_table.enter_scope()
+
+    for clause in node.clauses:
+      if clause.binding:
+        binding = clause.binding
+        expr_t = self.visit(binding.expr)
+        if binding.is_unwrap:
+          has_unwrap = True
+          if not isinstance(expr_t, OptionalType):
+            self.error(f"Cannot unwrap non-optional type '{expr_t}' in with clause.")
+            base_t = expr_t
+          else:
+            base_t = expr_t.base_type
+        else:
+          base_t = expr_t
+
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        check_t = base_t.element_type if (len(let_names) > 1 and isinstance(base_t, ArrayType)) else base_t
+
+        # Verify check_t implements Disposable
+        is_disposable = False
+        if isinstance(check_t, StructType):
+          if disposable_trait and check_t.implements_trait(disposable_trait, self.symbol_table):
+            is_disposable = True
+        elif isinstance(check_t, TraitType):
+          if check_t == disposable_trait or check_t.name == "Disposable":
+            is_disposable = True
+        elif isinstance(check_t, ArenaType):
+          is_disposable = True
+
+        if not is_disposable:
+          self.error(f"Type '{check_t}' bound in with statement does not implement trait 'Disposable'.")
+
+        if len(let_names) > 1:
+          for name in let_names:
+            self.symbol_table.define(name, VariableSymbol(name, check_t, is_mutable=binding.is_mutable))
+        else:
+          name = binding.let_name
+          self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))
+
+      elif clause.expr:
+        expr_t = self.visit(clause.expr)
+        is_disposable = False
+        if isinstance(expr_t, StructType):
+          if disposable_trait and expr_t.implements_trait(disposable_trait, self.symbol_table):
+            is_disposable = True
+        elif isinstance(expr_t, TraitType):
+          if expr_t == disposable_trait or expr_t.name == "Disposable":
+            is_disposable = True
+        elif isinstance(expr_t, ArenaType):
+          is_disposable = True
+
+        if not is_disposable:
+          self.error(f"Expression type '{expr_t}' in with statement does not implement trait 'Disposable'.")
+
+    # Check body statements
+    self.visit(node.body)
+    self.symbol_table.exit_scope()
+
+    if node.else_body:
+      if not has_unwrap:
+        self.error("With statement with 'else' block must contain at least one '?=' unwrap clause.")
+      self.symbol_table.enter_scope()
+      self.visit(node.else_body)
+      self.symbol_table.exit_scope()
 
     return PrimitiveType("none")
 

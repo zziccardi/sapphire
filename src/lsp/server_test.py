@@ -1171,6 +1171,28 @@ func main() {
     self.assertTrue(len(call_arg.diagnostics) > 0)
     self.assertIn("Missing semicolon ';' after closing brace '}' of match expression", call_arg.diagnostics[0].message)
 
+  def test_undefined_export_symbol_lsp_diagnostic(self):
+    """Verifies LSP diagnostics report semantic error when exporting an undefined symbol."""
+    from lsprotocol.types import DiagnosticSeverity
+    doc_uri = "file:///undefined_export.sp"
+    doc_text = """
+    export {
+      PathNode,
+      create_enemy_archetype,
+    }
+
+    struct PathNode {
+      let x: int;
+      let y: int;
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_text)
+    self.ls.text_document_publish_diagnostics.assert_called_once()
+    call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertTrue(len(call_arg.diagnostics) > 0)
+    self.assertEqual(call_arg.diagnostics[0].severity, DiagnosticSeverity.Error)
+    self.assertIn("Exported symbol 'create_enemy_archetype' is not defined in module.", call_arg.diagnostics[0].message)
+
   def test_map_for_loop_lsp_completion(self):
     """Verifies LSP completion for key_var and val_var inside map for loops."""
     from lsprotocol.types import CompletionParams, Position, TextDocumentIdentifier

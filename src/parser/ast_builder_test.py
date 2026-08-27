@@ -673,6 +673,57 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsNone(d_empty["expr"])
 
 
+  def test_with_statement_ast(self):
+    """Verifies AST construction for with statements with single/multiple clauses, unwrap, and else blocks."""
+    from src.parser.ast import WithStmtNode, WithClauseNode, HeaderBindingNode
+
+    code = """
+    func test() {
+      with let src ?= open("in.txt"); let dst = create("out.txt") {
+        let x = 1;
+      } else {
+        let err = 0;
+      }
+    }
+    """
+    ast = self._get_ast(code)
+    func_decl = ast.declarations[0]
+    with_node = func_decl.body.statements[0]
+    self.assertIsInstance(with_node, WithStmtNode)
+    self.assertEqual(len(with_node.clauses), 2)
+
+    # Clause 1: let src ?= open("in.txt")
+    self.assertIsNotNone(with_node.clauses[0].binding)
+    self.assertEqual(with_node.clauses[0].binding.let_name, "src")
+    self.assertTrue(with_node.clauses[0].binding.is_unwrap)
+
+    # Clause 2: let dst = create("out.txt")
+    self.assertIsNotNone(with_node.clauses[1].binding)
+    self.assertEqual(with_node.clauses[1].binding.let_name, "dst")
+    self.assertFalse(with_node.clauses[1].binding.is_unwrap)
+
+    # Body and else block
+    self.assertIsNotNone(with_node.body)
+    self.assertIsNotNone(with_node.else_body)
+    self.assertEqual(len(with_node.body.statements), 1)
+    self.assertEqual(len(with_node.else_body.statements), 1)
+
+    # Raw expression in with clause
+    code_raw = """
+    func test() {
+      with Arena() {
+        let y = 2;
+      }
+    }
+    """
+    ast_raw = self._get_ast(code_raw)
+    with_raw_node = ast_raw.declarations[0].body.statements[0]
+    self.assertIsInstance(with_raw_node, WithStmtNode)
+    self.assertEqual(len(with_raw_node.clauses), 1)
+    self.assertIsNone(with_raw_node.clauses[0].binding)
+    self.assertIsNotNone(with_raw_node.clauses[0].expr)
+
+
 if __name__ == "__main__":
   unittest.main()
 

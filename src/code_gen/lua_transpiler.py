@@ -70,6 +70,10 @@ function Arena:destroy()
   self.objects = {}
 end
 
+function Arena:dispose()
+  self:destroy()
+end
+
 local _DEFAULT_ARENA = Arena.init()
 
 local _clone_helper
@@ -508,6 +512,18 @@ local _sapphire_range = function(a, b, c)
   end
   return iter, {stop = stop, step = step}, start - step
 end
+
+local _sapphire_dispose = function(obj)
+  if obj == nil then return end
+  if type(obj) == "table" and type(obj.dispose) == "function" then
+    obj:dispose()
+  elseif type(obj) == "userdata" then
+    local meta = getmetatable(obj)
+    if meta and type(meta.dispose) == "function" then
+      obj:dispose()
+    end
+  end
+end
 """
 
 
@@ -595,6 +611,7 @@ class LuaTranspiler(BaseTranspiler):
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
     self.arena_stack: List[List[str]] = []
+    self.disposable_stack: List[List[str]] = []
     self._identifier_map: Dict[str, str] = {}
     self._loop_stack: List[bool] = []
 
@@ -924,11 +941,11 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
 
     if node.modifier == "static":
-      params = [p.name for p in func.parameters]
+      params = [p.name for p in func.parameters if p.name != "self"]
       self.emit(f"function {struct_name}.{func_name}({', '.join(params)})")
     else:
-      params = ["self"] + [p.name for p in func.parameters]
-      self.emit(f"function {struct_name}:{func_name}({', '.join(params[1:])})")
+      other_params = [p.name for p in func.parameters if p.name != "self"]
+      self.emit(f"function {struct_name}:{func_name}({', '.join(other_params)})")
 
     self.indent()
     for p in func.parameters:
@@ -986,6 +1003,9 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.arena_stack.append([])
+    self.disposable_stack.append([])
+    if getattr(node, "_with_disposables", None):
+      self.disposable_stack[-1].extend(node._with_disposables)
     if not node.statements:
       self.newline()
       self.emit("-- pass")
@@ -994,8 +1014,12 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(stmt)
 
     current_arenas = self.arena_stack.pop()
+    current_disposables = self.disposable_stack.pop()
     has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
     if not has_returned:
+      for disp_name in reversed(current_disposables):
+        self.newline()
+        self.emit(f"_sapphire_dispose({disp_name})")
       for arena_name in reversed(current_arenas):
         self.newline()
         self.emit(f"{arena_name}:destroy()")
@@ -1097,7 +1121,14 @@ class LuaTranspiler(BaseTranspiler):
     all_active_arenas = [
         a for frame in reversed(self.arena_stack) for a in reversed(frame)
     ]
+    all_active_disposables = [
+        d for frame in reversed(self.disposable_stack) for d in reversed(frame)
+    ]
     self._lift_match_expressions(node.expressions)
+
+    for disp_name in all_active_disposables:
+      self.newline()
+      self.emit(f"_sapphire_dispose({disp_name})")
 
     for arena_name in all_active_arenas:
       self.newline()
@@ -2045,6 +2076,81 @@ class LuaTranspiler(BaseTranspiler):
       self.visit(node.binding.expr)
     elif node.condition:
       self.visit(node.condition)
+
+  def visit_WithClauseNode(self, node: WithClauseNode) -> None:
+    if node.binding:
+      self.visit(node.binding.expr)
+    elif node.expr:
+      self.visit(node.expr)
+
+  def visit_WithStmtNode(self, node: WithStmtNode) -> None:
+    self._temp_with_count = getattr(self, "_temp_with_count", 0)
+
+    clause_vars = []  # List of (tmp_var, is_unwrap, binding, expr)
+    for clause in node.clauses:
+      self._temp_with_count += 1
+      tmp_var = f"_with_res_{self._temp_with_count}"
+      if clause.binding:
+        binding = clause.binding
+        self._lift_match_expressions(binding.expr)
+        self.newline()
+        self.emit(f"local {tmp_var} = ")
+        self.visit(binding.expr)
+        clause_vars.append((tmp_var, binding.is_unwrap, binding, None))
+      elif clause.expr:
+        self._lift_match_expressions(clause.expr)
+        self.newline()
+        self.emit(f"local {tmp_var} = ")
+        self.visit(clause.expr)
+        clause_vars.append((tmp_var, False, None, clause.expr))
+
+    has_unwrap = any(is_unwrap for _, is_unwrap, _, _ in clause_vars)
+    unwrap_vars = [tmp_var for tmp_var, is_unwrap, _, _ in clause_vars if is_unwrap]
+
+    def emit_body_statements():
+      for tmp_var, _, binding, _ in clause_vars:
+        if binding:
+          let_names = getattr(binding, "let_names", [binding.let_name])
+          if len(let_names) > 1:
+            for idx, name in enumerate(let_names):
+              self.newline()
+              self.emit(f"local {name} = {tmp_var}[{idx + 1}]")
+          else:
+            self.newline()
+            self.emit(f"local {binding.let_name} = {tmp_var}")
+
+      node.body._with_disposables = [tmp_var for tmp_var, _, _, _ in clause_vars]
+      self.visit(node.body)
+
+    if has_unwrap:
+      cond = " and ".join(f"{v} ~= nil" for v in unwrap_vars)
+      self.newline()
+      self.emit(f"if {cond} then")
+      self.indent()
+      emit_body_statements()
+      self.dedent()
+      self.newline()
+      if node.else_body:
+        self.emit("else")
+        self.indent()
+        for tmp_var, _, _, _ in reversed(clause_vars):
+          self.newline()
+          self.emit(f"_sapphire_dispose({tmp_var})")
+        self.visit(node.else_body)
+        self.dedent()
+        self.newline()
+        self.emit("end")
+      else:
+        self.emit("else")
+        self.indent()
+        for tmp_var, _, _, _ in reversed(clause_vars):
+          self.newline()
+          self.emit(f"_sapphire_dispose({tmp_var})")
+        self.dedent()
+        self.newline()
+        self.emit("end")
+    else:
+      emit_body_statements()
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
     if node.arena_expr:

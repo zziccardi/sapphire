@@ -2115,8 +2115,31 @@ class TestTypeChecker(unittest.TestCase):
       NonExistentSymbol,
     }
     """
-    with self.assertRaises(SemanticError):
+    with self.assertRaises(SemanticError) as ctx:
       self._check(code)
+    self.assertIn("Exported symbol 'NonExistentSymbol' is not defined in module.", str(ctx.exception))
+
+  def test_undefined_export_symbol_with_defined_structs(self):
+    """Verifies that exporting an undefined symbol in a module with other defined structs raises a SemanticError."""
+    code = """
+    export {
+      PathNode,
+      Enemy,
+      create_enemy_archetype,
+    }
+
+    struct PathNode {
+      let x: int;
+      let y: int;
+    }
+
+    struct Enemy {
+      var id: int = 0;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("Exported symbol 'create_enemy_archetype' is not defined in module.", str(ctx.exception))
 
   def test_module_export_errors_and_type_resolution(self):
     """Verifies module type resolution and export error branches."""
@@ -4096,6 +4119,176 @@ class TestTypeChecker(unittest.TestCase):
     checker.symbol_table.define("character", mod_sym)
 
     checker.check(ast)
+
+  def test_top_level_let_type_alias_resolution(self):
+    """Verifies type checking of top-level let type aliases (e.g. let Unit = mod.Unit, let Local = Unit)."""
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StructSymbol, StringType
+
+    code = """
+    let Unit = mod.Unit;
+    let LocalUnit = Unit;
+
+    func process(u: LocalUnit): String {
+      return u.name;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker()
+    mod_sym = ModuleSymbol("mod", "mod.sp")
+    unit_struct = StructType("Unit")
+    unit_struct.fields["name"] = StructField("name", StringType(), False)
+    mod_sym.exports["Unit"] = StructSymbol("Unit", unit_struct)
+    checker.symbol_table.define("mod", mod_sym)
+
+    checker.check(ast)
+
+  def test_with_statement_type_checking(self):
+    """Verifies type checking, Disposable trait requirement, optional unwrapping, and else-block semantics for with statements."""
+    from src.semantics.symbol_table import ArenaType, TraitType
+
+    # ArenaType.implements_trait coverage
+    arena_t = ArenaType()
+    self.assertTrue(arena_t.implements_trait(TraitType("Disposable")))
+    self.assertFalse(arena_t.implements_trait(TraitType("OtherTrait")))
+
+    # 1. Valid with statement with Disposable struct
+    self._check("""
+    struct FileStream {
+      var path: String;
+    }
+    impl Disposable for FileStream {
+      func dispose(var self) {}
+    }
+    func main() {
+      with let f = FileStream { path = "test.txt" } {
+        let p = f.path;
+      }
+    }
+    """)
+
+    # 2. Valid with statement with Arena and raw expression
+    self._check("""
+    func main() {
+      with let a = Arena() {
+        let x = 10;
+      }
+      with Arena() {
+        let y = 20;
+      }
+    }
+    """)
+
+    # 3. Valid with statement with unwrap ?= and else block
+    self._check("""
+    struct FileStream {
+      var path: String;
+    }
+    impl Disposable for FileStream {
+      func dispose(var self) {}
+    }
+    func get_file(): FileStream? {
+      return FileStream { path = "a.txt" };
+    }
+    func main() {
+      with let f ?= get_file() {
+        let p = f.path;
+      } else {
+        let err = 1;
+      }
+    }
+    """)
+
+    # 4. Valid with statement with TraitType and multi-variable binding and raw struct/trait expressions
+    self._check("""
+    struct FileStream {
+      var path: String;
+    }
+    impl Disposable for FileStream {
+      func dispose(var self) {}
+    }
+    func get_two(): [FileStream] {
+      return [FileStream { path = "a" }, FileStream { path = "b" }];
+    }
+    func test_trait(d: Disposable) {
+      with let x = d {
+        let y = 1;
+      }
+      with d {
+        let y = 2;
+      }
+      with FileStream { path = "raw" } {
+        let y = 3;
+      }
+      with let a, b = get_two() {
+        let p = a.path;
+      }
+    }
+    """)
+
+    # 5. Error: Non-disposable struct bound in with
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct NonDisposable {
+        var x: int;
+      }
+      func main() {
+        with let obj = NonDisposable { x = 1 } {
+          let y = obj.x;
+        }
+      }
+      """)
+    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+
+    # 6. Error: Non-disposable raw expression in with
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        with 123 {
+          let y = 1;
+        }
+      }
+      """)
+    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+
+    # 7. Error: With else block without ?= unwrap
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileStream {
+        var path: String;
+      }
+      impl Disposable for FileStream {
+        func dispose(var self) {}
+      }
+      func main() {
+        with let f = FileStream { path = "test.txt" } {
+          let p = f.path;
+        } else {
+          let err = 1;
+        }
+      }
+      """)
+    self.assertIn("must contain at least one '?=' unwrap clause", str(ctx.exception))
+
+    # 8. Error: Cannot unwrap non-optional type in with clause
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileStream {
+        var path: String;
+      }
+      impl Disposable for FileStream {
+        func dispose(var self) {}
+      }
+      func main() {
+        with let f ?= FileStream { path = "test.txt" } {
+          let p = f.path;
+        }
+      }
+      """)
+    self.assertIn("Cannot unwrap non-optional type", str(ctx.exception))
 
 
 if __name__ == "__main__":
