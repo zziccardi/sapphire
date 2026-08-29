@@ -22,7 +22,8 @@ from src.cli.diagnostics import get_source_line, format_diagnostic
 
 
 
-from src.common.errors import SapphireError
+from src.common.errors import SapphireError, SapphireSyntaxError
+from src.parser.error_listener import CustomErrorListener
 
 
 class TestDiscoveryError(SapphireError):
@@ -52,10 +53,18 @@ def find_sp_files(path: str) -> List[str]:
 def parse_ast(sp_file: str):
   """Parses a Sapphire file and returns its AST root node."""
   input_stream = FileStream(sp_file, encoding="utf-8")
+  error_listener = CustomErrorListener(file_path=sp_file, source_content=input_stream, quiet=True)
   lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
   stream = CommonTokenStream(lexer)
   parser = SapphireParser(stream)
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
   tree = parser.program()
+  if error_listener.errors > 0:
+    err_text = "\n".join(error_listener.error_messages) if error_listener.error_messages else f"Parsing failed with {error_listener.errors} syntax error(s)."
+    raise SapphireSyntaxError(err_text, file_path=sp_file)
   builder = ASTBuilder()
   return builder.visit(tree)
 
@@ -139,18 +148,21 @@ def run_tests_python(
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Python target backend."""
   try:
-    out_py = transpile_file(sp_file, target="python", test_mode=True, quiet=True)
-  except Exception as e:  # pragma: no cover
-    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed: {e})", file=sys.stderr)
+    out_py = transpile_file(sp_file, target="python", test_mode=True, quiet=True, raise_on_error=True)
+  except BaseException as e:  # pragma: no cover
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+    for line in str(e).splitlines():
+      print(f"  {line}")
     return 0, 1, [f"Transpilation failed: {e}"]
 
-  # Ensure workspace root and lib directory are in sys.path
+  # Ensure workspace root, lib directory, and test source directory are in sys.path
   workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
   lib_dir = os.path.join(workspace_root, "lib")
-  if lib_dir not in sys.path:  # pragma: no cover
-    sys.path.insert(0, lib_dir)
-  if workspace_root not in sys.path:  # pragma: no cover
-    sys.path.insert(0, workspace_root)
+  sp_dir = os.path.dirname(os.path.abspath(sp_file))
+  cwd = os.getcwd()
+  for path_entry in (sp_dir, cwd, lib_dir, workspace_root):
+    if path_entry and path_entry not in sys.path:  # pragma: no cover
+      sys.path.insert(0, path_entry)
 
   try:
     import std.testing as testing
@@ -158,7 +170,7 @@ def run_tests_python(
     try:
       from lib.std import testing
     except ImportError:  # pragma: no cover
-      print("Error: Could not import std.testing module.", file=sys.stderr)
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (could not import std.testing module)", file=sys.stderr)
       return 0, 1, ["Failed to load std.testing module"]
 
   # Dynamically import transpiled Python module
@@ -168,7 +180,10 @@ def run_tests_python(
   sys.modules[module_name] = mod
   try:
     spec.loader.exec_module(mod)
-  except Exception as e:  # pragma: no cover
+  except BaseException as e:  # pragma: no cover
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
+    for line in str(e).splitlines():
+      print(f"  {line}")
     return 0, 1, [f"Failed to execute transpiled test module: {e}"]
 
   passed = 0
@@ -354,9 +369,11 @@ def run_tests_lua(
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Lua 5.1 target backend."""
   try:
-    out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap, quiet=True)
-  except Exception as e:  # pragma: no cover
-    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed: {e})", file=sys.stderr)
+    out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap, quiet=True, raise_on_error=True)
+  except BaseException as e:  # pragma: no cover
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+    for line in str(e).splitlines():
+      print(f"  {line}")
     return 0, 1, [f"Transpilation failed: {e}"]
 
   lua_bin = find_lua_binary()
@@ -366,10 +383,11 @@ def run_tests_lua(
     return 0, 1, ["Lua interpreter not found"]
 
   workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+  sp_dir = os.path.dirname(os.path.abspath(sp_file))
 
   # Construct Lua runner script
   lua_script_lines = [
-      f'package.path = "{workspace_root}/lib/?.lua;{workspace_root}/lib/?/init.lua;" .. package.path',
+      f'package.path = "{workspace_root}/lib/?.lua;{workspace_root}/lib/?/init.lua;{sp_dir}/?.lua;{sp_dir}/?/init.lua;" .. package.path',
       f'local testing = require("std.testing")',
       f'local target_mod_ok, target_mod = pcall(function() return dofile("{out_lua}") end)',
       'if not target_mod_ok then',
@@ -605,8 +623,10 @@ def run_tests(
     try:
       ast = parse_ast(sp_file)
       standalone_tests, suite_tests = discover_tests(ast)
-    except Exception as e:  # pragma: no cover
-      print(f"Failed to parse test file '{sp_file}': {e}", file=sys.stderr)
+    except BaseException as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (parsing failed)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
       total_failed += 1
       continue
 

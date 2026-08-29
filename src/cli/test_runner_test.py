@@ -202,17 +202,17 @@ impl t.TestCase for BadSetupTest {
 
   def test_run_tests_cli_facade(self):
     with suppress_output():
-      # Test directory run
-      res_dir = run_tests(self.temp_dir, target="python", filter_pattern="pass")
-      self.assertEqual(res_dir, 0)
+      # Test passing file run
+      res_pass = run_tests(self.sample_sp, target="python", filter_pattern="pass")
+      self.assertEqual(res_pass, 0)
 
       # Test file with no tests
       res_no_tests = run_tests(self.no_tests_sp, target="python")
       self.assertEqual(res_no_tests, 0)
 
-      # Test syntax error file
+      # Test syntax error file (should return 1)
       res_syntax = run_tests(self.syntax_error_sp, target="python")
-      self.assertEqual(res_syntax, 0)
+      self.assertEqual(res_syntax, 1)
 
       # Test Lua target run with mocks
       mock_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="[ PASS ] test_pass", stderr="")
