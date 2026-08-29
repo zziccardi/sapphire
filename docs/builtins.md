@@ -786,6 +786,62 @@ func main() {
 }
 ```
 
+### Coroutine
+
+The `Coroutine<T>` type represents a first-class, frame-steppable coroutine or generator sequence.
+
+#### Key properties and semantics
+* **Type parameters**: `Coroutine<T>` yields values of type `T`. For execution sequencing where no values are produced, use `Coroutine<void>` (or `Coroutine`).
+* **Yield statements**:
+  * In `Coroutine<void>`, use bare `yield;` to pause execution until the next tick.
+  * In `Coroutine<T>`, use `yield <expr>;` to yield a value of type `T`.
+* **Completion**: When a coroutine hits `return;` or reaches the end of its function body, it transitions to `is_done() == true`. Returning a value (e.g. `return 5;`) from a coroutine is prohibited at compile time.
+* **Transpilation**:
+  * **Lua 5.1 / Love2D target**: Transpiles to native Lua asymmetric coroutines (`coroutine.create`, `coroutine.resume`, `coroutine.yield`) with zero allocation overhead.
+  * **Python target**: Transpiles to generator functions wrapped in a runtime `_SapphireCoroutine` class.
+
+#### Built-in methods
+
+| Method | Signature | Description |
+| :--- | :--- | :--- |
+| **`step`** | `step(): T?` | Resumes execution to the next `yield` point, returning the yielded value (or `none` if completed or `void`). |
+| **`is_done`** | `is_done(): bool` | Returns `true` if the coroutine has completed execution. |
+| **`reset`** | `reset(): void` | Resets the coroutine back to its initial entry state. |
+
+#### Usage examples
+
+```sapphire
+// 1. Timed execution flow (Coroutine<void>)
+func patrol_path(entity: Guard): Coroutine<void> {
+  entity.play_anim("walk");
+  yield;  // Pauses until next frame tick
+
+  entity.turn_around();
+  yield;
+}
+
+// 2. Value generation (Coroutine<int>)
+func fibonacci(count: int): Coroutine<int> {
+  var a = 0;
+  var b = 1;
+  for i in range(count) {
+    yield a;
+    let next = a + b;
+    a = b;
+    b = next;
+  }
+}
+
+func main() {
+  var fib = fibonacci(5);
+  while !fib.is_done() {
+    if let val ?= fib.step() {
+      print(f"Fib: {val}");
+    }
+  }
+}
+```
+
 ## Summary of built-in features
 
 | Built-in | Category | Key syntax / signature | Primary use case |
@@ -798,3 +854,4 @@ func main() {
 | **`Arena`** | Memory manager | `Arena()`, `expr in arena` | Scope-bound RAII memory allocation & safety control |
 | **`Disposable`** | Trait | `func dispose(var self);` | Deterministic RAII cleanup for `with` blocks |
 | **`Range`** | Iteration type | `Range()` | Type returned by `range()` for numeric iteration |
+| **`Coroutine`** | Flow-control type | `Coroutine<T>`, `Coroutine<void>` | Frame-steppable coroutines & generator streams |

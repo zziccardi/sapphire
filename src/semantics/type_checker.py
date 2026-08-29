@@ -36,6 +36,8 @@ from src.semantics.symbol_table import (
     TraitSymbol,
     EnumSymbol,
     ModuleSymbol,
+    CoroutineType,
+    COROUTINE_METHODS,
     STRING_METHODS,
     ARRAY_METHODS,
     MAP_METHODS,
@@ -620,6 +622,10 @@ class TypeChecker:
         return ArrayType(self._resolve_type_node(node.type_args[0]))
       if node.name == "Map" and len(node.type_args) >= 2:
         return MapType(self._resolve_type_node(node.type_args[0]), self._resolve_type_node(node.type_args[1]))
+      if node.name == "Coroutine":
+        if node.type_args:
+          return CoroutineType(self._resolve_type_node(node.type_args[0]))
+        return CoroutineType(NoneType())
       if "." in node.name:
         parts = node.name.split(".")
         mod_sym = self.symbol_table.lookup(parts[0])
@@ -1029,6 +1035,11 @@ class TypeChecker:
       return
 
     expected_ret_types = self.current_function.return_types
+    if expected_ret_types and any(isinstance(t, CoroutineType) for t in expected_ret_types):
+      if node.expressions:
+        self.error("Cannot return a value from a coroutine; use 'yield' or bare 'return;'.", node=node)
+      return
+
     actual_ret_types = []
     if node.expressions:
       if len(node.expressions) == 1:
@@ -1061,22 +1072,59 @@ class TypeChecker:
             self.error(f"Cannot return a reference to an object allocated in local arena '{arena_name}'.")
 
   def visit_YieldNode(self, node: YieldNode) -> None:
-    if not self._match_stack:
-      self.error("Yield statement outside match context.")  # pragma: no cover
-      return  # pragma: no cover
+    if self._match_stack:
+      if getattr(node, "expressions", None):
+        actual_types = [self.visit(e) for e in node.expressions]
+      elif getattr(node, "expr", None):  # pragma: no cover
+        actual_types = [self.visit(node.expr)]  # pragma: no cover
+      else:
+        actual_types = []
+
+      if len(actual_types) == 1:
+        self._match_stack[-1].append(actual_types[0])
+      elif len(actual_types) > 1:
+        self._match_stack[-1].append(MultiReturnType(actual_types))
+      else:
+        self._match_stack[-1].append(PrimitiveType("none"))
+      return
+
+    if not self.current_function:
+      self.error("Yield statement outside coroutine or match context.", node=node)
+      return
+
+    expected_ret_types = self.current_function.return_types
+    coro_type = next((t for t in expected_ret_types if isinstance(t, CoroutineType)), None)
+    if not coro_type:
+      ret_desc = expected_ret_types[0] if expected_ret_types else "void"
+      self.error(f"Cannot yield in a function with return type '{ret_desc}' (expected Coroutine).", node=node)
+      return
+
+    node.is_coroutine_yield = True
+    expected_yield = coro_type.yield_type
+
     if getattr(node, "expressions", None):
       actual_types = [self.visit(e) for e in node.expressions]
-    elif getattr(node, "expr", None):  # pragma: no cover
-      actual_types = [self.visit(node.expr)]  # pragma: no cover
+    elif getattr(node, "expr", None):
+      actual_types = [self.visit(node.expr)]
     else:
       actual_types = []
 
-    if len(actual_types) == 1:
-      self._match_stack[-1].append(actual_types[0])
-    elif len(actual_types) > 1:
-      self._match_stack[-1].append(MultiReturnType(actual_types))
+    if isinstance(expected_yield, NoneType):
+      if len(actual_types) > 1:
+        self.error(f"Cannot yield {len(actual_types)} values in Coroutine<void>; use bare 'yield;'.", node=node)
+      elif len(actual_types) == 1:
+        act = actual_types[0]
+        if not isinstance(act, NoneType) and not (isinstance(act, PrimitiveType) and act.name in ("none", "void")):
+          self.error(f"Cannot yield value of type '{act}' in Coroutine<void>; use bare 'yield;'.", node=node)
     else:
-      self._match_stack[-1].append(PrimitiveType("none"))
+      if not actual_types:
+        self.error(f"Must yield a value of type '{expected_yield}' in Coroutine<{expected_yield}>.", node=node)
+      elif len(actual_types) == 1:
+        act = actual_types[0]
+        if not act.is_compatible(expected_yield):
+          self.error(f"Cannot yield value of type '{act}' in Coroutine<{expected_yield}> (expected '{expected_yield}').", node=node)
+      else:
+        self.error(f"Cannot yield multiple values in Coroutine<{expected_yield}>.", node=node)
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
     subject_type = self.visit(node.subject)
@@ -2152,6 +2200,22 @@ class TypeChecker:
         elif node.member == "clear":
           return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
       self.error(f"Map has no method '{node.member}'.")
+      return PrimitiveType("none")
+
+    if isinstance(receiver_type, CoroutineType):
+      if node.member in COROUTINE_METHODS:
+        node.is_coroutine_method = True
+        node.coroutine_method = node.member
+        node.coroutine_receiver_type = receiver_type
+        y_type = receiver_type.yield_type
+        if node.member == "step":
+          ret_t = NoneType() if isinstance(y_type, NoneType) else OptionalType(y_type)
+          return FunctionType([receiver_type], ret_t, param_names=["self"], has_self=True)
+        elif node.member == "is_done":
+          return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
+        elif node.member == "reset":
+          return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
+      self.error(f"Coroutine has no method '{node.member}'.")
       return PrimitiveType("none")
 
     assertion_names = (

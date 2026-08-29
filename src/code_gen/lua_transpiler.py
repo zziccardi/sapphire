@@ -19,7 +19,7 @@ from src.parser.ast_builder import ASTBuilder
 from src.semantics.type_checker import TypeChecker, SemanticError
 from src.semantics.symbol_table import MapType, RangeType
 from src.code_gen.source_map import SourceMapBuilder
-from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.transpiler_registry import TranspilerRegistry
 
 
@@ -29,6 +29,59 @@ from src.code_gen.transpiler_registry import TranspilerRegistry
 # ==========================================
 
 LUA_RUNTIME_PREAMBLE = """-- Sapphire Lua 5.1 Runtime Header
+
+local _Coroutine = {}
+_Coroutine.__index = _Coroutine
+
+function _Coroutine.create(fn, ...)
+  local args = { ... }
+  local n = select("#", ...)
+  local self = setmetatable({}, _Coroutine)
+  self._fn = fn
+  self._args = args
+  self._n = n
+  self._done = false
+  self:reset()
+  return self
+end
+
+function _Coroutine:step(...)
+  if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    self._done = true
+    return nil
+  end
+  local ok, val = coroutine.resume(self._co, ...)
+  if not ok then
+    error(val)
+  end
+  if coroutine.status(self._co) == "dead" then
+    self._done = true
+    return val
+  end
+  return val
+end
+
+function _Coroutine:is_done()
+  if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    self._done = true
+    return true
+  end
+  return false
+end
+
+function _Coroutine:reset()
+  local fn = self._fn
+  local args = self._args
+  local n = self._n or #args
+  self._co = coroutine.create(function()
+    if table.unpack then
+      return fn(table.unpack(args, 1, n))
+    else
+      return fn(unpack(args, 1, n))
+    end
+  end)
+  self._done = false
+end
 
 local Arena = {}
 Arena.__index = Arena
@@ -569,6 +622,80 @@ if love and love.errorhandler then
 end
 """
 
+LUA_DEV_RELOAD_WATCHER = """-- Sapphire Dev Mode: High-Performance Live Hot-Reloading Hook
+local _SP_DEV_WATCHER = {
+  last_modified = {},
+  tracked_files = { "main.lua", ".sapphire_reload" },
+  poll_interval = 0.1,
+  elapsed = 0
+}
+
+function _SP_DEV_WATCHER.register_file(path)
+  if not path then return end
+  for _, f in ipairs(_SP_DEV_WATCHER.tracked_files) do
+    if f == path then return end
+  end
+  table.insert(_SP_DEV_WATCHER.tracked_files, path)
+end
+
+local function _sp_reload_file(file)
+  local modname = file:gsub("%.lua$", ""):gsub("/", ".")
+  package.loaded[modname] = nil
+  local chunk, err = love.filesystem.load(file)
+  if chunk then
+    local ok, runtime_err = pcall(chunk)
+    if not ok then
+      print("[Sapphire Hot-Reload Error] " .. tostring(runtime_err))
+    else
+      print("[Sapphire Hot-Reload] Successfully reloaded " .. file)
+    end
+  else
+    print("[Sapphire Hot-Reload Compile Error] " .. tostring(err))
+  end
+end
+
+function _SP_DEV_WATCHER.check(dt)
+  if not love or not love.filesystem then return end
+  _SP_DEV_WATCHER.elapsed = _SP_DEV_WATCHER.elapsed + (dt or 0)
+  if _SP_DEV_WATCHER.elapsed < _SP_DEV_WATCHER.poll_interval then return end
+  _SP_DEV_WATCHER.elapsed = 0
+
+  -- 1. Check direct signal trigger file (.sapphire_reload)
+  local sig_info = love.filesystem.getInfo(".sapphire_reload")
+  if sig_info and sig_info.modtime then
+    if _SP_DEV_WATCHER.last_modified[".sapphire_reload"] and _SP_DEV_WATCHER.last_modified[".sapphire_reload"] ~= sig_info.modtime then
+      _SP_DEV_WATCHER.last_modified[".sapphire_reload"] = sig_info.modtime
+      local content, _ = love.filesystem.read(".sapphire_reload")
+      if content then
+        for target_file in content:gmatch("[^\\r\\n]+") do
+          local clean_file = target_file:match("^%s*(.-)%s*$")
+          if clean_file and clean_file ~= "" then
+            _sp_reload_file(clean_file)
+          end
+        end
+      end
+    else
+      _SP_DEV_WATCHER.last_modified[".sapphire_reload"] = sig_info.modtime
+    end
+  end
+
+  -- 2. Check tracked game files directly without directory traversal
+  for _, file in ipairs(_SP_DEV_WATCHER.tracked_files) do
+    if file ~= ".sapphire_reload" then
+      local info = love.filesystem.getInfo(file)
+      if info and info.modtime then
+        if _SP_DEV_WATCHER.last_modified[file] and _SP_DEV_WATCHER.last_modified[file] ~= info.modtime then
+          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+          _sp_reload_file(file)
+        else
+          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+        end
+      end
+    end
+  end
+end
+"""
+
 
 def _has_continue_node(node: ASTNode) -> bool:
   if isinstance(node, ContinueNode):
@@ -588,7 +715,7 @@ def _has_continue_node(node: ASTNode) -> bool:
   return False
 
 
-@TranspilerRegistry.register(aliases=["lua", "lua5.1"], display_name="Lua 5.1", default_extension=".lua")
+@TranspilerRegistry.register(aliases=["lua", "lua5.1", "love2d", "love"], display_name="Lua 5.1", default_extension=".lua")
 class LuaTranspiler(BaseTranspiler):
 
   """AST visitor to transpile Sapphire code to Lua 5.1."""
@@ -598,6 +725,7 @@ class LuaTranspiler(BaseTranspiler):
       source_file: Optional[str] = None,
       source_map_builder: Optional[SourceMapBuilder] = None,
       test_mode: bool = False,
+      dev_mode: bool = False,
   ):
     self.code: List[str] = []
     self.indent_level = 0
@@ -606,6 +734,8 @@ class LuaTranspiler(BaseTranspiler):
     self.source_file = source_file
     self.source_map_builder = source_map_builder
     self.test_mode = test_mode
+    self.dev_mode = dev_mode
+    self.on_reload_callbacks: List[str] = []
     self.declared_symbols: List[str] = []
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
@@ -661,6 +791,10 @@ class LuaTranspiler(BaseTranspiler):
     self.emit(LUA_RUNTIME_PREAMBLE)
     self.newline()
 
+    if self.dev_mode:
+      self.emit(LUA_DEV_RELOAD_WATCHER)
+      self.newline()
+
     # 1b. Transpile module imports
     for imp in getattr(program, "imports", []):
       self.visit(imp)
@@ -697,12 +831,13 @@ class LuaTranspiler(BaseTranspiler):
         executable_stmts.append(decl)
 
     forward_names = []
-    for decl in struct_decls:
-      if isinstance(decl, StructDeclNode):
-        forward_names.append(decl.name)
-    for decl in func_decls:
-      if not any(a.name == "export" for a in getattr(decl, "annotations", [])):
-        forward_names.append(decl.name)
+    if not self.dev_mode:
+      for decl in struct_decls:
+        if isinstance(decl, StructDeclNode):
+          forward_names.append(decl.name)
+      for decl in func_decls:
+        if not any(a.name == "export" for a in getattr(decl, "annotations", [])):
+          forward_names.append(decl.name)
 
     if forward_names:
       self.emit(f"local {', '.join(forward_names)}")
@@ -723,6 +858,10 @@ class LuaTranspiler(BaseTranspiler):
     if has_main:
       self.emit("main()")
       self.newline()
+
+    for cb in self.on_reload_callbacks:
+      self.newline()
+      self.emit(f"if {cb} then {cb}() end")
 
     # 6. Append inline source map table and Love2D error demangler if sourcemap builder present
     if self.source_map_builder and self.source_map_builder.mappings:
@@ -801,6 +940,10 @@ class LuaTranspiler(BaseTranspiler):
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
     alias_name = node.alias if node.alias else node.path.split(".")[-1]
     self.emit(f"local {alias_name} = require(\"{node.path}\")")
+    if self.dev_mode:
+      file_path = node.path.replace(".", "/") + ".lua"
+      self.newline()
+      self.emit(f"if _SP_DEV_WATCHER and _SP_DEV_WATCHER.register_file then _SP_DEV_WATCHER.register_file(\"{file_path}\") end")
     self.newline()
 
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
@@ -826,7 +969,10 @@ class LuaTranspiler(BaseTranspiler):
     methods = self.struct_methods.get(struct_name, [])
 
     self.newline()
-    self.emit(f"{struct_name} = {{}}")
+    if self.dev_mode:
+      self.emit(f"{struct_name} = {struct_name} or {{}}")
+    else:
+      self.emit(f"{struct_name} = {{}}")
     self.newline()
     self.emit(f"{struct_name}.__index = {struct_name}")
     self.newline()
@@ -922,7 +1068,7 @@ class LuaTranspiler(BaseTranspiler):
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     """Public visitor satisfying the BaseTranspiler contract.
 
-    Impl members are not visited standalone in the Lua backend —- they are
+    Impl members are not visited standalone in the Lua backend -- they are
     emitted as part of `visit_StructDeclNode` via the private helper. This
     method exists solely to fulfil the abstract-method contract so that the
     class hierarchy remains structurally symmetric with `PythonTranspiler`.
@@ -955,7 +1101,23 @@ class LuaTranspiler(BaseTranspiler):
         temp.known_structs = self.known_structs
         temp.visit(p.default_expr)
         self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
-    self.visit(func.body)
+    if is_coroutine_func(func):
+      self.newline()
+      all_params = (["self"] if node.modifier != "static" else []) + [p.name for p in func.parameters if p.name != "self"]
+      if all_params:
+        self.emit(f"return _Coroutine.create(function({', '.join(all_params)})")
+      else:
+        self.emit("return _Coroutine.create(function()")
+      self.indent()
+      self.visit(func.body)
+      self.dedent()
+      self.newline()
+      if all_params:
+        self.emit(f"end, {', '.join(all_params)})")
+      else:
+        self.emit("end)")
+    else:
+      self.visit(func.body)
     self.dedent()
     self.newline()
     self.emit("end")
@@ -972,6 +1134,9 @@ class LuaTranspiler(BaseTranspiler):
     if is_test_func:
       self.declared_symbols.append(node.name)
 
+    if any(getattr(a, "name", "") == "on_reload" for a in getattr(node, "annotations", [])):
+      self.on_reload_callbacks.append(node.name)
+
     export_ann = next((a for a in node.annotations if a.name == "export"), None)
     params = [p.name for p in node.parameters]
 
@@ -983,6 +1148,10 @@ class LuaTranspiler(BaseTranspiler):
       self.emit(f"function {node.name}({', '.join(params)})")
 
     self.indent()
+    if self.dev_mode and export_ann and export_ann.arg == "love.update":
+      self.newline()
+      self.emit("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end")
+
     # Check default parameters
     for p in node.parameters:
       if p.default_expr:
@@ -991,7 +1160,22 @@ class LuaTranspiler(BaseTranspiler):
         temp.known_structs = self.known_structs
         temp.visit(p.default_expr)
         self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
-    self.visit(node.body)
+    if is_coroutine_func(node):
+      self.newline()
+      if params:
+        self.emit(f"return _Coroutine.create(function({', '.join(params)})")
+      else:
+        self.emit("return _Coroutine.create(function()")
+      self.indent()
+      self.visit(node.body)
+      self.dedent()
+      self.newline()
+      if params:
+        self.emit(f"end, {', '.join(params)})")
+      else:
+        self.emit("end)")
+    else:
+      self.visit(node.body)
     self.dedent()
     self.newline()
     self.emit("end")
@@ -1061,6 +1245,12 @@ class LuaTranspiler(BaseTranspiler):
 
     self.newline()
     names_str = ", ".join(node.names)
+    if self.dev_mode and self.indent_level == 0 and len(node.names) == 1 and node.exprs:
+      name = node.names[0]
+      self.emit(f"{name} = {name} ~= nil and {name} or ")
+      self.visit(node.exprs[0])
+      return
+
     self.emit(f"local {names_str}")
     if node.exprs:
       self.emit(" = ")
@@ -1205,19 +1395,33 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
     if target:
       self.emit(f"{target} = ")
-    if not exprs:
-      self.emit("nil")
-    elif len(exprs) == 1:
-      self.visit(exprs[0])
+      if not exprs:
+        self.emit("nil")
+      elif len(exprs) == 1:
+        self.visit(exprs[0])
+      else:
+        if match_node:
+          match_node._is_multi_yield = True
+        self.emit("{ ")
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        self.emit(" }")
     else:
-      if match_node:
-        match_node._is_multi_yield = True
-      self.emit("{ ")
-      for idx, expr in enumerate(exprs):
-        if idx > 0:
-          self.emit(", ")
-        self.visit(expr)
-      self.emit(" }")
+      if not exprs:
+        self.emit("coroutine.yield()")
+      elif len(exprs) == 1:
+        self.emit("coroutine.yield(")
+        self.visit(exprs[0])
+        self.emit(")")
+      else:
+        self.emit("coroutine.yield(")
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        self.emit(")")
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
     if not getattr(node, "_is_lifted", False):

@@ -19,6 +19,7 @@ from src.semantics.symbol_table import (
     TraitType,
     EnumType,
     Type,
+    CoroutineType,
 )
 
 
@@ -301,6 +302,32 @@ class TestSymbolTable(unittest.TestCase):
     resolved = child_st.get_method("parent_func", sym_tab)
     self.assertIsNotNone(resolved)
     self.assertEqual(resolved.name, "parent_func")
+
+  def test_coroutine_type(self):
+    """Verifies CoroutineType equality, repr, and compatibility rules."""
+    coro_void = CoroutineType()
+    coro_void_explicit = CoroutineType(NoneType())
+    coro_int = CoroutineType(PrimitiveType("int"))
+    coro_float = CoroutineType(PrimitiveType("float"))
+
+    # Repr
+    self.assertEqual(repr(coro_void), "Coroutine<void>")
+    self.assertEqual(repr(coro_int), "Coroutine<int>")
+
+    # Equality
+    self.assertEqual(coro_void, coro_void_explicit)
+    self.assertEqual(coro_int, CoroutineType(PrimitiveType("int")))
+    self.assertNotEqual(coro_int, coro_float)
+    self.assertNotEqual(coro_void, coro_int)
+    self.assertFalse(coro_int == "not-a-coroutine")
+
+    # Compatibility
+    self.assertTrue(coro_void.is_compatible(coro_int))
+    self.assertTrue(coro_int.is_compatible(coro_void))
+    self.assertTrue(coro_int.is_compatible(coro_float))
+    self.assertFalse(coro_float.is_compatible(coro_int))
+    self.assertTrue(coro_int.is_compatible(OptionalType(coro_int)))
+    self.assertFalse(coro_int.is_compatible(PrimitiveType("int")))
 
 
 if __name__ == "__main__":

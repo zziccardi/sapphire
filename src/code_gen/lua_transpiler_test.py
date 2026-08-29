@@ -31,6 +31,7 @@ from src.parser.ast import (
     StructInitializerNode,
     TraitDeclNode,
     UnaryOpNode,
+    YieldNode,
 )
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
@@ -633,6 +634,157 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('_M.create_player = create_player', output)
     self.assertIn('_M.DrawMode = enums.DrawMode', output)
     self.assertIn('return _M', output)
+
+  def test_coroutine_transpilation(self):
+    """Verifies that Coroutines transpile to Lua coroutine wrappers and execute correctly."""
+    code = """
+    func count_down(from_val: int): Coroutine<int> {
+      var curr = from_val;
+      while curr > 0 {
+        yield curr;
+        curr -= 1;
+      }
+    }
+
+    func main() {
+      var co = count_down(3);
+      let v1 = co.step();
+      let v2 = co.step();
+      let v3 = co.step();
+      let done1 = co.is_done();
+      let v4 = co.step();
+      let done2 = co.is_done();
+      co.reset();
+      let v_reset = co.step();
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("_Coroutine.create", output)
+    self.assertIn("coroutine.yield", output)
+    self.assertIn(":step()", output)
+    self.assertIn(":is_done()", output)
+    self.assertIn(":reset()", output)
+
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if lua_bin:
+      test_driver = output + """
+      local co = count_down(3)
+      assert(co:step() == 3)
+      assert(co:step() == 2)
+      assert(co:step() == 1)
+      assert(co:step() == nil)
+      assert(co:is_done() == true)
+      assert(co:step() == nil)
+      co:reset()
+      assert(co:is_done() == false)
+      assert(co:step() == 3)
+      """
+      with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+        f.write(test_driver)
+        tmp_path = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+      finally:
+        os.unlink(tmp_path)
+
+  def test_dev_mode_hot_reloading(self):
+    """Verifies that dev_mode emits reload-safe structs, @on_reload hooks, and watcher checks."""
+    code_v1 = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_speed(self): int {
+        return 10;
+      }
+    }
+
+    @on_reload
+    func on_reload_hook() {
+      print("Reloaded!");
+    }
+
+    @export("love.update")
+    func update(dt: float) {
+      let s = 1;
+    }
+    """
+    input_stream = InputStream(code_v1)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = LuaTranspiler(dev_mode=True)
+    out_v1 = transpiler.transpile(ast)
+
+    self.assertIn("Player = Player or {}", out_v1)
+    self.assertIn("_SP_DEV_WATCHER", out_v1)
+    self.assertIn("if on_reload_hook then on_reload_hook() end", out_v1)
+    self.assertIn("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end", out_v1)
+
+    code_v2 = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_speed(self): int {
+        return 50;
+      }
+    }
+    """
+    input_stream2 = InputStream(code_v2)
+    lexer2 = SapphireLexer(input_stream2)
+    stream2 = CommonTokenStream(lexer2)
+    parser2 = SapphireParser(stream2)
+    tree2 = parser2.program()
+    builder2 = ASTBuilder()
+    ast2 = builder2.visit(tree2)
+    transpiler2 = LuaTranspiler(dev_mode=True)
+    out_v2 = transpiler2.transpile(ast2)
+
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if lua_bin:
+      # Test in-place method patching at Lua runtime
+      test_driver = f"""
+      love = {{}}
+      {out_v1}
+      local p = Player.init({{ name = "Hero" }})
+      assert(p:get_speed() == 10)
+
+      -- Simulate live hot reload chunk execution
+      local reload_chunk = assert(loadstring or load)({repr(out_v2)})
+      reload_chunk()
+
+      -- The existing living instance p now receives the updated method get_speed == 50
+      assert(p:get_speed() == 50)
+      """
+      with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+        f.write(test_driver)
+        tmp_path = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+      finally:
+        os.unlink(tmp_path)
+
+  def test_dev_mode_import_registration(self):
+    """Verifies that import statements in dev_mode register dependencies with _SP_DEV_WATCHER."""
+    code = """
+    import lib.love2d.graphics;
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = LuaTranspiler(dev_mode=True)
+    out = transpiler.transpile(ast)
+    self.assertIn('_SP_DEV_WATCHER.register_file("lib/love2d/graphics.lua")', out)
 
 
   def test_transpile_file_with_imports(self):
@@ -1273,6 +1425,43 @@ class TestLuaTranspiler(unittest.TestCase):
     tr.visit_WithClauseNode(w_clause2)
     self.assertIn("1", tr.get_output())
     self.assertIn("2", tr.get_output())
+
+  def test_coroutine_transpilation_and_methods(self):
+    """Verifies Lua transpilation of top-level coroutines, struct method coroutines, and yields."""
+    code = """
+    func zero_param_coro(): Coroutine<void> {
+      yield;
+    }
+
+    struct GenHolder {
+      var val: int;
+    }
+
+    impl GenHolder {
+      func inst_gen(self): Coroutine<int> {
+        yield self.val;
+      }
+
+      static func stat_gen(): Coroutine<int> {
+        yield 42;
+      }
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function zero_param_coro()", output)
+    self.assertIn("return _Coroutine.create(function()", output)
+    self.assertIn("coroutine.yield()", output)
+    self.assertIn("function GenHolder:inst_gen()", output)
+    self.assertIn("return _Coroutine.create(function(self)", output)
+    self.assertIn("end, self)", output)
+    self.assertIn("function GenHolder.stat_gen()", output)
+    self.assertIn("return _Coroutine.create(function()", output)
+
+    # Directly verify YieldNode with multiple expressions
+    transpiler = LuaTranspiler()
+    multi_yield = YieldNode(exprs=[LiteralNode(1, "int"), LiteralNode(2, "int")])
+    transpiler.visit(multi_yield)
+    self.assertIn("coroutine.yield(1, 2)", transpiler.get_output())
 
 
 # ---------------------------------------------------------------------------

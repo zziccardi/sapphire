@@ -33,6 +33,7 @@ def transpile_file(
     visited: Optional[set] = None,
     sourcemap: bool = True,
     test_mode: bool = False,
+    dev_mode: bool = False,
     quiet: bool = False,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
@@ -115,17 +116,17 @@ def transpile_file(
     sub_source = resolve_module_path(imp.path, source_file_path=input_file)
     if sub_source:
       sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, quiet=quiet)
+      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, dev_mode=dev_mode, quiet=quiet)
 
   # 6. Transpile via TranspilerRegistry
   sm_builder = None
   src_filename = os.path.basename(input_file)
   src_content = str(input_stream)
 
-  if target_info.name == "lua":
+  if target_info.name in ("lua", "love2d", "love"):
     if sourcemap:
       sm_builder = SourceMapBuilder(src_filename, src_content)
-    transpiler = target_info.factory(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode)
+    transpiler = target_info.factory(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode, dev_mode=dev_mode)
   else:
     transpiler = target_info.factory(test_mode=test_mode)
 

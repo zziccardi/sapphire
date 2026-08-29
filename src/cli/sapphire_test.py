@@ -4,12 +4,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from testing.test_utils import suppress_output
 
 
-from src.cli.sapphire import main
+from src.cli.sapphire import main, _collect_sp_watch_files, _run_dev_watcher
 
 
 class SapphireCLITest(unittest.TestCase):
@@ -80,7 +80,7 @@ class SapphireCLITest(unittest.TestCase):
   def test_run_subcommand_lua(self):
     test_args = ["sapphire", "run", self.sp_file, "-t", "lua"]
     with patch.object(sys, "argv", test_args):
-      with patch("shutil.which", return_value="/usr/bin/lua"):
+      with patch("src.cli.sapphire._find_lua_binary", return_value="/usr/bin/lua"):
         with patch("subprocess.run") as mock_run:
           mock_run.return_value.returncode = 0
           with self.assertRaises(SystemExit) as cm:
@@ -92,7 +92,7 @@ class SapphireCLITest(unittest.TestCase):
   def test_run_subcommand_lua_not_found(self):
     test_args = ["sapphire", "run", self.sp_file, "-t", "lua"]
     with patch.object(sys, "argv", test_args):
-      with patch("shutil.which", return_value=None):
+      with patch("src.cli.sapphire._find_lua_binary", return_value=None):
         with self.assertRaises(SystemExit) as cm:
           with suppress_output():
             main()
@@ -162,6 +162,189 @@ class SapphireCLITest(unittest.TestCase):
       with patch("src.lsp.server.main") as mock_lsp_main:
         main()
         mock_lsp_main.assert_called_once()
+
+  def test_build_subcommand_love2d(self):
+    lua_file = os.path.join(self.temp_dir.name, "output_love.lua")
+    test_args = ["sapphire", "build", self.sp_file, "-t", "love2d", "-o", lua_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+    self.assertTrue(os.path.exists(lua_file))
+
+  def test_build_subcommand_dev_mode(self):
+    lua_file = os.path.join(self.temp_dir.name, "output_dev.lua")
+    test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "--dev", "-o", lua_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+    self.assertTrue(os.path.exists(lua_file))
+    with open(lua_file, "r") as f:
+      content = f.read()
+    self.assertIn("_SP_DEV_WATCHER", content)
+
+  def test_run_subcommand_love2d(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "love2d"]
+    with patch.object(sys, "argv", test_args):
+      with patch("src.cli.sapphire._find_love_binary", return_value="/usr/local/bin/love"):
+        with patch("subprocess.run") as mock_run:
+          mock_run.return_value.returncode = 0
+          with self.assertRaises(SystemExit) as cm:
+            with suppress_output():
+              main()
+          self.assertEqual(cm.exception.code, 0)
+          mock_run.assert_called_once()
+
+  def test_run_subcommand_love2d_not_found(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "love2d"]
+    with patch.object(sys, "argv", test_args):
+      with patch("src.cli.sapphire._find_love_binary", return_value=None):
+        with self.assertRaises(SystemExit) as cm:
+          with suppress_output():
+            main()
+        self.assertEqual(cm.exception.code, 1)
+
+  def test_run_subcommand_dev_mode_invokes_watcher(self):
+    test_args = ["sapphire", "run", self.sp_file, "--dev"]
+    with patch.object(sys, "argv", test_args):
+      with patch("src.cli.sapphire._run_dev_watcher") as mock_watcher:
+        with suppress_output():
+          main()
+        mock_watcher.assert_called_once()
+
+  def test_run_subcommand_love2d_dev_mode_invokes_watcher(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "love2d", "--dev"]
+    with patch.object(sys, "argv", test_args):
+      with patch("shutil.which", return_value="/usr/local/bin/love"):
+        with patch("src.cli.sapphire._run_dev_watcher") as mock_watcher:
+          with suppress_output():
+            main()
+          mock_watcher.assert_called_once()
+
+  def test_collect_sp_watch_files(self):
+    files = _collect_sp_watch_files(self.sp_file)
+    self.assertIn(os.path.abspath(self.sp_file), files)
+
+    # Test OSError handling when reading mtime
+    with patch("os.path.getmtime", side_effect=OSError("Permission denied")):
+      files_err = _collect_sp_watch_files(self.sp_file)
+      self.assertEqual(files_err, {})
+
+  def test_run_dev_watcher_love2d_process_exit(self):
+    proc = MagicMock()
+    proc.poll.return_value = 0
+    proc.returncode = 0
+    with patch("subprocess.Popen", return_value=proc):
+      with patch("time.sleep"):
+        with self.assertRaises(SystemExit) as cm:
+          with suppress_output():
+            _run_dev_watcher(self.sp_file, "out.lua", "love2d", True, ["love", "."])
+        self.assertEqual(cm.exception.code, 0)
+
+  def test_run_dev_watcher_file_change_and_restart(self):
+    proc1 = MagicMock()
+    proc1.poll.side_effect = [None, None, None]
+    proc1.wait.side_effect = subprocess.TimeoutExpired(["python", "out.py"], 1.0)
+    proc2 = MagicMock()
+    proc2.poll.return_value = 0
+    with patch("subprocess.Popen", side_effect=[proc1, proc2]):
+      with patch("time.sleep", side_effect=[None, KeyboardInterrupt]):
+        with patch("src.cli.sapphire.transpile_file") as mock_transpile:
+          with patch("src.cli.sapphire._collect_sp_watch_files", side_effect=[
+              {self.sp_file: 1.0},
+              {self.sp_file: 2.0},
+              {self.sp_file: 2.0},
+          ]):
+            with self.assertRaises(SystemExit) as cm:
+              with suppress_output():
+                _run_dev_watcher(self.sp_file, "out.py", "python", False, ["python", "out.py"])
+            self.assertEqual(cm.exception.code, 0)
+            mock_transpile.assert_called_once()
+            proc1.terminate.assert_called()
+            proc1.kill.assert_called()
+
+  def test_run_dev_watcher_compilation_error_and_shutdown(self):
+    proc = MagicMock()
+    proc.poll.return_value = 0
+    with patch("subprocess.Popen", return_value=proc):
+      with patch("time.sleep", side_effect=[None, KeyboardInterrupt]):
+        with patch("src.cli.sapphire.transpile_file", side_effect=RuntimeError("Compilation error")):
+          with patch("src.cli.sapphire._collect_sp_watch_files", side_effect=[
+              {self.sp_file: 1.0},
+              {self.sp_file: 2.0},
+          ]):
+            with self.assertRaises(SystemExit) as cm:
+              with suppress_output():
+                _run_dev_watcher(self.sp_file, "out.py", "python", False, ["python", "out.py"])
+            self.assertEqual(cm.exception.code, 0)
+
+  def test_run_dev_watcher_love2d_file_change_marker(self):
+    proc = MagicMock()
+    proc.poll.side_effect = [None, None]
+    proc.returncode = 0
+    with patch("subprocess.Popen", return_value=proc):
+      with patch("time.sleep", side_effect=[None, KeyboardInterrupt]):
+        with patch("src.cli.sapphire.transpile_file") as mock_transpile:
+          with patch("src.cli.sapphire._collect_sp_watch_files", side_effect=[
+              {self.sp_file: 1.0},
+              {self.sp_file: 2.0},
+          ]):
+            out_lua = os.path.join(self.temp_dir.name, "main.lua")
+            with self.assertRaises(SystemExit) as cm:
+              with suppress_output():
+                _run_dev_watcher(self.sp_file, out_lua, "love2d", False, ["love", "."])
+            self.assertEqual(cm.exception.code, 0)
+            mock_transpile.assert_called_once()
+            marker_path = os.path.join(self.temp_dir.name, ".sapphire_reload")
+            self.assertTrue(os.path.exists(marker_path))
+            with open(marker_path, "r", encoding="utf-8") as f:
+              self.assertIn("main.lua", f.read())
+
+  def test_run_dev_watcher_keyboard_interrupt_timeout(self):
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.wait.side_effect = subprocess.TimeoutExpired(["python", "out.py"], 1.0)
+    with patch("subprocess.Popen", return_value=proc):
+      with patch("time.sleep", side_effect=KeyboardInterrupt):
+        with self.assertRaises(SystemExit) as cm:
+          with suppress_output():
+            _run_dev_watcher(self.sp_file, "out.py", "python", False, ["python", "out.py"])
+        self.assertEqual(cm.exception.code, 0)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
+
+  def test_find_love_binary_lookup(self):
+    from src.cli.sapphire import _find_love_binary
+    # 1. When shutil.which finds love
+    with patch("shutil.which", return_value="/usr/local/bin/love"):
+      self.assertEqual(_find_love_binary(), "/usr/local/bin/love")
+
+    # 2. When shutil.which fails but macOS App bundle exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", side_effect=lambda p: p == "/Applications/love.app/Contents/MacOS/love"):
+        with patch("os.access", return_value=True):
+          self.assertEqual(_find_love_binary(), "/Applications/love.app/Contents/MacOS/love")
+
+    # 3. When nothing exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", return_value=False):
+        self.assertIsNone(_find_love_binary())
+
+  def test_find_lua_binary_lookup(self):
+    from src.cli.sapphire import _find_lua_binary
+    # 1. When shutil.which finds lua
+    with patch("shutil.which", return_value="/usr/bin/lua"):
+      self.assertEqual(_find_lua_binary(), "/usr/bin/lua")
+
+    # 2. When shutil.which fails but fallback exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", side_effect=lambda p: p == "/opt/homebrew/bin/lua"):
+        with patch("os.access", return_value=True):
+          self.assertEqual(_find_lua_binary(), "/opt/homebrew/bin/lua")
+
+    # 3. When nothing exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", return_value=False):
+        self.assertIsNone(_find_lua_binary())
 
 
 if __name__ == "__main__":

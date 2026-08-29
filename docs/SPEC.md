@@ -573,6 +573,43 @@ let sum_of_even_squares = numbers
     .reduce(initial = 0, (acc, x) -> acc + x);
 ```
 
+### Coroutines (`Coroutine<T>`)
+
+Sapphire provides first-class support for frame-steppable coroutines and generators via the built-in `Coroutine<T>` type and the `yield` statement.
+
+* **Declaration**: Functions returning a coroutine declare `Coroutine<T>` (yielding values of type `T`) or `Coroutine<void>` / `Coroutine` (yielding flow control without producing payload values).
+* **Yield syntax**:
+  * In `Coroutine<void>`, use bare `yield;` to pause execution until the next `.step()` tick.
+  * In `Coroutine<T>`, use `yield <expr>;` to yield a value of type `T`.
+* **Disambiguation with `match` expressions**: Any `yield` statement inside a multi-statement `match` case block is strictly bound to evaluating that match arm. To yield from a coroutine based on pattern matching, evaluate the `match` expression to a value first and then yield it at the coroutine level.
+* **Completion**: Coroutines complete when execution reaches the end of the body or hits a bare `return;`. Returning values via `return <expr>;` from a coroutine is prohibited at compile time.
+* **Runtime API**:
+  * `co.step(): T?` – Advances execution to the next `yield`, returning the yielded value (or `none` if void or completed).
+  * `co.is_done(): bool` – Returns `true` if the coroutine has terminated.
+  * `co.reset(): void` – Resets the coroutine back to its initial state.
+
+```sapphire
+// 1. Frame-based sequencing
+func cutscene(npc: NPC): Coroutine<void> {
+  npc.play_anim("wave");
+  yield;
+  npc.walk_to(x = 100.0, y = 50.0);
+  yield;
+}
+
+// 2. Generator stream
+func fibonacci(count: int): Coroutine<int> {
+  var a = 0;
+  var b = 1;
+  for i in range(count) {
+    yield a;
+    let next = a + b;
+    a = b;
+    b = next;
+  }
+}
+```
+
 ## 9. Structs & the implementation block
 
 The primary data layout tool is the `struct` keyword. To strictly separate data structures from behavior, all methods (including constructors) **must** be defined inside a Rust-style implementation (`impl`) block; defining method signatures or bodies inside the `struct` block itself is strictly forbidden.
@@ -1065,6 +1102,22 @@ func draw() {
 
   // Transpiles to `love.graphics.setColor(1.0, 0.0, 0.0)`
   love.graphics.setColorRGBA(1.0, 0.0, 0.0);
+}
+```
+
+### Live hot-reloading & `@on_reload` lifecycle hook
+
+Sapphire provides native development-mode hot-reloading (`sapphire run --dev`) for real-time iteration:
+
+* **In-place patching**: In dev mode, structures and prototype metatables persist across reloads (e.g. `Struct = Struct or {}` for the Lua transpilation target), meaning living in-memory instances immediately receive updated method definitions without losing variable state.
+* **`@on_reload` Hook**: Functions annotated with `@on_reload` are automatically invoked whenever the containing module is recompiled and reloaded at runtime:
+
+```sapphire
+@on_reload
+func handle_reload() {
+  // Recompute caches, refresh UI textures, or re-index asset registries here
+
+  print("[Hot Reload] Game state patched successfully!");
 }
 ```
 

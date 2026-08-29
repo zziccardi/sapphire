@@ -10,7 +10,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from src.parser.ast import *
-from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.transpiler_registry import TranspilerRegistry
 
 
@@ -24,6 +24,31 @@ from src.code_gen.transpiler_registry import TranspilerRegistry
 PYTHON_RUNTIME_PREAMBLE = """# Sapphire Runtime Header
 import copy
 from enum import Enum, IntEnum
+
+class _SapphireCoroutine:
+  def __init__(self, fn, *args, **kwargs):
+    self._fn = fn
+    self._args = args
+    self._kwargs = kwargs
+    self._gen = None
+    self._done = False
+    self.reset()
+
+  def step(self):
+    if self._done:
+      return None
+    try:
+      return next(self._gen)
+    except StopIteration:
+      self._done = True
+      return None
+
+  def is_done(self):
+    return self._done
+
+  def reset(self):
+    self._gen = self._fn(*self._args, **self._kwargs)
+    self._done = False
 
 class Arena:
   def __init__(self):
@@ -754,16 +779,34 @@ class PythonTranspiler(BaseTranspiler):
 
     # Python parameter formatting
     params = []
+    raw_params = []
     if node.modifier != "static":
       params.append("self")
+      raw_params.append("self")
     for p in func.parameters:
       if p.name != "self":
         params.append(self._format_param(p))
+        raw_params.append(p.name)
 
-    self.emit(f"def {func_name}({', '.join(params)}):")
-    self.indent()
-    self.visit(func.body)
-    self.dedent()
+    if is_coroutine_func(func):
+      self.emit(f"def {func_name}({', '.join(params)}):")
+      self.indent()
+      self.newline()
+      self.emit(f"def _gen_{func_name}({', '.join(raw_params)}):")
+      self.indent()
+      self.visit(func.body)
+      self.dedent()
+      self.newline()
+      if raw_params:
+        self.emit(f"return _SapphireCoroutine(_gen_{func_name}, {', '.join(raw_params)})")
+      else:
+        self.emit(f"return _SapphireCoroutine(_gen_{func_name})")
+      self.dedent()
+    else:
+      self.emit(f"def {func_name}({', '.join(params)}):")
+      self.indent()
+      self.visit(func.body)
+      self.dedent()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
     # Traits are compile-time monomorphic contracts and are not needed at Python runtime.
@@ -776,10 +819,26 @@ class PythonTranspiler(BaseTranspiler):
 
     self.newline()
     params = [self._format_param(p) for p in node.parameters]
-    self.emit(f"def {node.name}({', '.join(params)}):")
-    self.indent()
-    self.visit(node.body)
-    self.dedent()
+    raw_params = [p.name for p in node.parameters]
+    if is_coroutine_func(node):
+      self.emit(f"def {node.name}({', '.join(params)}):")
+      self.indent()
+      self.newline()
+      self.emit(f"def _gen_{node.name}({', '.join(raw_params)}):")
+      self.indent()
+      self.visit(node.body)
+      self.dedent()
+      self.newline()
+      if raw_params:
+        self.emit(f"return _SapphireCoroutine(_gen_{node.name}, {', '.join(raw_params)})")
+      else:
+        self.emit(f"return _SapphireCoroutine(_gen_{node.name})")
+      self.dedent()
+    else:
+      self.emit(f"def {node.name}({', '.join(params)}):")
+      self.indent()
+      self.visit(node.body)
+      self.dedent()
 
   def _visit_statements(self, statements: List[StmtNode]) -> None:
     if not statements:
@@ -960,15 +1019,28 @@ class PythonTranspiler(BaseTranspiler):
     self.newline()
     if target:
       self.emit(f"{target} = ")
-    if not exprs:
-      self.emit("None")
-    elif len(exprs) == 1:
-      self.visit(exprs[0])
+      if not exprs:
+        self.emit("None")
+      elif len(exprs) == 1:
+        self.visit(exprs[0])
+      else:
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
     else:
-      for idx, expr in enumerate(exprs):
-        if idx > 0:
-          self.emit(", ")
-        self.visit(expr)
+      self.emit("yield")
+      if not exprs:
+        self.emit(" None")
+      elif len(exprs) == 1:
+        self.emit(" ")
+        self.visit(exprs[0])
+      else:
+        self.emit(" ")
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
     if not getattr(node, "_is_lifted", False):
