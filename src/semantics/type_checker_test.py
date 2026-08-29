@@ -11,7 +11,7 @@ from antlr4 import InputStream, CommonTokenStream
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
-from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode
+from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode, YieldNode, BasicTypeNode
 from src.semantics.type_checker import TypeChecker, SemanticError
 from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
 
@@ -4408,6 +4408,48 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Coroutine has no method 'invalid_method'", str(ctx.exception))
+
+  def test_coroutine_type_checker_edges(self):
+    """Verifies edge cases in coroutine type checking and yield validation."""
+    # Bare Coroutine return type without type argument
+    self._check("""
+    func run(): Coroutine {
+      yield;
+    }
+    """)
+
+    # Top-level yield outside function or match context
+    checker = TypeChecker()
+    checker.visit_YieldNode(YieldNode([LiteralNode(1, "int")]))
+    self.assertTrue(any("Yield statement outside coroutine or match context" in err for err in checker.errors))
+
+    # Mock node with expr attribute when expressions is None
+    checker2 = TypeChecker()
+    checker2._check_code = lambda code: None
+    from src.semantics.symbol_table import CoroutineType, FunctionType, NoneType
+    checker2.current_function = FunctionType([], CoroutineType(PrimitiveType("int")))
+    class MockYieldNode:
+      expr = LiteralNode(42, "int")
+      expressions = None
+    checker2.visit_YieldNode(MockYieldNode())
+
+    # Cannot yield multiple values in Coroutine<void>
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_void(): Coroutine<void> {
+        yield 1, 2;
+      }
+      """)
+    self.assertIn("Cannot yield 2 values in Coroutine<void>; use bare 'yield;'", str(ctx.exception))
+
+    # Cannot yield multiple values in Coroutine<int>
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_int(): Coroutine<int> {
+        yield 1, 2;
+      }
+      """)
+    self.assertIn("Cannot yield multiple values in Coroutine<int>", str(ctx.exception))
 
 
 if __name__ == "__main__":

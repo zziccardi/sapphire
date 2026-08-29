@@ -31,6 +31,7 @@ from src.parser.ast import (
     StructInitializerNode,
     TraitDeclNode,
     UnaryOpNode,
+    YieldNode,
 )
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
@@ -1326,6 +1327,43 @@ class TestLuaTranspiler(unittest.TestCase):
     tr.visit_WithClauseNode(w_clause2)
     self.assertIn("1", tr.get_output())
     self.assertIn("2", tr.get_output())
+
+  def test_coroutine_transpilation_and_methods(self):
+    """Verifies Lua transpilation of top-level coroutines, struct method coroutines, and yields."""
+    code = """
+    func zero_param_coro(): Coroutine<void> {
+      yield;
+    }
+
+    struct GenHolder {
+      var val: int;
+    }
+
+    impl GenHolder {
+      func inst_gen(self): Coroutine<int> {
+        yield self.val;
+      }
+
+      static func stat_gen(): Coroutine<int> {
+        yield 42;
+      }
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function zero_param_coro()", output)
+    self.assertIn("return _Coroutine.create(function()", output)
+    self.assertIn("coroutine.yield()", output)
+    self.assertIn("function GenHolder:inst_gen()", output)
+    self.assertIn("return _Coroutine.create(function(self)", output)
+    self.assertIn("end, self)", output)
+    self.assertIn("function GenHolder.stat_gen()", output)
+    self.assertIn("return _Coroutine.create(function()", output)
+
+    # Directly verify YieldNode with multiple expressions
+    transpiler = LuaTranspiler()
+    multi_yield = YieldNode(exprs=[LiteralNode(1, "int"), LiteralNode(2, "int")])
+    transpiler.visit(multi_yield)
+    self.assertIn("coroutine.yield(1, 2)", transpiler.get_output())
 
 
 # ---------------------------------------------------------------------------

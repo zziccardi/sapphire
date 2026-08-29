@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from antlr4 import InputStream, CommonTokenStream
 
-from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode
+from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode, YieldNode
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
@@ -1542,6 +1542,50 @@ class TestPythonTranspiler(unittest.TestCase):
     tr.visit_WithClauseNode(w_clause2)
     self.assertIn("1", tr.get_output())
     self.assertIn("2", tr.get_output())
+
+  def test_coroutine_transpilation_and_methods(self):
+    """Verifies Python transpilation of top-level and struct method coroutines and yield expressions."""
+    code = """
+    func zero_param_coro(): Coroutine<void> {
+      yield;
+    }
+
+    struct GenHolder {
+      var val: int;
+    }
+
+    impl GenHolder {
+      func inst_gen(self): Coroutine<int> {
+        yield self.val;
+      }
+
+      static func stat_gen(): Coroutine<int> {
+        yield 42;
+      }
+    }
+
+    func test_coroutine_runner(): int {
+      let c1 = zero_param_coro();
+      c1.step();
+
+      let holder = GenHolder { val = 100 };
+      let c2 = holder.inst_gen();
+      let val2 = c2.step();
+
+      let c3 = GenHolder.stat_gen();
+      let val3 = c3.step();
+
+      return val2 + val3;
+    }
+    """
+    res = self._transpile_and_run(code, "test_coroutine_runner()")
+    self.assertEqual(res, 142)
+
+    # Directly verify YieldNode with multiple expressions
+    transpiler = PythonTranspiler()
+    multi_yield = YieldNode(exprs=[LiteralNode(1, "int"), LiteralNode(2, "int")])
+    transpiler.visit(multi_yield)
+    self.assertIn("yield 1, 2", transpiler.get_output())
 
 
 # ---------------------------------------------------------------------------
