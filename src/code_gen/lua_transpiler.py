@@ -622,26 +622,35 @@ if love and love.errorhandler then
 end
 """
 
-LUA_DEV_RELOAD_WATCHER = """-- Sapphire Dev Mode: In-place Hot-Reloading & Error Boundary Hook
+LUA_DEV_RELOAD_WATCHER = """-- Sapphire Dev Mode: High-Performance Live Hot-Reloading Hook
 local _SP_DEV_WATCHER = {
   last_modified = {},
-  poll_interval = 0.2,
+  tracked_files = { "main.lua", ".sapphire_reload" },
+  poll_interval = 0.1,
   elapsed = 0
 }
 
-local function _sp_scan_dir(dir, out)
-  if not love or not love.filesystem then return end
-  local items = love.filesystem.getDirectoryItems(dir)
-  for _, item in ipairs(items) do
-    local path = (dir == "" or dir == ".") and item or (dir .. "/" .. item)
-    local info = love.filesystem.getInfo(path)
-    if info then
-      if info.type == "file" and path:sub(-4) == ".lua" then
-        table.insert(out, path)
-      elseif info.type == "directory" and item ~= ".git" and item ~= "__pycache__" then
-        _sp_scan_dir(path, out)
-      end
+function _SP_DEV_WATCHER.register_file(path)
+  if not path then return end
+  for _, f in ipairs(_SP_DEV_WATCHER.tracked_files) do
+    if f == path then return end
+  end
+  table.insert(_SP_DEV_WATCHER.tracked_files, path)
+end
+
+local function _sp_reload_file(file)
+  local modname = file:gsub("%.lua$", ""):gsub("/", ".")
+  package.loaded[modname] = nil
+  local chunk, err = love.filesystem.load(file)
+  if chunk then
+    local ok, runtime_err = pcall(chunk)
+    if not ok then
+      print("[Sapphire Hot-Reload Error] " .. tostring(runtime_err))
+    else
+      print("[Sapphire Hot-Reload] Successfully reloaded " .. file)
     end
+  else
+    print("[Sapphire Hot-Reload Compile Error] " .. tostring(err))
   end
 end
 
@@ -650,29 +659,37 @@ function _SP_DEV_WATCHER.check(dt)
   _SP_DEV_WATCHER.elapsed = _SP_DEV_WATCHER.elapsed + (dt or 0)
   if _SP_DEV_WATCHER.elapsed < _SP_DEV_WATCHER.poll_interval then return end
   _SP_DEV_WATCHER.elapsed = 0
-  local files = {}
-  _sp_scan_dir("", files)
-  for _, file in ipairs(files) do
-    local info = love.filesystem.getInfo(file)
-    if info and info.modtime then
-      if _SP_DEV_WATCHER.last_modified[file] and _SP_DEV_WATCHER.last_modified[file] ~= info.modtime then
-        _SP_DEV_WATCHER.last_modified[file] = info.modtime
-        print("[Sapphire Hot-Reload] Detected change in " .. file .. ", reloading...")
-        local modname = file:gsub("%.lua$", ""):gsub("/", ".")
-        package.loaded[modname] = nil
-        local chunk, err = love.filesystem.load(file)
-        if chunk then
-          local ok, runtime_err = pcall(chunk)
-          if not ok then
-            print("[Sapphire Hot-Reload Error] " .. tostring(runtime_err))
-          else
-            print("[Sapphire Hot-Reload] Successfully reloaded " .. file)
+
+  -- 1. Check direct signal trigger file (.sapphire_reload)
+  local sig_info = love.filesystem.getInfo(".sapphire_reload")
+  if sig_info and sig_info.modtime then
+    if _SP_DEV_WATCHER.last_modified[".sapphire_reload"] and _SP_DEV_WATCHER.last_modified[".sapphire_reload"] ~= sig_info.modtime then
+      _SP_DEV_WATCHER.last_modified[".sapphire_reload"] = sig_info.modtime
+      local content, _ = love.filesystem.read(".sapphire_reload")
+      if content then
+        for target_file in content:gmatch("[^\\r\\n]+") do
+          local clean_file = target_file:match("^%s*(.-)%s*$")
+          if clean_file and clean_file ~= "" then
+            _sp_reload_file(clean_file)
           end
-        else
-          print("[Sapphire Hot-Reload Compile Error] " .. tostring(err))
         end
-      else
-        _SP_DEV_WATCHER.last_modified[file] = info.modtime
+      end
+    else
+      _SP_DEV_WATCHER.last_modified[".sapphire_reload"] = sig_info.modtime
+    end
+  end
+
+  -- 2. Check tracked game files directly without directory traversal
+  for _, file in ipairs(_SP_DEV_WATCHER.tracked_files) do
+    if file ~= ".sapphire_reload" then
+      local info = love.filesystem.getInfo(file)
+      if info and info.modtime then
+        if _SP_DEV_WATCHER.last_modified[file] and _SP_DEV_WATCHER.last_modified[file] ~= info.modtime then
+          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+          _sp_reload_file(file)
+        else
+          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+        end
       end
     end
   end
@@ -923,6 +940,10 @@ class LuaTranspiler(BaseTranspiler):
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
     alias_name = node.alias if node.alias else node.path.split(".")[-1]
     self.emit(f"local {alias_name} = require(\"{node.path}\")")
+    if self.dev_mode:
+      file_path = node.path.replace(".", "/") + ".lua"
+      self.newline()
+      self.emit(f"if _SP_DEV_WATCHER and _SP_DEV_WATCHER.register_file then _SP_DEV_WATCHER.register_file(\"{file_path}\") end")
     self.newline()
 
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:

@@ -70,6 +70,12 @@ def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap:
         print("\n[Sapphire Dev Mode] File change detected, re-transpiling...")
         try:
           transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=True, quiet=False)
+          if target in ("love2d", "love"):
+            run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
+            marker_path = os.path.join(run_dir, ".sapphire_reload")
+            rel_out = os.path.relpath(output_file, run_dir)
+            with open(marker_path, "w", encoding="utf-8") as mf:
+              mf.write(f"{rel_out}\n")
           print("[Sapphire Dev Mode] Re-compilation complete.")
           if target not in ("love2d", "love"):
             if proc.poll() is None:
