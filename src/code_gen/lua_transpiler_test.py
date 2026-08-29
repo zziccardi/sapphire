@@ -688,6 +688,88 @@ class TestLuaTranspiler(unittest.TestCase):
       finally:
         os.unlink(tmp_path)
 
+  def test_dev_mode_hot_reloading(self):
+    """Verifies that dev_mode emits reload-safe structs, @on_reload hooks, and watcher checks."""
+    code_v1 = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_speed(self): int {
+        return 10;
+      }
+    }
+
+    @on_reload
+    func on_reload_hook() {
+      print("Reloaded!");
+    }
+
+    @export("love.update")
+    func update(dt: float) {
+      let s = 1;
+    }
+    """
+    input_stream = InputStream(code_v1)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = LuaTranspiler(dev_mode=True)
+    out_v1 = transpiler.transpile(ast)
+
+    self.assertIn("Player = Player or {}", out_v1)
+    self.assertIn("_SP_DEV_WATCHER", out_v1)
+    self.assertIn("if on_reload_hook then on_reload_hook() end", out_v1)
+    self.assertIn("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end", out_v1)
+
+    code_v2 = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_speed(self): int {
+        return 50;
+      }
+    }
+    """
+    input_stream2 = InputStream(code_v2)
+    lexer2 = SapphireLexer(input_stream2)
+    stream2 = CommonTokenStream(lexer2)
+    parser2 = SapphireParser(stream2)
+    tree2 = parser2.program()
+    builder2 = ASTBuilder()
+    ast2 = builder2.visit(tree2)
+    transpiler2 = LuaTranspiler(dev_mode=True)
+    out_v2 = transpiler2.transpile(ast2)
+
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if lua_bin:
+      # Test in-place method patching at Lua runtime
+      test_driver = f"""
+      love = {{}}
+      {out_v1}
+      local p = Player.init({{ name = "Hero" }})
+      assert(p:get_speed() == 10)
+
+      -- Simulate live hot reload chunk execution
+      local reload_chunk = assert(loadstring or load)({repr(out_v2)})
+      reload_chunk()
+
+      -- The existing living instance p now receives the updated method get_speed == 50
+      assert(p:get_speed() == 50)
+      """
+      with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+        f.write(test_driver)
+        tmp_path = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+      finally:
+        os.unlink(tmp_path)
+
 
   def test_transpile_file_with_imports(self):
     """Verifies that transpile_file recursively transpiles imported module dependencies."""

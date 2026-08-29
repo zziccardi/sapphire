@@ -62,9 +62,17 @@ described in the spec.
 * Resolved at compile-time via **monomorphization** with automatic call-site
   type inference and explicit type arguments (`Stack<int>`).
 
-### Host engine & third-party interoperability
+### First-class coroutines & generators
+* Steppable coroutines via `Coroutine<T>` and `Coroutine<void>`.
+* Bare `yield;` for sequencing; `yield <expr>;` for value streams.
+* Step, inspect, or reset coroutines with `.step(): T?`, `.is_done(): bool`, and `.reset(): void`.
+* Transpiles to zero-allocation native Lua asymmetric coroutines on Lua/Love2D targets and generator objects on Python.
+
+### Host engine, Love2D & live hot-reloading
 * Native interoperation with host runtimes (such as **Love2D** in Lua 5.1 /
   LuaJIT environments).
+* Direct Love2D target support via `-t love2d` (or `-t love`).
+* **Live hot-reloading & dev mode (`sapphire run --dev`)**: Automatically watches `.sp` project files, performs fast incremental re-compilation, patches existing living prototype/struct instances in-place without losing state, and executes `@on_reload` lifecycle hooks.
 * `@extern var love: LoveEngine;` binds host runtime global variables with 100%
   type safety.
 * `@export("love.update") func update(dt: float)` exposes functions directly as
@@ -83,12 +91,18 @@ described in the spec.
 # Run a Sapphire script (transpiling to Python by default):
 sapphire samples/overview.sp
 
+# Run with live hot-reloading / dev mode (watches files and reloads in-place):
+sapphire run samples/overview.sp --dev
+
 # Transpile to Lua 5.1 (generating both main.lua and main.lua.map source maps by
 # default):
 sapphire build samples/love2d_demo.sp -t lua -o main.lua
 
 # Build for release without source map or runtime demangler:
 sapphire build samples/love2d_demo.sp -t lua -o main.lua --no_sourcemap
+
+# Run a Love2D game directly with live hot-reloading:
+sapphire run samples/love2d_demo.sp -t love2d --dev
 
 # Run transpiled game in Love2D (passing the directory containing `main.lua`):
 love .

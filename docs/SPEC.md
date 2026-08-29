@@ -1105,6 +1105,22 @@ func draw() {
 }
 ```
 
+### Live hot-reloading & `@on_reload` lifecycle hook
+
+Sapphire provides native development-mode hot-reloading (`sapphire run --dev`) for real-time iteration:
+
+* **In-place patching**: In dev mode, structures and prototype metatables persist across reloads (e.g. `Struct = Struct or {}` for the Lua transpilation target), meaning living in-memory instances immediately receive updated method definitions without losing variable state.
+* **`@on_reload` Hook**: Functions annotated with `@on_reload` are automatically invoked whenever the containing module is recompiled and reloaded at runtime:
+
+```sapphire
+@on_reload
+func handle_reload() {
+  // Recompute caches, refresh UI textures, or re-index asset registries here
+
+  print("[Hot Reload] Game state patched successfully!");
+}
+```
+
 ## 15. Generics & parametric polymorphism
 
 Sapphire supports zero-overhead parametric polymorphism (generics) for structures, implementation blocks, traits, and functions using angle bracket parameter syntax (`<T, U>`).

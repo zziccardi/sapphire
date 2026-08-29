@@ -163,6 +163,54 @@ class SapphireCLITest(unittest.TestCase):
         main()
         mock_lsp_main.assert_called_once()
 
+  def test_build_subcommand_love2d(self):
+    lua_file = os.path.join(self.temp_dir.name, "output_love.lua")
+    test_args = ["sapphire", "build", self.sp_file, "-t", "love2d", "-o", lua_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+    self.assertTrue(os.path.exists(lua_file))
+
+  def test_build_subcommand_dev_mode(self):
+    lua_file = os.path.join(self.temp_dir.name, "output_dev.lua")
+    test_args = ["sapphire", "build", self.sp_file, "-t", "lua", "--dev", "-o", lua_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+    self.assertTrue(os.path.exists(lua_file))
+    with open(lua_file, "r") as f:
+      content = f.read()
+    self.assertIn("_SP_DEV_WATCHER", content)
+
+  def test_run_subcommand_love2d(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "love2d"]
+    with patch.object(sys, "argv", test_args):
+      with patch("shutil.which", return_value="/usr/local/bin/love"):
+        with patch("subprocess.run") as mock_run:
+          mock_run.return_value.returncode = 0
+          with self.assertRaises(SystemExit) as cm:
+            with suppress_output():
+              main()
+          self.assertEqual(cm.exception.code, 0)
+          mock_run.assert_called_once()
+
+  def test_run_subcommand_love2d_not_found(self):
+    test_args = ["sapphire", "run", self.sp_file, "-t", "love2d"]
+    with patch.object(sys, "argv", test_args):
+      with patch("shutil.which", return_value=None):
+        with self.assertRaises(SystemExit) as cm:
+          with suppress_output():
+            main()
+        self.assertEqual(cm.exception.code, 1)
+
+  def test_run_subcommand_dev_mode_invokes_watcher(self):
+    test_args = ["sapphire", "run", self.sp_file, "--dev"]
+    with patch.object(sys, "argv", test_args):
+      with patch("src.cli.sapphire._run_dev_watcher") as mock_watcher:
+        with suppress_output():
+          main()
+        mock_watcher.assert_called_once()
+
 
 if __name__ == "__main__":
   unittest.main()

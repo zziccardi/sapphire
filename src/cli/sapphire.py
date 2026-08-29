@@ -9,6 +9,8 @@ import os
 import shutil
 import sys
 import subprocess
+import time
+from typing import Dict, List
 
 src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 root_dir = os.path.abspath(os.path.join(src_dir, ".."))
@@ -19,6 +21,73 @@ if src_dir not in sys.path:  # pragma: no cover
 
 from src.code_gen.transpiler import transpile_file
 
+TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
+
+
+def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
+  """Collects modification times for all .sp files in the project / directory of root_path."""
+  watch_files = {}
+  dir_path = os.path.dirname(os.path.abspath(root_path)) or "."
+  for root, _, files in os.walk(dir_path):
+    for f in files:
+      if f.endswith(".sp"):
+        p = os.path.join(root, f)
+        try:
+          watch_files[p] = os.path.getmtime(p)
+        except OSError:
+          pass
+  return watch_files
+
+
+def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap: bool, cmd: List[str]):
+  """Spawns process and watches source files for live hot-reloading."""
+  print(f"\n[Sapphire Dev Mode] Starting process with live hot-reloading: {' '.join(cmd)}")
+  print("[Sapphire Dev Mode] Watching for file changes... (Press Ctrl+C to stop)")
+
+  proc = subprocess.Popen(cmd)
+  watch_files = _collect_sp_watch_files(source_file)
+
+  try:
+    while True:
+      time.sleep(0.3)
+      if proc.poll() is not None:
+        if target in ("love2d", "love"):
+          sys.exit(proc.returncode)
+
+      current_watch_files = _collect_sp_watch_files(source_file)
+      changed = False
+      for path, mtime in current_watch_files.items():
+        if path not in watch_files or watch_files[path] != mtime:
+          changed = True
+          break
+
+      if changed:
+        watch_files = current_watch_files
+        print("\n[Sapphire Dev Mode] File change detected, re-transpiling...")
+        try:
+          transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=True, quiet=False)
+          print("[Sapphire Dev Mode] Re-compilation complete.")
+          if target not in ("love2d", "love"):
+            if proc.poll() is None:
+              proc.terminate()
+              try:
+                proc.wait(timeout=1.0)
+              except subprocess.TimeoutExpired:
+                proc.kill()
+            print("\n--- Re-executing Sapphire Program ---")
+            proc = subprocess.Popen(cmd)
+        except Exception as err:
+          print(f"[Sapphire Dev Mode Error] Compilation failed: {err}", file=sys.stderr)
+
+  except KeyboardInterrupt:
+    print("\n[Sapphire Dev Mode] Shutting down...")
+    if proc.poll() is None:
+      proc.terminate()
+      try:
+        proc.wait(timeout=1.0)
+      except subprocess.TimeoutExpired:
+        proc.kill()
+    sys.exit(0)
 
 
 def run_command(args):
@@ -30,10 +99,25 @@ def run_command(args):
     sys.exit(1)
 
   target = getattr(args, "target", "python").lower()
-  ext = ".lua" if target in ("lua", "lua5.1") else ".py"
+  dev_mode = getattr(args, "dev", False)
+  ext = ".lua" if target in ("lua", "lua5.1", "love2d", "love") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
   sourcemap = not getattr(args, "no_sourcemap", False)
-  out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap)
+  out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+
+  if target in ("love2d", "love"):
+    love_bin = shutil.which("love")
+    if not love_bin:
+      print("Error: Love2D executable ('love') not found in PATH.", file=sys.stderr)
+      sys.exit(1)
+    run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
+    cmd = [love_bin, run_dir]
+    if dev_mode:
+      _run_dev_watcher(source_file, output_file, target, sourcemap, cmd)
+    else:
+      print("\n--- Executing Love2D Engine ---")
+      result = subprocess.run(cmd)
+      sys.exit(result.returncode)
 
   print("\n--- Executing Sapphire Program ---")
   if target in ("lua", "lua5.1"):
@@ -47,8 +131,11 @@ def run_command(args):
   else:
     cmd = [sys.executable, out_path]
 
-  result = subprocess.run(cmd)
-  sys.exit(result.returncode)
+  if dev_mode:
+    _run_dev_watcher(source_file, output_file, target, sourcemap, cmd)
+  else:
+    result = subprocess.run(cmd)
+    sys.exit(result.returncode)
 
 
 def build_command(args):
@@ -60,10 +147,11 @@ def build_command(args):
     sys.exit(1)
 
   target = getattr(args, "target", "python").lower()
-  ext = ".lua" if target in ("lua", "lua5.1") else ".py"
+  dev_mode = getattr(args, "dev", False)
+  ext = ".lua" if target in ("lua", "lua5.1", "love2d", "love") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
   sourcemap = not getattr(args, "no_sourcemap", False)
-  transpile_file(source_file, output_file, target=target, sourcemap=sourcemap)
+  transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
 
 
 def test_command(args):
@@ -98,8 +186,11 @@ def main():
   build_parser.add_argument(
       "-o", "--output", help="Optional output path for generated target file")
   build_parser.add_argument(
-      "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
+      "-t", "--target", choices=TARGET_CHOICES, default="python",
       help="Code generation target (default: python)")
+  build_parser.add_argument(
+      "--dev", action="store_true",
+      help="Enable development mode with in-place hot-reloading")
   build_parser.add_argument(
       "--no_sourcemap", action="store_true",
       help="Disable source map generation (.lua.map) for Lua targets")
@@ -112,8 +203,11 @@ def main():
   run_parser.add_argument(
       "-o", "--output", help="Optional output path for generated target file")
   run_parser.add_argument(
-      "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
+      "-t", "--target", choices=TARGET_CHOICES, default="python",
       help="Code generation target (default: python)")
+  run_parser.add_argument(
+      "--dev", action="store_true",
+      help="Enable development mode with file watching and live hot-reloading")
   run_parser.add_argument(
       "--no_sourcemap", action="store_true",
       help="Disable source map generation (.lua.map) for Lua targets")
@@ -125,7 +219,7 @@ def main():
   test_parser.add_argument(
       "source", nargs="?", default=".", help="Path to Sapphire source file (.sp) or directory (default: .)")
   test_parser.add_argument(
-      "-t", "--target", choices=["python", "lua", "lua5.1"], default="python",
+      "-t", "--target", choices=TARGET_CHOICES, default="python",
       help="Code generation target (default: python)")
   test_parser.add_argument(
       "--filter", help="Filter tests by substring matching test name")

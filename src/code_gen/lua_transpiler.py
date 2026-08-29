@@ -622,6 +622,45 @@ if love and love.errorhandler then
 end
 """
 
+LUA_DEV_RELOAD_WATCHER = """-- Sapphire Dev Mode: In-place Hot-Reloading & Error Boundary Hook
+local _SP_DEV_WATCHER = {
+  last_modified = {},
+  poll_interval = 0.5,
+  elapsed = 0
+}
+function _SP_DEV_WATCHER.check(dt)
+  if not love or not love.filesystem then return end
+  _SP_DEV_WATCHER.elapsed = _SP_DEV_WATCHER.elapsed + (dt or 0)
+  if _SP_DEV_WATCHER.elapsed < _SP_DEV_WATCHER.poll_interval then return end
+  _SP_DEV_WATCHER.elapsed = 0
+  local files = love.filesystem.getDirectoryItems("")
+  for _, file in ipairs(files) do
+    if file:sub(-4) == ".lua" then
+      local info = love.filesystem.getInfo(file)
+      if info and info.modtime then
+        if _SP_DEV_WATCHER.last_modified[file] and _SP_DEV_WATCHER.last_modified[file] ~= info.modtime then
+          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+          print("[Sapphire Hot-Reload] Detected change in " .. file .. ", reloading...")
+          local chunk, err = love.filesystem.load(file)
+          if chunk then
+            local ok, runtime_err = pcall(chunk)
+            if not ok then
+              print("[Sapphire Hot-Reload Error] " .. tostring(runtime_err))
+            else
+              print("[Sapphire Hot-Reload] Successfully reloaded " .. file)
+            end
+          else
+            print("[Sapphire Hot-Reload Compile Error] " .. tostring(err))
+          end
+        else
+          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+        end
+      end
+    end
+  end
+end
+"""
+
 
 def _has_continue_node(node: ASTNode) -> bool:
   if isinstance(node, ContinueNode):
@@ -641,7 +680,7 @@ def _has_continue_node(node: ASTNode) -> bool:
   return False
 
 
-@TranspilerRegistry.register(aliases=["lua", "lua5.1"], display_name="Lua 5.1", default_extension=".lua")
+@TranspilerRegistry.register(aliases=["lua", "lua5.1", "love2d", "love"], display_name="Lua 5.1", default_extension=".lua")
 class LuaTranspiler(BaseTranspiler):
 
   """AST visitor to transpile Sapphire code to Lua 5.1."""
@@ -651,6 +690,7 @@ class LuaTranspiler(BaseTranspiler):
       source_file: Optional[str] = None,
       source_map_builder: Optional[SourceMapBuilder] = None,
       test_mode: bool = False,
+      dev_mode: bool = False,
   ):
     self.code: List[str] = []
     self.indent_level = 0
@@ -659,6 +699,8 @@ class LuaTranspiler(BaseTranspiler):
     self.source_file = source_file
     self.source_map_builder = source_map_builder
     self.test_mode = test_mode
+    self.dev_mode = dev_mode
+    self.on_reload_callbacks: List[str] = []
     self.declared_symbols: List[str] = []
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
@@ -750,12 +792,13 @@ class LuaTranspiler(BaseTranspiler):
         executable_stmts.append(decl)
 
     forward_names = []
-    for decl in struct_decls:
-      if isinstance(decl, StructDeclNode):
-        forward_names.append(decl.name)
-    for decl in func_decls:
-      if not any(a.name == "export" for a in getattr(decl, "annotations", [])):
-        forward_names.append(decl.name)
+    if not self.dev_mode:
+      for decl in struct_decls:
+        if isinstance(decl, StructDeclNode):
+          forward_names.append(decl.name)
+      for decl in func_decls:
+        if not any(a.name == "export" for a in getattr(decl, "annotations", [])):
+          forward_names.append(decl.name)
 
     if forward_names:
       self.emit(f"local {', '.join(forward_names)}")
@@ -776,6 +819,15 @@ class LuaTranspiler(BaseTranspiler):
     if has_main:
       self.emit("main()")
       self.newline()
+
+    if self.dev_mode:
+      self.newline()
+      self.emit(LUA_DEV_RELOAD_WATCHER)
+      self.newline()
+
+    for cb in self.on_reload_callbacks:
+      self.newline()
+      self.emit(f"if {cb} then {cb}() end")
 
     # 6. Append inline source map table and Love2D error demangler if sourcemap builder present
     if self.source_map_builder and self.source_map_builder.mappings:
@@ -879,7 +931,10 @@ class LuaTranspiler(BaseTranspiler):
     methods = self.struct_methods.get(struct_name, [])
 
     self.newline()
-    self.emit(f"{struct_name} = {{}}")
+    if self.dev_mode:
+      self.emit(f"{struct_name} = {struct_name} or {{}}")
+    else:
+      self.emit(f"{struct_name} = {{}}")
     self.newline()
     self.emit(f"{struct_name}.__index = {struct_name}")
     self.newline()
@@ -975,7 +1030,7 @@ class LuaTranspiler(BaseTranspiler):
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     """Public visitor satisfying the BaseTranspiler contract.
 
-    Impl members are not visited standalone in the Lua backend —- they are
+    Impl members are not visited standalone in the Lua backend -- they are
     emitted as part of `visit_StructDeclNode` via the private helper. This
     method exists solely to fulfil the abstract-method contract so that the
     class hierarchy remains structurally symmetric with `PythonTranspiler`.
@@ -1041,6 +1096,9 @@ class LuaTranspiler(BaseTranspiler):
     if is_test_func:
       self.declared_symbols.append(node.name)
 
+    if any(getattr(a, "name", "") == "on_reload" for a in getattr(node, "annotations", [])):
+      self.on_reload_callbacks.append(node.name)
+
     export_ann = next((a for a in node.annotations if a.name == "export"), None)
     params = [p.name for p in node.parameters]
 
@@ -1052,6 +1110,10 @@ class LuaTranspiler(BaseTranspiler):
       self.emit(f"function {node.name}({', '.join(params)})")
 
     self.indent()
+    if self.dev_mode and export_ann and export_ann.arg == "love.update":
+      self.newline()
+      self.emit("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end")
+
     # Check default parameters
     for p in node.parameters:
       if p.default_expr:
