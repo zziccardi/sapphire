@@ -90,6 +90,45 @@ def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap:
     sys.exit(0)
 
 
+def _find_love_binary() -> Optional[str]:
+  """Locates Love2D executable across PATH and standard OS installation paths."""
+  binary = shutil.which("love") or shutil.which("love2d")
+  if binary:
+    return binary
+
+  mac_candidates = [
+      "/Applications/love.app/Contents/MacOS/love",
+      os.path.expanduser("~/Applications/love.app/Contents/MacOS/love"),
+      "/opt/homebrew/bin/love",
+      "/usr/local/bin/love",
+  ]
+  for candidate in mac_candidates:
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+      return candidate
+
+  return None
+
+
+def _find_lua_binary() -> Optional[str]:
+  """Locates Lua interpreter across PATH and standard OS installation paths."""
+  binary = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+  if binary:
+    return binary
+
+  candidates = [
+      "/opt/homebrew/bin/lua",
+      "/opt/homebrew/bin/luajit",
+      "/usr/local/bin/lua",
+      "/usr/local/bin/luajit",
+      "/usr/bin/lua",
+  ]
+  for candidate in candidates:
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+      return candidate
+
+  return None
+
+
 def run_command(args):
   """Handles `run` subcommand: compiles and executes a Sapphire file."""
 
@@ -106,9 +145,9 @@ def run_command(args):
   out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
 
   if target in ("love2d", "love"):
-    love_bin = shutil.which("love")
+    love_bin = _find_love_binary()
     if not love_bin:
-      print("Error: Love2D executable ('love') not found in PATH.", file=sys.stderr)
+      print("Error: Love2D executable ('love') not found in PATH or standard installation directories (/Applications/love.app).", file=sys.stderr)
       sys.exit(1)
     run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
     cmd = [love_bin, run_dir]
@@ -122,8 +161,7 @@ def run_command(args):
 
   print("\n--- Executing Sapphire Program ---")
   if target in ("lua", "lua5.1"):
-    lua_bin = (shutil.which("lua") or shutil.which("luajit") or
-               shutil.which("lua5.1"))
+    lua_bin = _find_lua_binary()
     if not lua_bin:
       print("Error: Lua interpreter ('lua', 'luajit', or 'lua5.1')"
             " not found in PATH.", file=sys.stderr)

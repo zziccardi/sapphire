@@ -80,7 +80,7 @@ class SapphireCLITest(unittest.TestCase):
   def test_run_subcommand_lua(self):
     test_args = ["sapphire", "run", self.sp_file, "-t", "lua"]
     with patch.object(sys, "argv", test_args):
-      with patch("shutil.which", return_value="/usr/bin/lua"):
+      with patch("src.cli.sapphire._find_lua_binary", return_value="/usr/bin/lua"):
         with patch("subprocess.run") as mock_run:
           mock_run.return_value.returncode = 0
           with self.assertRaises(SystemExit) as cm:
@@ -92,7 +92,7 @@ class SapphireCLITest(unittest.TestCase):
   def test_run_subcommand_lua_not_found(self):
     test_args = ["sapphire", "run", self.sp_file, "-t", "lua"]
     with patch.object(sys, "argv", test_args):
-      with patch("shutil.which", return_value=None):
+      with patch("src.cli.sapphire._find_lua_binary", return_value=None):
         with self.assertRaises(SystemExit) as cm:
           with suppress_output():
             main()
@@ -185,7 +185,7 @@ class SapphireCLITest(unittest.TestCase):
   def test_run_subcommand_love2d(self):
     test_args = ["sapphire", "run", self.sp_file, "-t", "love2d"]
     with patch.object(sys, "argv", test_args):
-      with patch("shutil.which", return_value="/usr/local/bin/love"):
+      with patch("src.cli.sapphire._find_love_binary", return_value="/usr/local/bin/love"):
         with patch("subprocess.run") as mock_run:
           mock_run.return_value.returncode = 0
           with self.assertRaises(SystemExit) as cm:
@@ -197,7 +197,7 @@ class SapphireCLITest(unittest.TestCase):
   def test_run_subcommand_love2d_not_found(self):
     test_args = ["sapphire", "run", self.sp_file, "-t", "love2d"]
     with patch.object(sys, "argv", test_args):
-      with patch("shutil.which", return_value=None):
+      with patch("src.cli.sapphire._find_love_binary", return_value=None):
         with self.assertRaises(SystemExit) as cm:
           with suppress_output():
             main()
