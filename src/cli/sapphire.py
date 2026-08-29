@@ -114,6 +114,7 @@ def run_command(args):
     cmd = [love_bin, run_dir]
     if dev_mode:
       _run_dev_watcher(source_file, output_file, target, sourcemap, cmd)
+      return
     else:
       print("\n--- Executing Love2D Engine ---")
       result = subprocess.run(cmd)
