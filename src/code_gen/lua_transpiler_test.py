@@ -770,6 +770,22 @@ class TestLuaTranspiler(unittest.TestCase):
       finally:
         os.unlink(tmp_path)
 
+  def test_dev_mode_import_registration(self):
+    """Verifies that import statements in dev_mode register dependencies with _SP_DEV_WATCHER."""
+    code = """
+    import lib.love2d.graphics;
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = LuaTranspiler(dev_mode=True)
+    out = transpiler.transpile(ast)
+    self.assertIn('_SP_DEV_WATCHER.register_file("lib/love2d/graphics.lua")', out)
+
 
   def test_transpile_file_with_imports(self):
     """Verifies that transpile_file recursively transpiles imported module dependencies."""

@@ -277,6 +277,28 @@ class SapphireCLITest(unittest.TestCase):
                 _run_dev_watcher(self.sp_file, "out.py", "python", False, ["python", "out.py"])
             self.assertEqual(cm.exception.code, 0)
 
+  def test_run_dev_watcher_love2d_file_change_marker(self):
+    proc = MagicMock()
+    proc.poll.side_effect = [None, None]
+    proc.returncode = 0
+    with patch("subprocess.Popen", return_value=proc):
+      with patch("time.sleep", side_effect=[None, KeyboardInterrupt]):
+        with patch("src.cli.sapphire.transpile_file") as mock_transpile:
+          with patch("src.cli.sapphire._collect_sp_watch_files", side_effect=[
+              {self.sp_file: 1.0},
+              {self.sp_file: 2.0},
+          ]):
+            out_lua = os.path.join(self.temp_dir.name, "main.lua")
+            with self.assertRaises(SystemExit) as cm:
+              with suppress_output():
+                _run_dev_watcher(self.sp_file, out_lua, "love2d", False, ["love", "."])
+            self.assertEqual(cm.exception.code, 0)
+            mock_transpile.assert_called_once()
+            marker_path = os.path.join(self.temp_dir.name, ".sapphire_reload")
+            self.assertTrue(os.path.exists(marker_path))
+            with open(marker_path, "r", encoding="utf-8") as f:
+              self.assertIn("main.lua", f.read())
+
   def test_run_dev_watcher_keyboard_interrupt_timeout(self):
     proc = MagicMock()
     proc.poll.return_value = None
@@ -289,6 +311,40 @@ class SapphireCLITest(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         proc.terminate.assert_called_once()
         proc.kill.assert_called_once()
+
+  def test_find_love_binary_lookup(self):
+    from src.cli.sapphire import _find_love_binary
+    # 1. When shutil.which finds love
+    with patch("shutil.which", return_value="/usr/local/bin/love"):
+      self.assertEqual(_find_love_binary(), "/usr/local/bin/love")
+
+    # 2. When shutil.which fails but macOS App bundle exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", side_effect=lambda p: p == "/Applications/love.app/Contents/MacOS/love"):
+        with patch("os.access", return_value=True):
+          self.assertEqual(_find_love_binary(), "/Applications/love.app/Contents/MacOS/love")
+
+    # 3. When nothing exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", return_value=False):
+        self.assertIsNone(_find_love_binary())
+
+  def test_find_lua_binary_lookup(self):
+    from src.cli.sapphire import _find_lua_binary
+    # 1. When shutil.which finds lua
+    with patch("shutil.which", return_value="/usr/bin/lua"):
+      self.assertEqual(_find_lua_binary(), "/usr/bin/lua")
+
+    # 2. When shutil.which fails but fallback exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", side_effect=lambda p: p == "/opt/homebrew/bin/lua"):
+        with patch("os.access", return_value=True):
+          self.assertEqual(_find_lua_binary(), "/opt/homebrew/bin/lua")
+
+    # 3. When nothing exists
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", return_value=False):
+        self.assertIsNone(_find_lua_binary())
 
 
 if __name__ == "__main__":
