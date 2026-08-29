@@ -72,6 +72,21 @@ def get_default_value_for_type_node(type_node: Optional[TypeNode]) -> Optional[A
   return None
 
 
+def is_coroutine_func(node: Optional[ASTNode]) -> bool:
+  """Returns True if a FuncDeclNode, ImplMemberNode, or FunctionType returns Coroutine."""
+  if node is None:
+    return False
+  func_node = getattr(node, "func_decl", node)
+  if getattr(func_node, "return_types", None):
+    for t in func_node.return_types:
+      if isinstance(t, BasicTypeNode) and t.name == "Coroutine":
+        return True
+  if getattr(func_node, "return_type", None):
+    if isinstance(func_node.return_type, BasicTypeNode) and func_node.return_type.name == "Coroutine":
+      return True
+  return False
+
+
 class BaseTranspiler(ABC):
   """Abstract base for all Sapphire code-generation backends.
 

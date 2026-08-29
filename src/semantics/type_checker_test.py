@@ -4290,6 +4290,125 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot unwrap non-optional type", str(ctx.exception))
 
+  def test_coroutine_type_checking(self):
+    """Verifies type checking for Coroutine declarations, yields, returns, and methods."""
+    # 1. Valid Coroutine<int> and Coroutine<void>
+    self._check("""
+    func count_down(start: int): Coroutine<int> {
+      var current = start;
+      while current > 0 {
+        yield current;
+        current -= 1;
+      }
+    }
+
+    func patrol(): Coroutine<void> {
+      yield;
+      return;
+    }
+
+    func test_consumer() {
+      var co = count_down(5);
+      let step_val: int? = co.step();
+      let done: bool = co.is_done();
+      co.reset();
+
+      var p = patrol();
+      p.step();
+      let p_done: bool = p.is_done();
+    }
+    """)
+
+    # 2. Coroutine method on struct
+    self._check("""
+    struct Agent {
+      var speed: int = 10;
+    }
+    impl Agent {
+      func tick(var self): Coroutine<int> {
+        yield self.speed;
+      }
+    }
+    func test() {
+      var a = Agent { speed = 20 };
+      var co = a.tick();
+      let val = co.step();
+    }
+    """)
+
+    # 3. Yielding wrong type in Coroutine<int>
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_coro(): Coroutine<int> {
+        yield "hello";
+      }
+      """)
+    self.assertIn("Cannot yield value of type 'String' in Coroutine<int>", str(ctx.exception))
+
+    # 4. Bare yield in Coroutine<int>
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_coro(): Coroutine<int> {
+        yield;
+      }
+      """)
+    self.assertIn("Must yield a value of type 'int' in Coroutine<int>", str(ctx.exception))
+
+    # 5. Yielding non-void value in Coroutine<void>
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_coro(): Coroutine<void> {
+        yield 42;
+      }
+      """)
+    self.assertIn("Cannot yield value of type 'int' in Coroutine<void>", str(ctx.exception))
+
+    # 6. Yield in non-coroutine function
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func regular_func(): int {
+        yield 10;
+        return 10;
+      }
+      """)
+    self.assertIn("Cannot yield in a function with return type 'int'", str(ctx.exception))
+
+    # 7. Returning value from coroutine
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_return(): Coroutine<int> {
+        yield 1;
+        return 10;
+      }
+      """)
+    self.assertIn("Cannot return a value from a coroutine", str(ctx.exception))
+
+    # 8. Nested match inside coroutine (yield in match arm vs yield in coroutine)
+    self._check("""
+    enum Status { Ready, Busy }
+    func worker(s: Status): Coroutine<int> {
+      let code = match s {
+        Status.Ready -> {
+          yield 1;
+        },
+        Status.Busy -> {
+          yield 2;
+        },
+      };
+      yield code;
+    }
+    """)
+
+    # 9. Invalid method on Coroutine
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        var co: Coroutine<int>;
+        co.invalid_method();
+      }
+      """)
+    self.assertIn("Coroutine has no method 'invalid_method'", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

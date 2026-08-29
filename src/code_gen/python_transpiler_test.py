@@ -606,6 +606,33 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn('if __name__ == "__main__":', py_code)
     self.assertIn('main()', py_code)
 
+  def test_coroutine_python_transpilation(self):
+    """Verifies that Coroutines transpile to Python generator wrappers and execute correctly."""
+    code = """
+    func count_down(from_val: int): Coroutine<int> {
+      var curr = from_val;
+      while curr > 0 {
+        yield curr;
+        curr -= 1;
+      }
+    }
+
+    func run_coro(): int {
+      var co = count_down(3);
+      let v1 = co.step() ?? 0;
+      let v2 = co.step() ?? 0;
+      let v3 = co.step() ?? 0;
+      let done1 = co.is_done() ? 1 : 0;
+      let v4 = co.step() ?? 0;
+      let done2 = co.is_done() ? 1 : 0;
+      co.reset();
+      let v_reset = co.step() ?? 0;
+      return v1 * 1000 + v2 * 100 + v3 * 10 + v_reset;
+    }
+    """
+    result = self._transpile_and_run(code, "run_coro()")
+    self.assertEqual(result, 3213)
+
   def test_transpile_file_success(self):
     """Verifies transpile_file default and custom output file handling."""
     with tempfile.TemporaryDirectory() as temp_dir:

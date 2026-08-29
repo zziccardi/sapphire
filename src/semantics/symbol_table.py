@@ -444,6 +444,40 @@ class MapType(Type):
     return f"[{self.key_type}: {self.value_type}]"
 
 
+class CoroutineType(Type):
+  """Represents a Coroutine type (e.g. 'Coroutine<T>' or 'Coroutine<void>')."""
+
+  def __init__(self, yield_type: Optional[Type] = None):
+    self.yield_type = yield_type if yield_type is not None else NoneType()
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, CoroutineType):
+      if (isinstance(self.yield_type, NoneType) or
+          isinstance(other.yield_type, NoneType)):
+        return True
+      return self.yield_type.is_compatible(other.yield_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, CoroutineType):
+      return False
+    return self.yield_type == other.yield_type
+
+  def __repr__(self) -> str:
+    if isinstance(self.yield_type, NoneType):
+      return "Coroutine<void>"
+    return f"Coroutine<{self.yield_type}>"
+
+
+COROUTINE_METHODS: Set[str] = {
+    "step",
+    "is_done",
+    "reset",
+}
+
+
 STRING_METHODS: Dict[str, FunctionType] = {
     "size": FunctionType(
         [StringType()],
@@ -699,6 +733,7 @@ class SymbolTable:
     self.current_scope.define_type("String", StringType())
     self.current_scope.define_type("none", NoneType())
     self.current_scope.define_type("void", NoneType())
+    self.current_scope.define_type("Coroutine", CoroutineType(NoneType()))
     arena_t = ArenaType()
     self.current_scope.define_type("Arena", arena_t)
     self.current_scope.define(

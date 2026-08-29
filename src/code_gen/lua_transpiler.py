@@ -19,7 +19,7 @@ from src.parser.ast_builder import ASTBuilder
 from src.semantics.type_checker import TypeChecker, SemanticError
 from src.semantics.symbol_table import MapType, RangeType
 from src.code_gen.source_map import SourceMapBuilder
-from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node
+from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.transpiler_registry import TranspilerRegistry
 
 
@@ -29,6 +29,59 @@ from src.code_gen.transpiler_registry import TranspilerRegistry
 # ==========================================
 
 LUA_RUNTIME_PREAMBLE = """-- Sapphire Lua 5.1 Runtime Header
+
+local _Coroutine = {}
+_Coroutine.__index = _Coroutine
+
+function _Coroutine.create(fn, ...)
+  local args = { ... }
+  local n = select("#", ...)
+  local self = setmetatable({}, _Coroutine)
+  self._fn = fn
+  self._args = args
+  self._n = n
+  self._done = false
+  self:reset()
+  return self
+end
+
+function _Coroutine:step(...)
+  if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    self._done = true
+    return nil
+  end
+  local ok, val = coroutine.resume(self._co, ...)
+  if not ok then
+    error(val)
+  end
+  if coroutine.status(self._co) == "dead" then
+    self._done = true
+    return val
+  end
+  return val
+end
+
+function _Coroutine:is_done()
+  if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    self._done = true
+    return true
+  end
+  return false
+end
+
+function _Coroutine:reset()
+  local fn = self._fn
+  local args = self._args
+  local n = self._n or #args
+  self._co = coroutine.create(function()
+    if table.unpack then
+      return fn(table.unpack(args, 1, n))
+    else
+      return fn(unpack(args, 1, n))
+    end
+  end)
+  self._done = false
+end
 
 local Arena = {}
 Arena.__index = Arena
@@ -955,7 +1008,23 @@ class LuaTranspiler(BaseTranspiler):
         temp.known_structs = self.known_structs
         temp.visit(p.default_expr)
         self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
-    self.visit(func.body)
+    if is_coroutine_func(func):
+      self.newline()
+      all_params = (["self"] if node.modifier != "static" else []) + [p.name for p in func.parameters if p.name != "self"]
+      if all_params:
+        self.emit(f"return _Coroutine.create(function({', '.join(all_params)})")
+      else:
+        self.emit("return _Coroutine.create(function()")
+      self.indent()
+      self.visit(func.body)
+      self.dedent()
+      self.newline()
+      if all_params:
+        self.emit(f"end, {', '.join(all_params)})")
+      else:
+        self.emit("end)")
+    else:
+      self.visit(func.body)
     self.dedent()
     self.newline()
     self.emit("end")
@@ -991,7 +1060,22 @@ class LuaTranspiler(BaseTranspiler):
         temp.known_structs = self.known_structs
         temp.visit(p.default_expr)
         self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
-    self.visit(node.body)
+    if is_coroutine_func(node):
+      self.newline()
+      if params:
+        self.emit(f"return _Coroutine.create(function({', '.join(params)})")
+      else:
+        self.emit("return _Coroutine.create(function()")
+      self.indent()
+      self.visit(node.body)
+      self.dedent()
+      self.newline()
+      if params:
+        self.emit(f"end, {', '.join(params)})")
+      else:
+        self.emit("end)")
+    else:
+      self.visit(node.body)
     self.dedent()
     self.newline()
     self.emit("end")
@@ -1205,19 +1289,33 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
     if target:
       self.emit(f"{target} = ")
-    if not exprs:
-      self.emit("nil")
-    elif len(exprs) == 1:
-      self.visit(exprs[0])
+      if not exprs:
+        self.emit("nil")
+      elif len(exprs) == 1:
+        self.visit(exprs[0])
+      else:
+        if match_node:
+          match_node._is_multi_yield = True
+        self.emit("{ ")
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        self.emit(" }")
     else:
-      if match_node:
-        match_node._is_multi_yield = True
-      self.emit("{ ")
-      for idx, expr in enumerate(exprs):
-        if idx > 0:
-          self.emit(", ")
-        self.visit(expr)
-      self.emit(" }")
+      if not exprs:
+        self.emit("coroutine.yield()")
+      elif len(exprs) == 1:
+        self.emit("coroutine.yield(")
+        self.visit(exprs[0])
+        self.emit(")")
+      else:
+        self.emit("coroutine.yield(")
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        self.emit(")")
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
     if not getattr(node, "_is_lifted", False):

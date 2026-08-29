@@ -634,6 +634,59 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('_M.DrawMode = enums.DrawMode', output)
     self.assertIn('return _M', output)
 
+  def test_coroutine_transpilation(self):
+    """Verifies that Coroutines transpile to Lua coroutine wrappers and execute correctly."""
+    code = """
+    func count_down(from_val: int): Coroutine<int> {
+      var curr = from_val;
+      while curr > 0 {
+        yield curr;
+        curr -= 1;
+      }
+    }
+
+    func main() {
+      var co = count_down(3);
+      let v1 = co.step();
+      let v2 = co.step();
+      let v3 = co.step();
+      let done1 = co.is_done();
+      let v4 = co.step();
+      let done2 = co.is_done();
+      co.reset();
+      let v_reset = co.step();
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("_Coroutine.create", output)
+    self.assertIn("coroutine.yield", output)
+    self.assertIn(":step()", output)
+    self.assertIn(":is_done()", output)
+    self.assertIn(":reset()", output)
+
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if lua_bin:
+      test_driver = output + """
+      local co = count_down(3)
+      assert(co:step() == 3)
+      assert(co:step() == 2)
+      assert(co:step() == 1)
+      assert(co:step() == nil)
+      assert(co:is_done() == true)
+      assert(co:step() == nil)
+      co:reset()
+      assert(co:is_done() == false)
+      assert(co:step() == 3)
+      """
+      with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+        f.write(test_driver)
+        tmp_path = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+      finally:
+        os.unlink(tmp_path)
+
 
   def test_transpile_file_with_imports(self):
     """Verifies that transpile_file recursively transpiles imported module dependencies."""
