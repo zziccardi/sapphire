@@ -625,36 +625,54 @@ end
 LUA_DEV_RELOAD_WATCHER = """-- Sapphire Dev Mode: In-place Hot-Reloading & Error Boundary Hook
 local _SP_DEV_WATCHER = {
   last_modified = {},
-  poll_interval = 0.5,
+  poll_interval = 0.2,
   elapsed = 0
 }
+
+local function _sp_scan_dir(dir, out)
+  if not love or not love.filesystem then return end
+  local items = love.filesystem.getDirectoryItems(dir)
+  for _, item in ipairs(items) do
+    local path = (dir == "" or dir == ".") and item or (dir .. "/" .. item)
+    local info = love.filesystem.getInfo(path)
+    if info then
+      if info.type == "file" and path:sub(-4) == ".lua" then
+        table.insert(out, path)
+      elseif info.type == "directory" and item ~= ".git" and item ~= "__pycache__" then
+        _sp_scan_dir(path, out)
+      end
+    end
+  end
+end
+
 function _SP_DEV_WATCHER.check(dt)
   if not love or not love.filesystem then return end
   _SP_DEV_WATCHER.elapsed = _SP_DEV_WATCHER.elapsed + (dt or 0)
   if _SP_DEV_WATCHER.elapsed < _SP_DEV_WATCHER.poll_interval then return end
   _SP_DEV_WATCHER.elapsed = 0
-  local files = love.filesystem.getDirectoryItems("")
+  local files = {}
+  _sp_scan_dir("", files)
   for _, file in ipairs(files) do
-    if file:sub(-4) == ".lua" then
-      local info = love.filesystem.getInfo(file)
-      if info and info.modtime then
-        if _SP_DEV_WATCHER.last_modified[file] and _SP_DEV_WATCHER.last_modified[file] ~= info.modtime then
-          _SP_DEV_WATCHER.last_modified[file] = info.modtime
-          print("[Sapphire Hot-Reload] Detected change in " .. file .. ", reloading...")
-          local chunk, err = love.filesystem.load(file)
-          if chunk then
-            local ok, runtime_err = pcall(chunk)
-            if not ok then
-              print("[Sapphire Hot-Reload Error] " .. tostring(runtime_err))
-            else
-              print("[Sapphire Hot-Reload] Successfully reloaded " .. file)
-            end
+    local info = love.filesystem.getInfo(file)
+    if info and info.modtime then
+      if _SP_DEV_WATCHER.last_modified[file] and _SP_DEV_WATCHER.last_modified[file] ~= info.modtime then
+        _SP_DEV_WATCHER.last_modified[file] = info.modtime
+        print("[Sapphire Hot-Reload] Detected change in " .. file .. ", reloading...")
+        local modname = file:gsub("%.lua$", ""):gsub("/", ".")
+        package.loaded[modname] = nil
+        local chunk, err = love.filesystem.load(file)
+        if chunk then
+          local ok, runtime_err = pcall(chunk)
+          if not ok then
+            print("[Sapphire Hot-Reload Error] " .. tostring(runtime_err))
           else
-            print("[Sapphire Hot-Reload Compile Error] " .. tostring(err))
+            print("[Sapphire Hot-Reload] Successfully reloaded " .. file)
           end
         else
-          _SP_DEV_WATCHER.last_modified[file] = info.modtime
+          print("[Sapphire Hot-Reload Compile Error] " .. tostring(err))
         end
+      else
+        _SP_DEV_WATCHER.last_modified[file] = info.modtime
       end
     end
   end
@@ -756,6 +774,10 @@ class LuaTranspiler(BaseTranspiler):
     self.emit(LUA_RUNTIME_PREAMBLE)
     self.newline()
 
+    if self.dev_mode:
+      self.emit(LUA_DEV_RELOAD_WATCHER)
+      self.newline()
+
     # 1b. Transpile module imports
     for imp in getattr(program, "imports", []):
       self.visit(imp)
@@ -818,11 +840,6 @@ class LuaTranspiler(BaseTranspiler):
 
     if has_main:
       self.emit("main()")
-      self.newline()
-
-    if self.dev_mode:
-      self.newline()
-      self.emit(LUA_DEV_RELOAD_WATCHER)
       self.newline()
 
     for cb in self.on_reload_callbacks:
@@ -1207,6 +1224,12 @@ class LuaTranspiler(BaseTranspiler):
 
     self.newline()
     names_str = ", ".join(node.names)
+    if self.dev_mode and self.indent_level == 0 and len(node.names) == 1 and node.exprs:
+      name = node.names[0]
+      self.emit(f"{name} = {name} ~= nil and {name} or ")
+      self.visit(node.exprs[0])
+      return
+
     self.emit(f"local {names_str}")
     if node.exprs:
       self.emit(" = ")

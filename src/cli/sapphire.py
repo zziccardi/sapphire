@@ -25,17 +25,21 @@ TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
 
 
 def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
-  """Collects modification times for all .sp files in the project / directory of root_path."""
+  """Collects modification times for all .sp files in the project and source directory."""
   watch_files = {}
-  dir_path = os.path.dirname(os.path.abspath(root_path)) or "."
-  for root, _, files in os.walk(dir_path):
-    for f in files:
-      if f.endswith(".sp"):
-        p = os.path.join(root, f)
-        try:
-          watch_files[p] = os.path.getmtime(p)
-        except OSError:
-          pass
+  paths_to_check = {
+      os.path.dirname(os.path.abspath(root_path)) or ".",
+      os.getcwd(),
+  }
+  for dir_path in paths_to_check:
+    for root, _, files in os.walk(dir_path):
+      for f in files:
+        if f.endswith(".sp"):
+          p = os.path.join(root, f)
+          try:
+            watch_files[p] = os.path.getmtime(p)
+          except OSError:
+            pass
   return watch_files
 
 

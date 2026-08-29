@@ -49,7 +49,7 @@ func draw() {
                           width = 700.0, height = 500.0);
 
   // Draw mock hero character procedurally (in practice use image asset)
-  love.graphics.setColorRgba(0.9, 0.3, 0.4);
+  love.graphics.setColorRgba(0.9, 0.8, 0.4);
   love.graphics.circle(mode = enums.DrawMode.Fill, x = hero_x, y = hero_y,
                        radius = 24.0);
 

@@ -101,11 +101,11 @@ sapphire build samples/love2d_demo.sp -t lua -o main.lua
 # Build for release without source map or runtime demangler:
 sapphire build samples/love2d_demo.sp -t lua -o main.lua --no_sourcemap
 
-# Run a Love2D game directly with live hot-reloading:
-sapphire run samples/love2d_demo.sp -t love2d --dev
-
 # Run transpiled game in Love2D (passing the directory containing `main.lua`):
 love .
+
+# Run a Love2D game directly with live hot-reloading:
+sapphire run samples/love2d_demo.sp -t love2d -o main.lua --dev
 
 # Run native test suites:
 sapphire test
