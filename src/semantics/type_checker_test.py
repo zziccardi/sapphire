@@ -1529,14 +1529,14 @@ class TestTypeChecker(unittest.TestCase):
     from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
     from src.semantics.symbol_table import StructType
 
-    
+
     checker = TypeChecker()
     struct_type = StructType("Point")
     checker.symbol_table.define_type("Point", struct_type)
-    
+
     arg = ArgumentNode(None, LiteralNode(10, "int"))
     node = StructInitializerNode("Point", [arg])
-    
+
     with self.assertRaises(SemanticError) as context:
       checker.visit(node)
       if checker.errors:
@@ -1725,7 +1725,7 @@ class TestTypeChecker(unittest.TestCase):
     from src.parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
     from src.semantics.symbol_table import VariableSymbol, StructType, ArenaType
 
-    
+
     checker = TypeChecker()
     # Define parent and nested scopes
     parent_scope = checker.symbol_table.current_scope
@@ -1733,19 +1733,19 @@ class TestTypeChecker(unittest.TestCase):
     nested_scope = checker.symbol_table.current_scope
     # Go back to parent scope
     checker.symbol_table.current_scope = parent_scope
-    
+
     # Define local_arena in parent scope so lookup succeeds, but mock its scope_defined to nested_scope!
     arena_sym = VariableSymbol("local_arena", ArenaType(), is_mutable=False)
     checker.symbol_table.define("local_arena", arena_sym)
     arena_sym.scope_defined = nested_scope
-    
+
     # Try to declare a variable in parent scope pointing to local_arena
     init_expr = StructInitializerNode("Point", [], arena_expr=IdentifierNode("local_arena"))
     node = VarDeclNode(is_mutable=False, name="escaped_var", val_type=None, expr=init_expr)
-    
+
     # We must define Point type so it doesn't fail on Point lookup
     checker.symbol_table.define_type("Point", StructType("Point"))
-    
+
     checker.visit(node)
     self.assertTrue(any("in outer scope cannot hold a reference to an object allocated in nested arena" in err for err in checker.errors))
 
@@ -4519,10 +4519,18 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_array_and_map_get_method(self):
+    """Verifies that array.get and map.get resolve to OptionalType."""
+    self._check("""
+    func test_get() {
+      let arr = [10, 20, 30];
+      let val_arr: int? = arr.get(0);
+
+      let m = {"a": 1, "b": 2};
+      let val_map: int? = m.get("a");
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()
-
-
-
-

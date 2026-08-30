@@ -532,6 +532,16 @@ local _sapphire_array_clear = function(arr)
   end
 end
 
+local _sapphire_array_get = function(arr, index)
+  if arr == nil then return nil end
+  local len = #arr
+  local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+  if idx_1 >= 1 and idx_1 <= len then
+    return arr[idx_1]
+  end
+  return nil
+end
+
 local _sapphire_map_size = function(m)
   local count = 0
   for _ in pairs(m) do
@@ -546,6 +556,11 @@ end
 
 local _sapphire_map_contains = function(m, k)
   return m[k] ~= nil
+end
+
+local _sapphire_map_get = function(m, k)
+  if m == nil then return nil end
+  return m[k]
 end
 
 local _sapphire_map_keys = function(m)
@@ -1926,6 +1941,13 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(receiver)
         self.emit(" == 0)")
         return
+      elif method == "get":
+        self.emit("_sapphire_array_get(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
       elif method == "map":
         self.emit("_sapphire_array_map(")
         self.visit(receiver)
@@ -2115,6 +2137,13 @@ class LuaTranspiler(BaseTranspiler):
         return
       elif method == "contains":
         self.emit("_sapphire_map_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "get":
+        self.emit("_sapphire_map_get(")
         self.visit(receiver)
         self.emit(", ")
         self.visit(node.arguments[0].expr)

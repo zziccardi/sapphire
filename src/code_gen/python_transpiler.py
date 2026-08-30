@@ -1406,6 +1406,13 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(receiver)
         self.emit(") == 0)")
         return
+      elif method == "get":
+        self.emit("_sapphire_array_get(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
       elif method == "map":
         self.emit("_sapphire_array_map(")
         self.visit(receiver)
@@ -1595,6 +1602,13 @@ class PythonTranspiler(BaseTranspiler):
         return
       elif method == "contains":
         self.emit("_sapphire_map_contains(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
+      elif method == "get":
+        self.emit("_sapphire_map_get(")
         self.visit(receiver)
         self.emit(", ")
         self.visit(node.arguments[0].expr)

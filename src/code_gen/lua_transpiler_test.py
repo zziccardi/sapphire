@@ -1120,6 +1120,7 @@ class TestLuaTranspiler(unittest.TestCase):
       let sorted_asc = [3, 1, 2].sort();
       let sorted_pos = [3, 1, 2].sort((a, b) -> a - b, true);
       let sorted_named = [3, 1, 2].sort(by = (a, b) -> a - b, reverse = true);
+      let got_val = nums.get(1);
       let joined = ["a", "b"].join("-");
 
       var mut_arr = [10, 20];
@@ -1143,6 +1144,7 @@ class TestLuaTranspiler(unittest.TestCase):
     lua = self._transpile(code)
     self.assertIn("#nums", lua)
     self.assertIn("(#nums == 0)", lua)
+    self.assertIn("_sapphire_array_get(nums, 1)", lua)
     self.assertIn("_sapphire_array_map(nums", lua)
     self.assertIn("_sapphire_array_filter(nums", lua)
     self.assertIn("_sapphire_array_reduce(nums, 0", lua)
@@ -1164,6 +1166,7 @@ class TestLuaTranspiler(unittest.TestCase):
       let sz = m.size();
       let is_empty = m.empty();
       let has_a = m.contains("a");
+      let got_a = m.get("a");
       let k_list = m.keys();
       let v_list = m.values();
 
@@ -1178,6 +1181,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_map_size(m)", lua)
     self.assertIn("_sapphire_map_empty(m)", lua)
     self.assertIn("_sapphire_map_contains(m, \"a\")", lua)
+    self.assertIn("_sapphire_map_get(m, \"a\")", lua)
     self.assertIn("_sapphire_map_keys(m)", lua)
     self.assertIn("_sapphire_map_values(m)", lua)
     self.assertIn("_sapphire_map_insert(mut_m, \"y\", 200)", lua)

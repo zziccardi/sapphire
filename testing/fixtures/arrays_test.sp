@@ -37,3 +37,14 @@ func test_array_contains(): int {
   }
   return 0;
 }
+
+@test
+func test_array_get(): int {
+  let items = [10, 20, 30];
+  let val_found = items.get(1);
+  let val_oob = items.get(99);
+  if val_found == 20 && val_oob == none {
+    return 1;
+  }
+  return 0;
+}

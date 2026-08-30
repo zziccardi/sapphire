@@ -2171,6 +2171,8 @@ class TypeChecker:
           return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
         elif node.member == "empty":
           return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
+        elif node.member == "get":
+          return FunctionType([receiver_type, PrimitiveType("int")], OptionalType(elem_t), param_names=["self", "index"], has_self=True)
         elif node.member == "map":
           return FunctionType([receiver_type, FunctionType([elem_t], InferredType()), PrimitiveType("bool")], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn", "in_place"], has_self=True, num_defaults=1)
         elif node.member == "filter":
@@ -2211,6 +2213,8 @@ class TypeChecker:
           return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
         elif node.member == "contains":
           return FunctionType([receiver_type, k_type], PrimitiveType("bool"), param_names=["self", "key"], has_self=True)
+        elif node.member == "get":
+          return FunctionType([receiver_type, k_type], OptionalType(v_type), param_names=["self", "key"], has_self=True)
         elif node.member == "keys":
           return FunctionType([receiver_type], ArrayType(k_type), param_names=["self"], has_self=True)
         elif node.member == "values":
