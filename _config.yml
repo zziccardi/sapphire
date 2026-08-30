@@ -1,0 +1,13 @@
+title: Sapphire Docs
+description: Documentation for the Sapphire programming language
+
+remote_theme: just-the-docs/just-the-docs
+
+plugins:
+  - jekyll-remote-theme
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
