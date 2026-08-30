@@ -4451,6 +4451,62 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot yield multiple values in Coroutine<int>", str(ctx.exception))
 
+  def test_default_parameter_ordering_function(self):
+    """Verifies that non-default parameters following default parameters in functions raise a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_func(a: int = 1, b: int): int {
+        return a + b;
+      }
+      """)
+    self.assertIn("Parameter without a default value 'b' cannot follow a parameter with a default value.", str(ctx.exception))
+
+  def test_default_parameter_ordering_trait(self):
+    """Verifies that non-default parameters following default parameters in trait methods raise a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      trait BadTrait {
+        func bad_method(self, opt: int = 0, req: int);
+      }
+      """)
+    self.assertIn("Parameter without a default value 'req' cannot follow a parameter with a default value.", str(ctx.exception))
+
+  def test_default_parameter_ordering_impl(self):
+    """Verifies that non-default parameters following default parameters in struct methods raise a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      impl Point {
+        func bad_method(self, opt: int = 0, req: int) {
+          self.x = opt + req;
+        }
+      }
+      """)
+    self.assertIn("Parameter without a default value 'req' cannot follow a parameter with a default value.", str(ctx.exception))
+
+  def test_default_parameter_ordering_valid(self):
+    """Verifies that functions and methods with default parameters placed at the end pass type checking."""
+    self._check("""
+    func good_func(a: int, b: int = 1): int {
+      return a + b;
+    }
+
+    trait GoodTrait {
+      func good_method(self, req: int, opt: int = 0);
+    }
+
+    struct GoodStruct {
+      var x: int;
+    }
+    impl GoodStruct {
+      func good_method(self, req: int, opt: int = 0) {
+        self.x = req + opt;
+      }
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

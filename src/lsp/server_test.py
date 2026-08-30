@@ -2420,6 +2420,22 @@ func run_draw(x: float) {
       self.assertIn("(function)", res_floor.contents.value)
       self.assertIn("floor", res_floor.contents.value)
 
+  def test_diagnostics_for_default_parameter_ordering(self):
+    from src.lsp.server import validate_source
+    doc_uri = "file:///graphics_test.sp"
+    doc_text = """
+    trait Graphics {
+      func drawImage(image: int, quad: int = 0, x: float, y: float);
+    }
+    """
+    validate_source(self.ls, doc_uri, doc_text)
+    self.ls.text_document_publish_diagnostics.assert_called()
+    call_args = self.ls.text_document_publish_diagnostics.call_args[0][0]
+    self.assertEqual(call_args.uri, doc_uri)
+    self.assertTrue(len(call_args.diagnostics) >= 1)
+    diag_messages = [d.message for d in call_args.diagnostics]
+    self.assertTrue(any("cannot follow a parameter with a default value" in msg for msg in diag_messages))
+
 
 if __name__ == "__main__":
   unittest.main()

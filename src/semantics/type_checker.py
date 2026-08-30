@@ -321,8 +321,20 @@ class TypeChecker:
           except Exception:  # pragma: no cover
             pass
 
+  def _validate_parameter_defaults(self, parameters: List[ParameterNode]) -> None:
+    """Validates that parameters without default values do not follow parameters with default values."""
+    seen_default = False
+    for p in parameters:
+      if getattr(p, "default_expr", None) is not None:
+        seen_default = True
+      elif seen_default:
+        self.error(
+            f"Parameter without a default value '{p.name}' cannot follow a parameter with a default value.",
+            node=p,
+        )
+
   def _declare_globals(self, program: ProgramNode) -> None:
-    """Pre-pass to register types and global function symbols in the symbol table."""
+    """Pass 1: Collect struct, enum, and function declarations into global scope."""
     for decl in program.declarations:
       if isinstance(decl, StructDeclNode):
         if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
@@ -368,6 +380,7 @@ class TypeChecker:
           for tp in decl.type_params:
             self.symbol_table.define_type(tp, GenericTypeParameter(tp))
         for member in decl.members:
+          self._validate_parameter_defaults(member.parameters)
           p_types = []
           for p in member.parameters:
             if p.name == "self" and p.param_type is None:
@@ -440,6 +453,7 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
+        self._validate_parameter_defaults(decl.parameters)
         if decl.type_params:
           self.symbol_table.enter_scope()
           for tp in decl.type_params:
@@ -559,6 +573,8 @@ class TypeChecker:
     """Pre-pass to register methods defined inside impl blocks onto struct types."""
     for decl in program.declarations:
       if isinstance(decl, ImplBlockNode):
+        for member in decl.members:
+          self._validate_parameter_defaults(member.func_decl.parameters)
         if self._get_impl_type_params(decl):
           continue
         struct_type = self.symbol_table.lookup_type(decl.struct_name)
