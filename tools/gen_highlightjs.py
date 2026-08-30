@@ -85,7 +85,7 @@ def generate_head_custom_html(grammar_path: Path, theme: str = "github") -> str:
           end: /[{{;]/,
           excludeEnd: true,
           contains: [
-            hljs.inherit(hljs.TITLE_MODE, {{ begin: /[a-zA-Z_][a-zA-Z0-9_]*/ }}),
+            {{ className: 'title.function', begin: /[a-zA-Z_][a-zA-Z0-9_]*/ }},
             {{
               className: 'params',
               begin: /\\(/,
@@ -109,15 +109,20 @@ def generate_head_custom_html(grammar_path: Path, theme: str = "github") -> str:
     }};
   }});
 
-  document.addEventListener('DOMContentLoaded', () => {{
-    // Select code blocks inside Kramdown's language-sapphire containers.
+  function highlightSapphire() {{
     const targets = document.querySelectorAll(
-      '.language-sapphire code, pre code.language-sapphire'
+      'code.language-sapphire, .language-sapphire code'
     );
     targets.forEach((el) => {{
       hljs.highlightElement(el);
     }});
-  }});
+  }}
+
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', highlightSapphire);
+  }} else {{
+    highlightSapphire();
+  }}
 </script>
 """
 
