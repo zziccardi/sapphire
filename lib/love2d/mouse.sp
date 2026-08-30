@@ -10,12 +10,12 @@ trait Cursor {
 }
 
 trait Mouse {
-  func getPosition(): float, float;
-  func getX(): float;
-  func getY(): float;
-  func isDown(button: int): bool;
-  func setVisible(visible: bool);
-  func isVisible(): bool;
-  func newCursor(filename: String, hotx: int = 0, hoty: int = 0): Cursor;
-  func setCursor(cursor: Cursor);
+  static func getPosition(): float, float;
+  static func getX(): float;
+  static func getY(): float;
+  static func isDown(button: int): bool;
+  static func setVisible(visible: bool);
+  static func isVisible(): bool;
+  static func newCursor(filename: String, hotx: int = 0, hoty: int = 0): Cursor;
+  static func setCursor(cursor: Cursor);
 }

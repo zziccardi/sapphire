@@ -7,7 +7,7 @@ export {
 }
 
 trait Keyboard {
-  func isDown(key: enums.KeyCode): bool;
-  func setKeyRepeat(enable: bool);
-  func hasKeyRepeat(): bool;
+  static func isDown(key: enums.KeyCode): bool;
+  static func setKeyRepeat(enable: bool);
+  static func hasKeyRepeat(): bool;
 }

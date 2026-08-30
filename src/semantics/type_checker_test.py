@@ -1529,14 +1529,14 @@ class TestTypeChecker(unittest.TestCase):
     from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
     from src.semantics.symbol_table import StructType
 
-    
+
     checker = TypeChecker()
     struct_type = StructType("Point")
     checker.symbol_table.define_type("Point", struct_type)
-    
+
     arg = ArgumentNode(None, LiteralNode(10, "int"))
     node = StructInitializerNode("Point", [arg])
-    
+
     with self.assertRaises(SemanticError) as context:
       checker.visit(node)
       if checker.errors:
@@ -1725,7 +1725,7 @@ class TestTypeChecker(unittest.TestCase):
     from src.parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
     from src.semantics.symbol_table import VariableSymbol, StructType, ArenaType
 
-    
+
     checker = TypeChecker()
     # Define parent and nested scopes
     parent_scope = checker.symbol_table.current_scope
@@ -1733,19 +1733,19 @@ class TestTypeChecker(unittest.TestCase):
     nested_scope = checker.symbol_table.current_scope
     # Go back to parent scope
     checker.symbol_table.current_scope = parent_scope
-    
+
     # Define local_arena in parent scope so lookup succeeds, but mock its scope_defined to nested_scope!
     arena_sym = VariableSymbol("local_arena", ArenaType(), is_mutable=False)
     checker.symbol_table.define("local_arena", arena_sym)
     arena_sym.scope_defined = nested_scope
-    
+
     # Try to declare a variable in parent scope pointing to local_arena
     init_expr = StructInitializerNode("Point", [], arena_expr=IdentifierNode("local_arena"))
     node = VarDeclNode(is_mutable=False, name="escaped_var", val_type=None, expr=init_expr)
-    
+
     # We must define Point type so it doesn't fail on Point lookup
     checker.symbol_table.define_type("Point", StructType("Point"))
-    
+
     checker.visit(node)
     self.assertTrue(any("in outer scope cannot hold a reference to an object allocated in nested arena" in err for err in checker.errors))
 
@@ -2436,6 +2436,80 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+    # Invalid enum member access pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ok, NotFound }
+      enum Other { Bad }
+      func test_enum_mismatch(s: Status) {
+        let x = match s {
+          Other.Bad -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("not a valid variant of enum 'Status'", str(ctx.exception))
+
+    # Undefined identifier in enum pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ok }
+      func test_enum_undef(s: Status) {
+        let x = match s {
+          UnknownVariant -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("Undefined identifier 'UnknownVariant'", str(ctx.exception))
+
+    # Non-enum literal in enum pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ok }
+      func test_enum_lit(s: Status) {
+        let x = match s {
+          123 -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("not a valid variant of enum 'Status'", str(ctx.exception))
+
+    # Non-bool literal in bool pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_bool_lit(b: bool) {
+        let x = match b {
+          123 -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("Bool match pattern must be 'true' or 'false'", str(ctx.exception))
+
+    # Optional pattern with value match and incompatible type
+    self._check("""
+    func test_opt_val(v: int?): int {
+      return match v {
+        10 -> 1,
+        none -> 0,
+        ... -> 2
+      };
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_opt_incompat(v: int?) {
+        let x = match v {
+          "string_pat" -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("is incompatible with optional inner type 'int'", str(ctx.exception))
+
     # Struct member pattern type mismatch
     with self.assertRaises(SemanticError):
       self._check("""
@@ -2463,11 +2537,17 @@ class TestTypeChecker(unittest.TestCase):
 
     # Enum identifier pattern matching enum type name
     self._check("""
-    enum Status { Status }
+    enum Status { Active, Inactive }
     func test_enum_name(s: Status): int {
       return match s {
         Status -> 1,
         ... -> 0
+      };
+    }
+    func test_enum_bare(s: Status): int {
+      return match s {
+        Active -> 1,
+        Inactive -> 2
       };
     }
     """)
@@ -3825,29 +3905,36 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
   def test_dynamic_indexing_type_checking(self):
-    """Verifies dynamic array and map indexing return optional types while constant indexing returns non-optional types."""
-    # 1. Dynamic array indexing returns Optional
+    """Verifies standard indexing returns concrete types while .get() returns optional types."""
+    # 1. Standard indexing returns concrete type
+    self._check("""
+    func test(arr: [int], idx: int, m: [String: int], k: String) {
+      let val1: int = arr[idx];
+      let val2: int = m[k];
+    }
+    """)
+
+    # 2. get() method returns Optional type
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test(arr: [int], idx: int) {
-        let val: int = arr[idx]; // Dynamic indexing returns int?, cannot assign directly to int
+        let val: int = arr.get(idx); // get() returns int?, cannot assign directly to int
       }
       """)
     self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
 
-    # 2. Dynamic map indexing with variable key returns Optional
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test(m: [String: int], k: String) {
-        let val: int = m[k]; // Dynamic key returns int?, cannot assign directly to int
+        let val: int = m.get(k); // get() returns int?, cannot assign directly to int
       }
       """)
     self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
 
-    # 3. Dynamic indexing handled safely via guard or nil-coalescing
+    # 3. get() handled safely via guard
     self._check("""
     func test(arr: [int], idx: int, m: [String: int], k: String): int {
-      guard let a_val ?= arr[idx]; let m_val ?= m[k] else {
+      guard let a_val ?= arr.get(idx); let m_val ?= m.get(k) else {
         return -1;
       }
       return a_val + m_val;
@@ -4508,21 +4595,44 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
   def test_host_module_trait_implementation_static_methods(self):
-    """Verifies that methods implementing host module traits (Graphics, Timer, etc.) are treated as static methods."""
+    """Verifies that methods implementing traits with static func are treated as static methods."""
     self._check("""
-    trait Graphics {
-      func clear(r: float, g: float, b: float);
+    trait CustomStaticTrait {
+      static func clear(r: float, g: float, b: float);
     }
-    struct MockGraphics {}
-    impl Graphics for MockGraphics {
+    struct MockCustom {}
+    impl CustomStaticTrait for MockCustom {
       func clear(r: float, g: float, b: float) {}
     }
     """)
 
+  def test_array_and_map_get_method(self):
+    """Verifies that array.get and map.get resolve to OptionalType."""
+    self._check("""
+    func test_get() {
+      let arr = [10, 20, 30];
+      let val_arr: int? = arr.get(0);
+
+      let m = {"a": 1, "b": 2};
+      let val_map: int? = m.get("a");
+    }
+    """)
+
+  def test_value_producing_match_missing_yield(self):
+    """Verifies that missing yield in a block of a value-producing match expression causes a SemanticError."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(x: int): int {
+        return match x {
+          1 -> 10,
+          ... -> {
+            let y = 20;
+          }
+        };
+      }
+      """)
+    self.assertIn("Match case block in value-producing match expression must explicitly yield a value.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
-
-
-
-

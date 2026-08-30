@@ -20,3 +20,14 @@ func test_map_iteration_sum(): int {
   }
   return sum;
 }
+
+@test
+func test_map_get(): int {
+  let m = {"a": 10, "b": 20};
+  let val_found = m.get("a");
+  let val_missing = m.get("z");
+  if val_found == 10 && val_missing == none {
+    return 1;
+  }
+  return 0;
+}

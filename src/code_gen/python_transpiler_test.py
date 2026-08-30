@@ -1233,7 +1233,10 @@ class TestPythonTranspiler(unittest.TestCase):
       var temp = [3, 1, 2];
       temp.sort((a, b) -> a - b, false, true);
 
-      let c1 = sz == 5 && is_empty == false;
+      let got_val = nums.get(2) ?? 0;
+      let got_oob = nums.get(99) == none;
+
+      let c1 = sz == 5 && is_empty == false && got_val == 3 && got_oob == true;
       let c2 = doubled[0] == 2 && doubled[4] == 10;
       let c3 = evens.size() == 2 && evens[0] == 2 && evens[1] == 4;
       let c4 = sum == 15;
@@ -1258,6 +1261,8 @@ class TestPythonTranspiler(unittest.TestCase):
       let is_empty = m.empty();
       let has_a = m.contains("a");
       let has_z = m.contains("z");
+      let got_a = m.get("a") ?? 0;
+      let got_z = m.get("z") == none;
       let k_list = m.keys();
       let v_list = m.values();
 
@@ -1268,7 +1273,7 @@ class TestPythonTranspiler(unittest.TestCase):
       let missing_rem = mut_m.remove("nonexistent") == none;
       mut_m.clear();
 
-      let c1 = sz == 2 && is_empty == false;
+      let c1 = sz == 2 && is_empty == false && got_a == 10 && got_z == true;
       let c2 = has_a == true && has_z == false;
       let c3 = k_list.size() == 2 && v_list.size() == 2;
       let c4 = ins_val == 200 && ins_named == 300 && rem_val == 100 && missing_rem == true && mut_m.empty() == true;
@@ -1456,7 +1461,7 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("1", tr.get_output())
 
   def test_dynamic_indexing_execution(self):
-    """Verifies Python transpilation and execution of dynamic array and map indexing with type checking."""
+    """Verifies Python transpilation and execution of array and map .get() and direct indexing."""
     code = """
     func test_subscript(): int {
       let arr = [10, 20, 30];
@@ -1464,9 +1469,11 @@ class TestPythonTranspiler(unittest.TestCase):
       var idx = 5;
       var key = "b";
 
-      guard let val1 ?= arr[idx] else {
-        guard let val2 ?= m[key] else {
-          return 999;
+      guard let val1 ?= arr.get(idx) else {
+        guard let val2 ?= m.get(key) else {
+          let direct_arr = arr[0];
+          let direct_map = m["a"];
+          return direct_arr + direct_map;
         }
         return val2;
       }
@@ -1482,6 +1489,8 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = PythonTranspiler().transpile(ast)
     self.assertIn("_sapphire_array_get", py_code)
     self.assertIn("_sapphire_map_get", py_code)
+    res = self._transpile_and_run(code, "test_subscript()")
+    self.assertEqual(res, 110)
 
   def test_with_statement_transpilation_python(self):
     """Verifies that with statements transpile to Python try...finally blocks with LIFO disposal."""

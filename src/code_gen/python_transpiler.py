@@ -130,7 +130,7 @@ class _LazyCoWProxy:
         if hasattr(target, 'clone'):
           cow_val = target.clone()
         else:
-          cow_val = copy.deepcopy(target)
+          cow_val = copy.copy(target)
         parent_obj.__shadow__[attr_name] = cow_val
         return cow_val
       return parent_obj.__shadow__[attr_name]
@@ -1406,6 +1406,13 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(receiver)
         self.emit(") == 0)")
         return
+      elif method == "get":
+        self.emit("_sapphire_array_get(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
       elif method == "map":
         self.emit("_sapphire_array_map(")
         self.visit(receiver)
@@ -1600,6 +1607,13 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(node.arguments[0].expr)
         self.emit(")")
         return
+      elif method == "get":
+        self.emit("_sapphire_map_get(")
+        self.visit(receiver)
+        self.emit(", ")
+        self.visit(node.arguments[0].expr)
+        self.emit(")")
+        return
       elif method == "keys":
         self.emit("_sapphire_map_keys(")
         self.visit(receiver)
@@ -1731,35 +1745,10 @@ class PythonTranspiler(BaseTranspiler):
     self.emit("}")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
-    container_t = getattr(node.array, 'inferred_type', None)
-    is_map = type(container_t).__name__ == "MapType"
-    const_int = getattr(node.index, 'lit_type', None) == "int" if isinstance(node.index, LiteralNode) else False
-    is_const_key = isinstance(node.index, (LiteralNode, MemberAccessNode))
-
-    if is_map:
-      if is_const_key:
-        self.visit(node.array)
-        self.emit("[")
-        self.visit(node.index)
-        self.emit("]")
-      else:
-        self.emit("_sapphire_map_get(")
-        self.visit(node.array)
-        self.emit(", ")
-        self.visit(node.index)
-        self.emit(")")
-    else:
-      if const_int:
-        self.visit(node.array)
-        self.emit("[")
-        self.visit(node.index)
-        self.emit("]")
-      else:
-        self.emit("_sapphire_array_get(")
-        self.visit(node.array)
-        self.emit(", ")
-        self.visit(node.index)
-        self.emit(")")
+    self.visit(node.array)
+    self.emit("[")
+    self.visit(node.index)
+    self.emit("]")
 
   def visit_GuardClauseNode(self, node: GuardClauseNode) -> None:
     if node.binding:

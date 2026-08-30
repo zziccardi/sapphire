@@ -205,11 +205,13 @@ class TypeChecker:
 
     p_types = [self._resolve_type_node(p.param_type) for p in cloned_func.parameters]
     ret_t = self._resolve_return_types(cloned_func)
+    num_defaults = sum(1 for p in cloned_func.parameters if getattr(p, "default_expr", None) is not None)
     mono_func_type = FunctionType(
         p_types,
         ret_t,
         [p.is_mutable for p in cloned_func.parameters],
         [p.name for p in cloned_func.parameters],
+        num_defaults=num_defaults,
     )
     mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
     root_scope = self.symbol_table.current_scope
@@ -591,17 +593,11 @@ class TypeChecker:
             continue
           struct_type.implemented_traits.add(trait_type.name)
 
-        is_host_module_trait = bool(
-            decl.trait_name
-            and any(
-                decl.trait_name == t or decl.trait_name.endswith(f".{t}")
-                for t in ("Graphics", "Timer", "Keyboard", "Mouse")
-            )
-        )
-
         for member in decl.members:
-          if is_host_module_trait:
-            member.modifier = "static"
+          if trait_type and member.func_decl.name in trait_type.methods:
+            trait_method = trait_type.methods[member.func_decl.name]
+            if getattr(trait_method.ast_decl, "modifier", None) == "static":
+              member.modifier = "static"
           func_decl = member.func_decl
           # Resolve parameters
           param_types = []
@@ -1161,35 +1157,50 @@ class TypeChecker:
     seen_optional_none = False
     seen_optional_some = False
     has_ellipsis = False
+    has_unyielded_block = False
 
     case_types: List[Type] = []
 
     for case in node.cases:
       if isinstance(case.pattern, EllipsisPatternNode):
         has_ellipsis = True
-      elif isinstance(case.pattern, IdentifierNode):
-        sym = self.symbol_table.lookup(case.pattern.name)
-        if isinstance(sym, EnumSymbol) and isinstance(subject_type, EnumType) and sym.name == subject_type.name:
-          pass
+      elif isinstance(subject_type, EnumType):
+        if isinstance(case.pattern, MemberAccessNode):
+          pat_type = self.visit(case.pattern)
+          if isinstance(pat_type, EnumType) and pat_type.name == subject_type.name:
+            seen_enum_variants.add(case.pattern.member)
+          else:
+            self.error(f"Pattern '{case.pattern}' is not a valid variant of enum '{subject_type.name}'.")
+        elif isinstance(case.pattern, IdentifierNode):
+          if case.pattern.name in subject_type.variants:
+            seen_enum_variants.add(case.pattern.name)
+          else:
+            sym = self.symbol_table.lookup(case.pattern.name)
+            if isinstance(sym, EnumSymbol) and sym.name == subject_type.name:
+              pass
+            else:
+              self.error(f"Undefined identifier '{case.pattern.name}'.")
         else:
-          self.error(f"Undefined identifier '{case.pattern.name}'.")
-      elif isinstance(case.pattern, MemberAccessNode):
+          pat_type = self.visit(case.pattern)
+          if not (isinstance(pat_type, EnumType) and pat_type.name == subject_type.name):
+            self.error(f"Pattern '{case.pattern}' is not a valid variant of enum '{subject_type.name}'.")
+      elif isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
         pat_type = self.visit(case.pattern)
-        if isinstance(subject_type, EnumType) and isinstance(pat_type, EnumType):
-          seen_enum_variants.add(case.pattern.member)
-        elif not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):
-          self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")
-      elif isinstance(case.pattern, LiteralNode):
-        if case.pattern.lit_type == "none":
-          seen_optional_none = True
-        elif case.pattern.lit_type == "bool":
-          if case.pattern.value is True:
+        if isinstance(case.pattern, LiteralNode) and case.pattern.lit_type == "bool":
+          if case.pattern.value is True or case.pattern.value == "true":
             seen_bool_true = True
-          elif case.pattern.value is False:
+          elif case.pattern.value is False or case.pattern.value == "false":
             seen_bool_false = True
+        else:
+          self.error("Bool match pattern must be 'true' or 'false'.")
+      elif isinstance(subject_type, OptionalType):
         pat_type = self.visit(case.pattern)
-        if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):
-          self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")
+        if isinstance(pat_type, NoneType) or (isinstance(pat_type, PrimitiveType) and pat_type.name == "none"):
+          seen_optional_none = True
+        elif pat_type.is_compatible(subject_type.base_type) or subject_type.base_type.is_compatible(pat_type):
+          seen_optional_some = True
+        else:
+          self.error(f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'.")
       else:
         pat_type = self.visit(case.pattern)  # pragma: no cover
         if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):  # pragma: no cover
@@ -1208,6 +1219,7 @@ class TypeChecker:
           case_types.append(first_yield)
         else:
           case_types.append(NoneType())
+          has_unyielded_block = True
       else:
         self._match_stack.pop()
         expr_type = self.visit(case.body)
@@ -1229,6 +1241,9 @@ class TypeChecker:
     non_none_types = [t for t in case_types if not isinstance(t, NoneType)]
     if not non_none_types:
       return NoneType()
+
+    if has_unyielded_block:
+      self.error("Match case block in value-producing match expression must explicitly yield a value.")
 
     first_type = non_none_types[0]
     for t in non_none_types[1:]:
@@ -2175,6 +2190,8 @@ class TypeChecker:
           return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
         elif node.member == "empty":
           return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
+        elif node.member == "get":
+          return FunctionType([receiver_type, PrimitiveType("int")], OptionalType(elem_t), param_names=["self", "index"], has_self=True)
         elif node.member == "map":
           return FunctionType([receiver_type, FunctionType([elem_t], InferredType()), PrimitiveType("bool")], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn", "in_place"], has_self=True, num_defaults=1)
         elif node.member == "filter":
@@ -2215,6 +2232,8 @@ class TypeChecker:
           return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
         elif node.member == "contains":
           return FunctionType([receiver_type, k_type], PrimitiveType("bool"), param_names=["self", "key"], has_self=True)
+        elif node.member == "get":
+          return FunctionType([receiver_type, k_type], OptionalType(v_type), param_names=["self", "key"], has_self=True)
         elif node.member == "keys":
           return FunctionType([receiver_type], ArrayType(k_type), param_names=["self"], has_self=True)
         elif node.member == "values":
@@ -2279,8 +2298,9 @@ class TypeChecker:
       if method:
         if getattr(method, "extern_name", None):
           node.target_name = method.extern_name
-        node.is_instance_method = method.has_self
-        node.is_static_method = not method.has_self
+        is_static = getattr(method.ast_decl, "modifier", None) == "static"
+        node.is_static_method = is_static
+        node.is_instance_method = not is_static
         return method
       self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")
@@ -2588,19 +2608,13 @@ class TypeChecker:
       const_idx = self._get_const_int_value(node.index)
       if const_idx is not None:
         self._check_array_bounds(node, container_type)
-        return container_type.element_type
-      else:
-        return OptionalType(container_type.element_type)
+      return container_type.element_type
     elif isinstance(container_type, MapType):
       if not index_type.is_compatible(container_type.key_type) and not container_type.key_type.is_compatible(index_type):
         self.error(f"Map index type '{index_type}' is not compatible with key type '{container_type.key_type}'.")
       if isinstance(node.array, MapLiteralNode):
         self._check_map_literal_key(node)
-      is_const_key = isinstance(node.index, (LiteralNode, MemberAccessNode))
-      if is_const_key:
-        return container_type.value_type
-      else:
-        return OptionalType(container_type.value_type)
+      return container_type.value_type
     else:
       self.error("Cannot index non-array type.")
       return PrimitiveType("none")
