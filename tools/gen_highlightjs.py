@@ -110,11 +110,12 @@ def generate_head_custom_html(grammar_path: Path, theme: str = "github") -> str:
   }});
 
   document.addEventListener('DOMContentLoaded', () => {{
-    document.querySelectorAll('pre code').forEach((el) => {{
-      // Highlight sapphire code blocks
-      if (el.classList.contains('language-sapphire') || el.classList.contains('language-saph')) {{
-        hljs.highlightElement(el);
-      }}
+    // Select code blocks inside Kramdown's language-sapphire containers.
+    const targets = document.querySelectorAll(
+      '.language-sapphire code, pre code.language-sapphire'
+    );
+    targets.forEach((el) => {{
+      hljs.highlightElement(el);
     }});
   }});
 </script>
