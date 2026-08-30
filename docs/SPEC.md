@@ -74,10 +74,18 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **`let`**: Declares a constant variable (immutable).
 * **`var`**: Declares a mutable variable.
 * **Value vs. reference types**: Primitive scalar types (`int`, `float`, `bool`)
-  and `none` are value types (copied on assignment and parameter passing).
-  Reference types – including `String`, `Array`, `Map`, `Arena`, `Range`, and
-  all user-defined `struct` and `proto` types – are passed by reference by
-  default.
+  and `none` are value types. Standard user-defined `struct` types are
+  **stack-allocated by default** (unless explicitly allocated within an arena
+  via `in my_arena`).
+  * Passing non-primitive types into functions defaults to **constant reference**
+    to avoid copy overhead without visual pointer syntax.
+  * Returning stack structs from functions is done **by value** with
+    compiler-enforced **return-value optimization (RVO)** and copy
+    elision, constructing the instance directly in the caller's stack frame.
+    Returning raw borrowed references to local stack frames is statically
+    prohibited to eliminate use-after-free bugs without requiring lifetime annotations.
+  * Dynamic collections (`String`, `Array`, `Map`, `Arena`, `Range`) and all
+    `proto` types use managed reference semantics.
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
 * **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
 * **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
@@ -172,15 +180,18 @@ let dir_str: String = Direction.North as String;  // "North"
   ```sapphire
   let numbers = [10, 20, 30];  // Inferred as `[int]`
   ```
-* **Array indexing**: Elements of an array are accessed via zero-based integer index brackets:
-  ```sapphire
-  // Statically checked constant index -> `int`
-  let first = numbers[0];
-
-  // Dynamic index -> `int?` (evaluates to `none` if out of bounds)
-  let item = numbers[dynamic_idx];
-  ```
-  * **Tiered bounds-checking**: Constant integer indices on literals and fixed-size arrays (`[T; N]`) are checked at compile time; invalid constant indices produce a compile-time `SemanticError`. Dynamic array indexing with variable integer expressions returns an optional `T?` and safely evaluates to `none` on out-of-bounds access without throwing runtime exceptions.
+* **Array indexing & safe access**:
+  * **Standard indexing (`array[i]`)**: Reads the element at index `i` and returns concrete type `T`. Constant indices are validated at compile-time. Dynamic indexing performs runtime bounds checking and panics/halts on out-of-bounds access.
+    ```sapphire
+    let first = numbers[0];  // `int`
+    let item = numbers[dynamic_idx];  // `int` (panics if out of bounds)
+    ```
+  * **Safe optional lookup (`array.get(i)`)**: Returns an optional `T?`, safely evaluating to `none` if the index is out of bounds without raising runtime exceptions:
+    ```sapphire
+    if let item ?= numbers.get(dynamic_idx) {
+      print(f"Item: {item}");
+    }
+    ```
 * **Map literals & type syntax**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Map types are annotated using `[K: V]` (or `Map<K, V>`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
   ```sapphire
   let scores = {"alice": 100, "bob": 95};  // [String: int]
@@ -192,14 +203,18 @@ let dir_str: String = Direction.North as String;  // "North"
       Direction.South: 5,
   };
   ```
-* **Map indexing**: Values in a map are accessed by key using square brackets:
-  ```sapphire
-  let alice_score = scores["alice"];  // Constant key -> `int`
-  let val = scores[user_key];         // Dynamic key -> `int?` (evaluates to
-                                      // `none` if missing)
-  ```
-  * **Tiered key-checking**: Indexing map literals with constant literal/enum keys validates key existence at compile time; accessing non-existent constant keys emits a compile-time error. Dynamic map indexing with variable keys returns an optional `V?` and evaluates to `none` when a key is absent at runtime.
-* **Map built-in methods**: `Map` instances support `size(): int`, `empty(): bool`, `contains(key: K): bool`, `keys(): [K]`, `values(): [V]`, and mutating methods `insert(key: K, value: V): V`, `remove(key: K): V?`, and `clear(): void` on mutable map instances (`var`).
+* **Map indexing & safe access**:
+  * **Standard indexing (`map[key]`)**: Values in a map are accessed by key using square brackets and return concrete type `V`. Constant keys are validated at compile time; dynamic key access panics/halts if the key does not exist.
+    ```sapphire
+    let alice_score = scores["alice"];  // `int`
+    ```
+  * **Safe optional lookup (`map.get(key)`)**: Returns an optional `V?`, evaluating to `none` when a key is absent at runtime:
+    ```sapphire
+    if let val ?= scores.get(user_key) {
+      print(f"Score: {val}");
+    }
+    ```
+* **Map built-in methods**: `Map` instances support `size(): int`, `empty(): bool`, `contains(key: K): bool`, `get(key: K): V?`, `keys(): [K]`, `values(): [V]`, and mutating methods `insert(key: K, value: V): V`, `remove(key: K): V?`, and `clear(): void` on mutable map instances (`var`).
 * **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
   ```
   let name = target?.get_name();
@@ -230,15 +245,15 @@ Sapphire provides a first-class `match` construct for pattern matching, supporti
 
 * **Syntax**: `match subject { pattern -> body, ... }`
 * **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
-* **Multi-statement blocks**: Cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Using `return` inside a match block returns from the *enclosing function*.
-* **Implicit `none` fallback**: Multi-statement blocks without a `yield` statement automatically evaluate to `none` (type `none`), enabling clean side-effect-only branching without boilerplate.
-* **Optional wrapping for mixed return types**: If a `match` expression contains a mix of value-yielding arms (producing type `T`) and arms that evaluate to `none` (or multi-statement blocks without a `yield`), the compiler automatically wraps the overall result type of the `match` expression into an optional `T?`.
+* **Multi-statement blocks**: In a value-producing `match` expression, cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Omitting `yield` in a value-producing block is a compile-time `SemanticError`. Using `return` inside a match block returns from the *enclosing function*.
+* **Type consistency across arms**: All arms of a value-producing `match` expression must evaluate or yield compatible types `T`. If an arm explicitly yields `none`, the overall expression type is inferred as `T?`.
+* **Side-effect branching (statements)**: When used strictly as a statement (e.g. `match x { ... }` without variable assignment), multi-statement blocks do not require `yield` statements.
 * **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
 * **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
 * **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
 
 ```sapphire
-// Expression mapping
+// Value-producing match expression
 let label = match status {
   HttpStatus.Ok -> "Success",
   HttpStatus.NotFound -> {
@@ -248,12 +263,12 @@ let label = match status {
   ... -> "Unknown Error",
 };
 
-// Mixed arms produce an optional (type inferred as String?)
+// Explicit optional yielding (type inferred as String?)
 let result: String? = match status {
   HttpStatus.Ok -> "Success",
   HttpStatus.InternalError -> {
     log("Internal server error encountered");
-    // No yield: evaluates to none, wrapping `result` as String?
+    yield none;
   },
   ... -> none,
 };
@@ -649,28 +664,34 @@ impl Weapon {
 }
 ```
 
-### Struct initializers (curly-brace syntax)
+### Struct instantiation & constructor enforcement
 
-For direct instantiation of structs, Sapphire supports a curly-brace initializer syntax. This is the preferred way to instantiate structs (unless complex constructor setup is needed). The syntax matches named parameters, using the `=` operator, and allows trailing commas:
+Sapphire enforces clear rules for struct instantiation to protect structural invariants:
 
-```
-let sword = Weapon {
-  damage = 45,
-  durability = 100,
-  name = "Broadsword",
-};
-```
+1. **Constructor instantiation (`StructName(...)`)**: When a struct defines an `__init__` constructor inside its `impl` block, instantiation **must** use constructor syntax matching the constructor's parameters:
+   ```sapphire
+   // Instantiation via __init__ constructor
+   let sword = Weapon(dmg = 45, name = "Broadsword");
+   let default_sword = Weapon(dmg = 30);
+   ```
+   To protect class invariants and ensure required initialization code executes, direct curly-brace literal syntax `Weapon { ... }` is strictly disallowed for structs that define `__init__`.
 
-Fields declared with default initialization expressions (e.g.
-`var durability: int = 100;`) or optional types (`T?`) may be omitted during
-struct initialization. The compiler statically verifies that all remaining
-required (non-optional) fields are initialized and that their assigned types are
-compatible.
+2. **Curly-brace initializers (`StructName { ... }`)**: For plain data structs without custom `__init__` constructors, direct curly-brace initialization is the standard syntax:
+   ```sapphire
+   struct Point {
+     var x: float;
+     var y: float = 0.0;
+   }
+
+   let p = Point { x = 10.0 };
+   ```
+
+Fields declared with default initialization expressions or optional types (`T?`) may be omitted during initialization. The compiler statically verifies that all remaining required (non-optional) fields are initialized and that their assigned types are compatible.
 
 The following code will not compile because `sword` is a constant:
 
-```
-let sword = Weapon(...);
+```sapphire
+let sword = Weapon(dmg = 50);
 
 // This method attempts to mutate `self`, which is not allowed since `sword` is
 // declared as a constant.
@@ -824,7 +845,8 @@ Because Sapphire disallows struct upcasting, behavioral polymorphism is achieved
 
 * **Trait parameter & return types**: Trait names can be used directly as parameter types (e.g. `func display(p: Printable)`) or return types (e.g. `func get_item(): Printable`).
 * **Implicit assignability**: A struct `S` that implements trait `T` (via `impl T for S` or structural method compatibility) is implicitly assignable to any target expecting type `T` or optional type `T?`.
-* **Heterogeneous trait collections**: Trait types can be element types for collections (e.g. `[Renderable]`). While a concrete array `[Circle]` prohibits storing `Rectangle` instances, an array typed as `[Renderable]` allows heterogeneous storage of any struct types implementing `Renderable`.
+* **Zero-vtable heterogeneous trait collections**: Trait types can be element types for collections (e.g. `[Renderable]`). While a concrete array `[Circle]` prohibits storing `Rectangle` instances, an array typed as `[Renderable]` allows heterogeneous storage of any struct types implementing `Renderable`.
+  * **Native compilation via compiler-synthesized tagged unions**: To maintain zero vtable overhead and avoid runtime fat pointers, the native compiler synthesizes an internal closed tagged union (sum type) of all types implementing the trait. Iteration over `[Trait]` and method invocation compiles to an efficient, inlinable branch/jump table to direct static function calls over contiguous memory.
 * **Interface erasure**: Passing or returning a value typed as trait `T` narrows the caller's view strictly to the methods defined on `T`. Unrelated concrete fields of `S` cannot be accessed without explicit casting.
 * **Implicit and explicit `self` for instance methods**: Non-static trait methods implicitly operate on `self` when implemented. In standard Sapphire code, the explicit `self` parameter can be omitted in trait declarations. Specifying an explicit first `self` parameter (which may be `var self` for mutable access) is primarily used when creating bindings for external host libraries (like Love2D) to explicitly designate instance methods that transpile to colon syntax in Lua (e.g. `:draw(x, y)`).
 * **Module/static functions**: For external host bindings, omitting `self` from a trait method signature designates it as a module or static function (e.g. transpiling to Lua dot syntax `.rectangle(...)`).
@@ -922,7 +944,7 @@ When an instance is bound using `let` (e.g., `let elite_goblin = clone base_gobl
 
 To prevent the unpredictability of JavaScript-style dynamic prototypes and keep performance consistent, Sapphire enforces the following constraints:
 * **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
-  * Additionally, shadowing of nested reference types implements **copy-on-write (CoW)**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) will automatically intercept the write, deep-copy the nested reference locally on the clone (shadowing it), and then apply the mutation. This guarantees that mutations on the clone do not propagate back to the prototype.
+  * Additionally, shadowing of nested reference types implements **copy-on-write (CoW)**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) will automatically intercept the write, shallow-copy the immediate nested reference locally on the clone (shadowing it), and then apply the mutation. This guarantees that mutations on the clone do not propagate back to the prototype while avoiding unexpected deep-copy performance costs.
 * **Data-only delegation**: Prototypal inheritance only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
 * **Opt-in proto declarations**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is restricted to structures declared with the `proto` keyword. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
@@ -947,23 +969,24 @@ To preserve the zero-overhead promise of standard structures, the compiler does 
 2. **Proto structures**: Structures declared with the `proto` keyword compile to instances wrapping their properties in a lookup system containing `__proto__` and `__shadow__` tables.
 3. **Copy-on-Write (CoW) Wrapper**: Field writes targeting a nested reference field inside a cloned object trigger a copy-on-write intercept. The runtime duplicates the nested reference locally to isolate the cloned instance's mutations.
 
-### Arena-based memory management
+### Stack-first memory model & arena management
 
-All `proto` instances and their clones are automatically allocated on a managed arena. Additionally, standard `struct` instances can opt into arena allocation using the `in` suffix. Sapphire prohibits allocating `proto` instances or their clones on the call stack, eliminating LIFO stack escape issues.
+Sapphire enforces a clear, predictable memory hierarchy:
 
-1. **Implicit default arena**: If no arena is explicitly specified, `proto` instances are allocated in an implicit, thread-local or global reference-counted arena.
-2. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
-3. **Explicit Arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix (e.g., `Point { x = 10 } in my_arena`).
-4. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena`
-instances have lexical lifecycles. When the `Arena` variable goes out of scope,
-the runtime automatically tears down the arena and deallocates all objects (both
-`struct` and `proto` references) allocated within it. To prevent dangling
-references, the compiler statically enforces scope-bound escape rules:
-   * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an
-     outer scope cannot be assigned a reference to an object allocated in a
-     nested/inner arena.
-   * **Function-return escape**: A function cannot return a reference to an
-     object allocated in an arena local to the function scope.
+1. **Stack allocation by default for structs**: Standard `struct` instances are allocated directly on the stack with deterministic LIFO teardown upon exiting their lexical block scope.
+2. **Value returns with RVO / copy elision**: When returning a stack struct from a function, it is returned by value. The compiler enforces **return-value optimization (RVO)** and copy elision to construct the return value directly in the caller's stack frame without intermediate copies.
+3. **Static use-after-free prevention**:
+   * Downward reference passing to function calls is fully safe.
+   * Returning a borrowed reference to a local stack struct is rejected at compile time.
+   * Storing a reference to an inner-scope stack struct in an outer-scope variable or long-lived arena is statically prohibited.
+   * The compiler never performs silent heap promotion, ensuring memory allocation remains transparent and deterministic.
+4. **Arena allocation for prototypes and managed structures**: All `proto` instances and their clones are automatically allocated on a managed arena. Standard `struct` instances can also opt into arena allocation using the `in` suffix (`Point { x = 10 } in my_arena`).
+5. **Implicit default arena**: If no arena is explicitly specified, `proto` instances are allocated in an implicit, thread-local or global reference-counted arena.
+6. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
+7. **Explicit arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix.
+8. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. To prevent dangling references, the compiler statically enforces scope-bound escape rules:
+   * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an outer scope cannot be assigned a reference to an object allocated in a nested/inner arena.
+   * **Function-return escape**: A function cannot return a reference to an object allocated in an arena local to the function scope.
 
 ### Source map generation & runtime stack trace demangling
 
@@ -1229,3 +1252,12 @@ Traditional object-oriented languages rely on fine-grained access modifiers (`pu
 * **Single encapsulation boundary**: Visibility is defined exclusively at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
 * **Grammar & syntax simplicity**: Eliminates verbose field-level and method-level modifier keywords (such as `pub` or `private`), keeping the AST structure lean and code uncluttered.
 * **Internal member convention**: To signal that a struct field or helper method is intended strictly for internal module maintenance and should not be directly mutated or relied upon by external consumers, Sapphire recommends using an underscore prefix (e.g. `_handle`, `_cache`). The compiler treats all fields of an exported struct as accessible, relying on convention and export manifests to delineate public contracts from private implementation details.
+
+### Future considerations & exploratory directions
+
+The following proposals are preserved as prospective enhancements for future language versions and compiler roadmaps:
+
+1. **Compiler-enforced private access for underscore identifiers**: Future compiler versions may elevate the underscore convention (`_private_field`) to a hard semantic error if accessed outside the defining module, combining clean syntax with strict compiler-enforced field privacy.
+2. **Call-site mutability markers**: To enhance visual clarity and alert code reviewers to mutating function arguments, introducing mandatory call-site markers (such as `modify(var target)`) is under evaluation.
+3. **Standard `Result<T, E>` sum type**: While optionals (`T?`) and multi-value returns handle common failure states, a standard algebraic `Result<T, E>` type with associated error payloads and `guard` integration may be introduced for rich error reporting.
+4. **Explicit move semantics**: To complement stack allocation and RVO, explicit value transfers (e.g. `move resource`) may be explored for non-copyable native resources.

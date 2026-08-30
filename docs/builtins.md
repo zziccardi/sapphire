@@ -321,6 +321,7 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
 | `size(): int` | Returns the total number of elements in the array. |
 | `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
 | `contains(element: T): bool` | Returns `true` if `element` exists in the array, otherwise `false`. |
+| `get(index: int): T?` | Safely retrieves element at `index`, returning `none` if out of bounds. |
 | `map<U>(fn: (T) -> U, in_place: bool = false): [U]` | Returns an array by applying `fn` to each element. Mutates `self` in place when `in_place = true` (requires `U == T`). |
 | `filter(fn: (T) -> bool, in_place: bool = false): [T]` | Returns dynamic array containing elements for which `fn` returns `true`. Mutates `self` in place when `in_place = true`. |
 | `reduce<U>(initial: U, fn: (acc: U, item: T) -> U, reverse: bool = false): U` | Accumulates elements using `fn` starting from `initial`. Iterates right-to-left when `reverse = true`. |
@@ -355,6 +356,17 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   Returns `true` if `element` is found in the array.
   ```sapphire
   let has_two = [1, 2, 3].contains(2);  // true
+  ```
+
+* **`get(index: int): T?`**
+
+  Safely accesses the element at `index`. Returns `none` if `index < 0` or `index >= size()`.
+  ```sapphire
+  let items = [10, 20, 30];
+  if let val ?= items.get(1) {
+    print(f"Found: {val}");  // 20
+  }
+  let missing = items.get(99);  // none
   ```
 
 * **`map<U>(fn: (T) -> U, in_place: bool = false): [U]`**
@@ -453,12 +465,13 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
 | Operation | Syntax / example | Description |
 | :--- | :--- | :--- |
 | **Literal initialization** | `let numbers = [10, 20, 30];` | Instantiates an array literal. Element types must be strictly homogeneous. |
-| **Index access** | `let first = numbers[0];`<br>`let item: int? = numbers[i];` | Reads element at index `i` (0-based). Constant integer index returns `T`. Dynamic index returns `T?` (`none` if out of bounds). |
+| **Index access** | `let first = numbers[0];`<br>`let item: int = numbers[i];` | Reads element at index `i` (0-based) and returns `T`. Panics/halts if `i` is out of bounds at runtime. |
+| **Safe optional access** | `let item: int? = numbers.get(i);` | Reads element at index `i` safely, returning `none` if out of bounds. |
 | **Index mutation** | `numbers[1] = 25;` | Updates the element at index `i` on mutable array instances (declared with `var`). |
 | **Iteration** | `for item in numbers { ... }` | Iterates sequentially over elements in the array. |
 
 #### Tiered bounds-checking
-For fixed-size arrays (`[T; N]`) initialized with known lengths, constant integer indices are checked at compile time by the type checker; out-of-bounds constant indices trigger a compile-time error. Dynamic array indexing with variable integer expressions returns `T?` and evaluates to `none` at runtime if out of bounds (zero runtime exceptions).
+For fixed-size arrays (`[T; N]`) and array literals, constant integer indices are checked at compile time by the type checker; out-of-bounds constant indices trigger a compile-time error. Dynamic array indexing `array[i]` returns concrete `T` and halts/panics at runtime if out of bounds. For non-panicking access, use `array.get(i)` which returns `T?` and safely evaluates to `none`.
 
 #### Type compatibility and assignability
 
@@ -507,6 +520,7 @@ Sapphire provides standard built-in instance methods on `Map` instances (`[K: V]
 | `size(): int` | Returns the total number of entries in the map. |
 | `empty(): bool` | Returns `true` if `size() == 0`, otherwise `false`. |
 | `contains(key: K): bool` | Returns `true` if `key` exists in the map, otherwise `false`. |
+| `get(key: K): V?` | Safely retrieves value associated with `key`, returning `none` if absent. |
 | `keys(): [K]` | Returns a dynamic array `[K]` containing all keys in the map. |
 | `values(): [V]` | Returns a dynamic array `[V]` containing all values in the map. |
 | `insert(key: K, value: V): V` | Inserts or updates `key` with `value` in a mutable map (`var [K: V]`) and returns `value`. |
@@ -535,6 +549,17 @@ Sapphire provides standard built-in instance methods on `Map` instances (`[K: V]
   Returns `true` if `key` is present in the map.
   ```sapphire
   let has_admin = roles.contains("admin");  // true
+  ```
+
+* **`get(key: K): V?`**
+
+  Safely accesses the value for `key`. Returns `none` if the key is not present in the map.
+  ```sapphire
+  let scores = { "alice": 95, "bob": 88 };
+  if let val ?= scores.get("alice") {
+    print(f"Alice's score: {val}");  // 95
+  }
+  let missing = scores.get("charlie");  // none
   ```
 
 * **`keys(): [K]`**
@@ -580,7 +605,8 @@ Sapphire provides standard built-in instance methods on `Map` instances (`[K: V]
 | Operation | Syntax / example | Description |
 | :--- | :--- | :--- |
 | **Map literal** | `let map = { "a": 1, "b": 2 };` | Instantiates a map with key-value pairs separated by colons. Supports trailing commas. |
-| **Key access** | `let val = map["a"];` | Accesses the value associated with the specified key using square-bracket indexing. |
+| **Key access** | `let val = map["a"];` | Accesses the value associated with the specified key using square-bracket indexing (returns concrete `V`, panics if absent). |
+| **Safe optional access** | `let val: int? = map.get("a");` | Reads value for key safely, returning `none` if key is absent. |
 | **Key insertion / update**| `map["c"] = 3;` | Inserts or updates the key-value pair on mutable map instances (`var`). |
 | **Iteration** | `for key, val in map { ... }` | Iterates over key-value entries in the map using dual loop variables. |
 

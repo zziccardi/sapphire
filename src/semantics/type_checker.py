@@ -205,11 +205,13 @@ class TypeChecker:
 
     p_types = [self._resolve_type_node(p.param_type) for p in cloned_func.parameters]
     ret_t = self._resolve_return_types(cloned_func)
+    num_defaults = sum(1 for p in cloned_func.parameters if getattr(p, "default_expr", None) is not None)
     mono_func_type = FunctionType(
         p_types,
         ret_t,
         [p.is_mutable for p in cloned_func.parameters],
         [p.name for p in cloned_func.parameters],
+        num_defaults=num_defaults,
     )
     mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
     root_scope = self.symbol_table.current_scope
