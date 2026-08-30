@@ -41,8 +41,8 @@ def generate_head_custom_html(grammar_path: Path, theme: str = "github") -> str:
   keywords_json = json.dumps(tokens, indent=4)
 
   return f"""<!-- Auto-generated from {grammar_path.name} by tools/gen_highlightjs.py -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/{theme}.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="{{{{ '/docs/assets/{theme}.min.css' | relative_url }}}}">
+<script src="{{{{ '/docs/assets/highlight.min.js' | relative_url }}}}"></script>
 <script>
   hljs.registerLanguage('sapphire', function(hljs) {{
     const KEYWORDS = {keywords_json};
