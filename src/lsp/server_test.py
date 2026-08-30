@@ -2351,5 +2351,76 @@ func main() {
     self.assertEqual(_format_ast_expr("raw_fallback"), "raw_fallback")
 
 
+  def test_hover_nested_member_access_and_generics(self):
+    """Verifies that hover works for nested member accesses and across generic monomorphized functions."""
+    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
+    from pygls.uris import from_fs_path
+    from src.lsp.server import hover, validate_source
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      self.ls.workspace.root_uri = from_fs_path(temp_dir)
+      
+      # 1. Create a module with struct/trait hierarchy
+      mod_file = os.path.join(temp_dir, "graphics.sp")
+      mod_code = """export { Graphics }
+trait Graphics {
+  func draw(self, x: float, y: float);
+}
+"""
+      with open(mod_file, "w", encoding="utf-8") as f:
+        f.write(mod_code)
+
+      engine_file = os.path.join(temp_dir, "engine.sp")
+      engine_code = """import graphics;
+export { Engine, love }
+struct Engine {
+  var gfx: graphics.Graphics;
+}
+@extern
+var love: Engine;
+"""
+      with open(engine_file, "w", encoding="utf-8") as f:
+        f.write(engine_code)
+
+      main_file = os.path.join(temp_dir, "main.sp")
+      main_code = """import engine;
+import std.math;
+
+let love = engine.love;
+
+func run_draw(x: float) {
+  let floored = math.floor(x) as float;
+  love.gfx.draw(floored, 0.0);
+}
+"""
+      with open(main_file, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      main_uri = from_fs_path(main_file)
+      validate_source(self.ls, main_uri, main_code)
+
+      # Hover on 'draw' in 'love.gfx.draw(floored, 0.0);' (line 7, character 11)
+      res_draw = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=7, character=11)
+      ))
+      self.assertIsNotNone(res_draw)
+      self.assertIn("(method)", res_draw.contents.value)
+      self.assertIn("draw", res_draw.contents.value)
+      self.assertIn("x: float", res_draw.contents.value)
+
+      # Hover on 'floor' in 'math.floor(x)' (line 6, character 21)
+      res_floor = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=6, character=21)
+      ))
+      self.assertIsNotNone(res_floor)
+      self.assertIn("(function)", res_floor.contents.value)
+      self.assertIn("floor", res_floor.contents.value)
+
+
 if __name__ == "__main__":
   unittest.main()
+

@@ -113,8 +113,13 @@ class ANTLRDiagnosticListener(ErrorListener):
 def _resolve_module_path(doc_uri: str, mod_path: str, workspace_root: Optional[str] = None) -> Optional[str]:
   """Resolves a dot-separated Sapphire import path (e.g. 'lib.love2d.enums') to an absolute file path on disk."""
   from pygls.uris import to_fs_path
+  from src.semantics.module_resolver import resolve_module_path
 
   doc_path = to_fs_path(doc_uri) if doc_uri.startswith("file://") else doc_uri
+  res = resolve_module_path(mod_path, source_file_path=doc_path)
+  if res and os.path.isfile(res):
+    return res
+
   doc_dir = os.path.dirname(doc_path) if doc_path else ""
 
   rel_parts = mod_path.split(".")
@@ -482,6 +487,19 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 
   elif isinstance(node, MemberAccessNode):
     node_name = node.member
+    receiver_type = node_types.get(node.receiver)
+    from src.semantics.symbol_table import ModuleType, EnumType, FunctionType
+    if isinstance(receiver_type, ModuleType):
+      if isinstance(node_type, FunctionType):
+        category = "function"
+      else:
+        category = "variable"
+    elif isinstance(receiver_type, EnumType):
+      category = "enum member"
+    elif isinstance(node_type, FunctionType):
+      category = "method"
+    else:
+      category = "property"
   elif isinstance(node, StructDeclNode):
     node_name = node.name
     category = "proto" if node.is_prototype else "struct"
@@ -557,7 +575,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
     node_name = node.name
 
   if category == "symbol" and node_type:
-    from src.semantics.symbol_table import StructType, TraitType, EnumType
+    from src.semantics.symbol_table import StructType, TraitType, EnumType, FunctionType
 
     if isinstance(node_type, StructType):
       category = "proto" if node_type.is_prototype else "struct"
@@ -565,6 +583,8 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
       category = "enum"
     elif isinstance(node_type, TraitType):
       category = "trait"
+    elif isinstance(node_type, FunctionType):
+      category = "function"
 
   from src.semantics.symbol_table import FunctionType, StructType, TraitType, EnumType
 
