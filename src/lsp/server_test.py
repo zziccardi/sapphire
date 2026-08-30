@@ -2436,6 +2436,91 @@ func run_draw(x: float) {
     diag_messages = [d.message for d in call_args.diagnostics]
     self.assertTrue(any("cannot follow a parameter with a default value" in msg for msg in diag_messages))
 
+  def test_lsp_hover_enum_member_and_symbol_category(self):
+    from src.lsp.server import validate_source, hover, _resolve_module_path
+    import os
+    import tempfile
+    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
+    from pygls.uris import from_fs_path
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      self.ls.workspace.root_uri = from_fs_path(tmp_dir)
+      mod_file = os.path.join(tmp_dir, "my_mod.sp")
+      with open(mod_file, "w", encoding="utf-8") as f:
+        f.write("export { GLOBAL_VAL }\nvar GLOBAL_VAL: int = 42;\n")
+
+      main_file = os.path.join(tmp_dir, "main.sp")
+      main_code = (
+          "import my_mod;\n"
+          "enum Color { Red, Blue }\n"
+          "func my_helper() {}\n"
+          "func main() {\n"
+          "  let c = Color.Red;\n"
+          "  let v = my_mod.GLOBAL_VAL;\n"
+          "  let fn = my_helper;\n"
+          "}\n"
+      )
+      with open(main_file, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      main_uri = from_fs_path(main_file)
+      resolved = _resolve_module_path(main_uri, "my_mod", tmp_dir)
+      self.assertEqual(resolved, mod_file)
+
+      validate_source(self.ls, main_uri, main_code)
+
+      # Hover on 'Red' in 'Color.Red' (line 4, col 17)
+      res_enum_mem = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=4, character=17)
+      ))
+      self.assertIsNotNone(res_enum_mem)
+      self.assertIn("enum member", res_enum_mem.contents.value)
+
+      # Hover on 'GLOBAL_VAL' in 'my_mod.GLOBAL_VAL' (line 5, col 18)
+      res_mod_var = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=5, character=18)
+      ))
+      self.assertIsNotNone(res_mod_var)
+      self.assertIn("variable", res_mod_var.contents.value)
+
+      # Hover on 'my_helper' symbol identifier on RHS (line 6, col 14)
+      res_fn_sym = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=6, character=14)
+      ))
+      self.assertIsNotNone(res_fn_sym)
+      self.assertIn("function", res_fn_sym.contents.value)
+
+      # 2. Test fallback workspace module resolution (line 144 in server.py)
+      pkg_dir = os.path.join(tmp_dir, "pkg")
+      os.makedirs(pkg_dir, exist_ok=True)
+      pkg_mod_file = os.path.join(pkg_dir, "mod.sp")
+      with open(pkg_mod_file, "w", encoding="utf-8") as f:
+        f.write("let PKG_VAL = 1;\n")
+      # Resolve 'pkg' where only 'pkg/mod.sp' exists
+      resolved_mod = _resolve_module_path(main_uri, "pkg", tmp_dir)
+      self.assertEqual(resolved_mod, pkg_mod_file)
+
+      # 3. Test symbol category fallback for FunctionType (lines 586-587 in server.py)
+      from src.parser.ast import IdentifierNode
+      from src.semantics.symbol_table import FunctionType, PrimitiveType
+      mock_fn_node = IdentifierNode("unregistered_fn")
+      mock_fn_node.start_line = 6
+      mock_fn_node.start_column = 0
+      mock_fn_node.end_line = 6
+      mock_fn_node.end_column = 20
+      mock_fn_node.length = 15
+      self.ls.ast_cache[main_uri] = mock_fn_node
+      self.ls.node_types_cache[main_uri] = {mock_fn_node: FunctionType([], PrimitiveType("int"))}
+      res_fallback_sym = hover(self.ls, HoverParams(
+          text_document=TextDocumentIdentifier(uri=main_uri),
+          position=Position(line=5, character=3)
+      ))
+      self.assertIsNotNone(res_fallback_sym)
+      self.assertIn("function", res_fallback_sym.contents.value)
+
 
 if __name__ == "__main__":
   unittest.main()

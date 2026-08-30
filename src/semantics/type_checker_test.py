@@ -2436,6 +2436,80 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+    # Invalid enum member access pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ok, NotFound }
+      enum Other { Bad }
+      func test_enum_mismatch(s: Status) {
+        let x = match s {
+          Other.Bad -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("not a valid variant of enum 'Status'", str(ctx.exception))
+
+    # Undefined identifier in enum pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ok }
+      func test_enum_undef(s: Status) {
+        let x = match s {
+          UnknownVariant -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("Undefined identifier 'UnknownVariant'", str(ctx.exception))
+
+    # Non-enum literal in enum pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ok }
+      func test_enum_lit(s: Status) {
+        let x = match s {
+          123 -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("not a valid variant of enum 'Status'", str(ctx.exception))
+
+    # Non-bool literal in bool pattern
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_bool_lit(b: bool) {
+        let x = match b {
+          123 -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("Bool match pattern must be 'true' or 'false'", str(ctx.exception))
+
+    # Optional pattern with value match and incompatible type
+    self._check("""
+    func test_opt_val(v: int?): int {
+      return match v {
+        10 -> 1,
+        none -> 0,
+        ... -> 2
+      };
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_opt_incompat(v: int?) {
+        let x = match v {
+          "string_pat" -> 1,
+          ... -> 0
+        };
+      }
+      """)
+    self.assertIn("is incompatible with optional inner type 'int'", str(ctx.exception))
+
     # Struct member pattern type mismatch
     with self.assertRaises(SemanticError):
       self._check("""
@@ -2463,11 +2537,17 @@ class TestTypeChecker(unittest.TestCase):
 
     # Enum identifier pattern matching enum type name
     self._check("""
-    enum Status { Status }
+    enum Status { Active, Inactive }
     func test_enum_name(s: Status): int {
       return match s {
         Status -> 1,
         ... -> 0
+      };
+    }
+    func test_enum_bare(s: Status): int {
+      return match s {
+        Active -> 1,
+        Inactive -> 2
       };
     }
     """)

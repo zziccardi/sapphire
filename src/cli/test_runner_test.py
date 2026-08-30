@@ -504,6 +504,38 @@ func test_bare_fail() {
     finally:
       shutil.rmtree(tmpdir, ignore_errors=True)
 
+  def test_run_tests_python_with_local_lib_and_submodules(self):
+    """Verifies that run_tests_python invalidates sys.modules cache for local lib and nested packages."""
+    import sys
+    tmpdir = tempfile.mkdtemp()
+    try:
+      lib_dir = os.path.join(tmpdir, "lib")
+      sub_dir = os.path.join(tmpdir, "sub")
+      os.makedirs(lib_dir)
+      os.makedirs(sub_dir)
+
+      sub_py = os.path.join(sub_dir, "helper.py")
+      with open(sub_py, "w") as f:
+        f.write("X = 1\n")
+
+      test_sp = os.path.join(tmpdir, "my_test.sp")
+      with open(test_sp, "w") as f:
+        f.write("import std.testing;\n@test\nfunc test_simple() {\n  testing.assert_true(true);\n}\n")
+
+      # Populate sys.modules with matching names
+      sys.modules["lib.dummy"] = None
+      sys.modules["sub.helper"] = None
+      sys.modules["helper"] = None
+
+      with suppress_output():
+        passed, failed, logs = run_tests_python(test_sp, ["test_simple"], {})
+      self.assertEqual(passed, 1)
+      self.assertEqual(failed, 0)
+      self.assertNotIn("lib.dummy", sys.modules)
+      self.assertNotIn("sub.helper", sys.modules)
+    finally:
+      shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 if __name__ == "__main__":
   unittest.main()
