@@ -3825,29 +3825,36 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
   def test_dynamic_indexing_type_checking(self):
-    """Verifies dynamic array and map indexing return optional types while constant indexing returns non-optional types."""
-    # 1. Dynamic array indexing returns Optional
+    """Verifies standard indexing returns concrete types while .get() returns optional types."""
+    # 1. Standard indexing returns concrete type
+    self._check("""
+    func test(arr: [int], idx: int, m: [String: int], k: String) {
+      let val1: int = arr[idx];
+      let val2: int = m[k];
+    }
+    """)
+
+    # 2. get() method returns Optional type
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test(arr: [int], idx: int) {
-        let val: int = arr[idx]; // Dynamic indexing returns int?, cannot assign directly to int
+        let val: int = arr.get(idx); // get() returns int?, cannot assign directly to int
       }
       """)
     self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
 
-    # 2. Dynamic map indexing with variable key returns Optional
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test(m: [String: int], k: String) {
-        let val: int = m[k]; // Dynamic key returns int?, cannot assign directly to int
+        let val: int = m.get(k); // get() returns int?, cannot assign directly to int
       }
       """)
     self.assertIn("Cannot assign expression of type 'int?' to variable 'val' of type 'int'.", str(ctx.exception))
 
-    # 3. Dynamic indexing handled safely via guard or nil-coalescing
+    # 3. get() handled safely via guard
     self._check("""
     func test(arr: [int], idx: int, m: [String: int], k: String): int {
-      guard let a_val ?= arr[idx]; let m_val ?= m[k] else {
+      guard let a_val ?= arr.get(idx); let m_val ?= m.get(k) else {
         return -1;
       }
       return a_val + m_val;
@@ -4530,6 +4537,21 @@ class TestTypeChecker(unittest.TestCase):
       let val_map: int? = m.get("a");
     }
     """)
+
+  def test_value_producing_match_missing_yield(self):
+    """Verifies that missing yield in a block of a value-producing match expression causes a SemanticError."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(x: int): int {
+        return match x {
+          1 -> 10,
+          ... -> {
+            let y = 20;
+          }
+        };
+      }
+      """)
+    self.assertIn("Match case block in value-producing match expression must explicitly yield a value.", str(ctx.exception))
 
 
 if __name__ == "__main__":

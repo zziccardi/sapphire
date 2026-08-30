@@ -1461,7 +1461,7 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("1", tr.get_output())
 
   def test_dynamic_indexing_execution(self):
-    """Verifies Python transpilation and execution of dynamic array and map indexing with type checking."""
+    """Verifies Python transpilation and execution of array and map .get() and direct indexing."""
     code = """
     func test_subscript(): int {
       let arr = [10, 20, 30];
@@ -1469,9 +1469,11 @@ class TestPythonTranspiler(unittest.TestCase):
       var idx = 5;
       var key = "b";
 
-      guard let val1 ?= arr[idx] else {
-        guard let val2 ?= m[key] else {
-          return 999;
+      guard let val1 ?= arr.get(idx) else {
+        guard let val2 ?= m.get(key) else {
+          let direct_arr = arr[0];
+          let direct_map = m["a"];
+          return direct_arr + direct_map;
         }
         return val2;
       }
@@ -1487,6 +1489,8 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = PythonTranspiler().transpile(ast)
     self.assertIn("_sapphire_array_get", py_code)
     self.assertIn("_sapphire_map_get", py_code)
+    res = self._transpile_and_run(code, "test_subscript()")
+    self.assertEqual(res, 110)
 
   def test_with_statement_transpilation_python(self):
     """Verifies that with statements transpile to Python try...finally blocks with LIFO disposal."""
