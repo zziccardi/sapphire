@@ -1079,26 +1079,25 @@ External host–module contracts are defined cleanly using standard Sapphire `tr
 ```sapphire
 // 1. Opaque resource-handle trait (instance methods take `self`)
 trait Image {
-  func draw(self, x: float, y: float);
   func getWidth(self): float;
 }
 
-// 2. Host API trait (module functions without `self`, method aliases for
+// 2. Host API trait (module functions without `self`; method aliases for
 // overloaded host APIs)
 trait Graphics {
   @export("setColor")
-  func setColorRGBA(r: float, g: float, b: float, a: float = 1.0);
+  static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
   @export("setColor")
-  func setColorObj(color: Color);
+  static func setColorObj(color: Color);
 
-  func rectangle(mode: String, x: float, y: float, w: float, h: float);
-  func clear(r: float, g: float, b: float);
-  func newImage(path: String): Image;
+  static func rectangle(mode: String, x: float, y: float, w: float, h: float);
+  static func clear(r: float, g: float, b: float);
+  static func newImage(path: String): Image;
 }
 
 trait Keyboard {
-  func isDown(key: String): bool;
+  static func isDown(key: String): bool;
 }
 
 // 3. Engine container struct
@@ -1108,7 +1107,7 @@ struct LoveEngine {
 }
 
 // 4. External host variable binding
-@extern("love")
+@extern
 var love: LoveEngine;
 
 // 5. Exported engine callbacks
@@ -1124,7 +1123,7 @@ func draw() {
   love.graphics.clear(r = 0.1, g = 0.1, b = 0.1);
 
   // Transpiles to `love.graphics.setColor(1.0, 0.0, 0.0)`
-  love.graphics.setColorRGBA(1.0, 0.0, 0.0);
+  love.graphics.setColorRgba(1.0, 0.0, 0.0);
 }
 ```
 

@@ -390,6 +390,7 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   Reduces the array elements to a single accumulated value starting with `initial`.
   * When `reverse` is `false` (default), iterates forward from left to right (index 0 to `size() - 1`).
   * When `reverse` is `true`, iterates backward from right to left (index `size() - 1` down to 0).
+
   ```sapphire
   let numbers = [1, 2, 3, 4];
   let sum = numbers.reduce(0, (acc, x) -> acc + x);  // 10
