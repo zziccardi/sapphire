@@ -54,7 +54,7 @@ either `snake_case` or `PascalCase` but should be consistent.
 
 Sapphire supports both single-line and multi-line block comments:
 
-```
+```sapphire
 // This is a single-line comment
 
 /*
@@ -90,7 +90,7 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
 * **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
 
-```
+```sapphire
 let speed: int = 60;
 let name = "Hero";  // Type inferred as String
 
@@ -216,7 +216,7 @@ let dir_str: String = Direction.North as String;  // "North"
     ```
 * **Map built-in methods**: `Map` instances support `size(): int`, `empty(): bool`, `contains(key: K): bool`, `get(key: K): V?`, `keys(): [K]`, `values(): [V]`, and mutating methods `insert(key: K, value: V): V`, `remove(key: K): V?`, and `clear(): void` on mutable map instances (`var`).
 * **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
-  ```
+  ```sapphire
   let name = target?.get_name();
   ```
 
@@ -228,7 +228,7 @@ Sapphire supports conditional execution, pattern matching, and iteration loops.
 
 Sapphire supports standard conditional execution via `if`, `else if`, and `else` blocks. Parentheses around the condition are optional:
 
-```
+```sapphire
 let score = 85;
 if score >= 90 {
   print("Grade: A");
@@ -295,7 +295,7 @@ Sapphire supports conditional iteration and collection traversal:
 
 Executes a block of code as long as the condition evaluates to `true`. No parentheses are required around the condition:
 
-```
+```sapphire
 var count = 5;
 while count > 0 {
   print(count);
@@ -392,7 +392,7 @@ state.
 To unwrap optionals, Sapphire provides a conditional unwrapping operator `?=`
 used within conditional headers:
 
-```
+```sapphire
 var target: Enemy? = none;
 let damage: int? = 15;
 
@@ -410,7 +410,7 @@ scope of helper variables or combining unwrapping with other checks. The init
 statement evaluates **once** before entering the block or loop, while the loop
 condition to the right of the semicolon is re-evaluated on each iteration:
 
-```
+```sapphire
 if let active_target ?= target; active_target.health > 50 {
   // `active_target` is unwrapped once and its health is checked
 }
@@ -424,7 +424,7 @@ while let score = get_score(); score < 100 {
 Sapphire provides the binary coalescing operator `??` to supply a fallback value
 when unwrapping an optional:
 
-```
+```sapphire
 let active_enemy = target ?? default_enemy;
 
 // `active_enemy` is guaranteed to be non-optional
@@ -500,7 +500,7 @@ value is evaluated and used instead.
 `func getPosition(): float, float`). Return statements accept comma-separated
 expressions (`return x, y;`).
 
-```
+```sapphire
 func calculate_damage(attacker: Player, var defender: Enemy,
                       is_critical: bool = false): int {
   var base_damage = attacker.attack_power;
@@ -537,7 +537,7 @@ To guarantee reference safety and eliminate runtime aliasing logic bugs without 
 * **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be mutably borrowed (`var` parameter) if it is already borrowed (either mutably or immutably) within the same call.
 * **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (borrowed mutably for mutable methods, or immutably for `const` methods).
 
-```
+```sapphire
 // Rejected: 'player' is borrowed mutably as 'target' and immutably as
 // 'observer'.
 execute_interaction(target = player, observer = player);
@@ -551,7 +551,7 @@ player.mutate(other = player);
 
 Functions are first-class citizens. To avoid double-colon confusion, function type declarations isolate the return block via an arrow token (`->`).
 
-```
+```sapphire
 // Function type declaration
 var math_op: (int, int) -> int;
 var callback: (String) -> void;  // `void` is an alias for `none`
@@ -565,7 +565,7 @@ Anonymous functions use an arrow-based block syntax. The arrow (`->`) is mandato
 * **Multi-parameter syntax**: Parentheses are required when declaring multiple parameters.
 * **Single-expression shorthand**: If a lambda body consists of a single expression, the curly braces and the `return` keyword can be omitted. The result of the expression is implicitly returned.
 
-```
+```sapphire
 let numbers = [1, 2, 3, 4];
 
 // Explicitly typed parameter and return type
@@ -636,7 +636,7 @@ Sapphire provides a Python-style `__init__` initializer syntax defined inside th
 * **Constant methods**: Non-static methods may be marked `const`, which
 indicates that `self` cannot be modified.
 
-```
+```sapphire
 struct Weapon {
   var damage: int;
   var durability: int = 100;
@@ -901,7 +901,7 @@ func update_all() {
 ##### Explicit composition (data-oriented design)
 Instead of physical inheritance, structs can explicitly compose other structures. This allows clear separation of data components, which is ideal for Entity-Component-System (ECS) architectures where systems process arrays of single components to maximize cache locality.
 
-```
+```sapphire
 struct PhysicsComponent {
   var velocity: Vector2;
   var mass: float;
@@ -923,7 +923,7 @@ For prototype structures (`proto`), the compiler automatically generates a built
 
 Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
-```
+```sapphire
 var base_goblin = Enemy { damage = 10 };
 
 let elite_goblin = clone base_goblin {

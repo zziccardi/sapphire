@@ -1,4 +1,4 @@
-title: Sapphire Docs
+title: Sapphire
 description: Documentation for the Sapphire programming language
 
 remote_theme: just-the-docs/just-the-docs
@@ -11,3 +11,11 @@ defaults:
       path: ""
     values:
       layout: "default"
+
+enable_copy_code_button: true
+
+kramdown:
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false

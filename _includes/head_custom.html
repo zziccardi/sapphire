@@ -1,0 +1,122 @@
+<!-- Auto-generated from Sapphire.g4 by tools/gen_highlightjs.py -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+  hljs.registerLanguage('sapphire', function(hljs) {
+    const KEYWORDS = {
+    "keyword": [
+        "enum",
+        "proto",
+        "let",
+        "var",
+        "func",
+        "struct",
+        "impl",
+        "trait",
+        "for",
+        "in",
+        "static",
+        "const",
+        "clone",
+        "if",
+        "else",
+        "guard",
+        "with",
+        "while",
+        "break",
+        "continue",
+        "return",
+        "match",
+        "yield",
+        "import",
+        "export",
+        "as"
+    ],
+    "type": [
+        "int",
+        "float",
+        "bool"
+    ],
+    "literal": [
+        "none",
+        "true",
+        "false",
+        "self"
+    ],
+    "built_in": [
+        "__init__",
+        "__proto__"
+    ]
+};
+
+    const ANNOTATION = {
+      className: 'meta',
+      begin: /@[a-zA-Z_][a-zA-Z0-9_]*/
+    };
+
+    const INTERPOLATED_STRING = {
+      className: 'string',
+      begin: /f"/,
+      end: /"/,
+      illegal: /\n/,
+      contains: [
+        hljs.BACKSLASH_ESCAPE,
+        {
+          className: 'subst',
+          begin: /\{/,
+          end: /\}/,
+          keywords: KEYWORDS
+        }
+      ]
+    };
+
+    return {
+      name: 'Sapphire',
+      aliases: ['sapphire'],
+      keywords: KEYWORDS,
+      contains: [
+        hljs.C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE,
+        hljs.C_NUMBER_MODE,
+        hljs.QUOTE_STRING_MODE,
+        INTERPOLATED_STRING,
+        ANNOTATION,
+        {
+          className: 'function',
+          beginKeywords: 'func',
+          end: /[{;]/,
+          excludeEnd: true,
+          contains: [
+            hljs.inherit(hljs.TITLE_MODE, { begin: /[a-zA-Z_][a-zA-Z0-9_]*/ }),
+            {
+              className: 'params',
+              begin: /\(/,
+              end: /\)/,
+              keywords: KEYWORDS,
+              contains: [
+                hljs.C_LINE_COMMENT_MODE,
+                hljs.C_BLOCK_COMMENT_MODE
+              ]
+            }
+          ]
+        },
+        {
+          className: 'class',
+          beginKeywords: 'struct trait enum impl proto',
+          end: /[{;]/,
+          excludeEnd: true,
+          contains: [hljs.TITLE_MODE]
+        }
+      ]
+    };
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('pre code').forEach((el) => {
+      // Highlight sapphire code blocks
+      if (el.classList.contains('language-sapphire') || el.classList.contains('language-saph')) {
+        hljs.highlightElement(el);
+      }
+    });
+  });
+</script>
