@@ -22,7 +22,8 @@ from src.cli.diagnostics import get_source_line, format_diagnostic
 
 
 
-from src.common.errors import SapphireError
+from src.common.errors import SapphireError, SapphireSyntaxError
+from src.parser.error_listener import CustomErrorListener
 
 
 class TestDiscoveryError(SapphireError):
@@ -52,10 +53,18 @@ def find_sp_files(path: str) -> List[str]:
 def parse_ast(sp_file: str):
   """Parses a Sapphire file and returns its AST root node."""
   input_stream = FileStream(sp_file, encoding="utf-8")
+  error_listener = CustomErrorListener(file_path=sp_file, source_content=input_stream, quiet=True)
   lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
   stream = CommonTokenStream(lexer)
   parser = SapphireParser(stream)
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
   tree = parser.program()
+  if error_listener.errors > 0:
+    err_text = "\n".join(error_listener.error_messages) if error_listener.error_messages else f"Parsing failed with {error_listener.errors} syntax error(s)."
+    raise SapphireSyntaxError(err_text, file_path=sp_file)
   builder = ASTBuilder()
   return builder.visit(tree)
 
@@ -111,6 +120,26 @@ def get_source_line(sp_file: str, lineno: int) -> Optional[str]:
   return None
 
 
+def find_lua_binary() -> Optional[str]:
+  """Locates Lua interpreter across PATH and standard OS installation paths."""
+  binary = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+  if binary:
+    return binary
+
+  candidates = [
+      "/opt/homebrew/bin/lua",
+      "/opt/homebrew/bin/luajit",
+      "/usr/local/bin/lua",
+      "/usr/local/bin/luajit",
+      "/usr/bin/lua",
+  ]
+  for candidate in candidates:
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+      return candidate
+
+  return None
+
+
 def run_tests_python(
     sp_file: str,
     standalone_tests: List[str],
@@ -118,15 +147,24 @@ def run_tests_python(
     filter_pattern: Optional[str] = None,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Python target backend."""
-  out_py = transpile_file(sp_file, target="python", test_mode=True, quiet=True)
+  try:
+    out_py = transpile_file(sp_file, target="python", test_mode=True, quiet=True, raise_on_error=True)
+  except BaseException as e:  # pragma: no cover
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+    for line in str(e).splitlines():
+      print(f"  {line}")
+    return 0, 1, [f"Transpilation failed: {e}"]
 
-  # Ensure workspace root and lib directory are in sys.path
+  # Ensure workspace root, lib directory, and test source directory are in sys.path
   workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
   lib_dir = os.path.join(workspace_root, "lib")
-  if lib_dir not in sys.path:  # pragma: no cover
-    sys.path.insert(0, lib_dir)
-  if workspace_root not in sys.path:  # pragma: no cover
-    sys.path.insert(0, workspace_root)
+  sp_dir = os.path.dirname(os.path.abspath(sp_file))
+  cwd = os.getcwd()
+  for path_entry in (workspace_root, lib_dir, cwd, sp_dir):
+    if path_entry:
+      if path_entry in sys.path:
+        sys.path.remove(path_entry)
+      sys.path.insert(0, path_entry)
 
   try:
     import std.testing as testing
@@ -134,8 +172,28 @@ def run_tests_python(
     try:
       from lib.std import testing
     except ImportError:  # pragma: no cover
-      print("Error: Could not import std.testing module.", file=sys.stderr)
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (could not import std.testing module)", file=sys.stderr)
       return 0, 1, ["Failed to load std.testing module"]
+
+  # If a 'lib' directory exists in sp_dir, clear stale repo 'lib' modules from sys.modules
+  sp_lib = os.path.join(sp_dir, "lib")
+  if os.path.isdir(sp_lib):
+    to_del = [k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")]
+    for k in to_del:
+      del sys.modules[k]
+
+  # Invalidate cached modules in sys.modules that match files within sp_dir
+  for root, _, files in os.walk(sp_dir):
+    rel_root = os.path.relpath(root, sp_dir).replace(os.sep, ".")
+    for f in files:
+      if f.endswith(".py"):
+        base_f = os.path.splitext(f)[0]
+        mod_candidates = [base_f]
+        if rel_root != ".":
+          mod_candidates.append(f"{rel_root}.{base_f}")
+        for mc in mod_candidates:
+          if mc in sys.modules and mc != "std.testing":
+            del sys.modules[mc]
 
   # Dynamically import transpiled Python module
   module_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
@@ -144,7 +202,10 @@ def run_tests_python(
   sys.modules[module_name] = mod
   try:
     spec.loader.exec_module(mod)
-  except Exception as e:  # pragma: no cover
+  except BaseException as e:  # pragma: no cover
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
+    for line in str(e).splitlines():
+      print(f"  {line}")
     return 0, 1, [f"Failed to execute transpiled test module: {e}"]
 
   passed = 0
@@ -329,19 +390,91 @@ def run_tests_lua(
     sourcemap: bool = True,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Lua 5.1 target backend."""
-  out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap, quiet=True)
-  lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+  try:
+    out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap, quiet=True, raise_on_error=True)
+  except BaseException as e:  # pragma: no cover
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+    for line in str(e).splitlines():
+      print(f"  {line}")
+    return 0, 1, [f"Transpilation failed: {e}"]
+
+  lua_bin = find_lua_binary()
   if not lua_bin:  # pragma: no cover
     print("Error: Lua interpreter ('lua', 'luajit', or 'lua5.1') not found in PATH.", file=sys.stderr)
+    print(f"[ FAIL ] {os.path.basename(sp_file)} (Lua interpreter not found in PATH)")
     return 0, 1, ["Lua interpreter not found"]
 
   workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+  sp_dir = os.path.dirname(os.path.abspath(sp_file))
 
   # Construct Lua runner script
   lua_script_lines = [
-      f'package.path = "{workspace_root}/lib/?.lua;{workspace_root}/lib/?/init.lua;" .. package.path',
+      f'package.path = "{workspace_root}/lib/?.lua;{workspace_root}/lib/?/init.lua;{sp_dir}/?.lua;{sp_dir}/?/init.lua;" .. package.path',
+      '''
+local function _sp_install_loader()
+  if _G._SP_RELATIVE_LOADER_INSTALLED then return end
+  _G._SP_RELATIVE_LOADER_INSTALLED = true
+  local loaders = package.searchers or package.loaders
+  if not loaders then return end
+
+  local function relative_loader(modname)
+    local rel_path = modname:gsub("%.", "/")
+    for level = 2, 20 do
+      local info = debug.getinfo(level, "S")
+      if info and info.source and info.source:sub(1, 1) == "@" then
+        local caller_file = info.source:sub(2)
+        local curr_dir = caller_file:match("^(.*[/\\\\])") or "./"
+        while curr_dir and curr_dir ~= "" do
+          local cand1 = curr_dir .. rel_path .. ".lua"
+          local cand2 = curr_dir .. rel_path .. "/init.lua"
+          local f = io.open(cand1, "r")
+          if f then
+            f:close()
+            local chunk, err = loadfile(cand1)
+            if chunk then return chunk, cand1 else error("error loading module '" .. modname .. "' from file '" .. cand1 .. "':\\n\\t" .. tostring(err), 3) end
+          end
+          f = io.open(cand2, "r")
+          if f then
+            f:close()
+            local chunk, err = loadfile(cand2)
+            if chunk then return chunk, cand2 else error("error loading module '" .. modname .. "' from file '" .. cand2 .. "':\\n\\t" .. tostring(err), 3) end
+          end
+          local parent = curr_dir:match("^(.*[/\\\\])[^/\\\\]+[/\\\\]$")
+          if not parent or parent == curr_dir then
+            if curr_dir ~= "./" and curr_dir ~= "/" and not curr_dir:match("^[A-Za-z]:[\\\\/]$") then
+              local f_dot1 = io.open("./" .. rel_path .. ".lua", "r")
+              if f_dot1 then
+                f_dot1:close()
+                local chunk, err = loadfile("./" .. rel_path .. ".lua")
+                if chunk then return chunk, "./" .. rel_path .. ".lua" else error("error loading module '" .. modname .. "' from file './" .. rel_path .. ".lua':\\n\\t" .. tostring(err), 3) end
+              end
+              local f_dot2 = io.open("./" .. rel_path .. "/init.lua", "r")
+              if f_dot2 then
+                f_dot2:close()
+                local chunk, err = loadfile("./" .. rel_path .. "/init.lua")
+                if chunk then return chunk, "./" .. rel_path .. "/init.lua" else error("error loading module '" .. modname .. "' from file './" .. rel_path .. "/init.lua':\\n\\t" .. tostring(err), 3) end
+              end
+            end
+            break
+          end
+          curr_dir = parent
+        end
+      end
+    end
+    return "\\n\\tno relative sapphire module found for '" .. modname .. "'"
+  end
+
+  table.insert(loaders, 2, relative_loader)
+end
+_sp_install_loader()
+''',
       f'local testing = require("std.testing")',
-      f'local target_mod = dofile("{out_lua}")',
+      f'local target_mod_ok, target_mod = pcall(function() return dofile("{out_lua}") end)',
+      'if not target_mod_ok then',
+      f'  print("[ FAIL ] {os.path.basename(sp_file)} (module load error)")',
+      '  print("  " .. tostring(target_mod))',
+      '  os.exit(1)',
+      'end',
       'local total_passed = 0',
       'local total_failed = 0',
       '''
@@ -409,34 +542,35 @@ end
 do
   local ctx = testing.TestContext.new("{fn_name}")
   testing.set_active_context(ctx)
-  local ok, err = pcall(function()
-    if target_mod and target_mod["{fn_name}"] then
-      target_mod["{fn_name}"]()
-    elseif _G["{fn_name}"] then
-      _G["{fn_name}"]()
-    end
-  end)
-  if ok and #ctx.failures == 0 then
-    total_passed = total_passed + 1
-    print("[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
-  else
+  local fn = (target_mod and target_mod["{fn_name}"]) or _G["{fn_name}"]
+  if type(fn) ~= "function" then
     total_failed = total_failed + 1
-    local header_line = get_first_sp_line(ctx.failures)
-    if header_line > 0 then
-      print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
+    print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
+    print("  Test function '{fn_name}' not found or not callable")
+  else
+    local ok, err = pcall(fn)
+    if ok and #ctx.failures == 0 then
+      total_passed = total_passed + 1
+      print("[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
     else
-      print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
-    end
-    for _, f in ipairs(ctx.failures) do
-      print_failure(f)
-    end
-    if not ok then
-      local has_fatal = false
-      for _, f in ipairs(ctx.failures) do
-        if f.fatal then has_fatal = true break end
+      total_failed = total_failed + 1
+      local header_line = get_first_sp_line(ctx.failures)
+      if header_line > 0 then
+        print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
+      else
+        print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
       end
-      if not has_fatal then
-        print("  Unhandled Error: " .. tostring(err))
+      for _, f in ipairs(ctx.failures) do
+        print_failure(f)
+      end
+      if not ok then
+        local has_fatal = false
+        for _, f in ipairs(ctx.failures) do
+          if f.fatal then has_fatal = true break end
+        end
+        if not has_fatal then
+          print("  Unhandled Error: " .. tostring(err))
+        end
       end
     end
   end
@@ -466,34 +600,49 @@ do
     end
   end
 
-  if inst then
-    if inst.set_up then pcall(function() inst:set_up() end) end
-    local ok, err = pcall(function()
-      if inst["{m_name}"] then inst["{m_name}"](inst) end
-    end)
-    if inst.tear_down then pcall(function() inst:tear_down() end) end
-
-    if ok and #ctx.failures == 0 then
-      total_passed = total_passed + 1
-      print("[ PASS ] {full_name} ({os.path.basename(sp_file)})")
-    else
+  if not inst then
+    total_failed = total_failed + 1
+    print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
+    print("  Test suite struct '{struct_name}' could not be instantiated")
+  else
+    local setup_ok, setup_err = true, nil
+    if inst.set_up then setup_ok, setup_err = pcall(function() inst:set_up() end) end
+    if not setup_ok then
       total_failed = total_failed + 1
-      local header_line = get_first_sp_line(ctx.failures)
-      if header_line > 0 then
-        print("[ FAIL ] {full_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
-      else
+      print("[ FAIL ] {full_name} (set_up failed: " .. tostring(setup_err) .. ")")
+    else
+      local test_fn = inst["{m_name}"]
+      if type(test_fn) ~= "function" then
+        total_failed = total_failed + 1
         print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
-      end
-      for _, f in ipairs(ctx.failures) do
-        print_failure(f)
-      end
-      if not ok then
-        local has_fatal = false
-        for _, f in ipairs(ctx.failures) do
-          if f.fatal then has_fatal = true break end
-        end
-        if not has_fatal then
-          print("  Unhandled Error: " .. tostring(err))
+        print("  Test method '{m_name}' not found on struct '{struct_name}'")
+      else
+        local ok, err = pcall(function() test_fn(inst) end)
+        if inst.tear_down then pcall(function() inst:tear_down() end) end
+
+        if ok and #ctx.failures == 0 then
+          total_passed = total_passed + 1
+          print("[ PASS ] {full_name} ({os.path.basename(sp_file)})")
+        else
+          total_failed = total_failed + 1
+          local header_line = get_first_sp_line(ctx.failures)
+          if header_line > 0 then
+            print("[ FAIL ] {full_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
+          else
+            print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
+          end
+          for _, f in ipairs(ctx.failures) do
+            print_failure(f)
+          end
+          if not ok then
+            local has_fatal = false
+            for _, f in ipairs(ctx.failures) do
+              if f.fatal then has_fatal = true break end
+            end
+            if not has_fatal then
+              print("  Unhandled Error: " .. tostring(err))
+            end
+          end
         end
       end
     end
@@ -518,7 +667,13 @@ end
   if res.stderr:  # pragma: no cover
     print(res.stderr.strip(), file=sys.stderr)
 
-  return (1 if res.returncode != 0 else 0), (0 if res.returncode != 0 else 1), []
+  stdout_lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+  passed = sum(1 for l in stdout_lines if l.startswith("[ PASS ]"))
+  failed = sum(1 for l in stdout_lines if l.startswith("[ FAIL ]"))
+  if res.returncode != 0 and passed == 0 and failed == 0:
+    failed = 1
+
+  return passed, failed, []
 
 
 def run_tests(
@@ -539,6 +694,7 @@ def run_tests(
 
   total_passed = 0
   total_failed = 0
+  tests_found = 0
   start_time = time.time()
 
   print(f"Running Sapphire tests in target '{target}'...\n")
@@ -547,24 +703,31 @@ def run_tests(
     try:
       ast = parse_ast(sp_file)
       standalone_tests, suite_tests = discover_tests(ast)
-    except Exception as e:  # pragma: no cover
-      print(f"Failed to parse test file '{sp_file}': {e}", file=sys.stderr)
+    except BaseException as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (parsing failed)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
       total_failed += 1
       continue
 
     if not standalone_tests and not suite_tests:
+      if len(sp_files) == 1:
+        print(f"No tests found in '{sp_file}'.")
       continue
 
+    tests_found += len(standalone_tests) + sum(len(m) for m in suite_tests.values())
+
     if target.lower() in ("lua", "lua5.1"):
-      p_fail, p_pass, _ = run_tests_lua(sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap)
-      if p_fail > 0:
-        total_failed += 1
-      else:  # pragma: no cover
-        total_passed += 1
+      passed, failed, _ = run_tests_lua(sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap)
+      total_passed += passed
+      total_failed += failed
     else:
       passed, failed, _ = run_tests_python(sp_file, standalone_tests, suite_tests, filter_pattern)
       total_passed += passed
       total_failed += failed
+
+  if len(sp_files) > 1 and tests_found == 0 and total_failed == 0:
+    print(f"No tests found in '{path}'.")
 
   duration = time.time() - start_time
   print(f"\nTest Result: {total_passed} passed, {total_failed} failed in {duration:.2f}s")

@@ -12,11 +12,18 @@ from typing import Optional
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
+from src.common.errors import (
+    SapphireError,
+    SapphireSyntaxError,
+    SapphireTypeError,
+    SapphireTranspileError,
+    SemanticError,
+)
 from src.parser.ast import *
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
-from src.semantics.type_checker import TypeChecker, SemanticError
+from src.semantics.type_checker import TypeChecker
 from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREAMBLE, Transpiler, RUNTIME_PREAMBLE
 from src.code_gen.lua_transpiler import LuaTranspiler
 from src.code_gen.source_map import SourceMapBuilder
@@ -35,11 +42,20 @@ def transpile_file(
     test_mode: bool = False,
     dev_mode: bool = False,
     quiet: bool = False,
+    raise_on_error: bool = False,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
   Args:
     input_file: Path to the Sapphire source file (.sp).
+    output_file: Path to write transpiled target file.
+    target: Target language backend.
+    visited: Set of visited file paths for circular dependency tracking.
+    sourcemap: Whether to generate source map.
+    test_mode: Whether to transpile in test mode (@test inclusion).
+    dev_mode: Whether to enable dev hot-reloading hooks.
+    quiet: Suppress informational logs.
+    raise_on_error: Raise SapphireError exceptions instead of sys.exit(1).
   """
   if visited is None:
 
@@ -64,6 +80,8 @@ def transpile_file(
   try:
     input_stream = FileStream(input_file, encoding="utf-8")
   except Exception as e:
+    if raise_on_error:
+      raise SapphireError(f"Failed to read file: {e}", file_path=input_file)
     if not quiet:  # pragma: no cover
       print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
@@ -86,6 +104,9 @@ def transpile_file(
   tree = parser.program()
 
   if error_listener.errors > 0:
+    err_text = "\n".join(error_listener.error_messages) if error_listener.error_messages else f"Parsing failed with {error_listener.errors} syntax error(s)."
+    if raise_on_error:
+      raise SapphireSyntaxError(err_text, file_path=input_file)
     if not quiet:
       print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
     sys.exit(1)
@@ -103,6 +124,8 @@ def transpile_file(
   try:
     checker.check(ast)
   except SemanticError as e:
+    if raise_on_error:
+      raise e
     if not quiet:  # pragma: no cover
       print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
     sys.exit(1)
@@ -116,7 +139,7 @@ def transpile_file(
     sub_source = resolve_module_path(imp.path, source_file_path=input_file)
     if sub_source:
       sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, dev_mode=dev_mode, quiet=quiet)
+      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, dev_mode=dev_mode, quiet=quiet, raise_on_error=raise_on_error)
 
   # 6. Transpile via TranspilerRegistry
   sm_builder = None
@@ -153,6 +176,8 @@ def transpile_file(
             f"{output_file}")
     return output_file
   except Exception as e:
+    if raise_on_error:
+      raise SapphireTranspileError(f"Failed to write output file: {e}", file_path=output_file)
     if not quiet:  # pragma: no cover
       print(f"Failed to write output file: {e}", file=sys.stderr)
     sys.exit(1)

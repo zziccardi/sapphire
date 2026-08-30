@@ -671,6 +671,32 @@ class TestPythonTranspiler(unittest.TestCase):
         transpile_file(semantic_sp, quiet=True)
       self.assertEqual(cm.exception.code, 1)
 
+  def test_transpile_file_raise_on_error_modes(self):
+    """Verifies transpile_file raises domain exceptions when raise_on_error is True."""
+    from src.common.errors import SapphireError, SapphireSyntaxError, SapphireTypeError, SapphireTranspileError
+    with tempfile.TemporaryDirectory() as temp_dir:
+      # Missing file
+      with self.assertRaises(SapphireError):
+        transpile_file(os.path.join(temp_dir, "missing.sp"), raise_on_error=True)
+
+      # Syntax error
+      bad_syntax = os.path.join(temp_dir, "syntax.sp")
+      with open(bad_syntax, "w") as f: f.write("let x: int = ;")
+      with self.assertRaises(SapphireSyntaxError):
+        transpile_file(bad_syntax, raise_on_error=True)
+
+      # Semantic error
+      bad_sem = os.path.join(temp_dir, "sem.sp")
+      with open(bad_sem, "w") as f: f.write("return 42;")
+      with self.assertRaises(SapphireTypeError):
+        transpile_file(bad_sem, raise_on_error=True)
+
+      # Write error
+      valid_sp = os.path.join(temp_dir, "valid.sp")
+      with open(valid_sp, "w") as f: f.write("let x = 10;")
+      with self.assertRaises(SapphireTranspileError):
+        transpile_file(valid_sp, output_file="/invalid_dir_xyz/out.py", raise_on_error=True)
+
   def test_export_and_extern_annotations_python(self):
     """Verifies Python transpiler safely handles @export and erases @extern."""
     code = """

@@ -22,6 +22,13 @@ from src.code_gen.transpiler_registry import TranspilerRegistry
 # ==========================================
 
 PYTHON_RUNTIME_PREAMBLE = """# Sapphire Runtime Header
+import os
+import sys
+
+_curr_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+if _curr_dir not in sys.path:
+  sys.path.insert(0, _curr_dir)
+
 import copy
 from enum import Enum, IntEnum
 

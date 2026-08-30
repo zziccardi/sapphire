@@ -112,8 +112,8 @@ local function normalize_args(a, b, c)
   return a, b
 end
 
-function testing.assert_true(cond, msg)
-  cond, msg = normalize_args(cond, msg)
+function testing.assert_true(cond, msg, extra)
+  cond, msg = normalize_args(cond, msg, extra)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if not cond then
@@ -123,8 +123,8 @@ function testing.assert_true(cond, msg)
   end
 end
 
-function testing.assert_false(cond, msg)
-  cond, msg = normalize_args(cond, msg)
+function testing.assert_false(cond, msg, extra)
+  cond, msg = normalize_args(cond, msg, extra)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if cond then
@@ -134,8 +134,8 @@ function testing.assert_false(cond, msg)
   end
 end
 
-function testing.assert_eq(actual, expected, msg)
-  if actual == testing then actual = expected; expected = msg; msg = nil end
+function testing.assert_eq(actual, expected, msg, extra)
+  if actual == testing then actual = expected; expected = msg; msg = extra end
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
@@ -146,8 +146,8 @@ function testing.assert_eq(actual, expected, msg)
   end
 end
 
-function testing.assert_ne(actual, expected, msg)
-  if actual == testing then actual = expected; expected = msg; msg = nil end
+function testing.assert_ne(actual, expected, msg, extra)
+  if actual == testing then actual = expected; expected = msg; msg = extra end
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
@@ -158,8 +158,8 @@ function testing.assert_ne(actual, expected, msg)
   end
 end
 
-function testing.assert_almost_eq(a, b, eps, msg)
-  if a == testing then a = b; b = eps; eps = msg; msg = nil end
+function testing.assert_almost_eq(a, b, eps, msg, extra)
+  if a == testing then a = b; b = eps; eps = msg; msg = extra end
   eps = eps or 1e-5
   a = unwrap(a)
   b = unwrap(b)
@@ -171,8 +171,8 @@ function testing.assert_almost_eq(a, b, eps, msg)
   end
 end
 
-function testing.assert_none(opt, msg)
-  opt, msg = normalize_args(opt, msg)
+function testing.assert_none(opt, msg, extra)
+  opt, msg = normalize_args(opt, msg, extra)
   local ctx = testing.get_active_context()
   if not is_none(opt) then
     ctx:record_failure(format_msg("Expected nil/None, got " .. tostring(unwrap(opt)), msg), true, "none", nil, unwrap(opt))
@@ -181,8 +181,8 @@ function testing.assert_none(opt, msg)
   end
 end
 
-function testing.assert_not_none(opt, msg)
-  opt, msg = normalize_args(opt, msg)
+function testing.assert_not_none(opt, msg, extra)
+  opt, msg = normalize_args(opt, msg, extra)
   local ctx = testing.get_active_context()
   if is_none(opt) then
     ctx:record_failure(format_msg("Expected non-nil value, got nil", msg), true, "not_none", "<non-nil>", nil)
@@ -191,8 +191,8 @@ function testing.assert_not_none(opt, msg)
   end
 end
 
-function testing.expect_true(cond, msg)
-  cond, msg = normalize_args(cond, msg)
+function testing.expect_true(cond, msg, extra)
+  cond, msg = normalize_args(cond, msg, extra)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if not cond then
@@ -202,8 +202,8 @@ function testing.expect_true(cond, msg)
   end
 end
 
-function testing.expect_false(cond, msg)
-  cond, msg = normalize_args(cond, msg)
+function testing.expect_false(cond, msg, extra)
+  cond, msg = normalize_args(cond, msg, extra)
   local ctx = testing.get_active_context()
   cond = unwrap(cond)
   if cond then
@@ -213,8 +213,8 @@ function testing.expect_false(cond, msg)
   end
 end
 
-function testing.expect_eq(actual, expected, msg)
-  if actual == testing then actual = expected; expected = msg; msg = nil end
+function testing.expect_eq(actual, expected, msg, extra)
+  if actual == testing then actual = expected; expected = msg; msg = extra end
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
@@ -225,8 +225,8 @@ function testing.expect_eq(actual, expected, msg)
   end
 end
 
-function testing.expect_ne(actual, expected, msg)
-  if actual == testing then actual = expected; expected = msg; msg = nil end
+function testing.expect_ne(actual, expected, msg, extra)
+  if actual == testing then actual = expected; expected = msg; msg = extra end
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
@@ -237,8 +237,8 @@ function testing.expect_ne(actual, expected, msg)
   end
 end
 
-function testing.expect_almost_eq(a, b, eps, msg)
-  if a == testing then a = b; b = eps; eps = msg; msg = nil end
+function testing.expect_almost_eq(a, b, eps, msg, extra)
+  if a == testing then a = b; b = eps; eps = msg; msg = extra end
   eps = eps or 1e-5
   a = unwrap(a)
   b = unwrap(b)
@@ -250,8 +250,8 @@ function testing.expect_almost_eq(a, b, eps, msg)
   end
 end
 
-function testing.expect_none(opt, msg)
-  opt, msg = normalize_args(opt, msg)
+function testing.expect_none(opt, msg, extra)
+  opt, msg = normalize_args(opt, msg, extra)
   local ctx = testing.get_active_context()
   if not is_none(opt) then
     ctx:record_failure(format_msg("Expected nil/None, got " .. tostring(unwrap(opt)), msg), false, "none", nil, unwrap(opt))
@@ -260,8 +260,8 @@ function testing.expect_none(opt, msg)
   end
 end
 
-function testing.expect_not_none(opt, msg)
-  opt, msg = normalize_args(opt, msg)
+function testing.expect_not_none(opt, msg, extra)
+  opt, msg = normalize_args(opt, msg, extra)
   local ctx = testing.get_active_context()
   if is_none(opt) then
     ctx:record_failure(format_msg("Expected non-nil value, got nil", msg), false, "not_none", "<non-nil>", nil)

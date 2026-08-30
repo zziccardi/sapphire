@@ -43,7 +43,7 @@ def extract_comments_above(doc_text: str, start_line: Optional[int]) -> str:
     return ""
   lines = doc_text.splitlines()
   idx = start_line - 1
-  if idx <= 0:
+  if idx <= 0 or idx >= len(lines):
     return ""
 
   comments = []
@@ -199,7 +199,7 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def visit_StructDeclNode(self, node) -> None:
     # Struct name declaration
-    self.add_token(node.name_line, node.name_column, node.name_length, "struct", 1)  # declaration
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "struct", 1)  # declaration
     for info in getattr(node, "parent_names_info", []):
       self.add_token(info["line"], info["column"], info["length"], "struct")
     
@@ -228,7 +228,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     mods = 1  # declaration
     if not node.is_mutable:
       mods |= 4  # readonly
-    self.add_token(node.name_line, node.name_column, node.name_length, "property", mods)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "property", mods)
     if self.current_struct and node.name in self.current_struct.fields:
       field = self.current_struct.fields[node.name]
       if self.doc_text:
@@ -239,7 +239,7 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def visit_TraitDeclNode(self, node) -> None:
     # Trait name declaration
-    self.add_token(node.name_line, node.name_column, node.name_length, "interface", 1)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "interface", 1)
     
     trait_type = self.symbol_table.lookup_type(node.name)
     old_trait = self.current_trait
@@ -263,7 +263,7 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def visit_TraitMemberNode(self, node) -> None:
     # Trait method declaration
-    self.add_token(node.name_line, node.name_column, node.name_length, "method", 1)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "method", 1)
     if self.current_trait and node.name in self.current_trait.methods:
       method_type = self.current_trait.methods[node.name]
       if self.doc_text:
@@ -271,10 +271,11 @@ class SemanticTokensTypeChecker(TypeChecker):
         if comments:
           method_type.comments = comments
       self.node_types[node] = method_type
+      method_type.ast_decl = node
 
   def visit_EnumDeclNode(self, node) -> None:
     # Enum name declaration
-    self.add_token(node.name_line, node.name_column, node.name_length, "enum", 1)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "enum", 1)
     enum_type = self.symbol_table.lookup_type(node.name)
     old_enum = getattr(self, "current_enum", None)
     self.current_enum = enum_type
@@ -297,7 +298,7 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def visit_EnumMemberNode(self, node) -> None:
     # Enum member declaration (readonly)
-    self.add_token(node.name_line, node.name_column, node.name_length, "enumMember", 1 | 4)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "enumMember", 1 | 4)
     if getattr(self, "current_enum", None):
       self.node_types[node] = self.current_enum
 
@@ -318,7 +319,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     # Function declaration (only highlight if not a method; methods are handled by ImplMemberNode)
     is_method = self.current_struct is not None
     if not is_method:
-      self.add_token(node.name_line, node.name_column, node.name_length, "function", 1)
+      self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "function", 1)
     for p in node.parameters:
       self.visit(p)
     super().visit_FuncDeclNode(node)
@@ -339,27 +340,30 @@ class SemanticTokensTypeChecker(TypeChecker):
     mods = 1  # declaration
     if node.modifier == "static":
       mods |= 2  # static
-    self.add_token(node.func_decl.name_line, node.func_decl.name_column, node.func_decl.name_length, "method", mods)
-    for p in node.func_decl.parameters:
-      self.visit(p)
+    func_decl = getattr(node, "func_decl", None)
+    if func_decl:
+      self.add_token(getattr(func_decl, "name_line", None), getattr(func_decl, "name_column", None), getattr(func_decl, "name_length", None), "method", mods)
+      for p in func_decl.parameters:
+        self.visit(p)
     super().visit_ImplMemberNode(node)
-    if self.current_struct and node.func_decl.name in self.current_struct.methods:
-      method_obj = self.current_struct.methods[node.func_decl.name]
+    if self.current_struct and func_decl and func_decl.name in self.current_struct.methods:
+      method_obj = self.current_struct.methods[func_decl.name]
       method_type = method_obj.method_type
       from src.semantics.symbol_table import FunctionType
 
       if isinstance(method_type, FunctionType) and self.doc_text:
-        comments = extract_comments_above(self.doc_text, getattr(node.func_decl, "start_line", None))
+        comments = extract_comments_above(self.doc_text, getattr(func_decl, "start_line", None))
         if comments:
           method_type.comments = comments
-      self.node_types[node.func_decl] = method_type
-      method_obj.ast_decl = node.func_decl
+      self.node_types[func_decl] = method_type
+      method_obj.ast_decl = func_decl
+      method_type.ast_decl = func_decl
 
   def visit_ParameterNode(self, node) -> None:
     mods = 1
     if not node.is_mutable:
       mods |= 4
-    self.add_token(node.name_line, node.name_column, node.name_length, "parameter", mods)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "parameter", mods)
     sym = self.symbol_table.lookup(node.name)
     if sym:  # pragma: no cover
       sym.ast_decl = node
@@ -371,7 +375,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     mods = 1
     if not node.is_mutable:
       mods |= 4
-    self.add_token(node.name_line, node.name_column, node.name_length, "variable", mods)
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "variable", mods)
     super().visit_VarDeclNode(node)
     sym = self.symbol_table.lookup(node.name)
     if sym:
@@ -386,7 +390,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     if node.init_binding:
       # Add semantic token for let_name
       mods = 1 | 4  # declaration | readonly
-      self.add_token(node.init_binding.let_name_line, node.init_binding.let_name_column, node.init_binding.let_name_length, "variable", mods)
+      self.add_token(getattr(node.init_binding, "let_name_line", None), getattr(node.init_binding, "let_name_column", None), getattr(node.init_binding, "let_name_length", None), "variable", mods)
       # Calculate unwrapped type for hover info
       expr_type = self.visit(node.init_binding.expr)
       from src.semantics.symbol_table import OptionalType
@@ -403,7 +407,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     if node.init_binding:
       # Add semantic token for let_name
       mods = 1 | 4  # declaration | readonly
-      self.add_token(node.init_binding.let_name_line, node.init_binding.let_name_column, node.init_binding.let_name_length, "variable", mods)
+      self.add_token(getattr(node.init_binding, "let_name_line", None), getattr(node.init_binding, "let_name_column", None), getattr(node.init_binding, "let_name_length", None), "variable", mods)
       # Calculate unwrapped type for hover info
       expr_type = self.visit(node.init_binding.expr)
       from src.semantics.symbol_table import OptionalType
@@ -423,7 +427,7 @@ class SemanticTokensTypeChecker(TypeChecker):
 
     key_var = getattr(node, "key_var", None)
     if isinstance(key_var, str):
-      self.add_token(node.key_var_line, node.key_var_column, node.key_var_length, "variable", mods)
+      self.add_token(getattr(node, "key_var_line", None), getattr(node, "key_var_column", None), getattr(node, "key_var_length", None), "variable", mods)
     val_var = getattr(node, "val_var", None)
     line = getattr(node, "val_var_line", getattr(node, "loop_var_line", None))
     if line is not None and not isinstance(line, type(node)):
@@ -451,17 +455,17 @@ class SemanticTokensTypeChecker(TypeChecker):
     sym = self.symbol_table.lookup(node.name)
     if sym:
       if isinstance(sym, StructSymbol):
-        self.add_token(node.name_line, node.name_column, node.name_length, "struct")
+        self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "struct")
       elif isinstance(sym, TraitSymbol):
-        self.add_token(node.name_line, node.name_column, node.name_length, "interface")
+        self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "interface")
       elif isinstance(sym, FunctionSymbol):
-        self.add_token(node.name_line, node.name_column, node.name_length, "function")
+        self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "function")
       elif isinstance(sym, VariableSymbol):
         mods = 0
         if not sym.is_mutable:
           mods |= 4
         token_type = "parameter" if sym.is_parameter else "variable"
-        self.add_token(node.name_line, node.name_column, node.name_length, token_type, mods)
+        self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), token_type, mods)
     return super().visit_IdentifierNode(node)
 
   def visit_MemberAccessNode(self, node):
@@ -477,7 +481,7 @@ class SemanticTokensTypeChecker(TypeChecker):
         field = receiver_type.fields[node.member]
         if not getattr(field, "is_mutable", True):
           mods |= 4
-    self.add_token(node.member_line, node.member_column, node.member_length, token_type, mods)
+    self.add_token(getattr(node, "member_line", None), getattr(node, "member_column", None), getattr(node, "member_length", None), token_type, mods)
     return super().visit_MemberAccessNode(node)
 
   def visit_CallNode(self, node):
@@ -487,25 +491,32 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def visit_StructInitializerNode(self, node):
     # Struct initializer constructor name
-    self.add_token(node.name_line, node.name_column, node.name_length, "struct")
+    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "struct")
     for arg in getattr(node, "type_args", []):
       self.visit(arg)
     return super().visit_StructInitializerNode(node)
 
   def visit_BasicTypeNode(self, node):
     # Type reference
+    name_line = getattr(node, "name_line", None)
+    name_column = getattr(node, "name_column", None)
+    name_length = getattr(node, "name_length", None)
     if node.name not in ("int", "float", "bool", "none", "void"):
       from src.semantics.symbol_table import TraitType, GenericTypeParameter
 
       resolved = self.symbol_table.lookup_type(node.name)
       if resolved and isinstance(resolved, TraitType):
-        self.add_token(node.name_line, node.name_column, node.name_length, "interface")
+        self.add_token(name_line, name_column, name_length, "interface")
       elif resolved and isinstance(resolved, GenericTypeParameter):
-        self.add_token(node.name_line, node.name_column, node.name_length, "type")
+        self.add_token(name_line, name_column, name_length, "type")
       else:
-        self.add_token(node.name_line, node.name_column, node.name_length, "struct")
+        self.add_token(name_line, name_column, name_length, "struct")
     else:
-      self.add_token(node.name_line, node.name_column, node.name_length, "type")
+      self.add_token(name_line, name_column, name_length, "type")
+
+    for arg in getattr(node, "type_args", []):  # pragma: no cover
+      self.visit(arg)
+    return None
 
 
     for arg in getattr(node, "type_args", []):  # pragma: no cover

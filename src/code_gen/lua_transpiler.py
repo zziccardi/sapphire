@@ -30,6 +30,63 @@ from src.code_gen.transpiler_registry import TranspilerRegistry
 
 LUA_RUNTIME_PREAMBLE = """-- Sapphire Lua 5.1 Runtime Header
 
+local function _sp_install_loader()
+  if _G._SP_RELATIVE_LOADER_INSTALLED then return end
+  _G._SP_RELATIVE_LOADER_INSTALLED = true
+  local loaders = package.searchers or package.loaders
+  if not loaders then return end
+
+  local function relative_loader(modname)
+    local rel_path = modname:gsub("%.", "/")
+    for level = 2, 20 do
+      local info = debug.getinfo(level, "S")
+      if info and info.source and info.source:sub(1, 1) == "@" then
+        local caller_file = info.source:sub(2)
+        local curr_dir = caller_file:match("^(.*[/\\\\])") or "./"
+        while curr_dir and curr_dir ~= "" do
+          local cand1 = curr_dir .. rel_path .. ".lua"
+          local cand2 = curr_dir .. rel_path .. "/init.lua"
+          local f = io.open(cand1, "r")
+          if f then
+            f:close()
+            local chunk, err = loadfile(cand1)
+            if chunk then return chunk, cand1 else error("error loading module '" .. modname .. "' from file '" .. cand1 .. "':\\n\\t" .. tostring(err), 3) end
+          end
+          f = io.open(cand2, "r")
+          if f then
+            f:close()
+            local chunk, err = loadfile(cand2)
+            if chunk then return chunk, cand2 else error("error loading module '" .. modname .. "' from file '" .. cand2 .. "':\\n\\t" .. tostring(err), 3) end
+          end
+          local parent = curr_dir:match("^(.*[/\\\\])[^/\\\\]+[/\\\\]$")
+          if not parent or parent == curr_dir then
+            if curr_dir ~= "./" and curr_dir ~= "/" and not curr_dir:match("^[A-Za-z]:[\\\\/]$") then
+              local f_dot1 = io.open("./" .. rel_path .. ".lua", "r")
+              if f_dot1 then
+                f_dot1:close()
+                local chunk, err = loadfile("./" .. rel_path .. ".lua")
+                if chunk then return chunk, "./" .. rel_path .. ".lua" else error("error loading module '" .. modname .. "' from file './" .. rel_path .. ".lua':\\n\\t" .. tostring(err), 3) end
+              end
+              local f_dot2 = io.open("./" .. rel_path .. "/init.lua", "r")
+              if f_dot2 then
+                f_dot2:close()
+                local chunk, err = loadfile("./" .. rel_path .. "/init.lua")
+                if chunk then return chunk, "./" .. rel_path .. "/init.lua" else error("error loading module '" .. modname .. "' from file './" .. rel_path .. "/init.lua':\\n\\t" .. tostring(err), 3) end
+              end
+            end
+            break
+          end
+          curr_dir = parent
+        end
+      end
+    end
+    return "\\n\\tno relative sapphire module found for '" .. modname .. "'"
+  end
+
+  table.insert(loaders, 2, relative_loader)
+end
+_sp_install_loader()
+
 local _Coroutine = {}
 _Coroutine.__index = _Coroutine
 
@@ -740,6 +797,7 @@ class LuaTranspiler(BaseTranspiler):
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
+    self.imported_modules: Set[str] = set()
     self.arena_stack: List[List[str]] = []
     self.disposable_stack: List[List[str]] = []
     self._identifier_map: Dict[str, str] = {}
@@ -939,6 +997,7 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
     alias_name = node.alias if node.alias else node.path.split(".")[-1]
+    self.imported_modules.add(alias_name)
     self.emit(f"local {alias_name} = require(\"{node.path}\")")
     if self.dev_mode:
       file_path = node.path.replace(".", "/") + ".lua"
@@ -2137,7 +2196,7 @@ class LuaTranspiler(BaseTranspiler):
       if getattr(node.callee, "is_instance_method", False):
         self.visit(node.callee.receiver)
         self.emit(f":{member_name}(")
-      elif getattr(node.callee, "is_static_method", False) or (receiver_name and receiver_name in self.known_structs):
+      elif getattr(node.callee, "is_static_method", False) or (receiver_name and (receiver_name in self.known_structs or receiver_name in self.imported_modules)):
         self.visit(node.callee.receiver)
         self.emit(f".{member_name}(")
       elif isinstance(node.callee.receiver, MemberAccessNode):

@@ -189,28 +189,30 @@ impl t.TestCase for BadSetupTest {
     with patch("shutil.which", return_value="lua"), patch("subprocess.run", return_value=mock_proc):
       with suppress_output():
         # Test passing filter (exercises line 407 filter skip)
-        p_fail, p_pass, _ = run_tests_lua(
+        passed, failed, _ = run_tests_lua(
             self.sample_sp, standalone, suites, filter_pattern="nonexistent_filter"
         )
-        self.assertEqual(p_fail, 0)
+        self.assertEqual(failed, 0)
+        self.assertEqual(passed, 1)
 
         # Test full run
-        p_fail, p_pass, _ = run_tests_lua(self.sample_sp, standalone, suites)
-        self.assertEqual(p_fail, 0)
+        passed, failed, _ = run_tests_lua(self.sample_sp, standalone, suites)
+        self.assertEqual(failed, 0)
+        self.assertEqual(passed, 1)
 
   def test_run_tests_cli_facade(self):
     with suppress_output():
-      # Test directory run
-      res_dir = run_tests(self.temp_dir, target="python", filter_pattern="pass")
-      self.assertEqual(res_dir, 0)
+      # Test passing file run
+      res_pass = run_tests(self.sample_sp, target="python", filter_pattern="pass")
+      self.assertEqual(res_pass, 0)
 
       # Test file with no tests
       res_no_tests = run_tests(self.no_tests_sp, target="python")
       self.assertEqual(res_no_tests, 0)
 
-      # Test syntax error file
+      # Test syntax error file (should return 1)
       res_syntax = run_tests(self.syntax_error_sp, target="python")
-      self.assertEqual(res_syntax, 0)
+      self.assertEqual(res_syntax, 1)
 
       # Test Lua target run with mocks
       mock_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="[ PASS ] test_pass", stderr="")
@@ -443,6 +445,66 @@ func test_bare_fail() {
     self.assertNotIn("test_bare.sp:", out)
     self.assertGreater(failed, 0)
 
+  def test_find_lua_binary_fallbacks(self):
+    from src.cli.test_runner import find_lua_binary
+    with patch("shutil.which", return_value=None):
+      with patch("os.path.isfile", return_value=True), patch("os.access", return_value=True):
+        self.assertEqual(find_lua_binary(), "/opt/homebrew/bin/lua")
+
+      with patch("os.path.isfile", return_value=False):
+        self.assertIsNone(find_lua_binary())
+
+  def test_lua_runner_process_error_without_output(self):
+    ast = parse_ast(self.sample_sp)
+    standalone, suites = discover_tests(ast)
+    mock_proc_crash = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="crash")
+    with patch("shutil.which", return_value="lua"), patch("subprocess.run", return_value=mock_proc_crash):
+      with suppress_output():
+        passed, failed, _ = run_tests_lua(self.sample_sp, standalone, suites)
+      self.assertEqual(passed, 0)
+      self.assertEqual(failed, 1)
+
+  def test_run_tests_directory_with_no_tests_across_files(self):
+    empty_dir = tempfile.mkdtemp()
+    try:
+      f1 = os.path.join(empty_dir, "a.sp")
+      f2 = os.path.join(empty_dir, "b.sp")
+      with open(f1, "w") as f: f.write("let a = 1;")
+      with open(f2, "w") as f: f.write("let b = 2;")
+      with suppress_output():
+        res = run_tests(empty_dir, target="python")
+      self.assertEqual(res, 0)
+    finally:
+      shutil.rmtree(empty_dir, ignore_errors=True)
+
+  def test_same_folder_module_import_lua(self):
+    """Verifies that modules in subfolders importing sibling modules in the same folder run cleanly in Lua."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+      sp_dir = os.path.join(tmpdir, "sp")
+      love_dir = os.path.join(sp_dir, "lib", "love2d")
+      os.makedirs(love_dir)
+
+      enums_sp = os.path.join(love_dir, "enums.sp")
+      with open(enums_sp, "w") as f:
+        f.write("export { DrawMode }\nenum DrawMode { Fill, Line }\n")
+
+      graphics_sp = os.path.join(love_dir, "graphics.sp")
+      with open(graphics_sp, "w") as f:
+        f.write("import enums;\nexport { get_mode }\nfunc get_mode(): enums.DrawMode { return enums.DrawMode.Fill; }\n")
+
+      util_test_sp = os.path.join(sp_dir, "util_test.sp")
+      with open(util_test_sp, "w") as f:
+        f.write("import lib.love2d.graphics;\nimport std.testing;\n@test\nfunc test_graphics() {\n  let m = graphics.get_mode();\n  testing.assert_eq(m, 0);\n}\n")
+
+      with suppress_output():
+        passed, failed, logs = run_tests_lua(util_test_sp, ["test_graphics"], {})
+      self.assertEqual(passed, 1)
+      self.assertEqual(failed, 0)
+    finally:
+      shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 if __name__ == "__main__":
   unittest.main()
+

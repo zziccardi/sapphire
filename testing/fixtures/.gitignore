@@ -1,2 +1,4 @@
+*.lua
+*.lua.map
 *.py
 !_expectations.py
