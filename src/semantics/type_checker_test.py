@@ -4507,6 +4507,18 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_host_module_trait_implementation_static_methods(self):
+    """Verifies that methods implementing host module traits (Graphics, Timer, etc.) are treated as static methods."""
+    self._check("""
+    trait Graphics {
+      func clear(r: float, g: float, b: float);
+    }
+    struct MockGraphics {}
+    impl Graphics for MockGraphics {
+      func clear(r: float, g: float, b: float) {}
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

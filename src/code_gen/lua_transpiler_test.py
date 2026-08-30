@@ -635,6 +635,19 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('_M.DrawMode = enums.DrawMode', output)
     self.assertIn('return _M', output)
 
+  def test_lua_imported_module_function_call(self):
+    """Verifies that calling a function on an imported module uses dot syntax, not colon syntax."""
+    code = """
+    import util;
+
+    func test(): float {
+      return util.clamp(5.0, 0.0, 10.0);
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("local util = require(\"util\")", output)
+    self.assertIn("util.clamp(5.0, 0.0, 10.0)", output)
+
   def test_lua_preamble_contains_relative_loader(self):
     """Verifies that the Lua preamble includes the dynamic relative module loader hook."""
     output = self._transpile("let x: int = 10;")

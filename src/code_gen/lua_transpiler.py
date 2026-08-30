@@ -797,6 +797,7 @@ class LuaTranspiler(BaseTranspiler):
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
+    self.imported_modules: Set[str] = set()
     self.arena_stack: List[List[str]] = []
     self.disposable_stack: List[List[str]] = []
     self._identifier_map: Dict[str, str] = {}
@@ -996,6 +997,7 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
     alias_name = node.alias if node.alias else node.path.split(".")[-1]
+    self.imported_modules.add(alias_name)
     self.emit(f"local {alias_name} = require(\"{node.path}\")")
     if self.dev_mode:
       file_path = node.path.replace(".", "/") + ".lua"
@@ -2194,7 +2196,7 @@ class LuaTranspiler(BaseTranspiler):
       if getattr(node.callee, "is_instance_method", False):
         self.visit(node.callee.receiver)
         self.emit(f":{member_name}(")
-      elif getattr(node.callee, "is_static_method", False) or (receiver_name and receiver_name in self.known_structs):
+      elif getattr(node.callee, "is_static_method", False) or (receiver_name and (receiver_name in self.known_structs or receiver_name in self.imported_modules)):
         self.visit(node.callee.receiver)
         self.emit(f".{member_name}(")
       elif isinstance(node.callee.receiver, MemberAccessNode):

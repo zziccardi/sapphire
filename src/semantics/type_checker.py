@@ -591,7 +591,17 @@ class TypeChecker:
             continue
           struct_type.implemented_traits.add(trait_type.name)
 
+        is_host_module_trait = bool(
+            decl.trait_name
+            and any(
+                decl.trait_name == t or decl.trait_name.endswith(f".{t}")
+                for t in ("Graphics", "Timer", "Keyboard", "Mouse")
+            )
+        )
+
         for member in decl.members:
+          if is_host_module_trait:
+            member.modifier = "static"
           func_decl = member.func_decl
           # Resolve parameters
           param_types = []
