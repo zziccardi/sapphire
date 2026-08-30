@@ -591,17 +591,11 @@ class TypeChecker:
             continue
           struct_type.implemented_traits.add(trait_type.name)
 
-        is_host_module_trait = bool(
-            decl.trait_name
-            and any(
-                decl.trait_name == t or decl.trait_name.endswith(f".{t}")
-                for t in ("Graphics", "Timer", "Keyboard", "Mouse")
-            )
-        )
-
         for member in decl.members:
-          if is_host_module_trait:
-            member.modifier = "static"
+          if trait_type and member.func_decl.name in trait_type.methods:
+            trait_method = trait_type.methods[member.func_decl.name]
+            if getattr(trait_method.ast_decl, "modifier", None) == "static":
+              member.modifier = "static"
           func_decl = member.func_decl
           # Resolve parameters
           param_types = []
@@ -2279,8 +2273,9 @@ class TypeChecker:
       if method:
         if getattr(method, "extern_name", None):
           node.target_name = method.extern_name
-        node.is_instance_method = method.has_self
-        node.is_static_method = not method.has_self
+        is_static = getattr(method.ast_decl, "modifier", None) == "static"
+        node.is_static_method = is_static
+        node.is_instance_method = not is_static
         return method
       self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")

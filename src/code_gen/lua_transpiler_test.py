@@ -563,7 +563,7 @@ class TestLuaTranspiler(unittest.TestCase):
       func draw(self, x: float, y: float);
     }
     trait Graphics {
-      func rectangle(mode: String, x: float, y: float, w: float, h: float);
+      static func rectangle(mode: String, x: float, y: float, w: float, h: float);
     }
 
     struct Love {
@@ -590,7 +590,7 @@ class TestLuaTranspiler(unittest.TestCase):
     code = """
     trait Graphics {
       @export("setColor")
-      func setColorRGBA(r: float, g: float, b: float);
+      static func setColorRGBA(r: float, g: float, b: float);
     }
     struct Love {
       var graphics: Graphics;

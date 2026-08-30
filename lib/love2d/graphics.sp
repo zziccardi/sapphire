@@ -48,31 +48,31 @@ trait Quad {
 }
 
 trait Graphics {
-  func clear(r: float = 0.0, g: float = 0.0, b: float = 0.0, a: float = 1.0);
-  func setBackgroundColor(r: float, g: float, b: float, a: float = 1.0);
-  func present();
+  static func clear(r: float = 0.0, g: float = 0.0, b: float = 0.0, a: float = 1.0);
+  static func setBackgroundColor(r: float, g: float, b: float, a: float = 1.0);
+  static func present();
 
   @export("setColor")
-  func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
+  static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
-  func rectangle(mode: enums.DrawMode, x: float, y: float,
-                 width: float, height: float);
+  static func rectangle(mode: enums.DrawMode, x: float, y: float,
+                        width: float, height: float);
 
   @export("rectangle")
-  func rectangleRounded(mode: enums.DrawMode, x: float, y: float,
-                        width: float, height: float,
-                        rx: float, ry: float);
+  static func rectangleRounded(mode: enums.DrawMode, x: float, y: float,
+                               width: float, height: float,
+                               rx: float, ry: float);
 
-  func circle(mode: enums.DrawMode, x: float, y: float, radius: float);
-  func line(x1: float, y1: float, x2: float, y2: float);
-  func print(text: String, x: float, y: float);
+  static func circle(mode: enums.DrawMode, x: float, y: float, radius: float);
+  static func line(x1: float, y1: float, x2: float, y2: float);
+  static func print(text: String, x: float, y: float);
 
-  func newImage(path: String): Image;
-  func newCanvas(width: float = 0.0, height: float = 0.0): Canvas;
-  func newFont(path: String, size: int = 12): Font;
-  func newQuad(x: float, y: float, w: float, h: float,
-               sw: float, sh: float): Quad;
+  static func newImage(path: String): Image;
+  static func newCanvas(width: float = 0.0, height: float = 0.0): Canvas;
+  static func newFont(path: String, size: int = 12): Font;
+  static func newQuad(x: float, y: float, w: float, h: float,
+                      sw: float, sh: float): Quad;
 
-  func setCanvas(canvas: Canvas? = none);
-  func setFont(font: Font);
+  static func setCanvas(canvas: Canvas? = none);
+  static func setFont(font: Font);
 }

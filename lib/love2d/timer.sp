@@ -5,9 +5,9 @@ export {
 }
 
 trait Timer {
-  func getDelta(): float;
-  func getFPS(): int;
-  func getTime(): float;
-  func sleep(seconds: float);
-  func step(): float;
+  static func getDelta(): float;
+  static func getFPS(): int;
+  static func getTime(): float;
+  static func sleep(seconds: float);
+  static func step(): float;
 }
