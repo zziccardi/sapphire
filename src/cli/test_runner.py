@@ -160,8 +160,10 @@ def run_tests_python(
   lib_dir = os.path.join(workspace_root, "lib")
   sp_dir = os.path.dirname(os.path.abspath(sp_file))
   cwd = os.getcwd()
-  for path_entry in (sp_dir, cwd, lib_dir, workspace_root):
-    if path_entry and path_entry not in sys.path:  # pragma: no cover
+  for path_entry in (workspace_root, lib_dir, cwd, sp_dir):
+    if path_entry:
+      if path_entry in sys.path:
+        sys.path.remove(path_entry)
       sys.path.insert(0, path_entry)
 
   try:
@@ -172,6 +174,26 @@ def run_tests_python(
     except ImportError:  # pragma: no cover
       print(f"[ FAIL ] {os.path.basename(sp_file)} (could not import std.testing module)", file=sys.stderr)
       return 0, 1, ["Failed to load std.testing module"]
+
+  # If a 'lib' directory exists in sp_dir, clear stale repo 'lib' modules from sys.modules
+  sp_lib = os.path.join(sp_dir, "lib")
+  if os.path.isdir(sp_lib):
+    to_del = [k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")]
+    for k in to_del:
+      del sys.modules[k]
+
+  # Invalidate cached modules in sys.modules that match files within sp_dir
+  for root, _, files in os.walk(sp_dir):
+    rel_root = os.path.relpath(root, sp_dir).replace(os.sep, ".")
+    for f in files:
+      if f.endswith(".py"):
+        base_f = os.path.splitext(f)[0]
+        mod_candidates = [base_f]
+        if rel_root != ".":
+          mod_candidates.append(f"{rel_root}.{base_f}")
+        for mc in mod_candidates:
+          if mc in sys.modules and mc != "std.testing":
+            del sys.modules[mc]
 
   # Dynamically import transpiled Python module
   module_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
@@ -388,6 +410,64 @@ def run_tests_lua(
   # Construct Lua runner script
   lua_script_lines = [
       f'package.path = "{workspace_root}/lib/?.lua;{workspace_root}/lib/?/init.lua;{sp_dir}/?.lua;{sp_dir}/?/init.lua;" .. package.path',
+      '''
+local function _sp_install_loader()
+  if _G._SP_RELATIVE_LOADER_INSTALLED then return end
+  _G._SP_RELATIVE_LOADER_INSTALLED = true
+  local loaders = package.searchers or package.loaders
+  if not loaders then return end
+
+  local function relative_loader(modname)
+    local rel_path = modname:gsub("%.", "/")
+    for level = 2, 20 do
+      local info = debug.getinfo(level, "S")
+      if info and info.source and info.source:sub(1, 1) == "@" then
+        local caller_file = info.source:sub(2)
+        local curr_dir = caller_file:match("^(.*[/\\\\])") or "./"
+        while curr_dir and curr_dir ~= "" do
+          local cand1 = curr_dir .. rel_path .. ".lua"
+          local cand2 = curr_dir .. rel_path .. "/init.lua"
+          local f = io.open(cand1, "r")
+          if f then
+            f:close()
+            local chunk, err = loadfile(cand1)
+            if chunk then return chunk, cand1 else error("error loading module '" .. modname .. "' from file '" .. cand1 .. "':\\n\\t" .. tostring(err), 3) end
+          end
+          f = io.open(cand2, "r")
+          if f then
+            f:close()
+            local chunk, err = loadfile(cand2)
+            if chunk then return chunk, cand2 else error("error loading module '" .. modname .. "' from file '" .. cand2 .. "':\\n\\t" .. tostring(err), 3) end
+          end
+          local parent = curr_dir:match("^(.*[/\\\\])[^/\\\\]+[/\\\\]$")
+          if not parent or parent == curr_dir then
+            if curr_dir ~= "./" and curr_dir ~= "/" and not curr_dir:match("^[A-Za-z]:[\\\\/]$") then
+              local f_dot1 = io.open("./" .. rel_path .. ".lua", "r")
+              if f_dot1 then
+                f_dot1:close()
+                local chunk, err = loadfile("./" .. rel_path .. ".lua")
+                if chunk then return chunk, "./" .. rel_path .. ".lua" else error("error loading module '" .. modname .. "' from file './" .. rel_path .. ".lua':\\n\\t" .. tostring(err), 3) end
+              end
+              local f_dot2 = io.open("./" .. rel_path .. "/init.lua", "r")
+              if f_dot2 then
+                f_dot2:close()
+                local chunk, err = loadfile("./" .. rel_path .. "/init.lua")
+                if chunk then return chunk, "./" .. rel_path .. "/init.lua" else error("error loading module '" .. modname .. "' from file './" .. rel_path .. "/init.lua':\\n\\t" .. tostring(err), 3) end
+              end
+            end
+            break
+          end
+          curr_dir = parent
+        end
+      end
+    end
+    return "\\n\\tno relative sapphire module found for '" .. modname .. "'"
+  end
+
+  table.insert(loaders, 2, relative_loader)
+end
+_sp_install_loader()
+''',
       f'local testing = require("std.testing")',
       f'local target_mod_ok, target_mod = pcall(function() return dofile("{out_lua}") end)',
       'if not target_mod_ok then',

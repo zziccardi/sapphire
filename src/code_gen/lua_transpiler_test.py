@@ -635,6 +635,13 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('_M.DrawMode = enums.DrawMode', output)
     self.assertIn('return _M', output)
 
+  def test_lua_preamble_contains_relative_loader(self):
+    """Verifies that the Lua preamble includes the dynamic relative module loader hook."""
+    output = self._transpile("let x: int = 10;")
+    self.assertIn("_sp_install_loader", output)
+    self.assertIn("package.searchers or package.loaders", output)
+    self.assertIn("relative_loader", output)
+
   def test_coroutine_transpilation(self):
     """Verifies that Coroutines transpile to Lua coroutine wrappers and execute correctly."""
     code = """

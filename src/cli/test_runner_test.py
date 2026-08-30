@@ -477,6 +477,34 @@ func test_bare_fail() {
     finally:
       shutil.rmtree(empty_dir, ignore_errors=True)
 
+  def test_same_folder_module_import_lua(self):
+    """Verifies that modules in subfolders importing sibling modules in the same folder run cleanly in Lua."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+      sp_dir = os.path.join(tmpdir, "sp")
+      love_dir = os.path.join(sp_dir, "lib", "love2d")
+      os.makedirs(love_dir)
+
+      enums_sp = os.path.join(love_dir, "enums.sp")
+      with open(enums_sp, "w") as f:
+        f.write("export { DrawMode }\nenum DrawMode { Fill, Line }\n")
+
+      graphics_sp = os.path.join(love_dir, "graphics.sp")
+      with open(graphics_sp, "w") as f:
+        f.write("import enums;\nexport { get_mode }\nfunc get_mode(): enums.DrawMode { return enums.DrawMode.Fill; }\n")
+
+      util_test_sp = os.path.join(sp_dir, "util_test.sp")
+      with open(util_test_sp, "w") as f:
+        f.write("import lib.love2d.graphics;\nimport std.testing;\n@test\nfunc test_graphics() {\n  let m = graphics.get_mode();\n  testing.assert_eq(m, 0);\n}\n")
+
+      with suppress_output():
+        passed, failed, logs = run_tests_lua(util_test_sp, ["test_graphics"], {})
+      self.assertEqual(passed, 1)
+      self.assertEqual(failed, 0)
+    finally:
+      shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 if __name__ == "__main__":
   unittest.main()
+
