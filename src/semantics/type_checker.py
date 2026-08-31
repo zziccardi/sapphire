@@ -2100,11 +2100,19 @@ class TypeChecker:
       signature = init_method.method_type
       # Match arguments
       self._check_arguments(node.arguments, signature, is_constructor=True)
+      if callee_type.is_prototype and not node.arena_expr:
+        self.error(f"Proto constructor call for '{callee_type.name}' requires an explicit arena via 'in <arena>'.")
+      if node.arena_expr:
+        arena_type = self.visit(node.arena_expr)
+        if not isinstance(arena_type, ArenaType):
+          self.error("Explicit arena target must be an instance of Arena.")
     else:
       # Standard function/method resolution
       if not isinstance(callee_type, FunctionType):
         self.error("Target is not callable.")
         return PrimitiveType("none")
+      if node.arena_expr:
+        self.error("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.")
       signature = callee_type
       self._check_arguments(node.arguments, signature, callee_node=node.callee)
 
@@ -2761,6 +2769,8 @@ class TypeChecker:
         return PrimitiveType("none")
 
     # Validate explicit arena target
+    if struct_type.is_prototype and not node.arena_expr:
+      self.error(f"Proto instantiation of '{node.struct_name}' requires an explicit arena via 'in <arena>'.")
     if node.arena_expr:
       arena_type = self.visit(node.arena_expr)
       if not isinstance(arena_type, ArenaType):

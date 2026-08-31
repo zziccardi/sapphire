@@ -108,10 +108,12 @@ func execute_strike(attacker: Character, var defender: Character,
 
 // 6. Main simulation entry point
 func run_demo() {
+  let sim_arena = Arena();
+
   // A. Create a prototype archetype (Template)
   // This base_goblin represents a general archetype blueprint.
   var base_goblin = Character(id = 0, name = "Goblin Archer", x = 0.0,
-                              y = 0.0, hp = 30, spd = 1.5);
+                              y = 0.0, hp = 30, spd = 1.5) in sim_arena;
 
   // B. Clone active characters from the archetype and shadow individual traits
   var goblin_1 = clone base_goblin {
@@ -126,7 +128,7 @@ func run_demo() {
 
   // Create a Hero instance from scratch
   var hero = Character(id = 1, name = "Arthur", x = 8.0, y = 5.0, hp = 80,
-                       spd = 2.5);
+                       spd = 2.5) in sim_arena;
 
   // C. Show dynamic prototypal inheritance live updates!
   // Mutating the base archetype's stats updates all clones dynamically,

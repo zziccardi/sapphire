@@ -141,13 +141,19 @@ proto ServerFixture {
   var status: String;
 }
 
+let test_arena = Arena();
+let base_server_proto = ServerFixture {
+    port = 8080,
+    status = "IDLE"
+} in test_arena;
+
 struct ServerTest {
   var fixture: ServerFixture;
 }
 
 impl testing.TestCase for ServerTest {
   func set_up() {
-    // Clone baseline prototype; CoW guarantees mutations do not pollute
+    // Clone baseline prototype (inherits test_arena); CoW guarantees mutations do not pollute
     // prototype state
     self.fixture = clone base_server_proto;
   }

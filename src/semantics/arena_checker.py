@@ -5,7 +5,7 @@ reference escape checks from the monolithic TypeChecker.
 """
 
 from typing import Any, Callable, Optional
-from src.parser.ast import ASTNode, IdentifierNode, StructInitializerNode, CloneNode
+from src.parser.ast import ASTNode, IdentifierNode, StructInitializerNode, CloneNode, CallNode
 from src.semantics.symbol_table import SymbolTable, VariableSymbol
 
 
@@ -20,6 +20,9 @@ class ArenaChecker:
       if isinstance(symbol, VariableSymbol):
         return symbol.arena_dependency
     elif isinstance(node, StructInitializerNode):
+      if node.arena_expr and isinstance(node.arena_expr, IdentifierNode):
+        return node.arena_expr.name
+    elif isinstance(node, CallNode):
       if node.arena_expr and isinstance(node.arena_expr, IdentifierNode):
         return node.arena_expr.name
     elif isinstance(node, CloneNode):

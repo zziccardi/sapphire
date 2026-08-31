@@ -9,6 +9,7 @@ plugins:
 defaults:
   - scope:
       path: ""
+      type: "pages"
     values:
       layout: "default"
 
@@ -19,3 +20,15 @@ kramdown:
   syntax_highlighter_opts:
     block:
       line_numbers: false
+
+mermaid:
+  # Version of mermaid library
+  # Pick an available version from https://cdn.jsdelivr.net/npm/mermaid/
+  version: "11.17.2"
+
+aux_links:
+  "GitHub":
+    - "//github.com/zziccardi/sapphire"
+
+back_to_top: true
+back_to_top_text: "Back to top"

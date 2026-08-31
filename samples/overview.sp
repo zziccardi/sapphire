@@ -95,11 +95,13 @@ func execute_attack(attacker: Character, var defender: Character,
 
 // 5. Main entry demonstration function
 func run_demo() {
+  let game_arena = Arena();
+
   // Variable declarations and type inference
   // Constant binding
-  let player_one = Character(id = 1, name = "Galahad");
+  let player_one = Character(id = 1, name = "Galahad") in game_arena;
   // Mutable binding
-  var player_two = Character(id = 2, name = "Lancelot", max_hp = 120);
+  var player_two = Character(id = 2, name = "Lancelot", max_hp = 120) in game_arena;
 
   // Optionals and swift-style optional unwrapping
   var target_player: Character? = none;
@@ -115,7 +117,8 @@ func run_demo() {
   }
 
   // Dynamic prototypal inheritance via 'clone'
-  let prototype_enemy = Character(id = 99, name = "Goblin Minion", max_hp = 30);
+  let prototype_enemy = Character(id = 99, name = "Goblin Minion",
+                                  max_hp = 30) in game_arena;
 
   // Clone creates a live reference delegation back to prototype_enemy
   var active_clone = clone prototype_enemy {

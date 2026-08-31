@@ -216,6 +216,29 @@ class TestPythonTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "run_loops()")
     self.assertEqual(result, [6, 60])
 
+  def test_proto_explicit_arena_execution(self):
+    """Verifies that proto constructor and struct initializer with explicit arenas compile and execute properly."""
+    code = """
+    proto Entity {
+      var hp: int;
+    }
+    impl Entity {
+      func __init__(hp: int) {
+        self.hp = hp;
+      }
+    }
+    func run_proto_test(): int {
+      let a = Arena();
+      let e1 = Entity(hp = 75) in a;
+      let e2 = clone e1 {
+        self.hp = 120;
+      };
+      return e1.hp + e2.hp;
+    }
+    """
+    result = self._transpile_and_run(code, "run_proto_test()")
+    self.assertEqual(result, 195)
+
   def test_static_methods(self):
     """Verifies static method decorators and const struct methods compile and run."""
     code = """

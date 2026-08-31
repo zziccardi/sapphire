@@ -594,10 +594,13 @@ class ASTBuilder(SapphireVisitor):
     return IndexExprNode(array, index)
 
   def visitCallExpr(self, ctx: SapphireParser.CallExprContext) -> CallNode:
-    callee = self.visit(ctx.expression())
+    callee = self.visit(ctx.expression(0))
     type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []
     args = self.visit(ctx.argumentList()) if ctx.argumentList() else []
-    return CallNode(callee, args, type_args=type_args)
+    arena_expr = None
+    if ctx.IN() is not None:
+      arena_expr = self.visit(ctx.expression(1))
+    return CallNode(callee, args, type_args=type_args, arena_expr=arena_expr)
 
   def visitArgumentList(self, ctx: SapphireParser.ArgumentListContext) -> List[ArgumentNode]:
     return [self.visit(arg) for arg in ctx.argument()]

@@ -1,7 +1,7 @@
 """Unit tests for ArenaChecker in src/semantics/arena_checker.py."""
 
 import unittest
-from src.parser.ast import IdentifierNode, StructInitializerNode, CloneNode, LiteralNode
+from src.parser.ast import IdentifierNode, StructInitializerNode, CloneNode, LiteralNode, CallNode
 from src.semantics.symbol_table import SymbolTable, VariableSymbol, PrimitiveType
 from src.semantics.arena_checker import ArenaChecker
 
@@ -27,6 +27,16 @@ class TestArenaChecker(unittest.TestCase):
     )
     dep = ArenaChecker.get_arena_dependency(st, init_node)
     self.assertEqual(dep, "arena_b")
+
+  def test_get_arena_dependency_call_node(self):
+    st = SymbolTable()
+    call_node = CallNode(
+        callee=IdentifierNode("Enemy"),
+        arguments=[],
+        arena_expr=IdentifierNode("arena_call"),
+    )
+    dep = ArenaChecker.get_arena_dependency(st, call_node)
+    self.assertEqual(dep, "arena_call")
 
   def test_get_arena_dependency_clone_node(self):
     st = SymbolTable()

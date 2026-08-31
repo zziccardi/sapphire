@@ -390,6 +390,7 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   Reduces the array elements to a single accumulated value starting with `initial`.
   * When `reverse` is `false` (default), iterates forward from left to right (index 0 to `size() - 1`).
   * When `reverse` is `true`, iterates backward from right to left (index `size() - 1` down to 0).
+
   ```sapphire
   let numbers = [1, 2, 3, 4];
   let sum = numbers.reduce(0, (acc, x) -> acc + x);  // 10
@@ -664,9 +665,8 @@ let my_arena = Arena();
 
 | Mechanism / syntax | Description |
 | :--- | :--- |
-| **Targeted allocation (`in`)** | `let p = Point { x = 1.0, y = 2.0 } in my_arena;`<br>`let e = Enemy { hp = 100 } in my_arena;`<br>`let c = clone base_goblin in my_arena;`<br>Directs object memory allocation into an explicit `Arena` instance. |
+| **Targeted allocation (`in`)** | `let p = Point { x = 1.0, y = 2.0 } in my_arena;`<br>`let e = Enemy { hp = 100 } in my_arena;`<br>`let c = clone base_goblin in my_arena;`<br>Directs object memory allocation into an explicit `Arena` instance. Protos strictly require targeting an explicit `Arena`. |
 | **Scope-bound RAII teardown** | Explicit arenas have lexical lifecycles. When an `Arena` variable exits its enclosing block, the runtime automatically tears down the arena and deallocates all registered objects. |
-| **Implicit default arena** | If no explicit arena is targeted using `in`, prototype (`proto`) allocations and their clones land in an implicit default arena. |
 | **Clone arena propagation** | When cloning a prototype object (`clone base`), the cloned instance automatically inherits the arena of the original prototype unless explicitly overridden with `in`. |
 
 #### Static-escape rules

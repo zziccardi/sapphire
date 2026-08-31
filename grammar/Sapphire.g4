@@ -243,7 +243,7 @@ forStatement
 
 expression
     : expression LBRACKET expression RBRACKET                     # IndexExpr
-    | expression typeArgumentList? LPAREN argumentList? RPAREN    # CallExpr
+    | expression typeArgumentList? LPAREN argumentList? RPAREN (IN expression)?    # CallExpr
     | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
     | (SUB | ADD | NOT) expression                                # UnaryExpr
     | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
