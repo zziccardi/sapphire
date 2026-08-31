@@ -766,7 +766,8 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     func test() {
-      var e1 = Entity(s = 10);
+      let arena = Arena();
+      var e1 = Entity(s = 10) in arena;
       var e2 = clone e1 {
         self.score = 20;
       };
@@ -2897,7 +2898,8 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func test() {
-      let base = Hero { id = 1, hp = 100 };
+      let arena = Arena();
+      let base = Hero { id = 1, hp = 100 } in arena;
       let cloned = clone base {
         self.id = 2;
         self.hp = 90;
@@ -4632,6 +4634,72 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Match case block in value-producing match expression must explicitly yield a value.", str(ctx.exception))
+
+
+  def test_proto_initializer_requires_explicit_arena(self):
+    """Verifies that instantiating a proto struct via curly braces without an arena raises a SemanticError."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      proto Goblin {
+        var hp: int;
+      }
+      func test() {
+        let g = Goblin { hp = 50 };
+      }
+      """)
+    self.assertIn("Proto instantiation of 'Goblin' requires an explicit arena", str(ctx.exception))
+
+  def test_proto_constructor_requires_explicit_arena(self):
+    """Verifies that invoking a proto constructor without an arena raises a SemanticError."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      proto Goblin {
+        var hp: int;
+      }
+      impl Goblin {
+        func __init__(hp: int) {
+          self.hp = hp;
+        }
+      }
+      func test() {
+        let g = Goblin(hp = 50);
+      }
+      """)
+    self.assertIn("Proto constructor call for 'Goblin' requires an explicit arena", str(ctx.exception))
+
+  def test_proto_allocations_with_explicit_arena_succeed(self):
+    """Verifies that proto initializer and constructor calls with 'in <arena>' pass type checking."""
+    self._check("""
+    proto Goblin {
+      var hp: int;
+    }
+    impl Goblin {
+      func __init__(hp: int) {
+        self.hp = hp;
+      }
+    }
+    func test() {
+      let a = Arena();
+      let g1 = Goblin(hp = 50) in a;
+      let g2 = clone g1 {
+        self.hp = 100;
+      };
+    }
+    """)
+
+  def test_function_call_with_in_arena_rejected(self):
+    """Verifies that standard function calls cannot have an 'in <arena>' clause."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func compute(x: int): int {
+        return x * 2;
+      }
+      func test() {
+        let a = Arena();
+        let r = compute(5) in a;
+      }
+      """)
+    self.assertIn("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.", str(ctx.exception))
 
 
 if __name__ == "__main__":

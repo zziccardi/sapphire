@@ -8,7 +8,7 @@
  * 2. Opt-in Struct Allocation: Allocating standard structs in a targeted arena
  *    using the `in` operator.
  * 3. Proto Arena Allocation: Allocating prototypal objects in explicit arenas
- *    or the implicit default arena.
+ *    via the `in` operator (required for all proto allocations).
  * 4. Clone Arena Propagation: Clones inheriting their prototype's arena by
  *    default, or overriding it via `clone ... in arena`.
  * 5. Scoped RAII Teardown: Instantiating temporary arenas in local scopes for
@@ -148,15 +148,16 @@ func demo_scoped_raii_cleanup(): float {
   return total_lifetime;
 }
 
-// Demonstration 3: Implicit Default Arena
-func demo_implicit_default_arena(): int {
+// Demonstration 3: Constructor Proto Allocation with Explicit Arena
+func demo_constructor_arena_allocation(): int {
+  let dungeon_arena = Arena();
   let default_pos = Point(x = 0.0, y = 0.0);
 
-  // Protos instantiated via constructor without 'in' land in default arena
+  // Protos instantiated via constructor require explicit arena via 'in'
   let default_enemy = Enemy(name = "Default Skeleton", hp = 100,
-                            pos = default_pos);
+                            pos = default_pos) in dungeon_arena;
 
-  // Clones of default_enemy also propagate into the default arena
+  // Clones of default_enemy propagate into dungeon_arena automatically
   let cloned_skeleton = clone default_enemy {
     self.hp = 60;
   };
@@ -169,7 +170,7 @@ func demo_implicit_default_arena(): int {
 // Main demo orchestrator
 func run_demo(): int {
   let score1 = demo_explicit_arenas();
-  let score2 = demo_implicit_default_arena();
+  let score2 = demo_constructor_arena_allocation();
   let duration = demo_scoped_raii_cleanup();
   var result = score1 + score2;
 

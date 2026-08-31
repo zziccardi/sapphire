@@ -75,13 +75,15 @@ impl Widget for Button {
 // Usage Demonstration
 // --------------------------------------------------
 
+let theme_arena = Arena();
+
 // Base Light Theme
 var light_theme = ComponentTheme {
   bg_color = "#F0F0F4",
   text_color = "#222222",
   corner_radius = 6.0,
   padding = 10,
-};
+} in theme_arena;
 
 // Create a Primary Action Button style by cloning the base theme
 let primary_button_theme = clone light_theme {

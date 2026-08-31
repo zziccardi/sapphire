@@ -102,6 +102,7 @@ class TestLuaTranspiler(unittest.TestCase):
 
     # CallNode calling struct constructor with multiple args (named & positional)
     transpiler.visit(CallNode(IdentifierNode("Point"), [ArgumentNode("x", LiteralNode(1, "int")), ArgumentNode(None, LiteralNode(2, "int"))]))
+    transpiler.visit(CallNode(IdentifierNode("Point"), [ArgumentNode("x", LiteralNode(1, "int"))], arena_expr=IdentifierNode("my_arena")))
 
     # CallNode static method on struct name vs instance call
     transpiler.visit(CallNode(MemberAccessNode(IdentifierNode("Point"), "create", False), [ArgumentNode(None, LiteralNode(1, "int")), ArgumentNode(None, LiteralNode(2, "int"))]))
@@ -127,6 +128,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("-- pass", output)
     self.assertIn('10 .. "items"', output)
     self.assertIn("Point.init({x = 1, [2] = 2})", output)
+    self.assertIn("my_arena:register(Point.init({x = 1}))", output)
     self.assertIn("Point.create(1, 2)", output)
     self.assertIn("pt:get_x()", output)
     self.assertIn("my_arena:register(Point.init({x = 1, [2] = 2}))", output)

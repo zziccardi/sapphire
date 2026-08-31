@@ -21,6 +21,7 @@ from src.parser.ast import (
     StructDeclNode,
     StructInitializerNode,
     CloneNode,
+    CallNode,
     InterpolatedStringNode,
     IdentifierNode,
     ArrayTypeNode,
@@ -225,12 +226,13 @@ class TestASTBuilder(unittest.TestCase):
 
 
   def test_arena_parsing(self):
-    """Verifies parsing of struct initializer and clone expressions with explicit arenas."""
+    """Verifies parsing of struct initializer, constructor call, and clone expressions with explicit arenas."""
     ast = self._get_ast("""
     let x = Point { x = 10 } in my_arena;
     let y = clone base in other_arena;
+    let z = Enemy(hp = 100) in third_arena;
     """)
-    self.assertEqual(len(ast.declarations), 2)
+    self.assertEqual(len(ast.declarations), 3)
     
     decl1 = ast.declarations[0]
     self.assertIsInstance(decl1.expr, StructInitializerNode)
@@ -239,6 +241,10 @@ class TestASTBuilder(unittest.TestCase):
     decl2 = ast.declarations[1]
     self.assertIsInstance(decl2.expr, CloneNode)
     self.assertEqual(decl2.expr.arena_expr.name, "other_arena")
+
+    decl3 = ast.declarations[2]
+    self.assertIsInstance(decl3.expr, CallNode)
+    self.assertEqual(decl3.expr.arena_expr.name, "third_arena")
 
   def test_enum_declaration(self):
     """Verifies parsing of enum declarations with auto and explicit values and trailing commas."""

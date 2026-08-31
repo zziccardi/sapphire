@@ -648,10 +648,11 @@ class ArgumentNode(ASTNode):
 class CallNode(ExprNode):
   """Represents a function or method call."""
 
-  def __init__(self, callee: ASTNode, arguments: List[ArgumentNode], type_args: Optional[List[TypeNode]] = None):
+  def __init__(self, callee: ASTNode, arguments: List[ArgumentNode], type_args: Optional[List[TypeNode]] = None, arena_expr: Optional[ASTNode] = None):
     self.callee = callee
     self.arguments = arguments
     self.type_args = type_args or []
+    self.arena_expr = arena_expr
 
 
 class MemberAccessNode(ExprNode):

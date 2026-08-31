@@ -184,8 +184,6 @@ function Arena:dispose()
   self:destroy()
 end
 
-local _DEFAULT_ARENA = Arena.init()
-
 local _clone_helper
 
 local _create_cow_proxy
@@ -247,9 +245,6 @@ local function _create_proto_object(proto, class_tbl)
     end
   end
   local obj = setmetatable({}, meta)
-  if proto == nil then
-    _DEFAULT_ARENA:register(obj)
-  end
   return obj
 end
 
@@ -2196,6 +2191,9 @@ class LuaTranspiler(BaseTranspiler):
     if (isinstance(node.callee, IdentifierNode) and
         node.callee.name in self.known_structs):
       struct_name = node.callee.name
+      if node.arena_expr:
+        self.visit(node.arena_expr)
+        self.emit(":register(")
       self.emit(f"{struct_name}.init({{")
       for idx, arg in enumerate(node.arguments):
         if idx > 0:
@@ -2206,6 +2204,8 @@ class LuaTranspiler(BaseTranspiler):
           self.emit(f"[{idx + 1}] = ")
         self.visit(arg.expr)
       self.emit("})")
+      if node.arena_expr:
+        self.emit(")")
       return
 
     # Method call optimization for instance methods (e.g. obj.method()) vs
@@ -2218,6 +2218,10 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(arg.expr)
       self.emit(")")
       return
+
+    if node.arena_expr:
+      self.visit(node.arena_expr)
+      self.emit(":register(")
 
     if isinstance(node.callee, MemberAccessNode):
       member_name = getattr(node.callee, "target_name", None) or node.callee.member
@@ -2243,6 +2247,8 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(", ")
       self.visit(arg.expr)
     self.emit(")")
+    if node.arena_expr:
+      self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
     if node.is_optional:

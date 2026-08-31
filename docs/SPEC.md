@@ -924,7 +924,9 @@ For prototype structures (`proto`), the compiler automatically generates a built
 Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
 
 ```sapphire
-var base_goblin = Enemy { damage = 10 };
+let my_arena = Arena();
+
+var base_goblin = Enemy { damage = 10 } in my_arena;
 
 let elite_goblin = clone base_goblin {
   self.health = 200;  // Shadowed locally
@@ -954,7 +956,7 @@ Every struct instance automatically exposes a built-in, compiler-generated `__pr
 * **Immutability**: The `__proto__` property is read-only. It cannot be reassigned at runtime, preventing prototype-pollution vulnerabilities and allowing the compiler to perform layout optimizations.
 * **Type safety**: For any struct `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
 * **Prototype assignment**:
-  * For instances created via a standard constructor (e.g., `Enemy()`), `__proto__` evaluates to `none`.
+  * For instances created via a standard constructor (e.g., `Enemy() in my_arena`), `__proto__` evaluates to `none`.
   * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
   * Since static inheritance is resolved at compile time via delegation, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
 
@@ -980,11 +982,10 @@ Sapphire enforces a clear, predictable memory hierarchy:
    * Returning a borrowed reference to a local stack struct is rejected at compile time.
    * Storing a reference to an inner-scope stack struct in an outer-scope variable or long-lived arena is statically prohibited.
    * The compiler never performs silent heap promotion, ensuring memory allocation remains transparent and deterministic.
-4. **Arena allocation for prototypes and managed structures**: All `proto` instances and their clones are automatically allocated on a managed arena. Standard `struct` instances can also opt into arena allocation using the `in` suffix (`Point { x = 10 } in my_arena`).
-5. **Implicit default arena**: If no arena is explicitly specified, `proto` instances are allocated in an implicit, thread-local or global reference-counted arena.
-6. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
-7. **Explicit arenas and RAII**: Developers can instantiate explicit arenas (e.g. `let my_arena = Arena();`). Allocations are targeted to the arena using the `in` suffix.
-8. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. To prevent dangling references, the compiler statically enforces scope-bound escape rules:
+4. **Explicit arena allocation for prototypes and managed structures**: All `proto` instances strictly require allocation within an explicit managed arena using the `in` suffix (`Enemy { damage = 10 } in my_arena` or `Enemy(damage = 10) in my_arena`). Standard `struct` instances can also opt into arena allocation using the `in` suffix (`Point { x = 10 } in my_arena`).
+5. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
+6. **Explicit arenas and RAII**: Developers instantiate explicit arenas via `let my_arena = Arena();`. Allocations are targeted to the arena using the `in` suffix.
+7. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. To prevent dangling references, the compiler statically enforces scope-bound escape rules:
    * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an outer scope cannot be assigned a reference to an object allocated in a nested/inner arena.
    * **Function-return escape**: A function cannot return a reference to an object allocated in an arena local to the function scope.
 

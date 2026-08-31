@@ -34,8 +34,9 @@ described in the spec.
   by cloning existing prototypes using the `clone` keyword.
   * Nested reference fields on cloned objects support **copy-on-write (CoW)** to
     isolate mutations from the shared prototype.
-  * All `proto` instances and their clones are automatically managed in arenas
-    (supporting both implicit default arenas and explicit RAII-style arenas).
+  * All `proto` instances are explicitly managed in RAII-style arenas
+    (using `in <arena>`), with clones inheriting their prototype's arena by
+    default.
 
 ### Optional & reference safety
 * Null-pointer errors are prevented at compile time.

@@ -87,8 +87,6 @@ class Arena:
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.destroy()
 
-_DEFAULT_ARENA = Arena()
-
 def _sapphire_dispose(obj):
   if obj is not None and hasattr(obj, 'dispose') and callable(obj.dispose):
     obj.dispose()
@@ -262,8 +260,6 @@ class SapphireObject:
   def __init__(self, proto=None):
     super().__setattr__('__proto__', proto)
     super().__setattr__('__shadow__', {})
-    if proto is None:
-      _DEFAULT_ARENA.register(self)
 
   def clone(self):
     clone_obj = self.__class__(proto=self)
@@ -1657,6 +1653,9 @@ class PythonTranspiler(BaseTranspiler):
         self.emit(")")
         return
 
+    if node.arena_expr:
+      self.visit(node.arena_expr)
+      self.emit(".register(")
     self.visit(node.callee)
     self.emit("(")
     args = []
@@ -1673,6 +1672,8 @@ class PythonTranspiler(BaseTranspiler):
         self.emit(args[idx])
       self.visit(arg.expr)
     self.emit(")")
+    if node.arena_expr:
+      self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
     member_name = getattr(node, "target_name", None) or node.member

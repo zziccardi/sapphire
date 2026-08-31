@@ -665,9 +665,8 @@ let my_arena = Arena();
 
 | Mechanism / syntax | Description |
 | :--- | :--- |
-| **Targeted allocation (`in`)** | `let p = Point { x = 1.0, y = 2.0 } in my_arena;`<br>`let e = Enemy { hp = 100 } in my_arena;`<br>`let c = clone base_goblin in my_arena;`<br>Directs object memory allocation into an explicit `Arena` instance. |
+| **Targeted allocation (`in`)** | `let p = Point { x = 1.0, y = 2.0 } in my_arena;`<br>`let e = Enemy { hp = 100 } in my_arena;`<br>`let c = clone base_goblin in my_arena;`<br>Directs object memory allocation into an explicit `Arena` instance. Protos strictly require targeting an explicit `Arena`. |
 | **Scope-bound RAII teardown** | Explicit arenas have lexical lifecycles. When an `Arena` variable exits its enclosing block, the runtime automatically tears down the arena and deallocates all registered objects. |
-| **Implicit default arena** | If no explicit arena is targeted using `in`, prototype (`proto`) allocations and their clones land in an implicit default arena. |
 | **Clone arena propagation** | When cloning a prototype object (`clone base`), the cloned instance automatically inherits the arena of the original prototype unless explicitly overridden with `in`. |
 
 #### Static-escape rules

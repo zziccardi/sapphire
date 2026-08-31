@@ -109,6 +109,7 @@ struct GameEngine {
   var state: GameState;
   var score: int;
   var frame_count: int;
+  var arena: Arena;
   var player: Entity;
   var base_enemy: Entity;
   var active_enemy: Entity?;
@@ -120,10 +121,11 @@ impl GameEngine {
     self.state = GameState.Menu;
     self.score = 0;
     self.frame_count = 0;
+    self.arena = Arena();
     self.player = Entity(id = 1, name = "Hero", x = 10.0, y = 20.0, hp = 100,
-                         spd = 12.0);
+                         spd = 12.0) in self.arena;
     self.base_enemy = Entity(id = 0, name = "Slime", x = 100.0, y = 20.0,
-                             hp = 30, spd = -4.0);
+                             hp = 30, spd = -4.0) in self.arena;
     self.active_enemy = none;
     self.game_over_timer = 0.0;
   }
