@@ -2,6 +2,10 @@
 
 This document establishes the foundational design, syntax rules, and architectural specifications for **Sapphire**, a new general-purpose programming language. Sapphire prioritizes predictability, type safety, explicit function signatures, and highly ergonomic prototypal inheritance without traditional class-based OOP boilerplate or virtual method table (vtable) performance penalties.
 
+<!-- Used by Jekyll -->
+1. TOC
+{:toc}
+
 ## 1. Design philosophy & value proposition
 
 Sapphire occupies a unique niche in the language ecosystem: it combines the **safety and bare-metal performance of a systems language** (like Rust or C++) with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript or Lua) and the **expressive API clarity** of modern languages (like Swift).
