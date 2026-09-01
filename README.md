@@ -15,10 +15,43 @@ runner, a Language Server Protocol (LSP) server, and a VS Code extension.
 
 The project is a **work in progress**. The [language spec](docs/SPEC.md) may
 change significantly over time. For now the transpiler toolchain targets Python
-and Lua 5.1 to facilitate rapid iteration and scripting-engine integration; once
-the language design is finalized, I'd like to introduce a proper native compiler
+and Lua to facilitate rapid iteration and scripting-engine integration; once the
+language design is finalized, I'd like to introduce a proper native compiler
 (likely built in Rust) to enable the memory-safety and performance features
 described in the spec.
+
+## Sapphire at a glance
+
+```sapphire
+trait Damageable {
+  func take_damage(amount: int);
+}
+
+struct Player {
+  let name: String;
+  var health = 0;
+}
+
+impl Damageable for Player {
+  func take_damage(amount: int) {
+    self.health = self.health > amount ? self.health - amount : 0;
+  }
+}
+
+// Const-ref by default, explicit `var` for mutation, named args with defaults.
+func attack(attacker: Player, var defender: Player, bonus: int = 0) {
+  defender.take_damage(amount = 15 + bonus);
+  print(f"{attacker.name} hit {defender.name}! {defender.health} HP remaining");
+}
+
+// Contrived optional usage to demonstrate unwrapping with `?=` below.
+var goblin: Player? = Player { name = "Goblin", health = 40 };
+let hero = Player { name = "Hero", health = 100 };
+
+if let enemy ?= goblin {
+  attack(attacker = hero, defender = enemy, bonus = 5);
+}
+```
 
 ## Key features of Sapphire
 
