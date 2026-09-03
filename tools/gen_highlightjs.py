@@ -42,6 +42,11 @@ def generate_head_custom_html(grammar_path: Path, theme: str = "github") -> str:
 
   return f"""<!-- Auto-generated from {grammar_path.name} by tools/gen_highlightjs.py -->
 <link rel="stylesheet" href="{{{{ '/docs/assets/{theme}.min.css' | relative_url }}}}">
+<style>
+  code {{
+    font-size: 0.875em;
+  }}
+</style>
 <script src="{{{{ '/docs/assets/highlight.min.js' | relative_url }}}}"></script>
 <script>
   hljs.registerLanguage('sapphire', function(hljs) {{

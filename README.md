@@ -15,10 +15,43 @@ runner, a Language Server Protocol (LSP) server, and a VS Code extension.
 
 The project is a **work in progress**. The [language spec](docs/SPEC.md) may
 change significantly over time. For now the transpiler toolchain targets Python
-and Lua 5.1 to facilitate rapid iteration and scripting-engine integration; once
-the language design is finalized, I'd like to introduce a proper native compiler
+and Lua to facilitate rapid iteration and scripting-engine integration; once the
+language design is finalized, I'd like to introduce a proper native compiler
 (likely built in Rust) to enable the memory-safety and performance features
 described in the spec.
+
+## Sapphire at a glance
+
+```sapphire
+trait Damageable {
+  func take_damage(amount: int);
+}
+
+struct Player {
+  let name: String;
+  var health = 0;
+}
+
+impl Damageable for Player {
+  func take_damage(amount: int) {
+    self.health = self.health > amount ? self.health - amount : 0;
+  }
+}
+
+// Const-ref by default, explicit `var` for mutation, named args with defaults.
+func attack(attacker: Player, var defender: Player, bonus: int = 0) {
+  defender.take_damage(amount = 15 + bonus);
+  print(f"{attacker.name} hit {defender.name}! {defender.health} HP remaining");
+}
+
+// Contrived optional usage to demonstrate unwrapping with `?=` below.
+var goblin: Player? = Player { name = "Goblin", health = 40 };
+let hero = Player { name = "Hero", health = 100 };
+
+if let enemy ?= goblin {
+  attack(attacker = hero, defender = enemy, bonus = 5);
+}
+```
 
 ## Key features of Sapphire
 
@@ -38,15 +71,13 @@ described in the spec.
     (using `in <arena>`), with clones inheriting their prototype's arena by
     default.
 
-### Optional & reference safety
+### Null safety via optionals
 * Null-pointer errors are prevented at compile time.
 * Optionals are denoted by a `?` suffix (e.g., `Character?`).
 * Optionals can be chained safely (`let speed = target?.speed`).
 * Optionals can be conditionally unwrapped (`let x ?= optional`) within
   Go/C++17-style init statements in `if` and `while` headers.
 * Nil-coalescing fallback values are supported via the `??` operator.
-* Compile-time aliasing rules enforce reference safety without requiring
-  lifetime annotations.
 
 ### Reference semantics & parameter modes
 * Non-primitive types are passed by **constant reference** by default, avoiding
@@ -56,35 +87,34 @@ described in the spec.
 * Named parameters are supported at the call site using `=`
   (e.g., `execute_strike(bonus = 10)`); functions can also specify default
   parameter values in their signatures.
+* Compile-time aliasing rules enforce reference safety without requiring
+  lifetime annotations.
 
 ### Zero-overhead generics
 * Type-parameterized structs, implementation blocks, traits, and functions
-  (`struct Stack<T>`, `func identity<T>`).
-* Resolved at compile-time via **monomorphization** with automatic call-site
-  type inference and explicit type arguments (`Stack<int>`).
+  (`struct Stack<T>`, `func identity<T>`) are supported.
+* Generics are resolved at compile-time via **monomorphization** with automatic
+  call-site type inference and explicit type arguments (`Stack<int>`).
 
-### First-class coroutines & generators
-* Steppable coroutines via `Coroutine<T>` and `Coroutine<void>`.
-* Bare `yield;` for sequencing; `yield <expr>;` for value streams.
-* Step, inspect, or reset coroutines with `.step(): T?`, `.is_done(): bool`, and `.reset(): void`.
-* Transpiles to zero-allocation native Lua asymmetric coroutines on Lua/Love2D targets and generator objects on Python.
+### First-class coroutines
+* Coroutines are natively supported via `Coroutine<T>`.
+* Bare `yield;` is used for sequencing; `yield <expr>;` is used for value
+  streams.
 
-### Host engine, Love2D & live hot-reloading
-* Native interoperation with host runtimes (such as **Love2D** in Lua 5.1 /
-  LuaJIT environments).
-* Direct Love2D target support via `-t love2d` (or `-t love`).
-* **Live hot-reloading & dev mode (`sapphire run --dev`)**: Automatically watches `.sp` project files, performs fast incremental re-compilation, patches existing living prototype/struct instances in-place without losing state, and executes `@on_reload` lifecycle hooks.
-* `@extern var love: LoveEngine;` binds host runtime global variables with 100%
-  type safety.
-* `@export("love.update") func update(dt: float)` exposes functions directly as
-  global engine callbacks (`function love.update(dt)`).
-* Combines traits and structs to model external host APIs without runtime
-  performance penalties.
+### Host engine interoperability & live hot-reloading
+* Native interoperation with host runtimes (such as **Love2D**) is supported by
+  combining traits and structs to model external host APIs without runtime
+  performance penalties. Interoperability is defined via annotations:
+  * `@extern var love: LoveEngine;` binds host runtime global variables with
+    100% type safety.
+  * `@export("love.update") func update(dt: float)` exposes functions directly
+    as global engine callbacks (e.g. `function love.update(dt)` in Lua).
 * **Source maps & Love2D error demangling**: Automatically generates standard
   [source map v3](https://tc39.es/ecma426/) files (`.lua.map`) and embeds
   runtime stack-trace demanglers. When a runtime error occurs in Love2D, both
   the terminal and Love2D error screen display original Sapphire `.sp`
   filenames, line numbers, and source line snippets.
+* **Live hot-reloading & dev mode (`sapphire run --dev`)**: Automatically watches `.sp` project files, performs fast incremental re-compilation, patches existing living prototype/struct instances in-place without losing state, and executes `@on_reload` lifecycle hooks.
 
 ## CLI overview
 
