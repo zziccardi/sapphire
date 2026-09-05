@@ -743,6 +743,38 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("def update(dt):", py_code)
     self.assertNotIn("love =", py_code)
 
+  def test_extern_assignment_targets_builtins_python(self):
+    """Verifies assigning to @extern variables targets Python builtins for cross-module visibility."""
+    import builtins
+    code = """
+    struct Engine {
+      var speed: int;
+    }
+
+    @extern
+    var engine: Engine;
+
+    func install_engine() {
+      engine = Engine { speed = 42 };
+    }
+
+    func read_speed(): int {
+      return engine.speed;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("__import__('builtins').engine = Engine(speed=42)", py_code)
+
+    env = {}
+    try:
+      exec(py_code, env)
+      env["install_engine"]()
+      self.assertTrue(hasattr(builtins, "engine"))
+      self.assertEqual(env["read_speed"](), 42)
+    finally:
+      if hasattr(builtins, "engine"):
+        delattr(builtins, "engine")
+
 
   def test_python_multi_return_transpilation(self):
     """Verifies Python transpilation for multi-return functions, declarations, and assignments."""

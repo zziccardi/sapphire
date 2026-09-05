@@ -1,7 +1,12 @@
 # Sapphire language-design specification
 {: .no_toc }
 
-This document establishes the foundational design, syntax rules, and architectural specifications for **Sapphire**, a new general-purpose programming language. Sapphire prioritizes predictability, type safety, explicit function signatures, and highly ergonomic prototypal inheritance without traditional class-based OOP boilerplate or virtual method table (vtable) performance penalties.
+This document establishes the foundational design, syntax rules, and
+architectural specifications for **Sapphire**, a new general-purpose programming
+language. Sapphire prioritizes predictability, type safety, explicit function
+signatures, and highly ergonomic prototypal inheritance without traditional
+class-based OOP boilerplate or virtual method table (vtable) performance
+penalties.
 
 <!-- Used by Jekyll -->
 <details markdown="block">
@@ -15,7 +20,10 @@ This document establishes the foundational design, syntax rules, and architectur
 
 ## 1. Design philosophy & value proposition
 
-Sapphire occupies a unique niche in the language ecosystem: it combines the **safety and bare-metal performance of a systems language** (like Rust or C++) with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript or Lua) and the **expressive API clarity** of modern languages (like Swift).
+Sapphire occupies a unique niche in the language ecosystem: it combines the
+**safety and bare-metal performance of a systems language** (like Rust or C++)
+with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript
+or Lua) and the **expressive API clarity** of modern languages (like Swift).
 
 Unlike other performance-oriented languages, Sapphire distinguishes itself
 through four key pillars:
@@ -47,15 +55,21 @@ through four key pillars:
   * When continuing a function definition's parameter list or function call site
   on a subsequent line, params should be indented to align with the opening
   parenthesis.
-* **Statement termination**: All statements must be explicitly terminated with a semicolon (`;`). This prevents syntax parsing ambiguities with multi-line statements and expressions.
+* **Statement termination**: All statements must be explicitly terminated with a
+  semicolon (`;`). This prevents syntax parsing ambiguities with multi-line
+  statements and expressions.
 * **Naming conventions**: All variable names should use `snake_case`. Built-in
 functions will use `snake_case` as well; user-defined functions/methods can use
 either `snake_case` or `PascalCase` but should be consistent.
   * Note that variables, functions, and structs all share the same identifier
   namespace; i.e. you cannot have a function and a struct with the same name.
-* **Compile-time constants**: Global or compile-time constant expressions should use `SCREAMING_SNAKE_CASE` (e.g., `MAX_SPEED`).
+  * Enum values may use either `PascalCase` or `SCREAMING_SNAKE_CASE` but should
+  be kept consistent.
+* **Compile-time constants**: Global or compile-time constant expressions should
+  use `SCREAMING_SNAKE_CASE` (e.g., `MAX_SPEED`).
 * **Primitive types**: Lowercase naming (e.g., `int`, `float`, `bool`).
-* **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`, `Vector2`) for both built-in and user-defined types.
+* **Non-primitive types**: `PascalCase` naming (e.g., `String`, `Player`,
+  `Vector2`) for both built-in and user-defined types.
 * Comments on the same line as code should have two spaces before the `//`.
 * Constant params should generally precede mutable params in function
   definitions. The exception is params with default values, which should come
