@@ -1017,17 +1017,50 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
     self.newline()
-    self.emit("local _M = {}")
-    self.newline()
-    for spec in node.specifiers:
-      exp_name = spec.exported_name
-      if spec.module_prefix:
-        self.emit(f"_M.{exp_name} = {spec.module_prefix}.{spec.symbol}")
-      else:
-        self.emit(f"_M.{exp_name} = {spec.symbol}")
+    default_spec = next(
+        (
+            s
+            for s in node.specifiers
+            if (s.alias == "default" or s.exported_name == "default")
+            and not s.module_prefix
+        ),
+        None,
+    )
+    if default_spec is None and len(node.specifiers) == 1 and not node.specifiers[0].module_prefix:
+      if node.specifiers[0].symbol in self.known_structs:
+        default_spec = node.specifiers[0]
+
+    if default_spec is not None:
+      primary_sym = default_spec.symbol
+      self.emit(f"{primary_sym}.{primary_sym} = {primary_sym}")
       self.newline()
-    self.emit("return _M")
-    self.newline()
+      self.emit(f"{primary_sym}.default = {primary_sym}")
+      self.newline()
+      for spec in node.specifiers:
+        if spec is default_spec and (spec.alias == "default" or spec.exported_name == "default"):
+          continue
+        exp_name = spec.exported_name
+        if exp_name == primary_sym and not spec.module_prefix:
+          continue
+        if spec.module_prefix:
+          self.emit(f"{primary_sym}.{exp_name} = {spec.module_prefix}.{spec.symbol}")
+        else:
+          self.emit(f"{primary_sym}.{exp_name} = {spec.symbol}")
+        self.newline()
+      self.emit(f"return {primary_sym}")
+      self.newline()
+    else:
+      self.emit("local _M = {}")
+      self.newline()
+      for spec in node.specifiers:
+        exp_name = spec.exported_name
+        if spec.module_prefix:
+          self.emit(f"_M.{exp_name} = {spec.module_prefix}.{spec.symbol}")
+        else:
+          self.emit(f"_M.{exp_name} = {spec.symbol}")
+        self.newline()
+      self.emit("return _M")
+      self.newline()
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Header definition for struct
@@ -1075,47 +1108,121 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
 
     # Define constructor `.init(...)`
-    self.emit(f"function {struct_name}.init(kwargs, proto)")
+    self.emit(f"function {struct_name}.init(...)")
     self.indent()
     self.newline()
-    self.emit("kwargs = kwargs or {}")
+    self.emit("local _n_args = select(\"#\", ...)")
     self.newline()
     self.emit("local self")
     self.newline()
     if is_proto:
+      self.emit(f"local proto = (_n_args == 2 and type(select(2, ...)) == \"table\") and select(2, ...) or nil")
+      self.newline()
       self.emit(f"self = _create_proto_object(proto, {struct_name})")
+      self.newline()
+      self.emit("if proto == nil then")
+      self.indent()
+      self.newline()
+      self.emit(f"{struct_name}._init_fields(self)")
+      self.dedent()
+      self.newline()
+      self.emit("end")
     else:
       self.emit(f"self = setmetatable({{}}, {struct_name})")
-
-    self.newline()
-    self.emit("if proto == nil then")
-    self.indent()
-    self.newline()
-    self.emit(f"{struct_name}._init_fields(self)")
-    self.dedent()
-    self.newline()
-    self.emit("end")
-    self.newline()
-
-    self.emit("for k, v in pairs(kwargs) do")
-    self.indent()
-    self.newline()
-    self.emit("self[k] = v")
-    self.dedent()
-    self.newline()
-    self.emit("end")
+      self.newline()
+      self.emit(f"{struct_name}._init_fields(self)")
 
     init_member = next((m for m in methods if m.func_decl.name == "__init__"), None)
     if init_member:
-      init_args = []
-      for idx, p in enumerate(init_member.func_decl.parameters):
-        init_args.append(f"(kwargs['{p.name}'] ~= nil and kwargs['{p.name}'] or kwargs[{idx + 1}])")
-      call_args = ["self"] + init_args
       self.newline()
       self.emit(f"if {struct_name}._init_sapphire then")
       self.indent()
       self.newline()
-      self.emit(f"{struct_name}._init_sapphire({', '.join(call_args)})")
+      self.emit("if _n_args > 1 then")
+      self.indent()
+      self.newline()
+      self.emit(f"{struct_name}._init_sapphire(self, ...)")
+      self.dedent()
+      self.newline()
+      self.emit("elseif _n_args == 1 then")
+      self.indent()
+      self.newline()
+      self.emit("local _arg1 = ...")
+      self.newline()
+      init_params = init_member.func_decl.parameters
+      if len(init_params) == 0:
+        self.emit(f"{struct_name}._init_sapphire(self)")
+      else:
+        init_args = []
+        for idx, p in enumerate(init_params):
+          init_args.append(f"(_arg1['{p.name}'] ~= nil and _arg1['{p.name}'] or _arg1[{idx + 1}])")
+        call_args = ["self"] + init_args
+
+        param_checks = " or ".join(f"_arg1['{p.name}'] ~= nil" for p in init_params)
+        self.emit(f"if type(_arg1) == \"table\" and ({param_checks} or _arg1[1] ~= nil) then")
+        self.indent()
+        self.newline()
+        self.emit(f"{struct_name}._init_sapphire({', '.join(call_args)})")
+        self.dedent()
+        self.newline()
+        self.emit("else")
+        self.indent()
+        self.newline()
+        self.emit(f"{struct_name}._init_sapphire(self, _arg1)")
+        self.dedent()
+        self.newline()
+        self.emit("end")
+      self.dedent()
+      self.newline()
+      self.emit("else")
+      self.indent()
+      self.newline()
+      self.emit(f"{struct_name}._init_sapphire(self)")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+    else:
+      self.newline()
+      self.emit("if _n_args > 1 then")
+      self.indent()
+      self.newline()
+      self.emit("local _args = { ... }")
+      for idx, f in enumerate(node.fields):
+        self.newline()
+        self.emit(f"if _args[{idx + 1}] ~= nil then self.{f.name} = _args[{idx + 1}] end")
+      self.dedent()
+      self.newline()
+      self.emit("elseif _n_args == 1 then")
+      self.indent()
+      self.newline()
+      self.emit("local _arg1 = ...")
+      self.newline()
+      self.emit("if type(_arg1) == \"table\" then")
+      self.indent()
+      self.newline()
+      self.emit("for k, v in pairs(_arg1) do")
+      self.indent()
+      self.newline()
+      self.emit("if type(k) == \"string\" then self[k] = v end")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      for idx, f in enumerate(node.fields):
+        self.newline()
+        self.emit(f"if _arg1[{idx + 1}] ~= nil and self.{f.name} == nil then self.{f.name} = _arg1[{idx + 1}] end")
+      self.dedent()
+      self.newline()
+      self.emit("else")
+      self.indent()
+      if node.fields:
+        self.newline()
+        self.emit(f"self.{node.fields[0].name} = _arg1")
+      self.dedent()
+      self.newline()
+      self.emit("end")
       self.dedent()
       self.newline()
       self.emit("end")
