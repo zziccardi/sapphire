@@ -292,7 +292,7 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua_code = self._transpile(code)
     self.assertIn("Item = {}", lua_code)
-    self.assertIn("function Item.init(kwargs, proto)", lua_code)
+    self.assertIn("function Item.init(...)", lua_code)
     self.assertIn("Item._init_sapphire", lua_code)
     self.assertIn("Item.init({[1] = 100})", lua_code)
 
@@ -1488,6 +1488,156 @@ class TestLuaTranspiler(unittest.TestCase):
     multi_yield = YieldNode(exprs=[LiteralNode(1, "int"), LiteralNode(2, "int")])
     transpiler.visit(multi_yield)
     self.assertIn("coroutine.yield(1, 2)", transpiler.get_output())
+
+  def test_lua_export_default_explicit(self):
+    """Verifies that an explicit 'as default' export emits the primary symbol directly with attached exports."""
+    code = """
+    export {
+      Combat as default,
+      CombatResult,
+    }
+
+    struct CombatResult {
+      var victory: bool;
+    }
+
+    struct Combat {
+      var turns: int;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("Combat.Combat = Combat", output)
+    self.assertIn("Combat.default = Combat", output)
+    self.assertIn("Combat.CombatResult = CombatResult", output)
+    self.assertIn("return Combat", output)
+    self.assertNotIn("local _M = {}", output)
+
+  def test_lua_export_single_struct_default(self):
+    """Verifies that exporting a single struct treats it as the default export."""
+    code = """
+    export {
+      Combat,
+    }
+
+    struct Combat {
+      var turns: int;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("Combat.Combat = Combat", output)
+    self.assertIn("Combat.default = Combat", output)
+    self.assertIn("return Combat", output)
+    self.assertNotIn("local _M = {}", output)
+
+  def test_lua_struct_init_positional_and_kwargs(self):
+    """Verifies flexible constructor invocation supporting multi-arg positional, single-arg positional, and kwargs."""
+    code = """
+    struct Combat {
+      var rounds: int;
+      var debug: bool;
+    }
+
+    impl Combat {
+      func __init__(rounds: int, debug: bool) {
+        self.rounds = rounds;
+        self.debug = debug;
+      }
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function Combat.init(...)", output)
+    self.assertIn("local _n_args = select(\"#\", ...)", output)
+    self.assertIn("if _n_args > 1 then", output)
+    self.assertIn("Combat._init_sapphire(self, ...)", output)
+    self.assertIn("elseif _n_args == 1 then", output)
+    self.assertIn("Combat._init_sapphire(self)", output)
+
+  def test_lua_plain_struct_positional_and_table(self):
+    """Verifies plain data structs support both positional and table initialization."""
+    code = """
+    struct Point {
+      var x: float;
+      var y: float;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function Point.init(...)", output)
+    self.assertIn("if _args[1] ~= nil then self.x = _args[1] end", output)
+    self.assertIn("if _args[2] ~= nil then self.y = _args[2] end", output)
+
+  def test_lua_interop_execution(self):
+    """Executes transpiled Lua code to verify drop-in require and positional constructor calls from Lua."""
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if not lua_bin:
+      self.skipTest("No Lua interpreter found in system PATH.")
+    try:
+      test_run = subprocess.run([lua_bin, "-v"], capture_output=True, timeout=2)
+      if test_run.returncode != 0:
+        self.skipTest("Lua interpreter is not executable in current environment.")
+    except Exception:
+      self.skipTest("Lua interpreter execution failed.")
+
+    code = """
+    export {
+      Combat as default,
+      CombatResult,
+    }
+
+    struct CombatResult {
+      var victory: bool;
+    }
+
+    struct Combat {
+      var enemies: int;
+      var rounds: int;
+      var mode: String;
+    }
+
+    impl Combat {
+      func __init__(enemies: int, rounds: int, mode: String) {
+        self.enemies = enemies;
+        self.rounds = rounds;
+        self.mode = mode;
+      }
+
+      func get_summary(): String {
+        return f"{self.enemies}_{self.rounds}_{self.mode}";
+      }
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      sp_file = os.path.join(tmp_dir, "combat.sp")
+      lua_file = os.path.join(tmp_dir, "combat.lua")
+      with open(sp_file, "w") as f:
+        f.write(code)
+      transpile_file(sp_file, output_file=lua_file, target="lua", quiet=True)
+
+      test_lua = os.path.join(tmp_dir, "test_interop.lua")
+      with open(test_lua, "w") as f:
+        f.write("""
+        package.path = package.path .. ";./?.lua"
+        local Combat = require("combat")
+        assert(Combat ~= nil, "Combat module is nil")
+
+        local c1 = Combat.init(5, 10, "hard")
+        assert(c1.enemies == 5, "enemies mismatch")
+        assert(c1.rounds == 10, "rounds mismatch")
+        assert(c1.mode == "hard", "mode mismatch")
+        assert(c1:get_summary() == "5_10_hard", "method call failed")
+
+        assert(Combat.CombatResult ~= nil, "CombatResult missing")
+        local res = Combat.CombatResult.init({ victory = true })
+        assert(res.victory == true, "CombatResult init failed")
+
+        local mod = require("combat")
+        local c2 = mod.Combat.init({ enemies = 3, rounds = 7, mode = "easy" })
+        assert(c2:get_summary() == "3_7_easy", "kwargs call failed")
+
+        os.exit(0)
+        """)
+      res = subprocess.run([lua_bin, "test_interop.lua"], cwd=tmp_dir, capture_output=True, text=True)
+      self.assertEqual(res.returncode, 0, f"Lua error: {res.stderr}")
+
 
 
 # ---------------------------------------------------------------------------

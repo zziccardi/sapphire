@@ -492,6 +492,7 @@ class PythonTranspiler(BaseTranspiler):
     self.struct_traits: Dict[str, Set[str]] = {}
     self.clone_helper_counter = 0
     self._identifier_map: Dict[str, str] = {}
+    self.extern_vars: Dict[str, str] = {}
     # Source line map: Python output line -> Sapphire source line
     self._py_lineno = 1
     self._line_map: Dict[int, int] = {}
@@ -900,7 +901,15 @@ class PythonTranspiler(BaseTranspiler):
           self._lift_match_expressions(v)
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
-    if any(a.name == "extern" for a in node.annotations):
+    extern_ann = next((a for a in node.annotations if a.name == "extern"), None)
+    if extern_ann:
+      # @extern variables represent ambient host symbols (e.g. Love2D engine `love`).
+      # In Lua, variables without `local` automatically target `_G`, which is shared
+      # across all modules. In Python, module namespaces are isolated, so external symbols
+      # live in Python's `builtins`. We record the mapping so that subsequent assignments
+      # to these symbols mutate `builtins.<name>` rather than creating function-local variables.
+      for name in node.names:
+        self.extern_vars[name] = name
       return
 
     self._lift_match_expressions(node.exprs)
@@ -938,14 +947,25 @@ class PythonTranspiler(BaseTranspiler):
       for idx, target in enumerate(node.targets):
         if idx > 0:
           self.emit(", ")
-        self.visit(target)
+        # Assigning to an @extern variable inside a function must mutate Python's
+        # `builtins` namespace so other modules reading the ambient symbol (e.g. `love`)
+        # can resolve it via standard LEGB scope lookup.
+        if isinstance(target, IdentifierNode) and target.name in self.extern_vars:
+          ext_name = self.extern_vars[target.name]
+          self.emit(f"__import__('builtins').{ext_name}")
+        else:
+          self.visit(target)
       self.emit(" = ")
       for idx, expr in enumerate(node.exprs):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
     else:
-      self.visit(node.target)
+      if isinstance(node.target, IdentifierNode) and node.target.name in self.extern_vars:
+        ext_name = self.extern_vars[node.target.name]
+        self.emit(f"__import__('builtins').{ext_name}")
+      else:
+        self.visit(node.target)
       self.emit(f" {node.op} ")
       self.visit(node.expr)
 
