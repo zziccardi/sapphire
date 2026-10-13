@@ -96,7 +96,7 @@ The `String` type represents textual data encoded in UTF-8.
 
 #### Key properties and semantics
 
-* **Reference type**: Unlike primitive numeric types (`int`, `float`) and `bool` which have value semantics, `String` is a reference-passed type subject to Sapphire's borrow-checking rules.
+* **Reference type**: Unlike primitive numeric types (`int`, `float`) and `bool` which have value semantics, `String` is a reference-passed type subject to Sapphire's scope-bound aliasing rules.
 * **Immutability**: Strings in Sapphire are immutable once instantiated. String operations produce new string instances rather than mutating existing data.
 * **Enum conversions**: Converting an `enum` variant to `String` requires an explicit cast (`variant as String`) or `String.from(variant)`. Converting `String` to an enum variant requires explicit fallible parsing via `EnumName.from(val)`.
 

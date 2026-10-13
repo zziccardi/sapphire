@@ -21,9 +21,14 @@ penalties.
 ## 1. Design philosophy & value proposition
 
 Sapphire occupies a unique niche in the language ecosystem: it combines the
-**safety and bare-metal performance of a systems language** (like Rust or C++)
-with the **rapid prototyping ergonomics** of dynamic languages (like JavaScript
-or Lua) and the **expressive API clarity** of modern languages (like Swift).
+**safety and bare-metal performance of a systems language** (incorporating
+zero-cost abstractions and monomorphization similar to Rust) with the
+**rapid prototyping ergonomics** of dynamic languages (like JavaScript or Lua)
+and the **expressive API clarity** of modern languages (like Swift). While
+designed as a general-purpose systems language, Sapphire's deterministic
+performance, lexical memory arenas, and live-reload capabilities make it
+especially well-suited for interactive applications, simulation, and game
+engines.
 
 Unlike other performance-oriented languages, Sapphire distinguishes itself
 through four key pillars:
@@ -35,16 +40,17 @@ through four key pillars:
 * **Scope-bound memory safety**: Reference types (including `String`, `Array`,
   `Map`, `Arena`, `Range`, and all user-defined `struct` and `proto` types) are
   passed by constant reference by default. Compile-time scope-bound aliasing
-  rules guarantee memory safety and reference validity without the visual noise
-  of Rust-style lifetime annotations or C++ pointer syntax.
+  rules guarantee memory safety and reference validity across call sites
+  without requiring lifetime annotations or manual pointer arithmetic.
 * **Deterministic lifecycle control**: Opt-in dynamic prototypal references
   are allocated in managed, lexically scoped arenas. The compiler enforces
   strict escape-checking to automatically tear down allocations at scope
   boundaries.
 * **Modern API & host-environment ergonomics**: Native support for named
-  parameters and default values makes interfaces self-documenting. First-class
-  host annotations (`@extern`, `@export`) compile to zero-overhead bindings for
-  interoperability with scripting environments.
+  parameters, default values, and expressive optional unwrapping makes
+  interfaces self-documenting. First-class host annotations (`@extern`,
+  `@export`) compile to zero-overhead bindings for interoperability with
+  scripting environments.
 
 ## 2. Style, formatting, & comments
 
@@ -552,22 +558,22 @@ calculate_damage(defender = target_enemy, attacker = current_player);
 calculate_damage(current_player, target_enemy, is_critical = true);
 ```
 
-### Scope-bound aliasing rules (borrow-checking)
+### Scope-bound aliasing rules (call-site reference exclusivity)
 
-To guarantee reference safety and eliminate runtime aliasing logic bugs without introducing the visual overhead of Rust-style lifetime annotations, Sapphire's compiler enforces compile-time **scope-bound aliasing rules** at call sites:
+To guarantee reference safety and eliminate data corruption from unexpected aliasing mutations without requiring complex lifetime annotations, Sapphire's compiler enforces compile-time **scope-bound aliasing rules (call-site reference exclusivity)** at call sites:
 * **Reference types only**: Primitive value types (`int`, `float`, `bool`) and
   `none` are value-copied and ignored by this check. All reference types
   (`String`, `Array`, `Map`, `Arena`, `Range`, and user-defined `struct` and
   `proto` types) are reference-passed and validated.
-* **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be mutably borrowed (`var` parameter) if it is already borrowed (either mutably or immutably) within the same call.
-* **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (borrowed mutably for mutable methods, or immutably for `const` methods).
+* **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be passed as a mutable parameter (`var`) if it is already referenced (either mutably or immutably) within the same call.
+* **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (passed mutably for mutating methods, or as a constant reference for `const` methods).
 
 ```sapphire
-// Rejected: 'player' is borrowed mutably as 'target' and immutably as
+// Rejected: 'player' is passed mutably as 'target' and as a const-ref as
 // 'observer'.
-execute_interaction(target = player, observer = player);
+execute_interaction(observer = player, target = player);
 
-// Rejected: 'player' (receiver) is mutably borrowed, conflicting with its use
+// Rejected: 'player' (receiver) is mutably passed, conflicting with its use
 // as 'other'.
 player.mutate(other = player);
 ```
@@ -652,7 +658,7 @@ func fibonacci(count: int): Coroutine<int> {
 
 ## 9. Structs & the implementation block
 
-The primary data layout tool is the `struct` keyword. To strictly separate data structures from behavior, all methods (including constructors) **must** be defined inside a Rust-style implementation (`impl`) block; defining method signatures or bodies inside the `struct` block itself is strictly forbidden.
+The primary data layout tool is the `struct` keyword. To strictly separate data structures from behavior, all methods (including constructors) **must** be defined inside an explicit implementation (`impl`) block; defining method signatures or bodies inside the `struct` block itself is strictly forbidden.
 
 Sapphire provides a Python-style `__init__` initializer syntax defined inside the `impl` block. The compiler enforces that all non-optional fields declared in the `struct` be initialized within this function.
 
