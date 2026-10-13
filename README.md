@@ -2,7 +2,10 @@
 
 Sapphire is a statically typed general-purpose programming language that
 combines the **safety and performance** of modern systems languages with the
-**rapid-prototyping ergonomics** of dynamic languages.
+**rapid-prototyping ergonomics** of dynamic languages. While general-purpose in
+design, its deterministic memory model, lexical arenas, and live-reload
+capabilities make it especially well-suited for simulations, interactive
+applications, and game engines.
 
 By resolving polymorphism at compile time and restricting prototypal inheritance
 to be data-only, Sapphire enables runtime object modification without
@@ -23,33 +26,59 @@ described in the spec.
 ## Sapphire at a glance
 
 ```sapphire
+let arena = Arena();
+
 trait Damageable {
   func take_damage(amount: int);
 }
 
-struct Player {
-  let name: String;
-  var health = 0;
+struct Position {
+  var x: float = 0.0;
+  var y: float = 0.0;
 }
 
-impl Damageable for Player {
+// Opt-in prototypal inheritance: instances dynamically delegate state
+proto Entity {
+  var pos: Position;
+  var health = 100;  // Inferred to be `int`
+  let name: String;
+}
+
+impl Damageable for Entity {
   func take_damage(amount: int) {
     self.health = self.health > amount ? self.health - amount : 0;
   }
 }
 
-// Const-ref by default, explicit `var` for mutation, named args with defaults.
-func attack(attacker: Player, var defender: Player, bonus: int = 0) {
-  defender.take_damage(amount = 15 + bonus);
-  print(f"{attacker.name} hit {defender.name}! {defender.health} HP remaining");
+// Const-ref by default, explicit `var` for mutation, named args with defaults
+func attack(attacker: Entity, var target: Entity, bonus: int = 0) {
+  target.take_damage(amount = 15 + bonus);
+  print(f"{attacker.name} struck {target.name}! {target.health} HP remaining");
 }
 
-// Contrived optional usage to demonstrate unwrapping with `?=` below.
-var goblin: Player? = Player { name = "Goblin", health = 40 };
-let hero = Player { name = "Hero", health = 100 };
+// Scoped prototype allocated within an explicit lexical arena
+let base_goblin = Entity {
+  name = "Goblin",
+  health = 50,
+  pos = Position { x = 0.0, y = 0.0 }
+} in arena;
 
-if let enemy ?= goblin {
-  attack(attacker = hero, defender = enemy, bonus = 5);
+// Dynamic cloning with live delegation and local property shadowing
+var elite_goblin = clone base_goblin {
+  self.health = 120;
+};
+
+let hero = Entity {
+  name = "Hero",
+  health = 100,
+  pos = Position { x = 10.0, y = 5.0 }
+} in arena;
+
+var target_ref: Entity? = elite_goblin;
+
+// Swift-style optional unwrapping with `?=`
+if let target ?= target_ref {
+  attack(attacker = hero, target = target, bonus = 10);
 }
 ```
 
