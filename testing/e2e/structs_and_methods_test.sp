@@ -1,5 +1,5 @@
 /*
- * Fixture: structs_and_methods_test.sp
+ * E2E Test: structs_and_methods_test.sp
  * Tests struct declaration, default field values, impl blocks, and method calls.
  */
 

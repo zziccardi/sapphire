@@ -729,6 +729,36 @@ let sword = Weapon(dmg = 50);
 sword.use();
 ```
 
+### Deterministic destructors (`__del__`)
+
+To support automatic scope-bound resource management (RAII) without requiring explicit `with` blocks for every resource, structs may define an optional `__del__` destructor inside their `impl` block:
+
+```sapphire
+struct FileHandle {
+  var fd: int;
+}
+
+impl FileHandle {
+  func __init__(path: String) {
+    self.fd = open_file_descriptor(path);
+  }
+
+  func __del__() {
+    if self.fd != -1 {
+      close_file_descriptor(self.fd);
+      self.fd = -1;  // Mutable `self` is implicitly accessible
+    }
+  }
+}
+```
+
+* **Implicit mutable self**: In alignment with Sapphire's method conventions, `self` is implicitly available as a mutable reference within the body of `__del__()`.
+* **Zero parameters**: Destructors take exactly zero parameters (`func __del__()`). Declaring parameters on `__del__` is a compile-time `SemanticError`.
+* **Modifier constraints**: Marking `__del__` as `const` or `static` is strictly prohibited. Destructors must return `void` (or `none`).
+* **No manual invocation**: Calling `__del__()` directly as an ordinary method (`file.__del__()`) is forbidden at compile time. Destructors are exclusively invoked by the compiler.
+* **Automatic LIFO execution**: The compiler automatically emits destructor calls in reverse order of declaration (LIFO) when stack-allocated structs exit their enclosing lexical scope, on early `return`, or on loop control jumps (`break` and `continue`).
+* **RVO elision**: Returning a struct identifier by value from a function transfers ownership to the caller, eliding the local destructor invocation.
+
 ## 10. Enums
 
 Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
@@ -1006,8 +1036,8 @@ To preserve the zero-overhead promise of standard structures, the compiler does 
 
 Sapphire enforces a clear, predictable memory hierarchy:
 
-1. **Stack allocation by default for structs**: Standard `struct` instances are allocated directly on the stack with deterministic LIFO teardown upon exiting their lexical block scope.
-2. **Value returns with RVO / copy elision**: When returning a stack struct from a function, it is returned by value. The compiler enforces **return-value optimization (RVO)** and copy elision to construct the return value directly in the caller's stack frame without intermediate copies.
+1. **Stack allocation by default for structs**: Standard `struct` instances are allocated directly on the stack with deterministic LIFO teardown upon exiting their lexical block scope. If a struct defines an implementation of `__del__()`, the compiler automatically invokes the destructor in reverse order of declaration when variables exit lexical blocks, upon loop control jumps (`break` and `continue`), or prior to function returns.
+2. **Value returns with RVO / copy elision**: When returning a stack struct from a function, it is returned by value. The compiler enforces **return-value optimization (RVO)** and copy elision to construct the return value directly in the caller's stack frame without intermediate copies. Destructors for directly returned local identifiers are elided, transferring ownership cleanly to the caller without triggering local destruction.
 3. **Static use-after-free prevention**:
    * Downward reference passing to function calls is fully safe.
    * Returning a borrowed reference to a local stack struct is rejected at compile time.

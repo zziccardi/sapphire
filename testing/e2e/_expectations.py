@@ -1,7 +1,7 @@
-"""Ground-truth expected return values for shared Sapphire fixture tests.
+"""Ground-truth expected return values for shared Sapphire end-to-end tests.
 
-Each fixture file (`*_test.sp`) exposes one or more `@test` functions that
-return a single comparable value. This module maps fixture filename →
+Each test file (`*_test.sp`) exposes one or more `@test` functions that
+return a single comparable value. This module maps test filename →
 `{test_function_name: expected_value}` so that both transpiler test suites
 can share the same ground truth without duplicating it.
 

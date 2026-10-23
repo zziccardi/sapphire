@@ -1,5 +1,5 @@
 /*
- * Fixture: expressions_and_casting_test.sp
+ * E2E Test: expressions_and_casting_test.sp
  * Tests type casting with `as`, ternary expressions (`? :`), and optional chaining (`?.`).
  */
 

@@ -1638,28 +1638,278 @@ class TestLuaTranspiler(unittest.TestCase):
       res = subprocess.run([lua_bin, "test_interop.lua"], cwd=tmp_dir, capture_output=True, text=True)
       self.assertEqual(res.returncode, 0, f"Lua error: {res.stderr}")
 
+  def test_destructor_block_exit_lifo(self):
+    """Verifies that destructors are called in reverse order of declaration (LIFO) at block exit."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let r1 = Resource { id = 1 };
+      let r2 = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r2)", lua_code)
+    self.assertIn("_sapphire_del(r1)", lua_code)
+    # Check LIFO order: r2 destroyed before r1
+    idx_r2 = lua_code.index("_sapphire_del(r2)")
+    idx_r1 = lua_code.index("_sapphire_del(r1)")
+    self.assertLess(idx_r2, idx_r1)
+
+  def test_destructor_return_rvo_elision(self):
+    """Verifies that returned identifiers are elided from local destructor calls upon function return."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func create_resource(): Resource {
+      let temp = Resource { id = 10 };
+      let keep = Resource { id = 20 };
+      return keep;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(temp)", lua_code)
+    self.assertNotIn("_sapphire_del(keep)", lua_code)
+
+  def test_destructor_loop_break(self):
+    """Verifies that destructors run before break statements in loops."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      while true {
+        let r = Resource { id = 1 };
+        break;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    func_idx = lua_code.index("loop_test")
+    del_idx = lua_code.index("_sapphire_del(r)", func_idx)
+    break_idx = lua_code.index("break\n", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_return_complex_expression(self):
+    """Verifies that non-trivial return expressions evaluate to temporaries before destructors run."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func calc(): int {
+      let r = Resource { id = 10 };
+      return r.id * 2;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _ret_val_1 = ", lua_code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    self.assertIn("return _ret_val_1", lua_code)
+    ret_calc_idx = lua_code.index("local _ret_val_1 = ")
+    del_idx = lua_code.index("_sapphire_del(r)", ret_calc_idx)
+    ret_idx = lua_code.index("return _ret_val_1", del_idx)
+    self.assertLess(ret_calc_idx, del_idx)
+    self.assertLess(del_idx, ret_idx)
+
+  def test_destructor_loop_continue(self):
+    """Verifies that destructors run before continue statements in loops."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      for i in range(5) {
+        let r = Resource { id = i };
+        continue;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    func_idx = lua_code.index("loop_test")
+    del_idx = lua_code.index("_sapphire_del(r)", func_idx)
+    break_idx = lua_code.index("break\n", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_from_function_and_method_call(self):
+    """Verifies that variables receiving results from functions/methods returning destructible types are tracked."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      static func create(): Resource {
+        return Resource { id = 1 };
+      }
+    }
+    func make_res(): Resource {
+      return Resource { id = 2 };
+    }
+    func test() {
+      let r1 = make_res();
+      let r2 = Resource.create();
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r1)", lua_code)
+    self.assertIn("_sapphire_del(r2)", lua_code)
+
+  def test_destructor_from_variable_assignment(self):
+    """Verifies that variables assigned from other destructible variables are tracked."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = a;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(a)", lua_code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+
+  def test_destructor_inherited_from_parent(self):
+    """Verifies that child structs inherit parent destructor tracking."""
+    code = """
+    struct BaseResource {
+      var id: int;
+    }
+    impl BaseResource {
+      func __del__() {}
+    }
+    struct ChildResource: BaseResource {
+      var tag: String;
+    }
+    func test() {
+      let c = ChildResource { id = 1, tag = "test" };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(c)", lua_code)
+
+  def test_destructor_optional_unwrapping(self):
+    """Verifies that variables unwrapped via `if let x ?= opt` have their destructors called at block exit."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func get_opt(ok: bool): Resource? {
+      if ok {
+        return Resource { id = 1 };
+      }
+      return none;
+    }
+    func test() {
+      if let r ?= get_opt(ok = true) {
+        let x = r.id;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+
+  def test_destructor_multi_return_destructuring(self):
+    """Verifies that multi-return values are both elided on return, and tracked on destructuring assignment."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func make_pair(): Resource, Resource {
+      let a = Resource { id = 1 };
+      let b = Resource { id = 2 };
+      return a, b;
+    }
+    func test() {
+      let x, y = make_pair();
+    }
+    """
+    lua_code = self._transpile(code)
+    func_pair = lua_code.index("make_pair")
+    func_test = lua_code.index("function test()")
+    # In make_pair, neither a nor b should be destroyed (both elided by RVO)
+    make_pair_code = lua_code[func_pair:func_test]
+    self.assertNotIn("_sapphire_del(a)", make_pair_code)
+    self.assertNotIn("_sapphire_del(b)", make_pair_code)
+    # In test(), both x and y should be destroyed in LIFO order (y then x)
+    test_code = lua_code[func_test:]
+    self.assertIn("_sapphire_del(y)", test_code)
+    self.assertIn("_sapphire_del(x)", test_code)
+    self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
+
+  def test_destructor_with_statement_no_double_cleanup(self):
+    """Verifies that a resource managed in a with block is disposed by with, not double-deleted by __del__."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Disposable for Resource {
+      func dispose(var self) {}
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      with let r = Resource { id = 1 } {
+        let x = r.id;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_dispose(_with_res_1)", lua_code)
+    self.assertNotIn("_sapphire_del(r)", lua_code)
+
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture tests
+# End-to-end integration tests
 # ---------------------------------------------------------------------------
 
-_FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtures"
+_E2E_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "e2e"
+_FIXTURES_DIR = _E2E_DIR
 
 
 class TestSharedFixtures(unittest.TestCase):
-  """Transpiles each shared .sp fixture with LuaTranspiler and verifies output.
+  """Transpiles each shared .sp e2e test with LuaTranspiler and verifies output.
 
   Two levels of verification are performed:
 
-  1. **Transpilation succeeds** — the fixture must produce Lua output without
+  1. **Transpilation succeeds** — the test file must produce Lua output without
      raising `NotImplementedError` from `generic_visit`. This confirms
-     that the Lua backend covers every AST node used by the fixture.
+     that the Lua backend covers every AST node used by the test file.
 
   2. **Execution matches expectations** (optional) — if a Lua 5.1+ binary is
      available in `PATH`, the generated Lua is executed and the return value
      of each `@test` function is compared against the shared ground truth in
-     `testing/fixtures/_expectations.py`. Skipped automatically when Lua is
+     `testing/e2e/_expectations.py`. Skipped automatically when Lua is
      not installed.
 
   This class is structurally mirrored by `TestSharedFixtures` in
@@ -1670,7 +1920,7 @@ class TestSharedFixtures(unittest.TestCase):
   def _load_expectations(cls):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "_expectations", _FIXTURES_DIR / "_expectations.py"
+        "_expectations", _E2E_DIR / "_expectations.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

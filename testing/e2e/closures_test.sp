@@ -1,5 +1,5 @@
 /*
- * Fixture: closures_test.sp
+ * E2E Test: closures_test.sp
  * Tests single-parameter lambda expressions and closures over captured variables.
  * (Multi-parameter typed lambdas require a block body which currently produces
  * invalid Python output — tracked separately.)

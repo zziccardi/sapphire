@@ -4701,6 +4701,95 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.", str(ctx.exception))
 
+  def test_destructor_valid_definition(self):
+    """Verifies that a valid __del__() destructor compiles and marks has_destructor."""
+    tc = self._check("""
+    struct FileHandle {
+      var fd: int;
+    }
+    impl FileHandle {
+      func __del__() {
+        if self.fd != -1 {
+          self.fd = -1;
+        }
+      }
+    }
+    """)
+    file_handle_t = tc.symbol_table.lookup_type("FileHandle")
+    self.assertIsNotNone(file_handle_t)
+    self.assertTrue(file_handle_t.has_destructor)
+
+  def test_destructor_with_parameters_rejected(self):
+    """Verifies that __del__ with parameters is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileHandle {
+        var fd: int;
+      }
+      impl FileHandle {
+        func __del__(self) {}
+      }
+      """)
+    self.assertIn("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.", str(ctx.exception))
+
+  def test_destructor_const_rejected(self):
+    """Verifies that const func __del__() is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileHandle {
+        var fd: int;
+      }
+      impl FileHandle {
+        const func __del__() {}
+      }
+      """)
+    self.assertIn("Destructor '__del__' cannot be declared 'const' as teardown routines require mutable access to 'self'.", str(ctx.exception))
+
+  def test_destructor_static_rejected(self):
+    """Verifies that static func __del__() is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileHandle {
+        var fd: int;
+      }
+      impl FileHandle {
+        static func __del__() {}
+      }
+      """)
+    self.assertIn("Destructor '__del__' cannot be static.", str(ctx.exception))
+
+  def test_destructor_non_void_rejected(self):
+    """Verifies that non-void __del__() is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileHandle {
+        var fd: int;
+      }
+      impl FileHandle {
+        func __del__(): int {
+          return 0;
+        }
+      }
+      """)
+    self.assertIn("Destructor '__del__' must return void.", str(ctx.exception))
+
+  def test_destructor_manual_call_rejected(self):
+    """Verifies that direct manual invocations of __del__() are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct FileHandle {
+        var fd: int;
+      }
+      impl FileHandle {
+        func __del__() {}
+      }
+      func test() {
+        let h = FileHandle { fd = 1 };
+        h.__del__();
+      }
+      """)
+    self.assertIn("Destructor '__del__' cannot be manually invoked.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

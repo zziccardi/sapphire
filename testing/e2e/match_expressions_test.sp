@@ -1,5 +1,5 @@
 /*
- * Fixture: match_expressions_test.sp
+ * E2E Test: match_expressions_test.sp
  * Tests match used as a statement, match used as an expression, and wildcards.
  * Arms use the `pattern -> expr,` form with a trailing semicolon after the
  * closing brace when used as a statement.

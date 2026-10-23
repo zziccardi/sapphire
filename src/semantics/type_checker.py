@@ -618,6 +618,18 @@ class TypeChecker:
 
           method = StructMethod(func_decl.name, signature, member.modifier)
 
+          # Validate __del__ destructor
+          if func_decl.name == "__del__":
+            if member.modifier == "static":
+              self.error("Destructor '__del__' cannot be static.")
+            if member.modifier == "const":
+              self.error("Destructor '__del__' cannot be declared 'const' as teardown routines require mutable access to 'self'.")
+            if len(func_decl.parameters) > 0:
+              self.error("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.")
+            is_void = (len(ret_type) == 1 and (ret_type[0].name in ("none", "void") or (isinstance(ret_type[0], PrimitiveType) and ret_type[0].name in ("none", "void"))))
+            if not is_void:
+              self.error("Destructor '__del__' must return void.")
+
           # Check for duplicate definitions
           if func_decl.name in struct_type.methods:
             self.error(f"Method '{func_decl.name}' redefined in struct '{decl.struct_name}'.")
@@ -2321,6 +2333,11 @@ class TypeChecker:
     if node.member == "__proto__":
       # returns optional of same struct type
       return OptionalType(receiver_type)
+
+    # Special member __del__
+    if node.member == "__del__":
+      self.error("Destructor '__del__' cannot be manually invoked.")
+      return PrimitiveType("none")
 
     # Resolve field
     field = receiver_type.fields.get(node.member)

@@ -1677,22 +1677,271 @@ class TestPythonTranspiler(unittest.TestCase):
     transpiler.visit(multi_yield)
     self.assertIn("yield 1, 2", transpiler.get_output())
 
+  def test_destructor_block_exit_lifo(self):
+    """Verifies that destructors are called in reverse order of declaration (LIFO) at block exit in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let r1 = Resource { id = 1 };
+      let r2 = Resource { id = 2 };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r2)", py_code)
+    self.assertIn("_sapphire_del(r1)", py_code)
+    idx_r2 = py_code.index("_sapphire_del(r2)")
+    idx_r1 = py_code.index("_sapphire_del(r1)")
+    self.assertLess(idx_r2, idx_r1)
+
+  def test_destructor_return_rvo_elision(self):
+    """Verifies that returned identifiers are elided from local destructor calls upon function return in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func create_resource(): Resource {
+      let temp = Resource { id = 10 };
+      let keep = Resource { id = 20 };
+      return keep;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(temp)", py_code)
+    self.assertNotIn("_sapphire_del(keep)", py_code)
+
+  def test_destructor_loop_break(self):
+    """Verifies that destructors run before break statements in loops in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      while true {
+        let r = Resource { id = 1 };
+        break;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    func_idx = py_code.index("def loop_test")
+    del_idx = py_code.index("_sapphire_del(r)", func_idx)
+    break_idx = py_code.index("break", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_return_complex_expression(self):
+    """Verifies that non-trivial return expressions evaluate to temporaries before destructors run in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func calc(): int {
+      let r = Resource { id = 10 };
+      return r.id * 2;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_ret_val_1 = ", py_code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    self.assertIn("return _ret_val_1", py_code)
+    ret_calc_idx = py_code.index("_ret_val_1 = ")
+    del_idx = py_code.index("_sapphire_del(r)", ret_calc_idx)
+    ret_idx = py_code.index("return _ret_val_1", del_idx)
+    self.assertLess(ret_calc_idx, del_idx)
+    self.assertLess(del_idx, ret_idx)
+
+  def test_destructor_loop_continue(self):
+    """Verifies that destructors run before continue statements in loops in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      for i in range(5) {
+        let r = Resource { id = i };
+        continue;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    func_idx = py_code.index("def loop_test")
+    del_idx = py_code.index("_sapphire_del(r)", func_idx)
+    cont_idx = py_code.index("continue", func_idx)
+    self.assertLess(del_idx, cont_idx)
+
+  def test_destructor_from_function_and_method_call(self):
+    """Verifies that variables receiving results from functions/methods returning destructible types are tracked in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      static func create(): Resource {
+        return Resource { id = 1 };
+      }
+    }
+    func make_res(): Resource {
+      return Resource { id = 2 };
+    }
+    func test() {
+      let r1 = make_res();
+      let r2 = Resource.create();
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r1)", py_code)
+    self.assertIn("_sapphire_del(r2)", py_code)
+
+  def test_destructor_from_variable_assignment(self):
+    """Verifies that variables assigned from other destructible variables are tracked in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = a;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(a)", py_code)
+    self.assertIn("_sapphire_del(b)", py_code)
+
+  def test_destructor_inherited_from_parent(self):
+    """Verifies that child structs inherit parent destructor tracking in Python."""
+    code = """
+    struct BaseResource {
+      var id: int;
+    }
+    impl BaseResource {
+      func __del__() {}
+    }
+    struct ChildResource: BaseResource {
+      var tag: String;
+    }
+    func test() {
+      let c = ChildResource { id = 1, tag = "test" };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(c)", py_code)
+
+  def test_destructor_optional_unwrapping(self):
+    """Verifies that variables unwrapped via `if let x ?= opt` have their destructors called at block exit in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func get_opt(ok: bool): Resource? {
+      if ok {
+        return Resource { id = 1 };
+      }
+      return none;
+    }
+    func test() {
+      if let r ?= get_opt(ok = true) {
+        let x = r.id;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+
+  def test_destructor_multi_return_destructuring(self):
+    """Verifies that multi-return values are both elided on return, and tracked on destructuring assignment in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func make_pair(): Resource, Resource {
+      let a = Resource { id = 1 };
+      let b = Resource { id = 2 };
+      return a, b;
+    }
+    func test() {
+      let x, y = make_pair();
+    }
+    """
+    py_code = self._transpile(code)
+    func_pair = py_code.index("def make_pair")
+    func_test = py_code.index("def test()")
+    # In make_pair, neither a nor b should be destroyed (both elided by RVO)
+    make_pair_code = py_code[func_pair:func_test]
+    self.assertNotIn("_sapphire_del(a)", make_pair_code)
+    self.assertNotIn("_sapphire_del(b)", make_pair_code)
+    # In test(), both x and y should be destroyed in LIFO order (y then x)
+    test_code = py_code[func_test:]
+    self.assertIn("_sapphire_del(y)", test_code)
+    self.assertIn("_sapphire_del(x)", test_code)
+    self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
+
+  def test_destructor_with_statement_no_double_cleanup(self):
+    """Verifies that a resource managed in a with block is disposed by with, not double-deleted by __del__ in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Disposable for Resource {
+      func dispose(var self) {}
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      with let r = Resource { id = 1 } {
+        let x = r.id;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_dispose(_with_res_1)", py_code)
+    self.assertNotIn("_sapphire_del(r)", py_code)
+
 
 # ---------------------------------------------------------------------------
-# Shared fixture tests
+# End-to-end integration tests
 # ---------------------------------------------------------------------------
 
-_FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtures"
+_E2E_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "e2e"
+_FIXTURES_DIR = _E2E_DIR
 
 
 class TestSharedFixtures(unittest.TestCase):
-  """Compiles each shared .sp fixture with PythonTranspiler and executes it."""
+  """Compiles each shared .sp e2e test with PythonTranspiler and executes it."""
 
   @classmethod
   def _load_expectations(cls):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "_expectations", _FIXTURES_DIR / "_expectations.py"
+        "_expectations", _E2E_DIR / "_expectations.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1717,7 +1966,7 @@ class TestSharedFixtures(unittest.TestCase):
     except Exception:
       pass
     py_code = Transpiler(test_mode=True).transpile(ast)
-    lib_path = str(_FIXTURES_DIR.parent.parent / "lib")
+    lib_path = str(_E2E_DIR.parent.parent / "lib")
     if lib_path not in sys.path:
       sys.path.insert(0, lib_path)
     ctx: dict = {}
@@ -1754,7 +2003,7 @@ class TestSharedFixtures(unittest.TestCase):
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):
-      fixture_path = _FIXTURES_DIR / fixture_name
+      fixture_path = _E2E_DIR / fixture_name
       if not fixture_path.exists():
         self.skipTest(f"Fixture not found: {fixture_path}")
       expectations = self._load_expectations().get(fixture_name, {})
@@ -1777,8 +2026,8 @@ class TestSharedFixtures(unittest.TestCase):
     return _test
 
   # Dynamically generate one test method per fixture file
-  if _FIXTURES_DIR.exists():
-    for _fixture_file in sorted(_FIXTURES_DIR.glob("*_test.sp")):
+  if _E2E_DIR.exists():
+    for _fixture_file in sorted(_E2E_DIR.glob("*_test.sp")):
       _name = f"test_fixture_{_fixture_file.stem}"
       locals()[_name] = _make_fixture_test(_fixture_file.name)
 

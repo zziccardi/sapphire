@@ -1,5 +1,5 @@
 /*
- * Fixture: prototypes_test.sp
+ * E2E Test: prototypes_test.sp
  * Tests proto declaration, clone expressions, shadowing, and live prototype delegation.
  */
 

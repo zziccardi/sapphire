@@ -1,5 +1,5 @@
 /*
- * Fixture: math_test.sp
+ * E2E Test: math_test.sp
  * Tests std.math standard library functions across int and float types.
  */
 

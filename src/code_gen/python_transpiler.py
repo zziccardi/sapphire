@@ -91,6 +91,10 @@ def _sapphire_dispose(obj):
   if obj is not None and hasattr(obj, 'dispose') and callable(obj.dispose):
     obj.dispose()
 
+def _sapphire_del(obj):
+  if obj is not None and hasattr(obj, '__del__') and callable(obj.__del__):
+    obj.__del__()
+
 class _LazyCoWProxy:
   def __init__(self, parent, name, target):
     super().__setattr__('_parent', parent)
@@ -490,6 +494,12 @@ class PythonTranspiler(BaseTranspiler):
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.struct_traits: Dict[str, Set[str]] = {}
+    self.destructor_stack: List[List[str]] = []
+    self.loop_destructor_depth: List[int] = []
+    self.structs_with_destructor: Set[str] = set()
+    self.func_return_types: Dict[str, str] = {}
+    self.method_return_types: Dict[str, str] = {}
+    self.variable_types: Dict[str, str] = {}
     self.clone_helper_counter = 0
     self._identifier_map: Dict[str, str] = {}
     self.extern_vars: Dict[str, str] = {}
@@ -552,6 +562,28 @@ class PythonTranspiler(BaseTranspiler):
     for imp in getattr(program, "imports", []):
       self.visit(imp)
 
+    def _extract_type_name(t_node) -> Optional[str]:
+      if t_node is None:
+        return None
+      if hasattr(t_node, "base_type"):
+        return _extract_type_name(t_node.base_type)
+      if hasattr(t_node, "name"):
+        return t_node.name
+      return None
+
+    def _get_return_type_names(func_node) -> List[str]:
+      res = []
+      if hasattr(func_node, "return_types") and func_node.return_types:
+        for t in func_node.return_types:
+          name = _extract_type_name(t)
+          if name:
+            res.append(name)
+      elif hasattr(func_node, "return_type") and func_node.return_type:
+        name = _extract_type_name(func_node.return_type)
+        if name:
+          res.append(name)
+      return res
+
     # 2. Collect impl block methods to attach to class definitions
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
@@ -564,6 +596,26 @@ class PythonTranspiler(BaseTranspiler):
           if decl.struct_name not in self.struct_traits:
             self.struct_traits[decl.struct_name] = set()
           self.struct_traits[decl.struct_name].add(decl.trait_name)
+        for m in decl.members:
+          if getattr(m, "func_decl", None):
+            ret_names = _get_return_type_names(m.func_decl)
+            if ret_names:
+              self.method_return_types[m.func_decl.name] = ret_names
+      elif isinstance(decl, FuncDeclNode):
+        ret_names = _get_return_type_names(decl)
+        if ret_names:
+          self.func_return_types[decl.name] = ret_names
+
+    for s_name, members in self.struct_methods.items():
+      for m in members:
+        if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
+          self.structs_with_destructor.add(s_name)
+          break
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
+        if any(p in self.structs_with_destructor for p in decl.parent_names):
+          self.structs_with_destructor.add(decl.name)
 
     top_level_decls = []
     executable_stmts = []
@@ -873,12 +925,59 @@ class PythonTranspiler(BaseTranspiler):
       self.visit(stmt)
       self._visit_statements(statements[1:])
 
+  def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
+    if expr is None:
+      return None
+    if isinstance(expr, StructInitializerNode):
+      if expr.struct_name in self.structs_with_destructor:
+        return expr.struct_name
+    elif isinstance(expr, CallNode):
+      if isinstance(expr.callee, IdentifierNode):
+        if expr.callee.name in self.structs_with_destructor:
+          return expr.callee.name
+        if expr.callee.name in self.func_return_types:
+          rets = self.func_return_types[expr.callee.name]
+          if isinstance(rets, list):
+            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+              return rets[return_index]
+          elif rets in self.structs_with_destructor:
+            return rets
+      elif isinstance(expr.callee, MemberAccessNode):
+        m_name = expr.callee.member
+        if m_name in self.method_return_types:
+          rets = self.method_return_types[m_name]
+          if isinstance(rets, list):
+            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+              return rets[return_index]
+          elif rets in self.structs_with_destructor:
+            return rets
+    elif isinstance(expr, IdentifierNode):
+      if expr.name in self.variable_types:
+        st = self.variable_types[expr.name]
+        if st in self.structs_with_destructor:
+          return st
+    inferred = getattr(expr, "inferred_type", None)
+    if hasattr(inferred, "base_type"):
+      inferred = inferred.base_type
+    if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
+      return inferred.name
+    return None
+
   def visit_BlockNode(self, node: BlockNode) -> None:
+    self.destructor_stack.append([])
+    if getattr(node, "_block_destructibles", None):
+      self.destructor_stack[-1].extend(node._block_destructibles)
     if not node.statements:
       self.newline()
       self.emit("pass")
     else:
       self._visit_statements(node.statements)
+    current_destructors = self.destructor_stack.pop()
+    has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
+    if not has_returned:
+      for var_name in reversed(current_destructors):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
 
   def _lift_match_expressions(self, node: Any) -> None:
     """Finds all MatchExprNode in the AST subtree and emits their match statement blocks first."""
@@ -911,6 +1010,24 @@ class PythonTranspiler(BaseTranspiler):
       for name in node.names:
         self.extern_vars[name] = name
       return
+
+    for idx, name in enumerate(node.names):
+      val_type = node.val_types[idx] if idx < len(node.val_types) else None
+      type_name = getattr(val_type, "name", None) if val_type else None
+      st_name = None
+      if type_name and type_name in self.structs_with_destructor:
+        st_name = type_name
+      elif node.exprs and idx < len(node.exprs):
+        st_name = self._expr_destructible_struct(node.exprs[idx])
+      elif node.exprs and len(node.exprs) == 1:
+        st_name = self._expr_destructible_struct(node.exprs[0], return_index=idx)
+      elif node.expr:
+        st_name = self._expr_destructible_struct(node.expr, return_index=idx)
+
+      if st_name:
+        self.variable_types[name] = st_name
+        if self.destructor_stack:
+          self.destructor_stack[-1].append(name)
 
     self._lift_match_expressions(node.exprs)
 
@@ -980,6 +1097,33 @@ class PythonTranspiler(BaseTranspiler):
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     self._lift_match_expressions(node.expressions)
+    all_active_destructors = [
+        d for frame in reversed(self.destructor_stack) for d in reversed(frame)
+    ]
+    returned_ids = {expr.name for expr in node.expressions if isinstance(expr, IdentifierNode)}
+    destructors_to_run = [d for d in all_active_destructors if d not in returned_ids]
+
+    if node.expressions and destructors_to_run and not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions):
+      ret_tmps = []
+      for idx, expr in enumerate(node.expressions):
+        tmp_name = f"_ret_val_{idx + 1}"
+        ret_tmps.append(tmp_name)
+        self.newline()
+        self.emit(f"{tmp_name} = ")
+        self.visit(expr)
+
+      for var_name in destructors_to_run:
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
+
+      self.newline()
+      self.emit("return " + ", ".join(ret_tmps))
+      return
+
+    for var_name in destructors_to_run:
+      self.newline()
+      self.emit(f"_sapphire_del({var_name})")
+
     self.newline()
     if not node.expressions:
       self.emit("return")
@@ -1105,12 +1249,24 @@ class PythonTranspiler(BaseTranspiler):
         self.indent()
         self.newline()
         self.emit(f"{let_name} = {val_var}")
+        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        if st_name:
+          self.variable_types[let_name] = st_name
+          if not hasattr(node.then_block, "_block_destructibles"):
+            node.then_block._block_destructibles = []
+          node.then_block._block_destructibles.append(let_name)
         self.visit(node.then_block)
         self.dedent()
       else:
         # Standard bind + condition
         self.emit(f"{let_name} = ")
         self.visit(node.init_binding.expr)
+        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        if st_name:
+          self.variable_types[let_name] = st_name
+          if not hasattr(node.then_block, "_block_destructibles"):
+            node.then_block._block_destructibles = []
+          node.then_block._block_destructibles.append(let_name)
         self.newline()
         self.emit("if ")
         self.visit(node.condition)
@@ -1134,83 +1290,123 @@ class PythonTranspiler(BaseTranspiler):
       self.dedent()
 
   def visit_WhileNode(self, node: WhileNode) -> None:
-    if node.init_binding:
-      self._lift_match_expressions(node.init_binding.expr)
-    if node.condition:
-      self._lift_match_expressions(node.condition)
+    self.loop_destructor_depth.append(len(self.destructor_stack))
+    try:
+      if node.init_binding:
+        self._lift_match_expressions(node.init_binding.expr)
+      if node.condition:
+        self._lift_match_expressions(node.condition)
 
-    self.newline()
-    if node.init_binding:
-      let_name = node.init_binding.let_name
-      if node.init_binding.is_unwrap:
-        self.emit("while True:")
-        self.indent()
-        self.newline()
-        val_var = f"_val_{let_name}"
-        self.emit(f"{val_var} = ")
-        self.visit(node.init_binding.expr)
-        self.newline()
+      self.newline()
+      if node.init_binding:
+        let_name = node.init_binding.let_name
+        if node.init_binding.is_unwrap:
+          self.emit("while True:")
+          self.indent()
+          self.newline()
+          val_var = f"_val_{let_name}"
+          self.emit(f"{val_var} = ")
+          self.visit(node.init_binding.expr)
+          self.newline()
 
-        # Map identifier to temporary variable during condition check
-        old_map = self._identifier_map.copy()
-        self._identifier_map[let_name] = val_var
+          # Map identifier to temporary variable during condition check
+          old_map = self._identifier_map.copy()
+          self._identifier_map[let_name] = val_var
 
-        self.emit(f"if not ({val_var} is not None")
-        if node.condition:
-          self.emit(" and ")
+          self.emit(f"if not ({val_var} is not None")
+          if node.condition:
+            self.emit(" and ")
+            self.visit(node.condition)
+          self.emit("):")
+
+          # Restore map
+          self._identifier_map = old_map
+
+          self.indent()
+          self.newline()
+          self.emit("break")
+          self.dedent()
+          self.newline()
+          self.emit(f"{let_name} = {val_var}")
+          st_name = self._expr_destructible_struct(node.init_binding.expr)
+          if st_name:
+            self.variable_types[let_name] = st_name
+            if not hasattr(node.block, "_block_destructibles"):
+              node.block._block_destructibles = []
+            node.block._block_destructibles.append(let_name)
+          self.visit(node.block)
+          self.dedent()
+        else:
+          # Standard init-statement: execute once before loop begins
+          self.emit(f"{let_name} = ")
+          self.visit(node.init_binding.expr)
+          st_name = self._expr_destructible_struct(node.init_binding.expr)
+          if st_name:
+            self.variable_types[let_name] = st_name
+            if not hasattr(node.block, "_block_destructibles"):
+              node.block._block_destructibles = []
+            node.block._block_destructibles.append(let_name)
+          self.newline()
+          self.emit("while ")
           self.visit(node.condition)
-        self.emit("):")
-
-        # Restore map
-        self._identifier_map = old_map
-
-        self.indent()
-        self.newline()
-        self.emit("break")
-        self.dedent()
-        self.newline()
-        self.emit(f"{let_name} = {val_var}")
-        self.visit(node.block)
-        self.dedent()
+          self.emit(":")
+          self.indent()
+          self.visit(node.block)
+          self.dedent()
       else:
-        # Standard init-statement: execute once before loop begins
-        self.emit(f"{let_name} = ")
-        self.visit(node.init_binding.expr)
-        self.newline()
         self.emit("while ")
         self.visit(node.condition)
         self.emit(":")
         self.indent()
         self.visit(node.block)
         self.dedent()
-    else:
-      self.emit("while ")
-      self.visit(node.condition)
-      self.emit(":")
+    finally:
+      self.loop_destructor_depth.pop()
+
+  def visit_ForNode(self, node: ForNode) -> None:
+    self.loop_destructor_depth.append(len(self.destructor_stack))
+    try:
+      self._lift_match_expressions(node.iterable)
+      self.newline()
+      if node.key_var is not None:
+        self.emit(f"for {node.key_var}, {node.val_var} in ")
+        self.visit(node.iterable)
+        self.emit(".items():")
+      else:
+        self.emit(f"for {node.val_var} in ")
+        self.visit(node.iterable)
+        self.emit(":")
       self.indent()
       self.visit(node.block)
       self.dedent()
-
-  def visit_ForNode(self, node: ForNode) -> None:
-    self._lift_match_expressions(node.iterable)
-    self.newline()
-    if node.key_var is not None:
-      self.emit(f"for {node.key_var}, {node.val_var} in ")
-      self.visit(node.iterable)
-      self.emit(".items():")
-    else:
-      self.emit(f"for {node.val_var} in ")
-      self.visit(node.iterable)
-      self.emit(":")
-    self.indent()
-    self.visit(node.block)
-    self.dedent()
+    finally:
+      self.loop_destructor_depth.pop()
 
   def visit_BreakNode(self, node: BreakNode) -> None:
+    if self.loop_destructor_depth:
+      loop_depth = self.loop_destructor_depth[-1]
+      for frame in reversed(self.destructor_stack[loop_depth:]):
+        for var_name in reversed(frame):
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    elif self.destructor_stack:
+      for var_name in reversed(self.destructor_stack[-1]):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
     self.newline()
     self.emit("break")
 
   def visit_ContinueNode(self, node: ContinueNode) -> None:
+    if self.loop_destructor_depth:
+      loop_depth = self.loop_destructor_depth[-1]
+      for frame in reversed(self.destructor_stack[loop_depth:]):
+        for var_name in reversed(frame):
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    elif self.destructor_stack:
+      for var_name in reversed(self.destructor_stack[-1]):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
     self.newline()
     self.emit("continue")
 

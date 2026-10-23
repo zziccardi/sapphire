@@ -1,5 +1,5 @@
 /*
- * Fixture: enums_test.sp
+ * E2E Test: enums_test.sp
  * Tests integer-backed and string-backed enum declarations and member access.
  */
 

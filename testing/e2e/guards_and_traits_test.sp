@@ -1,5 +1,5 @@
 /*
- * Fixture: guards_and_traits_test.sp
+ * E2E Test: guards_and_traits_test.sp
  * Tests guard statements with scope promotion, trait declarations, and impl Trait for Struct.
  */
 
