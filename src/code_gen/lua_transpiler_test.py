@@ -1638,6 +1638,70 @@ class TestLuaTranspiler(unittest.TestCase):
       res = subprocess.run([lua_bin, "test_interop.lua"], cwd=tmp_dir, capture_output=True, text=True)
       self.assertEqual(res.returncode, 0, f"Lua error: {res.stderr}")
 
+  def test_destructor_block_exit_lifo(self):
+    """Verifies that destructors are called in reverse order of declaration (LIFO) at block exit."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let r1 = Resource { id = 1 };
+      let r2 = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r2)", lua_code)
+    self.assertIn("_sapphire_del(r1)", lua_code)
+    # Check LIFO order: r2 destroyed before r1
+    idx_r2 = lua_code.index("_sapphire_del(r2)")
+    idx_r1 = lua_code.index("_sapphire_del(r1)")
+    self.assertLess(idx_r2, idx_r1)
+
+  def test_destructor_return_rvo_elision(self):
+    """Verifies that returned identifiers are elided from local destructor calls upon function return."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func create_resource(): Resource {
+      let temp = Resource { id = 10 };
+      let keep = Resource { id = 20 };
+      return keep;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(temp)", lua_code)
+    self.assertNotIn("_sapphire_del(keep)", lua_code)
+
+  def test_destructor_loop_break(self):
+    """Verifies that destructors run before break statements in loops."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      while true {
+        let r = Resource { id = 1 };
+        break;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    func_idx = lua_code.index("loop_test")
+    del_idx = lua_code.index("_sapphire_del(r)", func_idx)
+    break_idx = lua_code.index("break", func_idx)
+    self.assertLess(del_idx, break_idx)
+
 
 
 # ---------------------------------------------------------------------------

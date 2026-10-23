@@ -828,6 +828,7 @@ class TestLSPServer(unittest.TestCase):
       st_type.fields["f1"] = StructField("f1", "int", is_mutable=True)
       st_type.methods["m1"] = StructMethod("m1", FunctionType([], "void"), None)
       st_type.methods["__init__"] = StructMethod("__init__", FunctionType([], "void"), None) # should be skipped
+      st_type.methods["__del__"] = StructMethod("__del__", FunctionType([], "void"), None) # should be skipped
 
       sym_struct = StructSymbol("x", st_type)
       sym_struct.symbol_type = st_type
@@ -845,8 +846,9 @@ class TestLSPServer(unittest.TestCase):
       from src.lsp.server import completion
       res_comp = completion(self.ls, params_comp)
       self.assertIsNotNone(res_comp)
-      self.assertEqual(len(res_comp.items), 2) # f1 and m1, __init__ skipped
+      self.assertEqual(len(res_comp.items), 2) # f1 and m1, __init__ and __del__ skipped
       self.assertIsNone(next((item for item in res_comp.items if item.label == "__init__"), None))
+      self.assertIsNone(next((item for item in res_comp.items if item.label == "__del__"), None))
 
       from src.semantics.symbol_table import StringType, VariableSymbol
 

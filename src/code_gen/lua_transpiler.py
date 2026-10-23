@@ -644,6 +644,18 @@ local _sapphire_dispose = function(obj)
     end
   end
 end
+
+local _sapphire_del = function(obj)
+  if obj == nil then return end
+  if type(obj) == "table" and type(obj.__del__) == "function" then
+    obj:__del__()
+  elseif type(obj) == "userdata" then
+    local meta = getmetatable(obj)
+    if meta and type(meta.__del__) == "function" then
+      obj:__del__()
+    end
+  end
+end
 """
 
 
@@ -810,6 +822,12 @@ class LuaTranspiler(BaseTranspiler):
     self.imported_modules: Set[str] = set()
     self.arena_stack: List[List[str]] = []
     self.disposable_stack: List[List[str]] = []
+    self.destructor_stack: List[List[str]] = []
+    self.loop_destructor_depth: List[int] = []
+    self.structs_with_destructor: Set[str] = set()
+    self.func_return_types: Dict[str, str] = {}
+    self.method_return_types: Dict[str, str] = {}
+    self.variable_types: Dict[str, str] = {}
     self._identifier_map: Dict[str, str] = {}
     self._loop_stack: List[bool] = []
 
@@ -877,6 +895,28 @@ class LuaTranspiler(BaseTranspiler):
         if decl.struct_name not in self.struct_methods:
           self.struct_methods[decl.struct_name] = []
         self.struct_methods[decl.struct_name].extend(decl.members)
+        for m in decl.members:
+          if getattr(m, "func_decl", None):
+            ret_t = getattr(m.func_decl, "return_type", None)
+            ret_name = getattr(ret_t, "name", None)
+            if ret_name:
+              self.method_return_types[m.func_decl.name] = ret_name
+      elif isinstance(decl, FuncDeclNode):
+        ret_t = getattr(decl, "return_type", None)
+        ret_name = getattr(ret_t, "name", None)
+        if ret_name:
+          self.func_return_types[decl.name] = ret_name
+
+    for s_name, members in self.struct_methods.items():
+      for m in members:
+        if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
+          self.structs_with_destructor.add(s_name)
+          break
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
+        if any(p in self.structs_with_destructor for p in decl.parent_names):
+          self.structs_with_destructor.add(decl.name)
 
     struct_decls = []
     func_decls = []
@@ -1361,9 +1401,40 @@ class LuaTranspiler(BaseTranspiler):
   # Statements Visitor
   # ==========================================
 
+  def _expr_destructible_struct(self, expr: Any) -> Optional[str]:
+    if expr is None:
+      return None
+    if isinstance(expr, StructInitializerNode):
+      if expr.struct_name in self.structs_with_destructor:
+        return expr.struct_name
+    elif isinstance(expr, CallNode):
+      if isinstance(expr.callee, IdentifierNode):
+        if expr.callee.name in self.structs_with_destructor:
+          return expr.callee.name
+        if expr.callee.name in self.func_return_types:
+          ret = self.func_return_types[expr.callee.name]
+          if ret in self.structs_with_destructor:
+            return ret
+      elif isinstance(expr.callee, MemberAccessNode):
+        m_name = expr.callee.member
+        if m_name in self.method_return_types:
+          ret = self.method_return_types[m_name]
+          if ret in self.structs_with_destructor:
+            return ret
+    elif isinstance(expr, IdentifierNode):
+      if expr.name in self.variable_types:
+        st = self.variable_types[expr.name]
+        if st in self.structs_with_destructor:
+          return st
+    inferred = getattr(expr, "inferred_type", None)
+    if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
+      return inferred.name
+    return None
+
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.arena_stack.append([])
     self.disposable_stack.append([])
+    self.destructor_stack.append([])
     if getattr(node, "_with_disposables", None):
       self.disposable_stack[-1].extend(node._with_disposables)
     if not node.statements:
@@ -1375,8 +1446,12 @@ class LuaTranspiler(BaseTranspiler):
 
     current_arenas = self.arena_stack.pop()
     current_disposables = self.disposable_stack.pop()
+    current_destructors = self.destructor_stack.pop()
     has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
     if not has_returned:
+      for var_name in reversed(current_destructors):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
       for disp_name in reversed(current_disposables):
         self.newline()
         self.emit(f"_sapphire_dispose({disp_name})")
@@ -1416,6 +1491,22 @@ class LuaTranspiler(BaseTranspiler):
       )
       if is_arena and self.arena_stack:
         self.arena_stack[-1].append(node.names[0])
+
+    for idx, name in enumerate(node.names):
+      val_type = node.val_types[idx] if idx < len(node.val_types) else None
+      type_name = getattr(val_type, "name", None) if val_type else None
+      st_name = None
+      if type_name and type_name in self.structs_with_destructor:
+        st_name = type_name
+      elif node.exprs and idx < len(node.exprs):
+        st_name = self._expr_destructible_struct(node.exprs[idx])
+      elif node.expr:
+        st_name = self._expr_destructible_struct(node.expr)
+
+      if st_name:
+        self.variable_types[name] = st_name
+        if self.destructor_stack:
+          self.destructor_stack[-1].append(name)
 
     self._lift_match_expressions(node.exprs)
 
@@ -1490,7 +1581,40 @@ class LuaTranspiler(BaseTranspiler):
     all_active_disposables = [
         d for frame in reversed(self.disposable_stack) for d in reversed(frame)
     ]
+    all_active_destructors = [
+        d for frame in reversed(self.destructor_stack) for d in reversed(frame)
+    ]
     self._lift_match_expressions(node.expressions)
+
+    # RVO: Identifiers returned directly are transferred to caller, so elide local destructor
+    returned_ids = {expr.name for expr in node.expressions if isinstance(expr, IdentifierNode)}
+    destructors_to_run = [d for d in all_active_destructors if d not in returned_ids]
+
+    # If non-trivial return expressions exist alongside destructors, evaluate expressions first
+    if node.expressions and destructors_to_run and not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions):
+      ret_tmps = []
+      for idx, expr in enumerate(node.expressions):
+        tmp_name = f"_ret_val_{idx + 1}"
+        ret_tmps.append(tmp_name)
+        self.newline()
+        self.emit(f"local {tmp_name} = ")
+        self.visit(expr)
+
+      for disp_name in all_active_disposables:
+        self.newline()
+        self.emit(f"_sapphire_dispose({disp_name})")
+
+      for arena_name in all_active_arenas:
+        self.newline()
+        self.emit(f"{arena_name}:destroy()")
+
+      for var_name in destructors_to_run:
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
+
+      self.newline()
+      self.emit("return " + ", ".join(ret_tmps))
+      return
 
     for disp_name in all_active_disposables:
       self.newline()
@@ -1499,6 +1623,10 @@ class LuaTranspiler(BaseTranspiler):
     for arena_name in all_active_arenas:
       self.newline()
       self.emit(f"{arena_name}:destroy()")
+
+    for var_name in destructors_to_run:
+      self.newline()
+      self.emit(f"_sapphire_del({var_name})")
 
     self.newline()
     if node.expressions:
@@ -1692,6 +1820,7 @@ class LuaTranspiler(BaseTranspiler):
   def visit_WhileNode(self, node: WhileNode) -> None:
     has_continue = _has_continue_node(node.block)
     self._loop_stack.append(has_continue)
+    self.loop_destructor_depth.append(len(self.destructor_stack))
     try:
       if node.init_binding:
         self._lift_match_expressions(node.init_binding.expr)
@@ -1758,11 +1887,13 @@ class LuaTranspiler(BaseTranspiler):
         self.newline()
         self.emit("end")
     finally:
+      self.loop_destructor_depth.pop()
       self._loop_stack.pop()
 
   def visit_ForNode(self, node: ForNode) -> None:
     has_continue = _has_continue_node(node.block)
     self._loop_stack.append(has_continue)
+    self.loop_destructor_depth.append(len(self.destructor_stack))
     try:
       self._lift_match_expressions(node.iterable)
       self.newline()
@@ -1787,9 +1918,20 @@ class LuaTranspiler(BaseTranspiler):
       self.newline()
       self.emit("end")
     finally:
+      self.loop_destructor_depth.pop()
       self._loop_stack.pop()
 
   def visit_BreakNode(self, node: BreakNode) -> None:
+    if self.loop_destructor_depth:
+      loop_depth = self.loop_destructor_depth[-1]
+      for frame in reversed(self.destructor_stack[loop_depth:]):
+        for var_name in reversed(frame):
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    elif self.destructor_stack:
+      for var_name in reversed(self.destructor_stack[-1]):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
     self.newline()
     if self._loop_stack and self._loop_stack[-1]:
       self.emit("_break_outer = true")
@@ -1797,6 +1939,16 @@ class LuaTranspiler(BaseTranspiler):
     self.emit("break")
 
   def visit_ContinueNode(self, node: ContinueNode) -> None:
+    if self.loop_destructor_depth:
+      loop_depth = self.loop_destructor_depth[-1]
+      for frame in reversed(self.destructor_stack[loop_depth:]):
+        for var_name in reversed(frame):
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    elif self.destructor_stack:
+      for var_name in reversed(self.destructor_stack[-1]):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
     self.newline()
     self.emit("break")
 

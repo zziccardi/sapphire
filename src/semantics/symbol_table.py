@@ -5,7 +5,7 @@ and the symbol table used to resolve and validate identifiers during
 type-checking.
 """
 
-from typing import Dict, List, Optional, Any, Set
+from typing import Any, Dict, List, Optional, Set, Union
 
 
 # ==========================================
@@ -237,6 +237,10 @@ class StructType(Type):
   @property
   def parent_name(self) -> Optional[str]:
     return self.parent_names[0] if self.parent_names else None
+
+  @property
+  def has_destructor(self) -> bool:
+    return "__del__" in self.methods
 
   @parent_name.setter
   def parent_name(self, value: Optional[str]) -> None:

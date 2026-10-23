@@ -1498,7 +1498,7 @@ def completion(ls: SapphireLanguageServer,
         )
       # Suggest methods
       for method_name, method in getattr(receiver_type, "methods", {}).items():
-        if method_name == "__init__":
+        if method_name in ("__init__", "__del__"):
           continue
         m_type = str(getattr(method, "method_type", method))
         items.append(
