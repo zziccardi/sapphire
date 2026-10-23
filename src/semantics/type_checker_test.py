@@ -4790,6 +4790,212 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Destructor '__del__' cannot be manually invoked.", str(ctx.exception))
 
+  def test_encapsulation_invariant_struct_cross_module(self):
+    """Verifies that direct field mutations on imported structs with __init__ are rejected."""
+    from antlr4 import InputStream, CommonTokenStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+    from src.parser.ast_builder import ASTBuilder
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StructMethod, FunctionType, PrimitiveType
+
+    code = """
+    func test() {
+      var w = weapon.Weapon();
+      w.damage = 100;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker(source_file_path="main.sp")
+    mod_sym = ModuleSymbol("weapon", "lib/weapon.sp")
+    weapon_struct = StructType("Weapon", defining_module="lib/weapon.sp", is_imported=True)
+    weapon_struct.fields["damage"] = StructField("damage", PrimitiveType("int"), is_mutable=True)
+    init_sig = FunctionType([], PrimitiveType("none"), has_self=True, param_names=["self"])
+    weapon_struct.methods["__init__"] = StructMethod("__init__", init_sig, modifier=None)
+    mod_sym.exports["Weapon"] = weapon_struct
+    checker.symbol_table.define("weapon", mod_sym)
+
+    with self.assertRaises(SemanticError) as ctx:
+      checker.check(ast)
+    self.assertIn("Cannot mutate field 'damage' of encapsulated struct 'Weapon' outside its defining module; mutate via methods instead.", str(ctx.exception))
+
+  def test_encapsulation_pod_struct_cross_module_allowed(self):
+    """Verifies that POD structs (no __init__) allow cross-module field mutation on var bindings."""
+    from antlr4 import InputStream, CommonTokenStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+    from src.parser.ast_builder import ASTBuilder
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+
+    code = """
+    func test() {
+      var p = math.Point { x = 1.0 };
+      p.x = 10.0;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker(source_file_path="main.sp")
+    mod_sym = ModuleSymbol("math", "lib/math.sp")
+    point_struct = StructType("Point", defining_module="lib/math.sp", is_imported=True)
+    point_struct.fields["x"] = StructField("x", PrimitiveType("float"), is_mutable=True)
+    mod_sym.exports["Point"] = point_struct
+    checker.symbol_table.define("math", mod_sym)
+
+    checker.check(ast)
+
+  def test_encapsulation_pod_struct_on_let_binding_rejected(self):
+    """Verifies that field mutation on a let-bound struct is rejected."""
+    from antlr4 import InputStream, CommonTokenStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+    from src.parser.ast_builder import ASTBuilder
+    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+
+    code = """
+    func test() {
+      let p = math.Point { x = 1.0 };
+      p.x = 10.0;
+    }
+    """
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+
+    checker = TypeChecker(source_file_path="main.sp")
+    mod_sym = ModuleSymbol("math", "lib/math.sp")
+    point_struct = StructType("Point", defining_module="lib/math.sp", is_imported=True)
+    point_struct.fields["x"] = StructField("x", PrimitiveType("float"), is_mutable=True)
+    mod_sym.exports["Point"] = point_struct
+    checker.symbol_table.define("math", mod_sym)
+
+    with self.assertRaises(SemanticError) as ctx:
+      checker.check(ast)
+    self.assertIn("Cannot mutate field 'x' of constant struct variable 'p'.", str(ctx.exception))
+
+  def test_move_use_after_move_rejected(self):
+    """Verifies that reading a moved variable produces a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let a = 10;
+        let b = move a;
+        let c = a;
+      }
+      """)
+    self.assertIn("Use of moved variable 'a'.", str(ctx.exception))
+
+  def test_move_again_after_move_rejected(self):
+    """Verifies that moving an already-moved variable produces a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let a = 10;
+        let b = move a;
+        let c = move a;
+      }
+      """)
+    self.assertIn("Use of moved variable 'a'.", str(ctx.exception))
+
+  def test_move_borrowed_parameter_rejected(self):
+    """Verifies that moving out of borrowed parameters is prohibited."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_const(p: int) {
+        let b = move p;
+      }
+      """)
+    self.assertIn("Cannot move out of borrowed parameter 'p'.", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test_var(var p: int) {
+        let b = move p;
+      }
+      """)
+    self.assertIn("Cannot move out of borrowed parameter 'p'.", str(ctx.exception))
+
+  def test_move_reinitialization_restores_liveness(self):
+    """Verifies that assigning a new value to a moved var variable restores its liveness."""
+    self._check("""
+    func test() {
+      var a = 10;
+      let b = move a;
+      a = 20;
+      let c = move a;
+    }
+    """)
+
+  def test_move_undefined_variable_rejected(self):
+    """Verifies moving an undefined variable raises a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let b = move not_defined;
+      }
+      """)
+    self.assertIn("Cannot move undefined variable 'not_defined'.", str(ctx.exception))
+
+  def test_move_in_branching(self):
+    """Verifies that moving a variable inside an if branch invalidates it after the branch."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test(cond: bool) {
+        var a = 10;
+        if cond {
+          let b = move a;
+        }
+        let c = a;
+      }
+      """)
+    self.assertIn("Use of moved variable 'a'.", str(ctx.exception))
+
+  def test_move_in_loop_without_reinitialization_rejected(self):
+    """Verifies that moving an outer variable inside a loop without re-initialization is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        var a = 10;
+        while true {
+          let b = move a;
+        }
+      }
+      """)
+    self.assertIn("Cannot move variable 'a' inside a loop without re-assigning it before the next iteration.", str(ctx.exception))
+
+  def test_move_in_loop_with_reinitialization_allowed(self):
+    """Verifies that moving and re-initializing an outer variable in a loop is permitted."""
+    self._check("""
+    func test() {
+      var a = 10;
+      while true {
+        let b = move a;
+        a = 20;
+      }
+    }
+    """)
+
+  def test_move_member_access_rejected(self):
+    """Verifies accessing a member on a moved variable is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func test() {
+        var p = Point { x = 1 };
+        let v = move p.x;
+      }
+      """)
+    self.assertIn("Cannot access member 'x' on moved variable 'p'.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
