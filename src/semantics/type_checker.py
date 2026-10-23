@@ -2513,6 +2513,12 @@ class TypeChecker:
     if getattr(sym, "is_parameter", False):
       self.error(f"Cannot move out of borrowed parameter '{node.name}'.", node=node)
       return sym.symbol_type
+    if not sym.is_mutable:
+      self.error(
+          f"Cannot move constant '{node.name}'; declare with 'var' to allow ownership transfer.",
+          node=node,
+      )
+      return sym.symbol_type
     if sym in self.moved_symbols:
       self.error(f"Use of moved variable '{node.name}'.", node=node)
       return sym.symbol_type

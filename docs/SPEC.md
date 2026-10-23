@@ -120,7 +120,8 @@ Variables are immutable constants by default to encourage safety. Mutability mus
     on assignment.
   * **The `move` keyword**: Explicit ownership transfers use the `move` keyword
     (e.g. `let b = move a;` or `process(move a);`), mirroring `clone` for deep
-    duplication.
+    duplication. Moving is only permitted on mutable variables (`var`); moving a
+    constant declared with `let` produces a compile-time error.
   * **Compile-time use-after-move enforcement**: Moving a variable transfers
     ownership and statically invalidates the source identifier in the current
     scope. Any subsequent read, borrow, or move of an invalidated identifier
@@ -596,7 +597,10 @@ render_pipeline.consume(move resource);
 Sapphire gives the caller explicit control over ownership transfer at the call site:
 * **Constant borrow (default)**: Passing an identifier without `move` passes it by constant reference. The caller retains ownership, and the callee cannot mutate the value.
 * **Exclusive mutable borrow (`var`)**: Passing to a parameter declared with `var` gives the callee exclusive mutable access. The caller retains ownership after the call completes.
-* **Ownership transfer (`move`)**: Passing `move <identifier>` transfers ownership into the function. The caller's variable is statically invalidated and cannot be read, borrowed, or moved again.
+* **Ownership transfer (`move`)**: Passing `move <identifier>` transfers
+  ownership into the function. The variable must be declared with `var`. The
+  caller's variable is statically invalidated and cannot be read, borrowed, or
+  moved again.
 
 ### Scope-bound aliasing rules (call-site reference exclusivity)
 

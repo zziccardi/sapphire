@@ -4880,12 +4880,23 @@ class TestTypeChecker(unittest.TestCase):
       checker.check(ast)
     self.assertIn("Cannot mutate field 'x' of constant struct variable 'p'.", str(ctx.exception))
 
+  def test_move_constant_rejected(self):
+    """Verifies that moving a let constant produces a semantic error."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let a = 10;
+        let b = move a;
+      }
+      """)
+    self.assertIn("Cannot move constant 'a'; declare with 'var' to allow ownership transfer.", str(ctx.exception))
+
   def test_move_use_after_move_rejected(self):
     """Verifies that reading a moved variable produces a semantic error."""
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
-        let a = 10;
+        var a = 10;
         let b = move a;
         let c = a;
       }
@@ -4897,7 +4908,7 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
-        let a = 10;
+        var a = 10;
         let b = move a;
         let c = move a;
       }
