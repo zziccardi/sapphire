@@ -413,6 +413,34 @@ class TestPythonTranspiler(unittest.TestCase):
 
     self.assertTrue(len(transpiler.get_output()) > 0)
 
+  def test_block_body_typed_lambda(self):
+    """Verifies that block-body multi-parameter typed lambdas transpile and execute correctly."""
+    code = """
+    func run_block_lambda(): int {
+      let add = (a: int, b: int) -> int {
+        let sum = a + b;
+        return sum * 2;
+      };
+      return add(3, 4);
+    }
+    """
+    res = self._transpile_and_run(code, "run_block_lambda()")
+    self.assertEqual(res, 14)
+
+    inline_code = """
+    func apply(fn: (int, int) -> int): int {
+      return fn(10, 20);
+    }
+    func run_inline_block_lambda(): int {
+      return apply((x: int, y: int) -> int {
+        let factor = 3;
+        return (x + y) * factor;
+      });
+    }
+    """
+    inline_res = self._transpile_and_run(inline_code, "run_inline_block_lambda()")
+    self.assertEqual(inline_res, 90)
+
   def test_prototypal_inheritance_with_static_inheritance(self):
     """Verifies that inherited struct constructors propagate proto correctly for cloning."""
     code = """
