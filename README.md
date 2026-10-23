@@ -175,6 +175,7 @@ sapphire test
 
 * `docs/`: Core documentation including the [language spec](docs/SPEC.md),
   [Rust comparison](docs/rust_comparison.md),
+  [C++ comparison](docs/cpp_comparison.md),
   [compiler architecture](docs/compiler.md),
   [development guide](docs/development.md), [builtins](docs/builtins.md), and
   [testing guide](docs/testing.md).
