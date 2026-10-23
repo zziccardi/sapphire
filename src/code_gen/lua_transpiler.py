@@ -885,6 +885,28 @@ class LuaTranspiler(BaseTranspiler):
     for imp in getattr(program, "imports", []):
       self.visit(imp)
 
+    def _extract_type_name(t_node) -> Optional[str]:
+      if t_node is None:
+        return None
+      if hasattr(t_node, "base_type"):
+        return _extract_type_name(t_node.base_type)
+      if hasattr(t_node, "name"):
+        return t_node.name
+      return None
+
+    def _get_return_type_names(func_node) -> List[str]:
+      res = []
+      if hasattr(func_node, "return_types") and func_node.return_types:
+        for t in func_node.return_types:
+          name = _extract_type_name(t)
+          if name:
+            res.append(name)
+      elif hasattr(func_node, "return_type") and func_node.return_type:
+        name = _extract_type_name(func_node.return_type)
+        if name:
+          res.append(name)
+      return res
+
     # 2. Collect known struct names and impl block methods
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
@@ -897,15 +919,13 @@ class LuaTranspiler(BaseTranspiler):
         self.struct_methods[decl.struct_name].extend(decl.members)
         for m in decl.members:
           if getattr(m, "func_decl", None):
-            ret_t = getattr(m.func_decl, "return_type", None)
-            ret_name = getattr(ret_t, "name", None)
-            if ret_name:
-              self.method_return_types[m.func_decl.name] = ret_name
+            ret_names = _get_return_type_names(m.func_decl)
+            if ret_names:
+              self.method_return_types[m.func_decl.name] = ret_names
       elif isinstance(decl, FuncDeclNode):
-        ret_t = getattr(decl, "return_type", None)
-        ret_name = getattr(ret_t, "name", None)
-        if ret_name:
-          self.func_return_types[decl.name] = ret_name
+        ret_names = _get_return_type_names(decl)
+        if ret_names:
+          self.func_return_types[decl.name] = ret_names
 
     for s_name, members in self.struct_methods.items():
       for m in members:
@@ -1401,7 +1421,7 @@ class LuaTranspiler(BaseTranspiler):
   # Statements Visitor
   # ==========================================
 
-  def _expr_destructible_struct(self, expr: Any) -> Optional[str]:
+  def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
     if expr is None:
       return None
     if isinstance(expr, StructInitializerNode):
@@ -1412,21 +1432,29 @@ class LuaTranspiler(BaseTranspiler):
         if expr.callee.name in self.structs_with_destructor:
           return expr.callee.name
         if expr.callee.name in self.func_return_types:
-          ret = self.func_return_types[expr.callee.name]
-          if ret in self.structs_with_destructor:
-            return ret
+          rets = self.func_return_types[expr.callee.name]
+          if isinstance(rets, list):
+            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+              return rets[return_index]
+          elif rets in self.structs_with_destructor:
+            return rets
       elif isinstance(expr.callee, MemberAccessNode):
         m_name = expr.callee.member
         if m_name in self.method_return_types:
-          ret = self.method_return_types[m_name]
-          if ret in self.structs_with_destructor:
-            return ret
+          rets = self.method_return_types[m_name]
+          if isinstance(rets, list):
+            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+              return rets[return_index]
+          elif rets in self.structs_with_destructor:
+            return rets
     elif isinstance(expr, IdentifierNode):
       if expr.name in self.variable_types:
         st = self.variable_types[expr.name]
         if st in self.structs_with_destructor:
           return st
     inferred = getattr(expr, "inferred_type", None)
+    if hasattr(inferred, "base_type"):
+      inferred = inferred.base_type
     if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
       return inferred.name
     return None
@@ -1437,6 +1465,8 @@ class LuaTranspiler(BaseTranspiler):
     self.destructor_stack.append([])
     if getattr(node, "_with_disposables", None):
       self.disposable_stack[-1].extend(node._with_disposables)
+    if getattr(node, "_block_destructibles", None):
+      self.destructor_stack[-1].extend(node._block_destructibles)
     if not node.statements:
       self.newline()
       self.emit("-- pass")
@@ -1500,8 +1530,10 @@ class LuaTranspiler(BaseTranspiler):
         st_name = type_name
       elif node.exprs and idx < len(node.exprs):
         st_name = self._expr_destructible_struct(node.exprs[idx])
+      elif node.exprs and len(node.exprs) == 1:
+        st_name = self._expr_destructible_struct(node.exprs[0], return_index=idx)
       elif node.expr:
-        st_name = self._expr_destructible_struct(node.expr)
+        st_name = self._expr_destructible_struct(node.expr, return_index=idx)
 
       if st_name:
         self.variable_types[name] = st_name
@@ -1770,6 +1802,12 @@ class LuaTranspiler(BaseTranspiler):
         self.indent()
         self.newline()
         self.emit(f"local {let_name} = {val_var}")
+        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        if st_name:
+          self.variable_types[let_name] = st_name
+          if not hasattr(node.then_block, "_block_destructibles"):
+            node.then_block._block_destructibles = []
+          node.then_block._block_destructibles.append(let_name)
         self.visit(node.then_block)
         self.dedent()
       else:
@@ -1777,6 +1815,12 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(f"local {let_name} = ")
         self.visit(node.init_binding.expr)
         self.newline()
+        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        if st_name:
+          self.variable_types[let_name] = st_name
+          if not hasattr(node.then_block, "_block_destructibles"):
+            node.then_block._block_destructibles = []
+          node.then_block._block_destructibles.append(let_name)
         self.emit("if ")
         self.visit(node.condition)
         self.emit(" then")
@@ -1860,6 +1904,12 @@ class LuaTranspiler(BaseTranspiler):
           self.emit("end")
           self.newline()
           self.emit(f"local {let_name} = {val_var}")
+          st_name = self._expr_destructible_struct(node.init_binding.expr)
+          if st_name:
+            self.variable_types[let_name] = st_name
+            if not hasattr(node.block, "_block_destructibles"):
+              node.block._block_destructibles = []
+            node.block._block_destructibles.append(let_name)
           self._visit_loop_body(node.block, has_continue)
           self.dedent()
           self.newline()
@@ -1868,6 +1918,12 @@ class LuaTranspiler(BaseTranspiler):
           # Standard init-statement: execute once before loop begins
           self.emit(f"local {let_name} = ")
           self.visit(node.init_binding.expr)
+          st_name = self._expr_destructible_struct(node.init_binding.expr)
+          if st_name:
+            self.variable_types[let_name] = st_name
+            if not hasattr(node.block, "_block_destructibles"):
+              node.block._block_destructibles = []
+            node.block._block_destructibles.append(let_name)
           self.newline()
           self.emit("while ")
           self.visit(node.condition)

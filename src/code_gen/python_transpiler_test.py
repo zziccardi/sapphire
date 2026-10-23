@@ -1848,6 +1848,83 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     self.assertIn("_sapphire_del(c)", py_code)
 
+  def test_destructor_optional_unwrapping(self):
+    """Verifies that variables unwrapped via `if let x ?= opt` have their destructors called at block exit in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func get_opt(ok: bool): Resource? {
+      if ok {
+        return Resource { id = 1 };
+      }
+      return none;
+    }
+    func test() {
+      if let r ?= get_opt(ok = true) {
+        let x = r.id;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+
+  def test_destructor_multi_return_destructuring(self):
+    """Verifies that multi-return values are both elided on return, and tracked on destructuring assignment in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func make_pair(): Resource, Resource {
+      let a = Resource { id = 1 };
+      let b = Resource { id = 2 };
+      return a, b;
+    }
+    func test() {
+      let x, y = make_pair();
+    }
+    """
+    py_code = self._transpile(code)
+    func_pair = py_code.index("def make_pair")
+    func_test = py_code.index("def test()")
+    # In make_pair, neither a nor b should be destroyed (both elided by RVO)
+    make_pair_code = py_code[func_pair:func_test]
+    self.assertNotIn("_sapphire_del(a)", make_pair_code)
+    self.assertNotIn("_sapphire_del(b)", make_pair_code)
+    # In test(), both x and y should be destroyed in LIFO order (y then x)
+    test_code = py_code[func_test:]
+    self.assertIn("_sapphire_del(y)", test_code)
+    self.assertIn("_sapphire_del(x)", test_code)
+    self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
+
+  def test_destructor_with_statement_no_double_cleanup(self):
+    """Verifies that a resource managed in a with block is disposed by with, not double-deleted by __del__ in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Disposable for Resource {
+      func dispose(var self) {}
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      with let r = Resource { id = 1 } {
+        let x = r.id;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_dispose(_with_res_1)", py_code)
+    self.assertNotIn("_sapphire_del(r)", py_code)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixture tests
