@@ -1740,6 +1740,114 @@ class TestPythonTranspiler(unittest.TestCase):
     break_idx = py_code.index("break", func_idx)
     self.assertLess(del_idx, break_idx)
 
+  def test_destructor_return_complex_expression(self):
+    """Verifies that non-trivial return expressions evaluate to temporaries before destructors run in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func calc(): int {
+      let r = Resource { id = 10 };
+      return r.id * 2;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_ret_val_1 = ", py_code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    self.assertIn("return _ret_val_1", py_code)
+    ret_calc_idx = py_code.index("_ret_val_1 = ")
+    del_idx = py_code.index("_sapphire_del(r)", ret_calc_idx)
+    ret_idx = py_code.index("return _ret_val_1", del_idx)
+    self.assertLess(ret_calc_idx, del_idx)
+    self.assertLess(del_idx, ret_idx)
+
+  def test_destructor_loop_continue(self):
+    """Verifies that destructors run before continue statements in loops in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      for i in range(5) {
+        let r = Resource { id = i };
+        continue;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    func_idx = py_code.index("def loop_test")
+    del_idx = py_code.index("_sapphire_del(r)", func_idx)
+    cont_idx = py_code.index("continue", func_idx)
+    self.assertLess(del_idx, cont_idx)
+
+  def test_destructor_from_function_and_method_call(self):
+    """Verifies that variables receiving results from functions/methods returning destructible types are tracked in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      static func create(): Resource {
+        return Resource { id = 1 };
+      }
+    }
+    func make_res(): Resource {
+      return Resource { id = 2 };
+    }
+    func test() {
+      let r1 = make_res();
+      let r2 = Resource.create();
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r1)", py_code)
+    self.assertIn("_sapphire_del(r2)", py_code)
+
+  def test_destructor_from_variable_assignment(self):
+    """Verifies that variables assigned from other destructible variables are tracked in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = a;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(a)", py_code)
+    self.assertIn("_sapphire_del(b)", py_code)
+
+  def test_destructor_inherited_from_parent(self):
+    """Verifies that child structs inherit parent destructor tracking in Python."""
+    code = """
+    struct BaseResource {
+      var id: int;
+    }
+    impl BaseResource {
+      func __del__() {}
+    }
+    struct ChildResource: BaseResource {
+      var tag: String;
+    }
+    func test() {
+      let c = ChildResource { id = 1, tag = "test" };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(c)", py_code)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixture tests

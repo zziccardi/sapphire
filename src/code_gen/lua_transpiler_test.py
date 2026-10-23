@@ -1699,8 +1699,116 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(r)", lua_code)
     func_idx = lua_code.index("loop_test")
     del_idx = lua_code.index("_sapphire_del(r)", func_idx)
-    break_idx = lua_code.index("break", func_idx)
+    break_idx = lua_code.index("break\n", func_idx)
     self.assertLess(del_idx, break_idx)
+
+  def test_destructor_return_complex_expression(self):
+    """Verifies that non-trivial return expressions evaluate to temporaries before destructors run."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func calc(): int {
+      let r = Resource { id = 10 };
+      return r.id * 2;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _ret_val_1 = ", lua_code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    self.assertIn("return _ret_val_1", lua_code)
+    ret_calc_idx = lua_code.index("local _ret_val_1 = ")
+    del_idx = lua_code.index("_sapphire_del(r)", ret_calc_idx)
+    ret_idx = lua_code.index("return _ret_val_1", del_idx)
+    self.assertLess(ret_calc_idx, del_idx)
+    self.assertLess(del_idx, ret_idx)
+
+  def test_destructor_loop_continue(self):
+    """Verifies that destructors run before continue statements in loops."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      for i in range(5) {
+        let r = Resource { id = i };
+        continue;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    func_idx = lua_code.index("loop_test")
+    del_idx = lua_code.index("_sapphire_del(r)", func_idx)
+    break_idx = lua_code.index("break\n", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_from_function_and_method_call(self):
+    """Verifies that variables receiving results from functions/methods returning destructible types are tracked."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      static func create(): Resource {
+        return Resource { id = 1 };
+      }
+    }
+    func make_res(): Resource {
+      return Resource { id = 2 };
+    }
+    func test() {
+      let r1 = make_res();
+      let r2 = Resource.create();
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r1)", lua_code)
+    self.assertIn("_sapphire_del(r2)", lua_code)
+
+  def test_destructor_from_variable_assignment(self):
+    """Verifies that variables assigned from other destructible variables are tracked."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = a;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(a)", lua_code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+
+  def test_destructor_inherited_from_parent(self):
+    """Verifies that child structs inherit parent destructor tracking."""
+    code = """
+    struct BaseResource {
+      var id: int;
+    }
+    impl BaseResource {
+      func __del__() {}
+    }
+    struct ChildResource: BaseResource {
+      var tag: String;
+    }
+    func test() {
+      let c = ChildResource { id = 1, tag = "test" };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(c)", lua_code)
 
 
 
