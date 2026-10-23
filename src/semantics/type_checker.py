@@ -2404,6 +2404,13 @@ class TypeChecker:
 
     return expr_type
 
+  def visit_MoveNode(self, node: MoveNode) -> Type:
+    sym = self.symbol_table.lookup(node.name)
+    if not sym:
+      self.error(f"Cannot move undefined variable '{node.name}'.")
+      return PrimitiveType("none")
+    return sym.type
+
   def _infer_lambda_param_type(self, param_name: str, body: "ASTNode") -> Optional[Type]:
     """Infer the type of a lambda parameter from its usage in *body*.
 

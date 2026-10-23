@@ -247,6 +247,7 @@ expression
     | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
     | (SUB | ADD | NOT) expression                                # UnaryExpr
     | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
+    | MOVE IDENTIFIER                                             # MoveExpr
     | expression AS type                                          # CastExpr
     | expression (MUL | DIV | MOD) expression                     # MultiplicativeExpr
     | expression (ADD | SUB) expression                           # AdditiveExpr
@@ -352,6 +353,7 @@ IN : 'in';
 STATIC : 'static';
 CONST : 'const';
 CLONE : 'clone';
+MOVE : 'move';
 IF : 'if';
 ELSE : 'else';
 GUARD : 'guard';

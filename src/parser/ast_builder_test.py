@@ -21,6 +21,7 @@ from src.parser.ast import (
     StructDeclNode,
     StructInitializerNode,
     CloneNode,
+    MoveNode,
     CallNode,
     InterpolatedStringNode,
     IdentifierNode,
@@ -728,6 +729,59 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(len(with_raw_node.clauses), 1)
     self.assertIsNone(with_raw_node.clauses[0].binding)
     self.assertIsNotNone(with_raw_node.clauses[0].expr)
+
+  def test_move_expression(self):
+    """Verifies parsing of explicit move expressions on variables."""
+    ast = self._get_ast("let b = move a;")
+    self.assertEqual(len(ast.declarations), 1)
+    decl = ast.declarations[0]
+    self.assertIsInstance(decl, VarDeclNode)
+    self.assertIsInstance(decl.expr, MoveNode)
+    self.assertEqual(decl.expr.name, "a")
+
+  def test_move_in_function_calls(self):
+    """Verifies move expressions in positional and named call arguments."""
+    ast = self._get_ast("""
+    func run() {
+      consume(move resource);
+      render(target = move buffer);
+    }
+    """)
+    func_node = ast.declarations[0]
+    stmt1 = func_node.body.statements[0]
+    self.assertIsInstance(stmt1.expr, CallNode)
+    self.assertIsInstance(stmt1.expr.arguments[0].expr, MoveNode)
+    self.assertEqual(stmt1.expr.arguments[0].expr.name, "resource")
+
+    stmt2 = func_node.body.statements[1]
+    self.assertIsInstance(stmt2.expr, CallNode)
+    self.assertEqual(stmt2.expr.arguments[0].name, "target")
+    self.assertIsInstance(stmt2.expr.arguments[0].expr, MoveNode)
+    self.assertEqual(stmt2.expr.arguments[0].expr.name, "buffer")
+
+  def test_move_in_assignment(self):
+    """Verifies move expression on the RHS of an assignment."""
+    from src.parser.ast import AssignmentNode
+    ast = self._get_ast("""
+    func run() {
+      b = move a;
+    }
+    """)
+    stmt = ast.declarations[0].body.statements[0]
+    self.assertIsInstance(stmt, AssignmentNode)
+    self.assertIsInstance(stmt.expr, MoveNode)
+    self.assertEqual(stmt.expr.name, "a")
+
+  def test_move_invalid_syntax(self):
+    """Verifies that moving a non-identifier is rejected by the parser."""
+    with self.assertRaises(SyntaxError):
+      self._get_ast("let x = move 42;")
+
+    with self.assertRaises(SyntaxError):
+      self._get_ast("let x = move (a);")
+
+    with self.assertRaises(SyntaxError):
+      self._get_ast("let x = move;")
 
 
 if __name__ == "__main__":

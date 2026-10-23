@@ -588,6 +588,10 @@ class ASTBuilder(SapphireVisitor):
       arena_expr = self.visit(ctx.expression(1))
     return CloneNode(expr, initializer_block, arena_expr)
 
+  def visitMoveExpr(self, ctx: SapphireParser.MoveExprContext) -> MoveNode:
+    name = ctx.IDENTIFIER().getText()
+    return MoveNode(name)
+
   def visitIndexExpr(self, ctx: SapphireParser.IndexExprContext) -> IndexExprNode:
     array = self.visit(ctx.expression(0))
     index = self.visit(ctx.expression(1))

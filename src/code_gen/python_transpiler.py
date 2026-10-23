@@ -1953,6 +1953,10 @@ class PythonTranspiler(BaseTranspiler):
 
     self.emit(")")
 
+  def visit_MoveNode(self, node: MoveNode) -> None:
+    name = self._identifier_map.get(node.name, node.name)
+    self.emit(name)
+
   def visit_LambdaNode(self, node: LambdaNode) -> None:
     if isinstance(node.body, BlockNode):
       if not getattr(node, "_is_lifted", False):
