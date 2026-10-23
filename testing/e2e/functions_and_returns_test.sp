@@ -1,5 +1,5 @@
 /*
- * Fixture: functions_and_returns_test.sp
+ * E2E Test: functions_and_returns_test.sp
  * Tests multiple return values, call-site destructuring, named arguments, and default parameters.
  */
 

@@ -1,5 +1,5 @@
 /*
- * Fixture: inheritance_test.sp
+ * E2E Test: inheritance_test.sp
  * Tests single-parent struct inheritance and prototypal field delegation.
  */
 

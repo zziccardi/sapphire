@@ -1,5 +1,5 @@
 /*
- * Fixture: maps_test.sp
+ * E2E Test: maps_test.sp
  * Tests map literal creation, key lookup, and key-value iteration.
  * Note: map type is inferred from the literal (explicit type annotations
  * for map types use a different syntax not exercised here).

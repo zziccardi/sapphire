@@ -1,5 +1,5 @@
 /*
- * Fixture: arrays_test.sp
+ * E2E Test: arrays_test.sp
  * Tests array creation, 0-based indexing, bounds behavior, element mutation, and size.
  */
 

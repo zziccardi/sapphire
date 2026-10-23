@@ -1,5 +1,5 @@
 /*
- * Fixture: arithmetic_test.sp
+ * E2E Test: arithmetic_test.sp
  * Tests basic integer and float arithmetic, operator precedence, and modulo.
  */
 

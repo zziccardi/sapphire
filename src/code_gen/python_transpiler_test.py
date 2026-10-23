@@ -1927,20 +1927,21 @@ class TestPythonTranspiler(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture tests
+# End-to-end integration tests
 # ---------------------------------------------------------------------------
 
-_FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtures"
+_E2E_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "e2e"
+_FIXTURES_DIR = _E2E_DIR
 
 
 class TestSharedFixtures(unittest.TestCase):
-  """Compiles each shared .sp fixture with PythonTranspiler and executes it."""
+  """Compiles each shared .sp e2e test with PythonTranspiler and executes it."""
 
   @classmethod
   def _load_expectations(cls):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "_expectations", _FIXTURES_DIR / "_expectations.py"
+        "_expectations", _E2E_DIR / "_expectations.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1965,7 +1966,7 @@ class TestSharedFixtures(unittest.TestCase):
     except Exception:
       pass
     py_code = Transpiler(test_mode=True).transpile(ast)
-    lib_path = str(_FIXTURES_DIR.parent.parent / "lib")
+    lib_path = str(_E2E_DIR.parent.parent / "lib")
     if lib_path not in sys.path:
       sys.path.insert(0, lib_path)
     ctx: dict = {}
@@ -2002,7 +2003,7 @@ class TestSharedFixtures(unittest.TestCase):
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):
-      fixture_path = _FIXTURES_DIR / fixture_name
+      fixture_path = _E2E_DIR / fixture_name
       if not fixture_path.exists():
         self.skipTest(f"Fixture not found: {fixture_path}")
       expectations = self._load_expectations().get(fixture_name, {})
@@ -2025,8 +2026,8 @@ class TestSharedFixtures(unittest.TestCase):
     return _test
 
   # Dynamically generate one test method per fixture file
-  if _FIXTURES_DIR.exists():
-    for _fixture_file in sorted(_FIXTURES_DIR.glob("*_test.sp")):
+  if _E2E_DIR.exists():
+    for _fixture_file in sorted(_E2E_DIR.glob("*_test.sp")):
       _name = f"test_fixture_{_fixture_file.stem}"
       locals()[_name] = _make_fixture_test(_fixture_file.name)
 

@@ -1,5 +1,5 @@
 /*
- * Fixture: control_flow_test.sp
+ * E2E Test: control_flow_test.sp
  * Tests if/else, while, for, break, continue, and range iteration.
  */
 

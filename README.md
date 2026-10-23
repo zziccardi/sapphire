@@ -197,7 +197,7 @@ sapphire test
     (`llvm_transpiler.py`), and source-map generator (`source_map.py`).
   * `lsp/`: Language Server Protocol (LSP) server providing diagnostics,
     autocompletion, hover info, and semantic tokens.
-* `testing/`: Test suite runner, integration-test fixtures
-  (`testing/fixtures/`), and test utilities (`test_utils.py`).
+* `testing/`: Test suite runner, cross-backend integration and end-to-end tests
+  (`testing/e2e/`), and test utilities (`test_utils.py`).
 * `tools/`: Development tools including the
   [VS Code extension](tools/vscode-extension/).

@@ -187,8 +187,8 @@ sapphire/
 │   ├── std/                # Built-in modules (testing, math, etc.)
 │   └── love2d/             # Love2D engine bindings
 ├── samples/                # Sample Sapphire programs (.sp)
-├── testing/                # Test fixtures and cross-backend validation
-│   ├── fixtures/           # .sp fixtures and ground-truth expectations
+├── testing/                # Cross-backend integration tests and test utilities
+│   ├── e2e/                # End-to-end .sp test suites and ground-truth expectations
 │   └── test_utils.py       # Testing helpers
 └── tools/
     └── vscode-extension/   # VS Code extension client
@@ -249,7 +249,7 @@ pipenv run test
 # 2. Run test coverage suite
 pipenv run coverage
 
-# 3. Run cross-backend integration fixtures
+# 3. Run cross-backend integration tests
 pipenv run python -m unittest src/code_gen/python_transpiler_test.py
 pipenv run python -m unittest src/code_gen/lua_transpiler_test.py
 
@@ -281,7 +281,7 @@ pipenv run sapphire run samples/overview.sp --dev
    * Update `src/parser/ast_builder.py` (AST visitor).
    * Update `src/semantics/type_checker.py` and `symbol_table.py`.
    * Update both `python_transpiler.py` and `lua_transpiler.py`.
-   * Add or update unit tests in `src/` and fixtures in `testing/fixtures/`.
+   * Add or update unit tests in `src/` and end-to-end tests in `testing/e2e/`.
 2. **Never Violate Language Constraints**:
    * Do **not** generate code or semantics relying on vtables or dynamic method overriding.
    * Do **not** allow struct up-casting.
@@ -295,5 +295,5 @@ pipenv run sapphire run samples/overview.sp --dev
    * Sapphire code: Follow `docs/SPEC.md §2` (80 chars max line length, 2-space indentation, semicolon terminated).
 5. **Pre-Completion Checklist**:
    * [ ] `pipenv run test` passes with zero failures or errors.
-   * [ ] Affected fixture tests pass across all relevant backends.
+   * [ ] Affected e2e/integration tests pass across all relevant backends.
    * [ ] Newly created files adhere to repository naming and layout conventions.

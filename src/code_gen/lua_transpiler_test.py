@@ -1890,25 +1890,26 @@ class TestLuaTranspiler(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture tests
+# End-to-end integration tests
 # ---------------------------------------------------------------------------
 
-_FIXTURES_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "fixtures"
+_E2E_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "e2e"
+_FIXTURES_DIR = _E2E_DIR
 
 
 class TestSharedFixtures(unittest.TestCase):
-  """Transpiles each shared .sp fixture with LuaTranspiler and verifies output.
+  """Transpiles each shared .sp e2e test with LuaTranspiler and verifies output.
 
   Two levels of verification are performed:
 
-  1. **Transpilation succeeds** — the fixture must produce Lua output without
+  1. **Transpilation succeeds** — the test file must produce Lua output without
      raising `NotImplementedError` from `generic_visit`. This confirms
-     that the Lua backend covers every AST node used by the fixture.
+     that the Lua backend covers every AST node used by the test file.
 
   2. **Execution matches expectations** (optional) — if a Lua 5.1+ binary is
      available in `PATH`, the generated Lua is executed and the return value
      of each `@test` function is compared against the shared ground truth in
-     `testing/fixtures/_expectations.py`. Skipped automatically when Lua is
+     `testing/e2e/_expectations.py`. Skipped automatically when Lua is
      not installed.
 
   This class is structurally mirrored by `TestSharedFixtures` in
@@ -1919,7 +1920,7 @@ class TestSharedFixtures(unittest.TestCase):
   def _load_expectations(cls):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "_expectations", _FIXTURES_DIR / "_expectations.py"
+        "_expectations", _E2E_DIR / "_expectations.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

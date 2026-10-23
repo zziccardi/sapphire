@@ -1,5 +1,5 @@
 /*
- * Fixture: strings_test.sp
+ * E2E Test: strings_test.sp
  * Tests string interpolation and common string instance methods.
  */
 

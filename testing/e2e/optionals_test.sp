@@ -1,5 +1,5 @@
 /*
- * Fixture: optionals_test.sp
+ * E2E Test: optionals_test.sp
  * Tests optional types, ?= unwrapping, and ?? null-coalescing.
  */
 
