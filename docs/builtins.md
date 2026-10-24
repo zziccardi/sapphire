@@ -920,4 +920,4 @@ func main() {
 | **`Ref`** | Smart pointer | `Ref(T)`, `Ref<T>` | Unique move-only heap ownership |
 | **`SharedRef`** | Smart pointer | `SharedRef(T)`, `SharedRef<T>` | Reference-counted shared heap ownership |
 | **`WeakRef`** | Smart pointer | `WeakRef<T>` | Non-owning weak reference for cycle-breaking |
-| **`Coroutine`** | Flow-control type | `Coroutine<T>`, `Coroutine<void>` | Frame-steppable coroutines & generator streams |
+| **`Coroutine`** | Flow-control type | `Coroutine<T>`, `Coroutine` | Frame-steppable coroutines & generator streams |

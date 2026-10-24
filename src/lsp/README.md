@@ -1,4 +1,4 @@
-# Sapphire language server
+# Language server
 
 This directory contains the Python-based Language Server Protocol (LSP) server implementation for the Sapphire programming language.
 
