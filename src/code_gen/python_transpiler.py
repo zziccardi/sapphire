@@ -80,16 +80,12 @@ class Arena:
       if hasattr(obj, '__shadow__'):
         obj.__shadow__.clear()
     self.objects.clear()
-  def dispose(self):
+  def __del__(self):
     self.destroy()
   def __enter__(self):
     return self
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.destroy()
-
-def _sapphire_dispose(obj):
-  if obj is not None and hasattr(obj, 'dispose') and callable(obj.dispose):
-    obj.dispose()
 
 def _sapphire_del(obj):
   if obj is not None and hasattr(obj, '__del__') and callable(obj.__del__):
@@ -965,6 +961,26 @@ class PythonTranspiler(BaseTranspiler):
       self.visit(node.body)
       self.dedent()
 
+    export_ann = next((a for a in getattr(node, "annotations", []) if a.name == "export"), None)
+    if export_ann:
+      target_path = export_ann.arg if export_ann.arg else node.name
+      if "." in target_path:
+        self.newline()
+        self.emit("try:")
+        self.indent()
+        self.newline()
+        self.emit(f"{target_path} = {node.name}")
+        self.dedent()
+        self.newline()
+        self.emit("except (NameError, AttributeError):")
+        self.indent()
+        self.newline()
+        self.emit("pass")
+        self.dedent()
+      elif target_path != node.name:
+        self.newline()
+        self.emit(f"{target_path} = {node.name}")
+
   def _visit_statements(self, statements: List[StmtNode]) -> None:
     if not statements:
       return
@@ -1085,15 +1101,29 @@ class PythonTranspiler(BaseTranspiler):
           self._lift_match_expressions(v)
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
-    extern_ann = next((a for a in node.annotations if a.name == "extern"), None)
+    extern_ann = next((a for a in getattr(node, "annotations", []) if a.name == "extern"), None)
     if extern_ann:
-      # @extern variables represent ambient host symbols (e.g. Love2D engine `love`).
-      # In Lua, variables without `local` automatically target `_G`, which is shared
-      # across all modules. In Python, module namespaces are isolated, so external symbols
-      # live in Python's `builtins`. We record the mapping so that subsequent assignments
-      # to these symbols mutate `builtins.<name>` rather than creating function-local variables.
+      # @extern variables represent ambient host symbols (e.g. Love2D engine `love`
+      # or Python standard library / host modules).
+      # If an external module name is provided in the annotation (e.g. @extern("module.name")),
+      # we attempt to import it directly into the Python module namespace so standard library
+      # components are immediately accessible.
       for name in node.names:
-        self.extern_vars[name] = name
+        ext_target = extern_ann.arg if extern_ann.arg else name
+        self.extern_vars[name] = ext_target
+        if extern_ann.arg:
+          self.newline()
+          self.emit("try:")
+          self.indent()
+          self.newline()
+          self.emit(f"import {extern_ann.arg} as {name}")
+          self.dedent()
+          self.newline()
+          self.emit("except ImportError:")
+          self.indent()
+          self.newline()
+          self.emit("pass")
+          self.dedent()
       return
 
     for idx, name in enumerate(node.names):
@@ -2158,7 +2188,7 @@ class PythonTranspiler(BaseTranspiler):
       self.indent()
       for tmp_var, _, _, _ in reversed(clause_vars):
         self.newline()
-        self.emit(f"_sapphire_dispose({tmp_var})")
+        self.emit(f"_sapphire_del({tmp_var})")
       self.dedent()
 
     if has_unwrap:
@@ -2173,7 +2203,7 @@ class PythonTranspiler(BaseTranspiler):
       self.indent()
       for tmp_var, _, _, _ in reversed(clause_vars):
         self.newline()
-        self.emit(f"_sapphire_dispose({tmp_var})")
+        self.emit(f"_sapphire_del({tmp_var})")
       if node.else_body:
         self.visit(node.else_body)
       else:

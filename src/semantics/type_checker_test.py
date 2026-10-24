@@ -266,8 +266,8 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Target is not callable", str(context.exception))
 
-  def test_mutate_field_const_method(self):
-    """Enforces that you cannot mutate fields inside a constant method."""
+  def test_mutate_field_immutable_method(self):
+    """Enforces that you cannot mutate fields inside an immutable method by default."""
     code = """
     struct Point {
       var x: int;
@@ -276,14 +276,31 @@ class TestTypeChecker(unittest.TestCase):
       func __init__() {
         self.x = 0;
       }
-      const func change() {
+      func change() {
         self.x = 10;
       }
     }
     """
     with self.assertRaises(SemanticError) as context:
       self._check(code)
-    self.assertIn("Cannot mutate field 'x' within a constant method", str(context.exception))
+    self.assertIn("Cannot mutate field 'x' within an immutable method", str(context.exception))
+
+  def test_mutate_field_var_method(self):
+    """Verifies that methods declared with 'var func' can mutate self fields."""
+    code = """
+    struct Point {
+      var x: int;
+    }
+    impl Point {
+      func __init__() {
+        self.x = 0;
+      }
+      var func change() {
+        self.x = 10;
+      }
+    }
+    """
+    self._check(code)
 
   def test_mutate_const_field(self):
     """Enforces that constant let fields of structs cannot be mutated outside __init__."""
@@ -525,7 +542,7 @@ class TestTypeChecker(unittest.TestCase):
       func __init__(val: int) {
         self.x = val;
       }
-      const func get_x(): int {
+      func get_x(): int {
         return self.x;
       }
       static func create(): Point {
@@ -1317,7 +1334,7 @@ class TestTypeChecker(unittest.TestCase):
     struct Character { var val: int; }
     impl Character {
       func __init__() { self.val = 0; }
-      func mutate(other: Character) { self.val = other.val; }
+      var func mutate(other: Character) { self.val = other.val; }
     }
     func test() {
       var player = Character();
@@ -1333,7 +1350,7 @@ class TestTypeChecker(unittest.TestCase):
     struct Character { var val: int; }
     impl Character {
       func __init__() { self.val = 0; }
-      const func query(other: Character): int { return self.val; }
+      func query(other: Character): int { return self.val; }
     }
     func test() {
       var player = Character();
@@ -1386,7 +1403,7 @@ class TestTypeChecker(unittest.TestCase):
     struct Character { var val: int; }
     impl Character {
       func __init__() { self.val = 0; }
-      func mutate(other: Character) { self.val = other.val; }
+      var func mutate(other: Character) { self.val = other.val; }
     }
     func test() {
       var player: Character? = Character();
@@ -4030,7 +4047,7 @@ class TestTypeChecker(unittest.TestCase):
     }
 
     impl Entity {
-      const func get_tile_position(): int, int {
+      func get_tile_position(): int, int {
         return self.tile_x, self.tile_y;
       }
     }
@@ -4044,7 +4061,7 @@ class TestTypeChecker(unittest.TestCase):
       }
 
       impl Entity {
-        const func get_tile_position(): int, int {
+        func get_tile_position(): int, int {
           return self.tile_x;
         }
       }
@@ -4059,7 +4076,7 @@ class TestTypeChecker(unittest.TestCase):
       }
 
       impl Entity {
-        const func get_tile_position(): int, int {
+        func get_tile_position(): int, int {
           return self.tile_x, "invalid";
         }
       }
@@ -4236,21 +4253,20 @@ class TestTypeChecker(unittest.TestCase):
     checker.check(ast)
 
   def test_with_statement_type_checking(self):
-    """Verifies type checking, Disposable trait requirement, optional unwrapping, and else-block semantics for with statements."""
-    from src.semantics.symbol_table import ArenaType, TraitType
+    """Verifies type checking, __del__ destructor requirement, optional unwrapping, and else-block semantics for with statements."""
+    from src.semantics.symbol_table import ArenaType
 
-    # ArenaType.implements_trait coverage
+    # ArenaType.has_destructor coverage
     arena_t = ArenaType()
-    self.assertTrue(arena_t.implements_trait(TraitType("Disposable")))
-    self.assertFalse(arena_t.implements_trait(TraitType("OtherTrait")))
+    self.assertTrue(arena_t.has_destructor)
 
-    # 1. Valid with statement with Disposable struct
+    # 1. Valid with statement with destructible struct
     self._check("""
     struct FileStream {
       var path: String;
     }
-    impl Disposable for FileStream {
-      func dispose(var self) {}
+    impl FileStream {
+      func __del__() {}
     }
     func main() {
       with let f = FileStream { path = "test.txt" } {
@@ -4276,8 +4292,8 @@ class TestTypeChecker(unittest.TestCase):
     struct FileStream {
       var path: String;
     }
-    impl Disposable for FileStream {
-      func dispose(var self) {}
+    impl FileStream {
+      func __del__() {}
     }
     func get_file(): FileStream? {
       return FileStream { path = "a.txt" };
@@ -4291,24 +4307,18 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 4. Valid with statement with TraitType and multi-variable binding and raw struct/trait expressions
+    # 4. Valid with statement with multi-variable binding and raw struct expressions
     self._check("""
     struct FileStream {
       var path: String;
     }
-    impl Disposable for FileStream {
-      func dispose(var self) {}
+    impl FileStream {
+      func __del__() {}
     }
     func get_two(): [FileStream] {
       return [FileStream { path = "a" }, FileStream { path = "b" }];
     }
-    func test_trait(d: Disposable) {
-      with let x = d {
-        let y = 1;
-      }
-      with d {
-        let y = 2;
-      }
+    func test_with() {
       with FileStream { path = "raw" } {
         let y = 3;
       }
@@ -4318,7 +4328,7 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 5. Error: Non-disposable struct bound in with
+    # 5. Error: Non-destructible struct bound in with
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       struct NonDisposable {
@@ -4330,9 +4340,9 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       """)
-    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+    self.assertIn("does not define a '__del__' destructor", str(ctx.exception))
 
-    # 6. Error: Non-disposable raw expression in with
+    # 6. Error: Non-destructible raw expression in with
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {
@@ -4341,7 +4351,7 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       """)
-    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+    self.assertIn("does not define a '__del__' destructor", str(ctx.exception))
 
     # 7. Error: With else block without ?= unwrap
     with self.assertRaises(SemanticError) as ctx:
@@ -4349,8 +4359,8 @@ class TestTypeChecker(unittest.TestCase):
       struct FileStream {
         var path: String;
       }
-      impl Disposable for FileStream {
-        func dispose(var self) {}
+      impl FileStream {
+        func __del__() {}
       }
       func main() {
         with let f = FileStream { path = "test.txt" } {
@@ -4368,8 +4378,8 @@ class TestTypeChecker(unittest.TestCase):
       struct FileStream {
         var path: String;
       }
-      impl Disposable for FileStream {
-        func dispose(var self) {}
+      impl FileStream {
+        func __del__() {}
       }
       func main() {
         with let f ?= FileStream { path = "test.txt" } {
@@ -4583,14 +4593,14 @@ class TestTypeChecker(unittest.TestCase):
     }
 
     trait GoodTrait {
-      func good_method(self, req: int, opt: int = 0);
+      var func good_method(self, req: int, opt: int = 0);
     }
 
     struct GoodStruct {
       var x: int;
     }
     impl GoodStruct {
-      func good_method(self, req: int, opt: int = 0) {
+      var func good_method(self, req: int, opt: int = 0) {
         self.x = req + opt;
       }
     }
@@ -4733,8 +4743,8 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.", str(ctx.exception))
 
   def test_destructor_const_rejected(self):
-    """Verifies that const func __del__() is rejected."""
-    with self.assertRaises(SemanticError) as ctx:
+    """Verifies that const func is rejected as invalid syntax in impl block."""
+    with self.assertRaises(SyntaxError):
       self._check("""
       struct FileHandle {
         var fd: int;
@@ -4743,7 +4753,41 @@ class TestTypeChecker(unittest.TestCase):
         const func __del__() {}
       }
       """)
-    self.assertIn("Destructor '__del__' cannot be declared 'const' as teardown routines require mutable access to 'self'.", str(ctx.exception))
+
+  def test_destructor_can_mutate_self(self):
+    """Verifies that __del__() has mutable access to self by default."""
+    self._check("""
+    struct FileHandle {
+      var fd: int;
+    }
+    impl FileHandle {
+      func __del__() {
+        self.fd = -1;
+      }
+    }
+    """)
+
+  def test_cannot_invoke_mutating_method_on_constant(self):
+    """Verifies that a mutating method (var func) cannot be called on a constant variable."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Counter {
+        var count: int;
+      }
+      impl Counter {
+        func __init__() {
+          self.count = 0;
+        }
+        var func increment() {
+          self.count += 1;
+        }
+      }
+      func test() {
+        let c = Counter();
+        c.increment();
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'increment' on constant variable 'c'", str(ctx.exception))
 
   def test_destructor_static_rejected(self):
     """Verifies that static func __del__() is rejected."""

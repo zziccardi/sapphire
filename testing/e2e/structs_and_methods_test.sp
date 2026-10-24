@@ -8,7 +8,7 @@ struct Counter {
 }
 
 impl Counter {
-  func increment() {
+  var func increment() {
     self.count += 1;
   }
 

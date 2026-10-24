@@ -16,7 +16,7 @@ impl Stack<T> {
     self.top = top;
   }
 
-  const func get_top(): T {
+  func get_top(): T {
     return self.top;
   }
 }

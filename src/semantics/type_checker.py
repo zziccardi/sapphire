@@ -645,8 +645,6 @@ class TypeChecker:
           if func_decl.name == "__del__":
             if member.modifier == "static":
               self.error("Destructor '__del__' cannot be static.")
-            if member.modifier == "const":
-              self.error("Destructor '__del__' cannot be declared 'const' as teardown routines require mutable access to 'self'.")
             if len(func_decl.parameters) > 0:
               self.error("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.")
             is_void = (len(ret_type) == 1 and (ret_type[0].name in ("none", "void") or (isinstance(ret_type[0], PrimitiveType) and ret_type[0].name in ("none", "void"))))
@@ -834,8 +832,10 @@ class TypeChecker:
 
     # Define 'self' unless it is a static method
     if node.modifier != "static":
-      # If const method, self is immutable. Else mutable
-      is_mutable = node.modifier != "const"
+      # By default, methods have immutable 'self'.
+      # 'self' is only mutable if the method is explicitly declared 'var func'
+      # or is the constructor '__init__' or destructor '__del__'.
+      is_mutable = (node.modifier == "var") or (func_decl.name in ("__init__", "__del__"))
       self.symbol_table.define("self", VariableSymbol("self", struct_type, is_mutable))
 
     # Setup constructor checking
@@ -1099,11 +1099,15 @@ class TypeChecker:
         if not ((self.is_in_init or self.is_in_clone_init) and is_self):
           self.error(f"Cannot assign to constant field '{node.member}' of '{receiver_type.name}'.", node=node)
 
-      # Verify self constness
+      # Verify self mutability
       if is_self:
         self_sym = self.symbol_table.lookup("self")
         if self_sym and not self_sym.is_mutable:
-          self.error(f"Cannot mutate field '{node.member}' within a constant method.", node=node)
+          self.error(
+              f"Cannot mutate field '{node.member}' within an immutable method. "
+              f"Declare the method with 'var func' to allow mutation of 'self'.",
+              node=node,
+          )
 
       # Verify root receiver binding mutability (let vs var)
       curr = node.receiver
@@ -1693,12 +1697,16 @@ class TypeChecker:
         method = receiver_type.get_method(node.callee.member, self.symbol_table)
         if method and method.modifier != "static":
           # Receiver is implicitly passed.
-          # It is mutably borrowed if method is not const.
-          is_mutable = (method.modifier != "const")
+          # It is mutably borrowed if method is declared with 'var func'.
+          is_mutable = (method.modifier == "var")
           res = self._get_lvalue_path(receiver_node)
           if res:
             root, path = res
             borrows.append((root, path, is_mutable))
+            if is_mutable:
+              root_sym = self.symbol_table.lookup(root)
+              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable and not receiver_type.is_prototype:
+                self.error(f"Cannot invoke mutating method '{node.callee.member}' on constant variable '{root}'.")
 
     # 2. Check explicit arguments
     for idx, arg in enumerate(node.arguments):
@@ -2933,7 +2941,6 @@ class TypeChecker:
     return PrimitiveType("none")
 
   def visit_WithStmtNode(self, node: WithStmtNode) -> Type:
-    disposable_trait = self.symbol_table.lookup_type("Disposable")
     has_unwrap = False
 
     self.symbol_table.enter_scope()
@@ -2955,19 +2962,13 @@ class TypeChecker:
         let_names = getattr(binding, "let_names", [binding.let_name])
         check_t = base_t.element_type if (len(let_names) > 1 and isinstance(base_t, ArrayType)) else base_t
 
-        # Verify check_t implements Disposable
-        is_disposable = False
-        if isinstance(check_t, StructType):
-          if disposable_trait and check_t.implements_trait(disposable_trait, self.symbol_table):
-            is_disposable = True
-        elif isinstance(check_t, TraitType):
-          if check_t == disposable_trait or check_t.name == "Disposable":
-            is_disposable = True
-        elif isinstance(check_t, ArenaType):
-          is_disposable = True
+        # Verify check_t defines a __del__ destructor or is an Arena
+        is_destructible = False
+        if isinstance(check_t, (StructType, ArenaType)) and getattr(check_t, "has_destructor", False):
+          is_destructible = True
 
-        if not is_disposable:
-          self.error(f"Type '{check_t}' bound in with statement does not implement trait 'Disposable'.")
+        if not is_destructible:
+          self.error(f"Type '{check_t}' bound in with statement does not define a '__del__' destructor.")
 
         if len(let_names) > 1:
           for name in let_names:
@@ -2978,18 +2979,12 @@ class TypeChecker:
 
       elif clause.expr:
         expr_t = self.visit(clause.expr)
-        is_disposable = False
-        if isinstance(expr_t, StructType):
-          if disposable_trait and expr_t.implements_trait(disposable_trait, self.symbol_table):
-            is_disposable = True
-        elif isinstance(expr_t, TraitType):
-          if expr_t == disposable_trait or expr_t.name == "Disposable":
-            is_disposable = True
-        elif isinstance(expr_t, ArenaType):
-          is_disposable = True
+        is_destructible = False
+        if isinstance(expr_t, (StructType, ArenaType)) and getattr(expr_t, "has_destructor", False):
+          is_destructible = True
 
-        if not is_disposable:
-          self.error(f"Expression type '{expr_t}' in with statement does not implement trait 'Disposable'.")
+        if not is_destructible:
+          self.error(f"Expression type '{expr_t}' in with statement does not define a '__del__' destructor.")
 
     # Check body statements
     self.visit(node.body)

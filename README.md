@@ -29,7 +29,7 @@ described in the spec.
 let arena = Arena();
 
 trait Damageable {
-  func take_damage(amount: int);
+  var func take_damage(amount: int);
 }
 
 struct Position {
@@ -45,7 +45,7 @@ proto Entity {
 }
 
 impl Damageable for Entity {
-  func take_damage(amount: int) {
+  var func take_damage(amount: int) {
     self.health = self.health > amount ? self.health - amount : 0;
   }
 }

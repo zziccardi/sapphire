@@ -46,7 +46,7 @@ struct Countdown {
 }
 
 impl Countdown {
-  func run(steps: int): int {
+  var func run(steps: int): int {
     if steps <= 0 {
       return self.count;
     }

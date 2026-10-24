@@ -76,7 +76,7 @@ Target code generators register dynamically with `TranspilerRegistry` in [transp
 ### Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
 - **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, conditional bindings to `None` checks, and `??` to inline lambdas.
-- **Annotation Erasure**: Erases `@extern var` declarations and cleanly strips `@export` target strings so cross-backend compilation remains functional.
+- **Host Engine & Stdlib Interop (`@extern` & `@export`)**: Binds host or Python standard library modules with `@extern("module.name")`, maps trait method aliases with `@export("method")`, and attaches exported function callbacks via `@export("target.path")` with safe fallback for cross-backend targets.
 
 ### Lua 5.1 Target (`lua_transpiler.py`)
 - **Runtime Preamble**: Emits `Arena`, `_create_proto_object`, and `_clone_helper` using Lua's native `setmetatable` mechanism (`__index` fallback, `__proto`, `__shadow`).

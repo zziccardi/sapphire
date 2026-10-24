@@ -249,7 +249,7 @@ class TestPythonTranspiler(unittest.TestCase):
       func __init__(v: int) {
         self.val = v;
       }
-      const func get_val(): int {
+      func get_val(): int {
         return self.val;
       }
       static func create_default(): Counter {
@@ -802,6 +802,104 @@ class TestPythonTranspiler(unittest.TestCase):
     finally:
       if hasattr(builtins, "engine"):
         delattr(builtins, "engine")
+
+  def test_export_function_alias_binding_python(self):
+    """Verifies that @export("alias") binds the alias name at module scope."""
+    code = """
+    @export("app")
+    func handle_request(path: String): String {
+      return "Response: " + path;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def handle_request(path):", py_code)
+    self.assertIn("app = handle_request", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("app", env)
+    self.assertEqual(env["app"]("/api/v1"), "Response: /api/v1")
+
+  def test_export_dotted_path_binding_python(self):
+    """Verifies that @export("host.callback") safely binds to host object properties."""
+    code = """
+    trait HostServer {
+      func start(self);
+    }
+
+    @extern
+    var server: HostServer;
+
+    @export("server.on_request")
+    func handle(status: int): String {
+      return "Status: " + String.from(status);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("server.on_request = handle", py_code)
+
+    class MockServer:
+      def __init__(self):
+        self.on_request = None
+
+    mock = MockServer()
+    env = {"server": mock}
+    exec(py_code, env)
+    self.assertIsNotNone(mock.on_request)
+    self.assertEqual(mock.on_request(200), "Status: 200")
+
+  def test_extern_module_import_python(self):
+    """Verifies that @extern("module.name") generates import statements for host modules."""
+    code = """
+    trait JsonModule {
+      func dumps(self, obj: String): String;
+    }
+
+    @extern("json")
+    var json_mod: JsonModule;
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import json as json_mod", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("json_mod", env)
+    import json
+    self.assertIs(env["json_mod"], json)
+
+  def test_python_stdlib_wsgiref_interop_execution(self):
+    """Verifies end-to-end Python stdlib interop with wsgiref using @extern and @export."""
+    code = """
+    trait WsgiServer {
+      func server_close(self);
+    }
+
+    trait WsgiModule {
+      func make_server(self, host: String, port: int, app: (Map<String, String>, (String, [[String]]) -> void) -> [String]): WsgiServer;
+    }
+
+    @extern("wsgiref.simple_server")
+    var wsgiref: WsgiModule;
+
+    @export("app")
+    func wsgi_app(environ: Map<String, String>, start_response: (String, [[String]]) -> void): [String] {
+      return ["Hello from Sapphire!"];
+    }
+
+    func build_server(): WsgiServer {
+      return wsgiref.make_server("127.0.0.1", 0, wsgi_app);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import wsgiref.simple_server as wsgiref", py_code)
+    self.assertIn("app = wsgi_app", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("app", env)
+    server = env["build_server"]()
+    self.assertIsNotNone(server)
+    server.server_close()
 
 
   def test_python_multi_return_transpilation(self):
@@ -1583,8 +1681,8 @@ class TestPythonTranspiler(unittest.TestCase):
     struct Resource {
       var name: String;
     }
-    impl Disposable for Resource {
-      func dispose(var self) {
+    impl Resource {
+      func __del__() {
         events.push("dispose:" + self.name);
       }
     }
@@ -1638,7 +1736,7 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     self.assertIn("try:", py_code)
     self.assertIn("finally:", py_code)
-    self.assertIn("_sapphire_dispose(_with_res_", py_code)
+    self.assertIn("_sapphire_del(_with_res_", py_code)
 
     res = self._transpile_and_run(code, "test_with()")
     self.assertEqual(res, 3)
@@ -1932,13 +2030,10 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
 
   def test_destructor_with_statement_no_double_cleanup(self):
-    """Verifies that a resource managed in a with block is disposed by with, not double-deleted by __del__ in Python."""
+    """Verifies that a resource managed in a with block is cleaned up by with, not double-deleted by __del__ in Python."""
     code = """
     struct Resource {
       var id: int;
-    }
-    impl Disposable for Resource {
-      func dispose(var self) {}
     }
     impl Resource {
       func __del__() {}
@@ -1950,7 +2045,7 @@ class TestPythonTranspiler(unittest.TestCase):
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("_sapphire_dispose(_with_res_1)", py_code)
+    self.assertIn("_sapphire_del(_with_res_1)", py_code)
     self.assertNotIn("_sapphire_del(r)", py_code)
 
 

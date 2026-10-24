@@ -530,15 +530,9 @@ with let src ?= open_file("source.txt", "r");
 }
 ```
 
-* **Disposable trait**: Any resource bound inside a `with` statement must implement the built-in `Disposable` trait:
-  ```sapphire
-  trait Disposable {
-    func dispose(var self);
-  }
-  ```
-  `Arena` and any struct or trait explicitly implementing `Disposable` are valid disposable resources.
-* **Deterministic LIFO teardown**: Acquired resources are automatically disposed via `.dispose()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on error/exception.
-* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly disposed before executing the optional `else` block.
+* **RAII & destructors**: Any resource bound inside a `with` statement must define a `func __del__()` destructor (or be a built-in `Arena`).
+* **Deterministic LIFO teardown**: Acquired resources are automatically cleaned up via `__del__()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on error/exception.
+* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly destroyed via their `__del__()` destructors before executing the optional `else` block.
 * **Lexical scoping**: Variables bound in `with` clauses are scoped strictly to the `with` body block.
 
 ## 8. Functions & closures
@@ -614,7 +608,7 @@ To guarantee reference safety and eliminate data corruption from unexpected alia
   (`String`, `Array`, `Map`, `Arena`, `Range`, and user-defined `struct` and
   `proto` types) are reference-passed and validated.
 * **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be passed as a mutable parameter (`var`) if it is already referenced (either mutably or immutably) within the same call.
-* **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (passed mutably for mutating methods, or as a constant reference for `const` methods).
+* **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (passed mutably for mutating `var func` methods, or as a constant reference for immutable methods).
 
 ```sapphire
 // Rejected: 'player' is passed mutably as 'target' and as a const-ref as
@@ -710,10 +704,10 @@ The primary data layout tool is the `struct` keyword. To strictly separate data 
 
 Sapphire provides a Python-style `__init__` initializer syntax defined inside the `impl` block. The compiler enforces that all non-optional fields declared in the `struct` be initialized within this function.
 
-* **Implicit self**: For all non-static member functions, the `self` token is implicitly available within the body of the function.
+* **Implicit `self`**: For all non-static member functions, the `self` token is implicitly available within the body of the function.
+* **Immutable `self` by default**: In alignment with Sapphire's `let`-by-default philosophy, instance methods have an immutable `self` reference by default.
+* **Mutating methods (`var func`)**: Non-static methods that modify properties of `self` must be explicitly declared using `var func`.
 * **Static methods**: Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
-* **Constant methods**: Non-static methods may be marked `const`, which
-indicates that `self` cannot be modified.
 
 ```sapphire
 struct Weapon {
@@ -729,7 +723,7 @@ impl Weapon {
     self.name = name;
   }
 
-  func use() {
+  var func use() {
     self.durability -= 1;
   }
 
@@ -737,7 +731,7 @@ impl Weapon {
     return Weapon(dmg = 250);
   }
 
-  const func get_name(): String {
+  func get_name(): String {
     return self.name;
   }
 }
@@ -772,8 +766,8 @@ The following code will not compile because `sword` is a constant:
 ```sapphire
 let sword = Weapon(dmg = 50);
 
-// This method attempts to mutate `self`, which is not allowed since `sword` is
-// declared as a constant.
+// This method attempts to mutate `self` via `var func use()`, which is not
+// allowed since `sword` is declared as a constant.
 sword.use();
 ```
 
@@ -796,7 +790,7 @@ Sapphire intentionally eliminates fine-grained member access keywords (`public`,
 
 ### Deterministic destructors (`__del__`)
 
-To support automatic scope-bound resource management (RAII) without requiring explicit `with` blocks for every resource, structs may define an optional `__del__` destructor inside their `impl` block:
+To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power both lexical block-scope teardown and transactional `with` blocks:
 
 ```sapphire
 struct FileHandle {
@@ -819,7 +813,7 @@ impl FileHandle {
 
 * **Implicit mutable self**: In alignment with Sapphire's method conventions, `self` is implicitly available as a mutable reference within the body of `__del__()`.
 * **Zero parameters**: Destructors take exactly zero parameters (`func __del__()`). Declaring parameters on `__del__` is a compile-time `SemanticError`.
-* **Modifier constraints**: Marking `__del__` as `const` or `static` is strictly prohibited. Destructors must return `void` (or `none`).
+* **Modifier constraints**: Marking `__del__` as `static` is strictly prohibited. Destructors must return `void` (or `none`).
 * **No manual invocation**: Calling `__del__()` directly as an ordinary method (`file.__del__()`) is forbidden at compile time. Destructors are exclusively invoked by the compiler.
 * **Automatic LIFO execution**: The compiler automatically emits destructor calls in reverse order of declaration (LIFO) when stack-allocated structs exit their enclosing lexical scope, on early `return`, or on loop control jumps (`break` and `continue`).
 * **RVO elision**: Returning a struct identifier by value from a function transfers ownership to the caller, eliding the local destructor invocation.

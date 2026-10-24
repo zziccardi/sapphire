@@ -245,8 +245,8 @@ class ASTBuilder(SapphireVisitor):
     modifier = None
     if ctx.STATIC():
       modifier = "static"
-    elif ctx.CONST():
-      modifier = "const"
+    elif ctx.VAR():
+      modifier = "var"
     func_decl = self.visit(ctx.functionDeclaration())
     return ImplMemberNode(modifier, func_decl)
 
@@ -270,8 +270,8 @@ class ASTBuilder(SapphireVisitor):
     modifier = None
     if ctx.STATIC():
       modifier = "static"
-    elif ctx.CONST():
-      modifier = "const"
+    elif ctx.VAR():
+      modifier = "var"
     name = ctx.IDENTIFIER().getText()
     type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []

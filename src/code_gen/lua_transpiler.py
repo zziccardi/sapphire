@@ -180,7 +180,7 @@ function Arena:destroy()
   self.objects = {}
 end
 
-function Arena:dispose()
+function Arena:__del__()
   self:destroy()
 end
 
@@ -633,17 +633,6 @@ local _sapphire_range = function(a, b, c)
   return iter, {stop = stop, step = step}, start - step
 end
 
-local _sapphire_dispose = function(obj)
-  if obj == nil then return end
-  if type(obj) == "table" and type(obj.dispose) == "function" then
-    obj:dispose()
-  elseif type(obj) == "userdata" then
-    local meta = getmetatable(obj)
-    if meta and type(meta.dispose) == "function" then
-      obj:dispose()
-    end
-  end
-end
 
 local _sapphire_del = function(obj)
   if obj == nil then return end
@@ -917,7 +906,6 @@ class LuaTranspiler(BaseTranspiler):
     self.known_structs: Set[str] = set()
     self.imported_modules: Set[str] = set()
     self.arena_stack: List[List[str]] = []
-    self.disposable_stack: List[List[str]] = []
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
     self.structs_with_destructor: Set[str] = set()
@@ -1557,10 +1545,7 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.arena_stack.append([])
-    self.disposable_stack.append([])
     self.destructor_stack.append([])
-    if getattr(node, "_with_disposables", None):
-      self.disposable_stack[-1].extend(node._with_disposables)
     if getattr(node, "_block_destructibles", None):
       self.destructor_stack[-1].extend(node._block_destructibles)
     if not node.statements:
@@ -1571,16 +1556,12 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(stmt)
 
     current_arenas = self.arena_stack.pop()
-    current_disposables = self.disposable_stack.pop()
     current_destructors = self.destructor_stack.pop()
     has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
     if not has_returned:
       for var_name in reversed(current_destructors):
         self.newline()
         self.emit(f"_sapphire_del({var_name})")
-      for disp_name in reversed(current_disposables):
-        self.newline()
-        self.emit(f"_sapphire_dispose({disp_name})")
       for arena_name in reversed(current_arenas):
         self.newline()
         self.emit(f"{arena_name}:destroy()")
@@ -1706,9 +1687,6 @@ class LuaTranspiler(BaseTranspiler):
     all_active_arenas = [
         a for frame in reversed(self.arena_stack) for a in reversed(frame)
     ]
-    all_active_disposables = [
-        d for frame in reversed(self.disposable_stack) for d in reversed(frame)
-    ]
     all_active_destructors = [
         d for frame in reversed(self.destructor_stack) for d in reversed(frame)
     ]
@@ -1728,10 +1706,6 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(f"local {tmp_name} = ")
         self.visit(expr)
 
-      for disp_name in all_active_disposables:
-        self.newline()
-        self.emit(f"_sapphire_dispose({disp_name})")
-
       for arena_name in all_active_arenas:
         self.newline()
         self.emit(f"{arena_name}:destroy()")
@@ -1743,10 +1717,6 @@ class LuaTranspiler(BaseTranspiler):
       self.newline()
       self.emit("return " + ", ".join(ret_tmps))
       return
-
-    for disp_name in all_active_disposables:
-      self.newline()
-      self.emit(f"_sapphire_dispose({disp_name})")
 
     for arena_name in all_active_arenas:
       self.newline()
@@ -2832,7 +2802,9 @@ class LuaTranspiler(BaseTranspiler):
             self.newline()
             self.emit(f"local {binding.let_name} = {tmp_var}")
 
-      node.body._with_disposables = [tmp_var for tmp_var, _, _, _ in clause_vars]
+      if not hasattr(node.body, "_block_destructibles"):
+        node.body._block_destructibles = []
+      node.body._block_destructibles.extend(tmp_var for tmp_var, _, _, _ in clause_vars)
       self.visit(node.body)
 
     if has_unwrap:
@@ -2848,7 +2820,7 @@ class LuaTranspiler(BaseTranspiler):
         self.indent()
         for tmp_var, _, _, _ in reversed(clause_vars):
           self.newline()
-          self.emit(f"_sapphire_dispose({tmp_var})")
+          self.emit(f"_sapphire_del({tmp_var})")
         self.visit(node.else_body)
         self.dedent()
         self.newline()
@@ -2858,7 +2830,7 @@ class LuaTranspiler(BaseTranspiler):
         self.indent()
         for tmp_var, _, _, _ in reversed(clause_vars):
           self.newline()
-          self.emit(f"_sapphire_dispose({tmp_var})")
+          self.emit(f"_sapphire_del({tmp_var})")
         self.dedent()
         self.newline()
         self.emit("end")

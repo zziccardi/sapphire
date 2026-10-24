@@ -4,6 +4,6 @@
  */
 
 trait TestCase {
-  func set_up();
-  func tear_down();
+  var func set_up();
+  var func tear_down();
 }

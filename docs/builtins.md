@@ -850,39 +850,6 @@ func demo_math() {
 }
 ```
 
-### Disposable
-
-The `Disposable` trait is a standard contract for any type whose instances require deterministic resource disposal (e.g. closing file descriptors, flushing buffers, releasing GPU resources, or tearing down memory arenas).
-
-#### Definition
-
-```sapphire
-trait Disposable {
-  func dispose(var self);
-}
-```
-
-#### Implementing `Disposable`
-
-```sapphire
-struct FileHandle {
-  var path: String;
-}
-
-impl Disposable for FileHandle {
-  func dispose(var self) {
-    print("Closing file: " + self.path);
-  }
-}
-
-func main() {
-  with let f = FileHandle { path = "data.csv" } {
-    print("Processing file: " + f.path);
-  }
-  // `f.dispose()` is automatically called upon leaving the `with` block
-}
-```
-
 ### Coroutine
 
 The `Coroutine<T>` type represents a first-class, frame-steppable coroutine or generator sequence.
@@ -953,5 +920,4 @@ func main() {
 | **`Ref`** | Smart pointer | `Ref(T)`, `Ref<T>` | Unique move-only heap ownership |
 | **`SharedRef`** | Smart pointer | `SharedRef(T)`, `SharedRef<T>` | Reference-counted shared heap ownership |
 | **`WeakRef`** | Smart pointer | `WeakRef<T>` | Non-owning weak reference for cycle-breaking |
-| **`Disposable`** | Trait | `func dispose(var self);` | Deterministic RAII cleanup for `with` blocks |
 | **`Coroutine`** | Flow-control type | `Coroutine<T>`, `Coroutine<void>` | Frame-steppable coroutines & generator streams |

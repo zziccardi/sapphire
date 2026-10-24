@@ -22,7 +22,7 @@ impl Vector2D {
     self.y = y;
   }
 
-  func translate(dx: float, dy: float) {
+  var func translate(dx: float, dy: float) {
     self.x += dx;
     self.y += dy;
   }
@@ -30,11 +30,11 @@ impl Vector2D {
 
 // 2. Behavioral contracts (Traits)
 trait Updatable {
-  func update(dt: float);
+  var func update(dt: float);
 }
 
 trait Combatant {
-  func take_damage(amount: int);
+  var func take_damage(amount: int);
   func get_health(): int;
 }
 
@@ -68,7 +68,7 @@ impl Character {
 
 // Implement traits on Character
 impl Updatable for Character {
-  func update(dt: float) {
+  var func update(dt: float) {
     if self.health <= 0 {
       self.active = false;
       return;
@@ -79,7 +79,7 @@ impl Updatable for Character {
 }
 
 impl Combatant for Character {
-  func take_damage(amount: int) {
+  var func take_damage(amount: int) {
     self.health -= amount;
     if self.health <= 0 {
       self.health = 0;

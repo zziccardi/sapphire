@@ -454,11 +454,11 @@ class TestLuaTranspiler(unittest.TestCase):
       self.assertEqual(cm.exception.code, 1)
 
   def test_trait_member_modifiers(self):
-    """Verifies parsing and building AST for const and static trait members."""
+    """Verifies parsing and building AST for var and static trait members."""
     code = """
     trait Printable {
       static func create(): Printable;
-      const func display(): String;
+      var func display(): String;
     }
     """
     input_stream = InputStream(code)
@@ -469,7 +469,7 @@ class TestLuaTranspiler(unittest.TestCase):
     builder = ASTBuilder()
     ast = builder.visit(tree)
     self.assertEqual(ast.declarations[0].members[0].modifier, "static")
-    self.assertEqual(ast.declarations[0].members[1].modifier, "const")
+    self.assertEqual(ast.declarations[0].members[1].modifier, "var")
 
   def test_lua_execution_if_available(self):
     """Executes transpiled Lua code using system Lua interpreter if present."""
@@ -1438,14 +1438,14 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("1", tr.get_output())
 
   def test_with_statement_transpilation_lua(self):
-    """Verifies that with statements transpile to Lua nil-checks and LIFO _sapphire_dispose calls."""
+    """Verifies that with statements transpile to Lua nil-checks and LIFO _sapphire_del calls."""
     from src.parser.ast import WithClauseNode
     code = """
     struct Resource {
       var name: String;
     }
-    impl Disposable for Resource {
-      func dispose(var self) {}
+    impl Resource {
+      func __del__() {}
     }
 
     func get_res(ok: bool): Resource? {
@@ -1489,10 +1489,10 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("_sapphire_dispose(_with_res_1)", lua_code)
-    self.assertIn("_sapphire_dispose(_with_res_2)", lua_code)
+    self.assertIn("_sapphire_del(_with_res_1)", lua_code)
+    self.assertIn("_sapphire_del(_with_res_2)", lua_code)
     self.assertIn("if _with_res_3 ~= nil then", lua_code)
-    self.assertIn("_sapphire_dispose(_with_res_3)", lua_code)
+    self.assertIn("_sapphire_del(_with_res_3)", lua_code)
     self.assertIn("else", lua_code)
 
     # Directly visit WithClauseNode to cover visitor
@@ -1918,13 +1918,10 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
 
   def test_destructor_with_statement_no_double_cleanup(self):
-    """Verifies that a resource managed in a with block is disposed by with, not double-deleted by __del__."""
+    """Verifies that a resource managed in a with block is cleaned up by with, not double-deleted by __del__."""
     code = """
     struct Resource {
       var id: int;
-    }
-    impl Disposable for Resource {
-      func dispose(var self) {}
     }
     impl Resource {
       func __del__() {}
@@ -1936,7 +1933,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("_sapphire_dispose(_with_res_1)", lua_code)
+    self.assertIn("_sapphire_del(_with_res_1)", lua_code)
     self.assertNotIn("_sapphire_del(r)", lua_code)
 
 

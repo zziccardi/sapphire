@@ -42,11 +42,11 @@ struct SuiteTest : Parent {
 }
 
 impl t.TestCase for SuiteTest {
-  func set_up() {
+  var func set_up() {
     self.count = 5;
   }
 
-  func tear_down() {
+  var func tear_down() {
     self.count = 0;
   }
 

@@ -9,11 +9,11 @@ struct MathSuiteTest {
 }
 
 impl testing.TestCase for MathSuiteTest {
-  func set_up() {
+  var func set_up() {
     self.initial_val = 10;
   }
 
-  func tear_down() {
+  var func tear_down() {
     self.initial_val = 0;
   }
 
