@@ -722,6 +722,77 @@ func demo_arena() {
 }
 ```
 
+### Ref
+
+`Ref<T>` represents unique heap ownership of an underlying value or structure. It provides zero-overhead, move-only smart pointer semantics analogous to `Box<T>` in Rust or `std::unique_ptr<T>` in C++.
+
+#### Key properties and semantics
+
+* **Move-only**: `Ref<T>` cannot be copied implicitly. Assignment to another variable or passing to a value parameter requires an explicit `move` operation (`let b = move a;`). Bare identifier assignment raises a compile-time `SemanticError`.
+* **Compile-time use-after-move enforcement**: Moving a `Ref<T>` variable transfers ownership and invalidates the source identifier in the enclosing scope.
+* **Auto-dereferencing**: Member accesses (`ref.field`) and method calls (`ref.method()`) automatically forward to the inner value without manual dereferencing operators.
+* **Transparent borrowing**: Passing `Ref<T>` into a function expecting the underlying type `T` (or `var T`) automatically borrows by reference without moving the variable.
+* **No arena escape check**: Unlike allocations within an `Arena`, `Ref<T>` can be returned freely from functions and stored across dynamic scopes.
+
+#### Syntax & usage
+
+```sapphire
+struct Node {
+  var value: int;
+  var next: Ref<Node>? = none;
+}
+
+// 1. Direct heap allocation
+var head = Ref(Node { value = 10 });
+
+// 2. Explicit move to transfer ownership
+let moved_head = move head;
+
+// 3. Auto-dereferencing
+print(f"Value: {moved_head.value}");
+```
+
+### SharedRef & WeakRef
+
+`SharedRef<T>` and `WeakRef<T>` provide reference-counted heap allocation and non-owning observation for shared ownership topologies, cyclic graphs, and caches.
+
+#### Key properties and semantics
+
+* **Co-allocated control block**: `SharedRef(expr)` allocates the reference-count control block (tracking strong and weak counts) and the payload contiguously in a single heap allocation.
+* **Promotion from `Ref<T>`**: `SharedRef(move unique_ref)` adopts an existing unique reference into a shared handle.
+* **Explicit duplication (`.share()`)**: Calling `.share()` increments the strong reference count and returns an additional shared handle. Moving a `SharedRef` (`move s`) transfers the handle without touching reference counts.
+* **Cycle breaking (`WeakRef<T>`)**: Calling `.downgrade()` on a `SharedRef<T>` returns a non-owning `WeakRef<T>`. Weak references do not keep the object alive. Calling `.upgrade()` on a `WeakRef<T>` returns an optional `SharedRef<T>?`, safely evaluating to `none` if all strong references have been destroyed.
+
+#### Available methods
+
+| Method | Receiver | Return type | Description |
+| :--- | :--- | :--- | :--- |
+| `share()` | `SharedRef<T>` | `SharedRef<T>` | Increments the strong refcount and returns a new shared handle. |
+| `downgrade()` | `SharedRef<T>` | `WeakRef<T>` | Creates a non-owning weak observer handle. |
+| `upgrade()` | `WeakRef<T>` | `SharedRef<T>?` | Safely unwraps to a strong handle, or `none` if expired. |
+
+#### Syntax & usage
+
+```sapphire
+struct GraphNode {
+  var id: int;
+  var neighbors: [SharedRef<GraphNode>] = [];
+  var parent: WeakRef<GraphNode>? = none;
+}
+
+// Instantiate shared root
+let root = SharedRef(GraphNode { id = 1 });
+
+// Share ownership across handles
+let root_clone = root.share();
+
+// Non-owning weak reference to break cycles
+let weak_parent = root.downgrade();
+if let active_parent ?= weak_parent.upgrade() {
+  print(f"Parent ID: {active_parent.id}");
+}
+```
+
 ## Standard library
 
 ### Standard math module (`std.math`)
@@ -877,7 +948,10 @@ func main() {
 | **`String`** | Reference type | `String` | Immutable UTF-8 text representation |
 | **`Array`** | Collection type | `[T]`, `[T; N]` | Sequential element collections with 0-based indexing |
 | **`Map`** | Collection type | `[K: V]` | Key–value associative lookup (`K`: String, int, or enum) |
-| **`Arena`** | Memory manager | `Arena()`, `expr in arena` | Scope-bound RAII memory allocation & safety control |
-| **`Disposable`** | Trait | `func dispose(var self);` | Deterministic RAII cleanup for `with` blocks |
 | **`Range`** | Iteration type | `Range()` | Type returned by `range()` for numeric iteration |
+| **`Arena`** | Memory manager | `Arena()`, `expr in arena` | Scope-bound RAII memory allocation & safety control |
+| **`Ref`** | Smart pointer | `Ref(T)`, `Ref<T>` | Unique move-only heap ownership |
+| **`SharedRef`** | Smart pointer | `SharedRef(T)`, `SharedRef<T>` | Reference-counted shared heap ownership |
+| **`WeakRef`** | Smart pointer | `WeakRef<T>` | Non-owning weak reference for cycle-breaking |
+| **`Disposable`** | Trait | `func dispose(var self);` | Deterministic RAII cleanup for `with` blocks |
 | **`Coroutine`** | Flow-control type | `Coroutine<T>`, `Coroutine<void>` | Frame-steppable coroutines & generator streams |

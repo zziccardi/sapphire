@@ -2028,6 +2028,44 @@ class TestSharedFixtures(unittest.TestCase):
     res = self._transpile_and_exec(code)["test_compute"]
     self.assertEqual(res, 130)
 
+  def test_heap_smart_refs_execution(self):
+    """Verifies Ref, SharedRef, and WeakRef execution in Python backend."""
+    code = """
+    struct Node {
+      var val: int;
+    }
+    impl Node {
+      func double_val(): int {
+        return self.val * 2;
+      }
+    }
+
+    func test_ref(): int {
+      let r = Ref(Node { val = 21 });
+      return r.double_val();
+    }
+
+    func test_shared_ref(): int {
+      let s1 = SharedRef(Node { val = 42 });
+      let s2 = s1.share();
+      let w = s1.downgrade();
+      if let active ?= w.upgrade() {
+        return active.val;
+      }
+      return 0;
+    }
+
+    func test_shared_from_move(): int {
+      var r = Ref(Node { val = 99 });
+      let s = SharedRef(move r);
+      return s.val;
+    }
+    """
+    res = self._transpile_and_exec(code)
+    self.assertEqual(res["test_ref"], 42)
+    self.assertEqual(res["test_shared_ref"], 42)
+    self.assertEqual(res["test_shared_from_move"], 99)
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

@@ -710,6 +710,58 @@ class TestLuaTranspiler(unittest.TestCase):
       finally:
         os.unlink(tmp_path)
 
+  def test_heap_smart_refs_lua_execution(self):
+    """Verifies Ref, SharedRef, and WeakRef execution in Lua backend."""
+    code = """
+    struct Node {
+      var val: int;
+    }
+    impl Node {
+      func double_val(self): int {
+        return self.val * 2;
+      }
+    }
+
+    func test_ref(): int {
+      let r = Ref(Node { val = 21 });
+      return r.double_val();
+    }
+
+    func test_shared_ref(): int {
+      let s1 = SharedRef(Node { val = 42 });
+      let s2 = s1.share();
+      let w = s1.downgrade();
+      if let active ?= w.upgrade() {
+        return active.val;
+      }
+      return 0;
+    }
+
+    func test_shared_from_move(): int {
+      var r = Ref(Node { val = 99 });
+      let s = SharedRef(move r);
+      return s.val;
+    }
+    """
+    lua_code = self._transpile(code)
+    lua_bin = shutil.which("lua") or shutil.which("luajit")
+    if not lua_bin:
+      self.skipTest("Lua binary not found")
+    test_driver = f"""
+    {lua_code}
+    assert(test_ref() == 42, "test_ref failed")
+    assert(test_shared_ref() == 42, "test_shared_ref failed")
+    assert(test_shared_from_move() == 99, "test_shared_from_move failed")
+    """
+    with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+      f.write(test_driver)
+      tmp_path = f.name
+    try:
+      proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+      self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+    finally:
+      os.unlink(tmp_path)
+
   def test_dev_mode_hot_reloading(self):
     """Verifies that dev_mode emits reload-safe structs, @on_reload hooks, and watcher checks."""
     code_v1 = """

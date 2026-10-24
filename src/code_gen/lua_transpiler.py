@@ -656,6 +656,102 @@ local _sapphire_del = function(obj)
     end
   end
 end
+
+local _Ref = {}
+function _Ref.create(val)
+  local self = { _val = val }
+  local mt = {
+    __index = function(t, k)
+      if type(val) == "table" then
+        local v = val[k]
+        if type(v) == "function" then
+          return function(recv, ...)
+            if recv == self then
+              return v(val, ...)
+            else
+              return v(recv, ...)
+            end
+          end
+        end
+        return v
+      end
+      return nil
+    end,
+    __newindex = function(t, k, v)
+      if type(val) == "table" then
+        val[k] = v
+      end
+    end
+  }
+  return setmetatable(self, mt)
+end
+local Ref = _Ref.create
+
+local _SharedRef = {}
+local _WeakRef = {}
+
+function _WeakRef.create(cb)
+  local self = { _cb = cb }
+  function self:upgrade()
+    if self._cb and self._cb.strong > 0 then
+      self._cb.strong = self._cb.strong + 1
+      return _SharedRef.create(self._cb)
+    end
+    return nil
+  end
+  return self
+end
+
+function _SharedRef.create(target)
+  local cb
+  if type(target) == "table" and target._cb then
+    cb = target._cb
+  elseif type(target) == "table" and target.strong ~= nil and target.weak ~= nil then
+    cb = target
+  elseif type(target) == "table" and target._val then
+    cb = { val = target._val, strong = 1, weak = 0 }
+  else
+    cb = { val = target, strong = 1, weak = 0 }
+  end
+  local self = { _cb = cb }
+  function self:share()
+    self._cb.strong = self._cb.strong + 1
+    return _SharedRef.create(self._cb)
+  end
+  function self:downgrade()
+    self._cb.weak = self._cb.weak + 1
+    return _WeakRef.create(self._cb)
+  end
+  local mt = {
+    __index = function(t, k)
+      if k == "share" then return function(recv) return self:share() end end
+      if k == "downgrade" then return function(recv) return self:downgrade() end end
+      local inner = self._cb.val
+      if type(inner) == "table" then
+        local v = inner[k]
+        if type(v) == "function" then
+          return function(recv, ...)
+            if recv == self then
+              return v(inner, ...)
+            else
+              return v(recv, ...)
+            end
+          end
+        end
+        return v
+      end
+      return nil
+    end,
+    __newindex = function(t, k, v)
+      if type(self._cb.val) == "table" then
+        self._cb.val[k] = v
+      end
+    end
+  }
+  return setmetatable(self, mt)
+end
+local SharedRef = _SharedRef.create
+local WeakRef = _WeakRef.create
 """
 
 

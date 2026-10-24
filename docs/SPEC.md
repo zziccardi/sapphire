@@ -122,6 +122,10 @@ Variables are immutable constants by default to encourage safety. Mutability mus
     (e.g. `let b = move a;` or `process(move a);`), mirroring `clone` for deep
     duplication. Moving is only permitted on mutable variables (`var`); moving a
     constant declared with `let` produces a compile-time error.
+  * **Move-only types (`Ref<T>`)**: Types representing exclusive heap ownership
+    (`Ref<T>`) are move-only. Assigning a `Ref<T>` to another variable without
+    `move` (e.g. `let b = a;`) raises a compile-time `SemanticError`. Ownership
+    transfers must be explicit: `let b = move a;`.
   * **Compile-time use-after-move enforcement**: Moving a variable transfers
     ownership and statically invalidates the source identifier in the current
     scope. Any subsequent read, borrow, or move of an invalidated identifier
@@ -1110,6 +1114,12 @@ Sapphire enforces a clear, predictable memory hierarchy:
 7. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. To prevent dangling references, the compiler statically enforces scope-bound escape rules:
    * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an outer scope cannot be assigned a reference to an object allocated in a nested/inner arena.
    * **Function-return escape**: A function cannot return a reference to an object allocated in an arena local to the function scope.
+8. **General heap allocations (`Ref<T>`, `SharedRef<T>`, `WeakRef<T>`)**:
+   For long-lived objects, recursive data structures (trees, graphs), or instances that must outlive lexical scopes without arena escape restrictions, Sapphire provides first-class smart reference types:
+   * **Unique heap allocation (`Ref<T>`)**: Instantiated via `let r = Ref(Point { x = 1, y = 2 });`. Exclusive owner of the underlying heap memory. `Ref<T>` is strictly move-only; reassignment or passing to a value parameter requires the explicit `move` keyword (`let b = move a;`). Bypasses arena escape analysis, allowing instances to be returned freely from functions.
+   * **Shared heap allocation (`SharedRef<T>`)**: Instantiated via `let s = SharedRef(Point { x = 1, y = 2 });` (single co-allocation of control block and payload) or by adopting an existing unique reference `let s = SharedRef(move r);`. Reference-counted; duplicate handles are created via `s.share()`, while `move s` transfers the handle without touching reference counts.
+   * **Weak observer (`WeakRef<T>`)**: Non-owning reference created via `s.downgrade()`. Prevents reference cycles in graphs and hierarchies. Upgraded safely to a `SharedRef<T>?` optional via `if let active ?= w.upgrade() { ... }`.
+   * **Auto-dereferencing & transparent borrowing**: Direct member access (`r.field`) and method calls (`r.method()`) automatically dereference to the inner value. Passing `Ref<T>` or `SharedRef<T>` to functions expecting the underlying type `T` automatically borrows by constant reference without transferring ownership.
 
 ### Source map generation & runtime stack trace demangling
 
