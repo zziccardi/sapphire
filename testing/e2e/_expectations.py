@@ -141,4 +141,11 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_shared_ref_cycle_breaking": 42,
         "test_shared_from_move": 99,
     },
+    "recursion_test.sp": {
+        "test_direct_recursion": 120,
+        "test_branching_recursion": 13,
+        "test_accumulator_recursion": 55,
+        "test_mutual_recursion": 1,
+        "test_struct_method_recursion": 15,
+    },
 }
