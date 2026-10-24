@@ -1,4 +1,4 @@
-# Sapphire language-design specification
+# Sapphire language specification
 {: .no_toc }
 
 This document establishes the foundational design, syntax rules, and

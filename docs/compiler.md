@@ -1,4 +1,4 @@
-# Sapphire Compiler Pipeline Documentation
+# Compiler pipeline
 
 This document provides a comprehensive technical overview of the implementation of the **Sapphire Compiler**, transpiling Sapphire source code (`.sp`) to executable Python or Lua 5.1.
 

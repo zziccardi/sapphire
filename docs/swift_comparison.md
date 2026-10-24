@@ -1,4 +1,4 @@
-# Sapphire vs. Swift: Design Rationale & Architectural Comparison
+# Sapphire vs. Swift
 
 This document outlines how Sapphire's core architecture and language design compare with **Swift**, highlighting shared modern ergonomics, pain point mitigations, and architectural divergences in memory management, polymorphism, and runtime predictability.
 

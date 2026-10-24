@@ -1,4 +1,4 @@
-# Built-in functions and types in Sapphire
+# Built-in functions and types
 
 This document provides a comprehensive reference for the standard built-in functions, primitive types, collections, and memory management constructs in the Sapphire language.
 
