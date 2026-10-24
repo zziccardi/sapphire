@@ -4236,21 +4236,20 @@ class TestTypeChecker(unittest.TestCase):
     checker.check(ast)
 
   def test_with_statement_type_checking(self):
-    """Verifies type checking, Disposable trait requirement, optional unwrapping, and else-block semantics for with statements."""
-    from src.semantics.symbol_table import ArenaType, TraitType
+    """Verifies type checking, __del__ destructor requirement, optional unwrapping, and else-block semantics for with statements."""
+    from src.semantics.symbol_table import ArenaType
 
-    # ArenaType.implements_trait coverage
+    # ArenaType.has_destructor coverage
     arena_t = ArenaType()
-    self.assertTrue(arena_t.implements_trait(TraitType("Disposable")))
-    self.assertFalse(arena_t.implements_trait(TraitType("OtherTrait")))
+    self.assertTrue(arena_t.has_destructor)
 
-    # 1. Valid with statement with Disposable struct
+    # 1. Valid with statement with destructible struct
     self._check("""
     struct FileStream {
       var path: String;
     }
-    impl Disposable for FileStream {
-      func dispose(var self) {}
+    impl FileStream {
+      func __del__() {}
     }
     func main() {
       with let f = FileStream { path = "test.txt" } {
@@ -4276,8 +4275,8 @@ class TestTypeChecker(unittest.TestCase):
     struct FileStream {
       var path: String;
     }
-    impl Disposable for FileStream {
-      func dispose(var self) {}
+    impl FileStream {
+      func __del__() {}
     }
     func get_file(): FileStream? {
       return FileStream { path = "a.txt" };
@@ -4291,24 +4290,18 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 4. Valid with statement with TraitType and multi-variable binding and raw struct/trait expressions
+    # 4. Valid with statement with multi-variable binding and raw struct expressions
     self._check("""
     struct FileStream {
       var path: String;
     }
-    impl Disposable for FileStream {
-      func dispose(var self) {}
+    impl FileStream {
+      func __del__() {}
     }
     func get_two(): [FileStream] {
       return [FileStream { path = "a" }, FileStream { path = "b" }];
     }
-    func test_trait(d: Disposable) {
-      with let x = d {
-        let y = 1;
-      }
-      with d {
-        let y = 2;
-      }
+    func test_with() {
       with FileStream { path = "raw" } {
         let y = 3;
       }
@@ -4318,7 +4311,7 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 5. Error: Non-disposable struct bound in with
+    # 5. Error: Non-destructible struct bound in with
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       struct NonDisposable {
@@ -4330,9 +4323,9 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       """)
-    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+    self.assertIn("does not define a '__del__' destructor", str(ctx.exception))
 
-    # 6. Error: Non-disposable raw expression in with
+    # 6. Error: Non-destructible raw expression in with
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func main() {
@@ -4341,7 +4334,7 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       """)
-    self.assertIn("does not implement trait 'Disposable'", str(ctx.exception))
+    self.assertIn("does not define a '__del__' destructor", str(ctx.exception))
 
     # 7. Error: With else block without ?= unwrap
     with self.assertRaises(SemanticError) as ctx:
@@ -4349,8 +4342,8 @@ class TestTypeChecker(unittest.TestCase):
       struct FileStream {
         var path: String;
       }
-      impl Disposable for FileStream {
-        func dispose(var self) {}
+      impl FileStream {
+        func __del__() {}
       }
       func main() {
         with let f = FileStream { path = "test.txt" } {
@@ -4368,8 +4361,8 @@ class TestTypeChecker(unittest.TestCase):
       struct FileStream {
         var path: String;
       }
-      impl Disposable for FileStream {
-        func dispose(var self) {}
+      impl FileStream {
+        func __del__() {}
       }
       func main() {
         with let f ?= FileStream { path = "test.txt" } {

@@ -80,16 +80,12 @@ class Arena:
       if hasattr(obj, '__shadow__'):
         obj.__shadow__.clear()
     self.objects.clear()
-  def dispose(self):
+  def __del__(self):
     self.destroy()
   def __enter__(self):
     return self
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.destroy()
-
-def _sapphire_dispose(obj):
-  if obj is not None and hasattr(obj, 'dispose') and callable(obj.dispose):
-    obj.dispose()
 
 def _sapphire_del(obj):
   if obj is not None and hasattr(obj, '__del__') and callable(obj.__del__):
@@ -2158,7 +2154,7 @@ class PythonTranspiler(BaseTranspiler):
       self.indent()
       for tmp_var, _, _, _ in reversed(clause_vars):
         self.newline()
-        self.emit(f"_sapphire_dispose({tmp_var})")
+        self.emit(f"_sapphire_del({tmp_var})")
       self.dedent()
 
     if has_unwrap:
@@ -2173,7 +2169,7 @@ class PythonTranspiler(BaseTranspiler):
       self.indent()
       for tmp_var, _, _, _ in reversed(clause_vars):
         self.newline()
-        self.emit(f"_sapphire_dispose({tmp_var})")
+        self.emit(f"_sapphire_del({tmp_var})")
       if node.else_body:
         self.visit(node.else_body)
       else:

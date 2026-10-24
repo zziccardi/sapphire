@@ -70,7 +70,7 @@ Addressing C++'s most persistent pitfalls through static compiler guarantees—w
 * **Sapphire's Solution**:
   1. **No Throwable Exceptions**: Sapphire completely omits `throw`/`try`/`catch` language machinery ([docs/SPEC.md §16.3](SPEC.md#avoiding-throwable-exceptions)).
   2. **Explicit, Typed Fallibility**: Functions express failure explicitly in their signatures using optional return types (`T?`), multiple return values (`T, bool`), or tagged unions with pattern matching ([docs/SPEC.md §6.2](SPEC.md#match-expressions) & [§8](SPEC.md#8-functions--closures)). Callers must acknowledge error paths explicitly.
-  3. **Deterministic Scope Teardown**: Struct destructors (`func __del__()`) and `with` blocks for `Disposable` resources guarantee deterministic LIFO teardown on scope exit, early `return`, or loop control jumps (`break`/`continue`) without exception machinery ([docs/SPEC.md §7.4](SPEC.md#with-statements-with----) & [§9.2](SPEC.md#deterministic-destructors-__del__)).
+  3. **Deterministic Scope Teardown**: Struct destructors (`func __del__()`) and scoped `with` blocks guarantee deterministic LIFO teardown on scope exit, early `return`, or loop control jumps (`break`/`continue`) without exception machinery ([docs/SPEC.md §7.4](SPEC.md#with-statements-with----) & [§9.2](SPEC.md#deterministic-destructors-__del__)).
 
 ### 2.5 Header Files, Compilation Cascades & Preprocessor Macros
 

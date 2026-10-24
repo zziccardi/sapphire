@@ -530,15 +530,9 @@ with let src ?= open_file("source.txt", "r");
 }
 ```
 
-* **Disposable trait**: Any resource bound inside a `with` statement must implement the built-in `Disposable` trait:
-  ```sapphire
-  trait Disposable {
-    func dispose(var self);
-  }
-  ```
-  `Arena` and any struct or trait explicitly implementing `Disposable` are valid disposable resources.
-* **Deterministic LIFO teardown**: Acquired resources are automatically disposed via `.dispose()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on error/exception.
-* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly disposed before executing the optional `else` block.
+* **RAII & destructors**: Any resource bound inside a `with` statement must define a `func __del__()` destructor (or be a built-in `Arena`).
+* **Deterministic LIFO teardown**: Acquired resources are automatically cleaned up via `__del__()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on error/exception.
+* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly destroyed via their `__del__()` destructors before executing the optional `else` block.
 * **Lexical scoping**: Variables bound in `with` clauses are scoped strictly to the `with` body block.
 
 ## 8. Functions & closures
@@ -796,7 +790,7 @@ Sapphire intentionally eliminates fine-grained member access keywords (`public`,
 
 ### Deterministic destructors (`__del__`)
 
-To support automatic scope-bound resource management (RAII) without requiring explicit `with` blocks for every resource, structs may define an optional `__del__` destructor inside their `impl` block:
+To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power both lexical block-scope teardown and transactional `with` blocks:
 
 ```sapphire
 struct FileHandle {

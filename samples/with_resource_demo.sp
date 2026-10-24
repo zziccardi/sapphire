@@ -3,7 +3,7 @@
  * `with` statements.
  *
  * Demonstrates:
- * 1. Implementing the built-in `Disposable` trait for custom structs.
+ * 1. Implementing the `__del__()` destructor for custom RAII structs.
  * 2. Scope-bound deterministic resource acquisition and LIFO cleanup.
  * 3. Multi-clause `with` blocks (semicolon-separated) to manage multiple
  *    resources without nesting.
@@ -17,8 +17,8 @@ struct FileHandle {
   var is_open: bool;
 }
 
-impl Disposable for FileHandle {
-  func dispose(var self) {
+impl FileHandle {
+  func __del__() {
     if self.is_open {
       self.is_open = false;
       print("  [FileHandle] Closed and flushed file: " + self.path);
@@ -31,8 +31,8 @@ struct DatabaseTransaction {
   var committed: bool;
 }
 
-impl Disposable for DatabaseTransaction {
-  func dispose(var self) {
+impl DatabaseTransaction {
+  func __del__() {
     if !self.committed {
       print("  [DatabaseTransaction] Rolling back uncommitted transaction: " + self.tx_id);
     } else {

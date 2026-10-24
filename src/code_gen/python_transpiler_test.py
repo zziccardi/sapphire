@@ -1583,8 +1583,8 @@ class TestPythonTranspiler(unittest.TestCase):
     struct Resource {
       var name: String;
     }
-    impl Disposable for Resource {
-      func dispose(var self) {
+    impl Resource {
+      func __del__() {
         events.push("dispose:" + self.name);
       }
     }
@@ -1638,7 +1638,7 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     self.assertIn("try:", py_code)
     self.assertIn("finally:", py_code)
-    self.assertIn("_sapphire_dispose(_with_res_", py_code)
+    self.assertIn("_sapphire_del(_with_res_", py_code)
 
     res = self._transpile_and_run(code, "test_with()")
     self.assertEqual(res, 3)
@@ -1932,13 +1932,10 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
 
   def test_destructor_with_statement_no_double_cleanup(self):
-    """Verifies that a resource managed in a with block is disposed by with, not double-deleted by __del__ in Python."""
+    """Verifies that a resource managed in a with block is cleaned up by with, not double-deleted by __del__ in Python."""
     code = """
     struct Resource {
       var id: int;
-    }
-    impl Disposable for Resource {
-      func dispose(var self) {}
     }
     impl Resource {
       func __del__() {}
@@ -1950,7 +1947,7 @@ class TestPythonTranspiler(unittest.TestCase):
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("_sapphire_dispose(_with_res_1)", py_code)
+    self.assertIn("_sapphire_del(_with_res_1)", py_code)
     self.assertNotIn("_sapphire_del(r)", py_code)
 
 

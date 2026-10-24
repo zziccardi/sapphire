@@ -347,8 +347,9 @@ class EnumType(Type):
 class ArenaType(Type):
   """Represents the built-in Arena type."""
 
-  def implements_trait(self, trait: "TraitType", symbol_table: Optional[Any] = None) -> bool:
-    return getattr(trait, "name", "") == "Disposable"
+  @property
+  def has_destructor(self) -> bool:
+    return True
 
   def __repr__(self) -> str:
     return "Arena"
@@ -866,13 +867,7 @@ class SymbolTable:
       testcase_trait.methods[name] = fn_t
     self.testcase_trait = testcase_trait
 
-    # Register Disposable trait for RAII resource cleanup
-    disposable_trait = TraitType("Disposable")
-    disposable_fn_t = FunctionType([PrimitiveType("none")], PrimitiveType("none"), param_mutabilities=[True], param_names=["self"], has_self=True)
-    disposable_trait.methods["dispose"] = disposable_fn_t
-    self.current_scope.define_type("Disposable", disposable_trait)
-    self.current_scope.define("Disposable", TraitSymbol("Disposable", disposable_trait))
-    self.disposable_trait = disposable_trait
+
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

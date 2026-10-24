@@ -2933,7 +2933,6 @@ class TypeChecker:
     return PrimitiveType("none")
 
   def visit_WithStmtNode(self, node: WithStmtNode) -> Type:
-    disposable_trait = self.symbol_table.lookup_type("Disposable")
     has_unwrap = False
 
     self.symbol_table.enter_scope()
@@ -2955,19 +2954,13 @@ class TypeChecker:
         let_names = getattr(binding, "let_names", [binding.let_name])
         check_t = base_t.element_type if (len(let_names) > 1 and isinstance(base_t, ArrayType)) else base_t
 
-        # Verify check_t implements Disposable
-        is_disposable = False
-        if isinstance(check_t, StructType):
-          if disposable_trait and check_t.implements_trait(disposable_trait, self.symbol_table):
-            is_disposable = True
-        elif isinstance(check_t, TraitType):
-          if check_t == disposable_trait or check_t.name == "Disposable":
-            is_disposable = True
-        elif isinstance(check_t, ArenaType):
-          is_disposable = True
+        # Verify check_t defines a __del__ destructor or is an Arena
+        is_destructible = False
+        if isinstance(check_t, (StructType, ArenaType)) and getattr(check_t, "has_destructor", False):
+          is_destructible = True
 
-        if not is_disposable:
-          self.error(f"Type '{check_t}' bound in with statement does not implement trait 'Disposable'.")
+        if not is_destructible:
+          self.error(f"Type '{check_t}' bound in with statement does not define a '__del__' destructor.")
 
         if len(let_names) > 1:
           for name in let_names:
@@ -2978,18 +2971,12 @@ class TypeChecker:
 
       elif clause.expr:
         expr_t = self.visit(clause.expr)
-        is_disposable = False
-        if isinstance(expr_t, StructType):
-          if disposable_trait and expr_t.implements_trait(disposable_trait, self.symbol_table):
-            is_disposable = True
-        elif isinstance(expr_t, TraitType):
-          if expr_t == disposable_trait or expr_t.name == "Disposable":
-            is_disposable = True
-        elif isinstance(expr_t, ArenaType):
-          is_disposable = True
+        is_destructible = False
+        if isinstance(expr_t, (StructType, ArenaType)) and getattr(expr_t, "has_destructor", False):
+          is_destructible = True
 
-        if not is_disposable:
-          self.error(f"Expression type '{expr_t}' in with statement does not implement trait 'Disposable'.")
+        if not is_destructible:
+          self.error(f"Expression type '{expr_t}' in with statement does not define a '__del__' destructor.")
 
     # Check body statements
     self.visit(node.body)
