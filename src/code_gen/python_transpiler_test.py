@@ -803,6 +803,104 @@ class TestPythonTranspiler(unittest.TestCase):
       if hasattr(builtins, "engine"):
         delattr(builtins, "engine")
 
+  def test_export_function_alias_binding_python(self):
+    """Verifies that @export("alias") binds the alias name at module scope."""
+    code = """
+    @export("app")
+    func handle_request(path: String): String {
+      return "Response: " + path;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def handle_request(path):", py_code)
+    self.assertIn("app = handle_request", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("app", env)
+    self.assertEqual(env["app"]("/api/v1"), "Response: /api/v1")
+
+  def test_export_dotted_path_binding_python(self):
+    """Verifies that @export("host.callback") safely binds to host object properties."""
+    code = """
+    trait HostServer {
+      func start(self);
+    }
+
+    @extern
+    var server: HostServer;
+
+    @export("server.on_request")
+    func handle(status: int): String {
+      return "Status: " + String.from(status);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("server.on_request = handle", py_code)
+
+    class MockServer:
+      def __init__(self):
+        self.on_request = None
+
+    mock = MockServer()
+    env = {"server": mock}
+    exec(py_code, env)
+    self.assertIsNotNone(mock.on_request)
+    self.assertEqual(mock.on_request(200), "Status: 200")
+
+  def test_extern_module_import_python(self):
+    """Verifies that @extern("module.name") generates import statements for host modules."""
+    code = """
+    trait JsonModule {
+      func dumps(self, obj: String): String;
+    }
+
+    @extern("json")
+    var json_mod: JsonModule;
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import json as json_mod", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("json_mod", env)
+    import json
+    self.assertIs(env["json_mod"], json)
+
+  def test_python_stdlib_wsgiref_interop_execution(self):
+    """Verifies end-to-end Python stdlib interop with wsgiref using @extern and @export."""
+    code = """
+    trait WsgiServer {
+      func server_close(self);
+    }
+
+    trait WsgiModule {
+      func make_server(self, host: String, port: int, app: (Map<String, String>, (String, [[String]]) -> void) -> [String]): WsgiServer;
+    }
+
+    @extern("wsgiref.simple_server")
+    var wsgiref: WsgiModule;
+
+    @export("app")
+    func wsgi_app(environ: Map<String, String>, start_response: (String, [[String]]) -> void): [String] {
+      return ["Hello from Sapphire!"];
+    }
+
+    func build_server(): WsgiServer {
+      return wsgiref.make_server("127.0.0.1", 0, wsgi_app);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import wsgiref.simple_server as wsgiref", py_code)
+    self.assertIn("app = wsgi_app", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("app", env)
+    server = env["build_server"]()
+    self.assertIsNotNone(server)
+    server.server_close()
+
 
   def test_python_multi_return_transpilation(self):
     """Verifies Python transpilation for multi-return functions, declarations, and assignments."""
