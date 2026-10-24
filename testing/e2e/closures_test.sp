@@ -1,8 +1,7 @@
 /*
  * E2E Test: closures_test.sp
- * Tests single-parameter lambda expressions and closures over captured variables.
- * (Multi-parameter typed lambdas require a block body which currently produces
- * invalid Python output — tracked separately.)
+ * Tests single-parameter lambdas, closures over captured variables, and
+ * multi-parameter typed lambdas with block bodies.
  */
 
 @test
@@ -23,4 +22,13 @@ func test_lambda_captures_call(): int {
   let offset = 10;
   let shift = x -> x + offset;
   return shift(5);
+}
+
+@test
+func test_block_body_lambda(): int {
+  let add = (a: int, b: int) -> int {
+    let sum = a + b;
+    return sum * 2;
+  };
+  return add(3, 4);
 }

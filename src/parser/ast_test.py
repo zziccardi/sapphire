@@ -82,6 +82,17 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node_dict["left"]["name"], "a")
     self.assertEqual(node_dict["right"]["value"], 5)
 
+  def test_move_node(self):
+    """Verifies MoveNode structure and serialization."""
+    from src.parser.ast import MoveNode
+
+    node = MoveNode("resource")
+    self.assertEqual(node.name, "resource")
+
+    node_dict = node.to_dict()
+    self.assertEqual(node_dict["node_type"], "MoveNode")
+    self.assertEqual(node_dict["name"], "resource")
+
   def test_list_serialization_and_repr(self):
     """Verifies that lists containing AST nodes and non-AST elements serialize, and repr works."""
     from src.parser.ast import ProgramNode

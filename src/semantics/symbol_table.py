@@ -217,7 +217,9 @@ class StructType(Type):
                is_prototype: bool = False, comments: Optional[str] = None,
                type_params: Optional[List[str]] = None,
                ast_decl: Optional[Any] = None,
-               parent_name: Optional[str] = None):
+               parent_name: Optional[str] = None,
+               defining_module: Optional[str] = None,
+               is_imported: bool = False):
     self.name = name
     if parent_names is None:
       self.parent_names = [parent_name] if parent_name else []
@@ -233,6 +235,8 @@ class StructType(Type):
     self.comments = comments or ""
     self.type_params = type_params or []
     self.ast_decl = ast_decl
+    self.defining_module = defining_module
+    self.is_imported = is_imported
 
   @property
   def parent_name(self) -> Optional[str]:
@@ -616,6 +620,7 @@ class VariableSymbol(Symbol):
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
     self.arena_dependency: Optional[str] = None
+    self.is_moved: bool = False
 
 
 class FunctionSymbol(Symbol):

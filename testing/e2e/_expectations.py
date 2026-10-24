@@ -29,6 +29,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_single_param_lambda": 10,
         "test_lambda_arithmetic": 17,
         "test_lambda_captures_call": 15,
+        "test_block_body_lambda": 14,
     },
     "control_flow_test.sp": {
         "test_if_else": 1,
@@ -107,5 +108,27 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_default_fields": 0,
         "test_method_call": 2,
         "test_static_method": 7,
+    },
+    "coroutines_test.sp": {
+        "test_coroutine_stepping": 60,
+        "test_coroutine_is_done": 111,
+        "test_coroutine_reset": 110,
+    },
+    "raii_and_cleanup_test.sp": {
+        "test_destructor_lifo_order": 21,
+        "test_destructor_early_return": 105,
+    },
+    "generics_test.sp": {
+        "test_generic_struct_int": 42,
+        "test_generic_struct_string_len": 8,
+        "test_generic_function_specialization": 42,
+    },
+    "traits_polymorphism_test.sp": {
+        "test_polymorphic_trait_call": 303,
+    },
+    "feature_interactions_test.sp": {
+        "test_struct_with_enum_matching_in_loop": 200,
+        "test_deep_optional_chaining_on_structs": 49,
+        "test_guard_unwrapping_with_block_closure": 26,
     },
 }

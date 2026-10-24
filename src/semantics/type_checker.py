@@ -5,8 +5,7 @@ checking and type inference, and validates all semantic constraints of the
 Sapphire language.
 """
 
-import copy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from src.parser.ast import *
 from src.semantics.symbol_table import (
@@ -65,6 +64,7 @@ class TypeChecker:
     self.current_function_scope = None
     self._match_stack: List[List[Type]] = []
     self.loop_depth: int = 0
+    self.moved_symbols: Set[VariableSymbol] = set()
 
   def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
     return ArenaChecker.get_arena_dependency(self.symbol_table, node)
@@ -306,15 +306,27 @@ class TypeChecker:
                   else:
                     exp = sub_checker.symbol_table.lookup_type(spec.symbol) or sub_checker.symbol_table.lookup(spec.symbol)
                     if exp:
+                      if isinstance(exp, StructType):
+                        exp.is_imported = True
+                        exp.defining_module = mod_sym.file_path or mod_sym.module_path
+                      elif hasattr(exp, "struct_type"):
+                        exp.struct_type.is_imported = True
+                        exp.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
                       mod_sym.exports[export_name] = exp
               else:
                 sub_root = sub_checker.symbol_table.current_scope
                 while sub_root.parent:
                   sub_root = sub_root.parent
                 for name, sym in sub_root.symbols.items():
+                  if hasattr(sym, "struct_type"):
+                    sym.struct_type.is_imported = True
+                    sym.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
                   mod_sym.exports[name] = sym
                 for name, t in sub_root.types.items():
                   if name not in ("int", "float", "bool", "String", "none", "Arena"):
+                    if isinstance(t, StructType):
+                      t.is_imported = True
+                      t.defining_module = mod_sym.file_path or mod_sym.module_path
                     mod_sym.exports[name] = t
               if is_builtin:
                 mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
@@ -342,7 +354,15 @@ class TypeChecker:
         if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
           self.error(f"Redefinition of identifier '{decl.name}'.")
           continue
-        struct_type = StructType(decl.name, parent_names=decl.parent_names, is_prototype=decl.is_prototype, type_params=decl.type_params, ast_decl=decl)
+        struct_type = StructType(
+            decl.name,
+            parent_names=decl.parent_names,
+            is_prototype=decl.is_prototype,
+            type_params=decl.type_params,
+            ast_decl=decl,
+            defining_module=self.source_file_path or "__main__",
+            is_imported=False,
+        )
         self.symbol_table.define_type(decl.name, struct_type)
         self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
 
@@ -794,6 +814,8 @@ class TypeChecker:
 
     # Enter scope of method
     self.symbol_table.enter_scope()
+    old_moved_symbols = set(self.moved_symbols)
+    self.moved_symbols = set()
 
     # Define 'self' unless it is a static method
     if node.modifier != "static":
@@ -834,7 +856,7 @@ class TypeChecker:
     # Verify constructor initializes all non-optional fields
     if func_decl.name == "__init__" and struct_type:
       for f_name, f_obj in struct_type.fields.items():
-        if (f_name not in self.initialized_fields 
+        if (f_name not in self.initialized_fields
             and not isinstance(f_obj.field_type, OptionalType)
             and not f_obj.has_explicit_default):
           self.error(f"Constructor '__init__' failed to initialize non-optional field '{f_name}'.")
@@ -843,6 +865,7 @@ class TypeChecker:
     self.is_in_init = old_in_init
     self.initialized_fields = old_fields
     self.current_function = None
+    self.moved_symbols = old_moved_symbols
 
     self.symbol_table.exit_scope()
 
@@ -854,6 +877,8 @@ class TypeChecker:
       return
     # Register parameters and check body
     self.symbol_table.enter_scope()
+    old_moved_symbols = set(self.moved_symbols)
+    self.moved_symbols = set()
     old_function_scope = self.current_function_scope
     self.current_function_scope = self.symbol_table.current_scope
 
@@ -877,12 +902,15 @@ class TypeChecker:
 
     self.current_function = None
     self.current_function_scope = old_function_scope
+    self.moved_symbols = old_moved_symbols
     self.symbol_table.exit_scope()
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.symbol_table.enter_scope()
     for stmt in node.statements:
       self.visit(stmt)
+    cur_scope = self.symbol_table.current_scope
+    self.moved_symbols = {s for s in self.moved_symbols if s.scope_defined != cur_scope}
     self.symbol_table.exit_scope()
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
@@ -992,6 +1020,11 @@ class TypeChecker:
         if isinstance(target.receiver, IdentifierNode) and target.receiver.name == "self":
           self.initialized_fields.add(target.member)
 
+      if isinstance(target, IdentifierNode):
+        target_sym = self.symbol_table.lookup(target.name)
+        if isinstance(target_sym, VariableSymbol) and target_sym in self.moved_symbols:
+          self.moved_symbols.discard(target_sym)
+
   def _check_lvalue(self, node: ASTNode) -> Type:
     """Helper to check if AST node is a mutable lvalue and returns its resolved type."""
     if isinstance(node, IdentifierNode):
@@ -1007,6 +1040,10 @@ class TypeChecker:
       return sym.symbol_type
 
     if isinstance(node, MemberAccessNode):
+      if isinstance(node.receiver, MoveNode):
+        self.error(f"Cannot access member '{node.member}' on moved variable '{node.receiver.name}'.", node=node)
+        return PrimitiveType("none")
+
       receiver_type = self.visit(node.receiver)
       # Unwrap optional if chained
       if node.is_optional and isinstance(receiver_type, OptionalType):
@@ -1022,6 +1059,20 @@ class TypeChecker:
         self.error(f"Struct '{receiver_type.name}' has no field '{node.member}'.", node=node)
         return PrimitiveType("none")
 
+      # Encapsulation check for invariant-enforcing structs (with __init__)
+      if getattr(receiver_type, "is_imported", False) and "__init__" in receiver_type.methods:
+        is_same_module = False
+        if getattr(receiver_type, "defining_module", None) and self.source_file_path:
+          import os
+          if os.path.abspath(receiver_type.defining_module) == os.path.abspath(self.source_file_path):
+            is_same_module = True
+        if not is_same_module:
+          self.error(
+              f"Cannot mutate field '{node.member}' of encapsulated struct '{receiver_type.name}' outside its defining module; mutate via methods instead.",
+              node=node,
+          )
+          return field.field_type
+
       # Check field mutability or constructor exemption
       # Inside __init__ or clone blocks, self fields are always assignable (even if immutable let fields)
       is_self = isinstance(node.receiver, IdentifierNode) and node.receiver.name == "self"
@@ -1034,6 +1085,15 @@ class TypeChecker:
         self_sym = self.symbol_table.lookup("self")
         if self_sym and not self_sym.is_mutable:
           self.error(f"Cannot mutate field '{node.member}' within a constant method.", node=node)
+
+      # Verify root receiver binding mutability (let vs var)
+      curr = node.receiver
+      while isinstance(curr, MemberAccessNode):
+        curr = curr.receiver
+      if isinstance(curr, IdentifierNode) and curr.name != "self":
+        root_sym = self.symbol_table.lookup(curr.name)
+        if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable and not receiver_type.is_prototype:
+          self.error(f"Cannot mutate field '{node.member}' of constant struct variable '{curr.name}'.", node=node)
 
       return field.field_type
 
@@ -1293,19 +1353,39 @@ class TypeChecker:
         if not node.init_binding.is_unwrap:
           self.error("Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='.")
 
+      pre_branch_moved = set(self.moved_symbols)
       self.visit(node.then_block)
+      then_moved = set(self.moved_symbols)
+
+      if node.else_block:
+        self.moved_symbols = set(pre_branch_moved)
+        self.visit(node.else_block)
+        else_moved = set(self.moved_symbols)
+        self.moved_symbols = then_moved | else_moved
+      else:
+        self.moved_symbols = then_moved
+
       self.symbol_table.exit_scope()
     else:
       cond_type = self.visit(node.condition)
       if cond_type != PrimitiveType("bool"):
         self.error("If condition must resolve to 'bool'.")
-      self.visit(node.then_block)
 
-    if node.else_block:
-      self.visit(node.else_block)
+      pre_branch_moved = set(self.moved_symbols)
+      self.visit(node.then_block)
+      then_moved = set(self.moved_symbols)
+
+      if node.else_block:
+        self.moved_symbols = set(pre_branch_moved)
+        self.visit(node.else_block)
+        else_moved = set(self.moved_symbols)
+        self.moved_symbols = then_moved | else_moved
+      else:
+        self.moved_symbols = then_moved
 
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.loop_depth += 1
+    pre_loop_moved = set(self.moved_symbols)
     try:
       if node.init_binding:
         self.symbol_table.enter_scope()
@@ -1339,11 +1419,18 @@ class TypeChecker:
         if cond_type != PrimitiveType("bool"):
           self.error("While condition must resolve to 'bool'.")
         self.visit(node.block)
+
+      for sym in self.moved_symbols - pre_loop_moved:
+        self.error(
+            f"Cannot move variable '{sym.name}' inside a loop without re-assigning it before the next iteration.",
+            node=node,
+        )
     finally:
       self.loop_depth -= 1
 
   def visit_ForNode(self, node: ForNode) -> None:
     self.loop_depth += 1
+    pre_loop_moved = set(self.moved_symbols)
     try:
       iter_type = self.visit(node.iterable)
       self.symbol_table.enter_scope()
@@ -1372,6 +1459,12 @@ class TypeChecker:
 
       self.visit(node.block)
       self.symbol_table.exit_scope()
+
+      for sym in self.moved_symbols - pre_loop_moved:
+        self.error(
+            f"Cannot move variable '{sym.name}' inside a loop without re-assigning it before the next iteration.",
+            node=node,
+        )
     finally:
       self.loop_depth -= 1
 
@@ -1414,8 +1507,10 @@ class TypeChecker:
       type_sym = self.symbol_table.lookup_type(node.name)
       if type_sym:
         return type_sym
-      self.error(f"Undefined identifier '{node.name}'.")
+      self.error(f"Undefined identifier '{node.name}'.", node=node)
       return PrimitiveType("none")
+    if isinstance(sym, VariableSymbol) and sym in self.moved_symbols:
+      self.error(f"Use of moved variable '{node.name}'.", node=node)
     return sym.symbol_type
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
@@ -2176,6 +2271,9 @@ class TypeChecker:
           self.error("Too many arguments passed to call.")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> Type:
+    if isinstance(node.receiver, MoveNode):
+      self.error(f"Cannot access member '{node.member}' on moved variable '{node.receiver.name}'.", node=node)
+      return PrimitiveType("none")
     receiver_type = self.visit(node.receiver)
 
     # Optional chaining check
@@ -2404,6 +2502,30 @@ class TypeChecker:
 
     return expr_type
 
+  def visit_MoveNode(self, node: MoveNode) -> Type:
+    sym = self.symbol_table.lookup(node.name)
+    if not sym:
+      self.error(f"Cannot move undefined variable '{node.name}'.", node=node)
+      return PrimitiveType("none")
+    if not isinstance(sym, VariableSymbol):
+      self.error(f"Cannot move non-variable symbol '{node.name}'.", node=node)
+      return sym.symbol_type
+    if getattr(sym, "is_parameter", False):
+      self.error(f"Cannot move out of borrowed parameter '{node.name}'.", node=node)
+      return sym.symbol_type
+    if not sym.is_mutable:
+      self.error(
+          f"Cannot move constant '{node.name}'; declare with 'var' to allow ownership transfer.",
+          node=node,
+      )
+      return sym.symbol_type
+    if sym in self.moved_symbols:
+      self.error(f"Use of moved variable '{node.name}'.", node=node)
+      return sym.symbol_type
+
+    self.moved_symbols.add(sym)
+    return sym.symbol_type
+
   def _infer_lambda_param_type(self, param_name: str, body: "ASTNode") -> Optional[Type]:
     """Infer the type of a lambda parameter from its usage in *body*.
 
@@ -2494,6 +2616,8 @@ class TypeChecker:
 
   def visit_LambdaNode(self, node: LambdaNode) -> Type:
     self.symbol_table.enter_scope()
+    old_moved_symbols = set(self.moved_symbols)
+    self.moved_symbols = set()
 
     expected_func = self.expected_type
     from src.semantics.symbol_table import OptionalType
@@ -2535,6 +2659,7 @@ class TypeChecker:
     if node.return_type:
       ret_type = self._resolve_type_node(node.return_type)
 
+    self.moved_symbols = old_moved_symbols
     self.symbol_table.exit_scope()
     return FunctionType(resolved_param_types, ret_type)
 
@@ -2826,7 +2951,7 @@ class TypeChecker:
 
     # Verify all non-optional and non-default fields are initialized
     for f_name, f_obj in struct_type.fields.items():
-      if (f_name not in initialized 
+      if (f_name not in initialized
           and not isinstance(f_obj.field_type, OptionalType)
           and not f_obj.has_default):
         self.error(f"Struct initializer for '{node.struct_name}' is missing required field '{f_name}'.")

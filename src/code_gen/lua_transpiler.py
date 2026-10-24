@@ -2598,6 +2598,10 @@ class LuaTranspiler(BaseTranspiler):
 
     self.emit(")")
 
+  def visit_MoveNode(self, node: MoveNode) -> None:
+    name = self._identifier_map.get(node.name, node.name)
+    self.emit(name)
+
   def visit_LambdaNode(self, node: LambdaNode) -> None:
     params = [p.name for p in node.parameters]
     self.emit(f"(function({', '.join(params)})")

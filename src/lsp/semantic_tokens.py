@@ -383,8 +383,10 @@ class SemanticTokensTypeChecker(TypeChecker):
       sym.ast_decl = node
 
   def visit_AssignmentNode(self, node) -> None:
-    self.visit(node.target)
     super().visit_AssignmentNode(node)
+    targets = getattr(node, "targets", [node.target] if hasattr(node, "target") else [])
+    for target in targets:
+      self.visit(target)
 
   def visit_IfNode(self, node) -> None:
     if node.init_binding:

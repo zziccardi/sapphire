@@ -17,7 +17,7 @@ impl Counter {
   }
 
   static func create_at(n: int): Counter {
-    let c = Counter {};
+    var c = Counter {};
     c.count = n;
     return c;
   }
@@ -31,7 +31,7 @@ func test_default_fields(): int {
 
 @test
 func test_method_call(): int {
-  let c = Counter {};
+  var c = Counter {};
   c.increment();
   c.increment();
   return c.get();

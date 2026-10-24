@@ -979,9 +979,25 @@ class PythonTranspiler(BaseTranspiler):
         self.newline()
         self.emit(f"_sapphire_del({var_name})")
 
+  def _emit_lifted_lambda(self, node: LambdaNode) -> str:
+    self._temp_lambda_count = getattr(self, "_temp_lambda_count", 0) + 1
+    fn_name = f"_lambda_{self._temp_lambda_count}"
+    params = [p.name for p in node.parameters]
+    self.newline()
+    self.emit(f"def {fn_name}({', '.join(params)}):")
+    self.indent()
+    self.visit(node.body)
+    self.dedent()
+    return fn_name
+
   def _lift_match_expressions(self, node: Any) -> None:
-    """Finds all MatchExprNode in the AST subtree and emits their match statement blocks first."""
+    """Finds all MatchExprNode and block-bodied LambdaNode in the AST subtree and emits helper statements first."""
     if node is None:
+      return
+    if isinstance(node, LambdaNode) and isinstance(node.body, BlockNode):
+      if not getattr(node, "_is_lifted", False):
+        node._is_lifted = True
+        node._lifted_name = self._emit_lifted_lambda(node)
       return
     if isinstance(node, MatchExprNode):
       if not getattr(node, "_is_lifted", False):
@@ -1937,11 +1953,21 @@ class PythonTranspiler(BaseTranspiler):
 
     self.emit(")")
 
+  def visit_MoveNode(self, node: MoveNode) -> None:
+    name = self._identifier_map.get(node.name, node.name)
+    self.emit(name)
+
   def visit_LambdaNode(self, node: LambdaNode) -> None:
-    params = [p.name for p in node.parameters]
-    self.emit(f"(lambda {', '.join(params)}: ")
-    self.visit(node.body)
-    self.emit(")")
+    if isinstance(node.body, BlockNode):
+      if not getattr(node, "_is_lifted", False):
+        node._is_lifted = True
+        node._lifted_name = self._emit_lifted_lambda(node)
+      self.emit(node._lifted_name)
+    else:
+      params = [p.name for p in node.parameters]
+      self.emit(f"(lambda {', '.join(params)}: ")
+      self.visit(node.body)
+      self.emit(")")
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> None:
     self.emit("[")

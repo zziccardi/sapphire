@@ -106,17 +106,46 @@ Variables are immutable constants by default to encourage safety. Mutability mus
 * **`var`**: Declares a mutable variable.
 * **Value vs. reference types**: Primitive scalar types (`int`, `float`, `bool`)
   and `none` are value types. Standard user-defined `struct` types are
-  **stack-allocated by default** (unless explicitly allocated within an arena
-  via `in my_arena`).
-  * Passing non-primitive types into functions defaults to **constant reference**
-    to avoid copy overhead without visual pointer syntax.
+  strictly **value types and stack-allocated by default** (unless explicitly
+  allocated within an arena via `in my_arena`).
+  * Dynamic collections (`String`, `Array`, `Map`, `Arena`, `Range`) and all
+    `proto` types use managed reference semantics within explicit arenas.
+  * **Flat unboxed struct layouts**: When a `struct` contains another `struct`
+    as a field, it is embedded flat and inline in contiguous memory (zero
+    pointer indirection, zero heap allocation overhead). Copy-on-Write (CoW) is
+    strictly isolated to dynamic heap containers (`String`, `Array`, `Map`).
+* **Copy, move, and ownership semantics**:
+  * **Trivially copyable types**: Structs composed entirely of primitive
+    scalars and other trivially copyable structs implement implicit bitwise copy
+    on assignment.
+  * **The `move` keyword**: Explicit ownership transfers use the `move` keyword
+    (e.g. `let b = move a;` or `process(move a);`), mirroring `clone` for deep
+    duplication. Moving is only permitted on mutable variables (`var`); moving a
+    constant declared with `let` produces a compile-time error.
+  * **Compile-time use-after-move enforcement**: Moving a variable transfers
+    ownership and statically invalidates the source identifier in the current
+    scope. Any subsequent read, borrow, or move of an invalidated identifier
+    produces a compile-time error (`Use of moved variable 'a'`).
+  * **Re-initialization**: Assigning a new value to a moved mutable variable
+    (`var`) restores its validity and liveness in that scope.
+  * **Whole-variable moves**: Moves are restricted to whole root variables
+    (`move resource`); partial moves of individual struct fields are prohibited
+    to prevent partially deconstructed states.
+* **Function parameter modes**:
+  * Non-primitive types are passed by **constant reference (borrow)** by default
+    to eliminate copy overhead without pointer syntax. The caller retains
+    ownership.
+  * Mutable parameters must be explicitly declared with `var` in signatures
+    (`func update(var target: Entity)`), representing an **exclusive mutable
+    borrow**. The caller retains ownership.
+  * Ownership transfer into a function is determined at the call site: callers
+    pass `move arg` (e.g. `ingest(move resource)`), transferring ownership into
+    the callee's parameter binding and invalidating the caller's variable.
   * Returning stack structs from functions is done **by value** with
     compiler-enforced **return-value optimization (RVO)** and copy
     elision, constructing the instance directly in the caller's stack frame.
     Returning raw borrowed references to local stack frames is statically
     prohibited to eliminate use-after-free bugs without requiring lifetime annotations.
-  * Dynamic collections (`String`, `Array`, `Map`, `Arena`, `Range`) and all
-    `proto` types use managed reference semantics.
 * **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
 * **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
 * **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
@@ -556,7 +585,22 @@ calculate_damage(defender = target_enemy, attacker = current_player);
 
 // Invocation overriding the default parameter value
 calculate_damage(current_player, target_enemy, is_critical = true);
+
+// Ownership transfer via caller-driven `move`
+var resource = load_mesh("model.obj");
+render_pipeline.consume(move resource);
+// `resource` is now statically invalidated and cannot be accessed again
 ```
+
+### Call-site parameter modes: borrowing vs. moving
+
+Sapphire gives the caller explicit control over ownership transfer at the call site:
+* **Constant borrow (default)**: Passing an identifier without `move` passes it by constant reference. The caller retains ownership, and the callee cannot mutate the value.
+* **Exclusive mutable borrow (`var`)**: Passing to a parameter declared with `var` gives the callee exclusive mutable access. The caller retains ownership after the call completes.
+* **Ownership transfer (`move`)**: Passing `move <identifier>` transfers
+  ownership into the function. The variable must be declared with `var`. The
+  caller's variable is statically invalidated and cannot be read, borrowed, or
+  moved again.
 
 ### Scope-bound aliasing rules (call-site reference exclusivity)
 
@@ -728,6 +772,23 @@ let sword = Weapon(dmg = 50);
 // declared as a constant.
 sword.use();
 ```
+
+### Member encapsulation via construction contract
+
+Sapphire intentionally eliminates fine-grained member access keywords (`public`, `private`, `protected`) in favor of encapsulation tied to a struct's construction contract:
+
+1. **Plain-old-data structs (POD; no `__init__`)**:
+   * For structs without a custom `__init__` constructor (such as `Point`, `Vector2`, or `Rect`), all fields are transparent data.
+   * Direct field read and write access (`p.x = 20.0;`) is fully permitted across module boundaries, governed solely by whether the target variable is bound mutably (`var`) or immutably (`let`).
+   * This eliminates boilerplate getters and setters for pure data representations.
+
+2. **Invariant-enforcing structs (with `__init__`)**:
+   * When a struct defines an `__init__` constructor inside its `impl` block, it signals that it maintains internal invariants (such as non-negative durability, valid handles, or normalized state).
+   * Struct fields are **publicly readable, but module-write only**:
+     * External modules can freely read fields (`let dmg = sword.damage;`).
+     * External modules **cannot** directly mutate fields (`sword.damage = 100;` produces a compile-time error).
+     * Field mutations on invariant-enforcing structs from outside their defining module must occur through methods declared in the struct's `impl` block (e.g. `sword.use();`).
+   * Code within the struct's defining module retains full direct read and write access to all fields.
 
 ### Deterministic destructors (`__del__`)
 
@@ -1307,18 +1368,16 @@ handling:
   guarantee that allocations and resources are automatically torn down upon
   scope exit, eliminating the need for exception cleanup blocks.
 
-### Module-level encapsulation over member-level access control
+### Module-level and construction-contract encapsulation over member access modifiers
 
-Traditional object-oriented languages rely on fine-grained access modifiers (`public`, `private`, `protected`, `internal`) on individual struct fields and methods. Sapphire intentionally omits member-level access control keywords in favor of a unified **module-level encapsulation model**:
-* **Single encapsulation boundary**: Visibility is defined exclusively at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
+Traditional object-oriented languages rely on fine-grained access modifiers (`public`, `private`, `protected`) on individual struct fields and methods. Sapphire intentionally omits member-level access control keywords in favor of a cohesive **module-manifest and construction-contract encapsulation model**:
+* **Single encapsulation boundary**: Visibility is defined at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
 * **Grammar & syntax simplicity**: Eliminates verbose field-level and method-level modifier keywords (such as `pub` or `private`), keeping the AST structure lean and code uncluttered.
-* **Internal member convention**: To signal that a struct field or helper method is intended strictly for internal module maintenance and should not be directly mutated or relied upon by external consumers, Sapphire recommends using an underscore prefix (e.g. `_handle`, `_cache`). The compiler treats all fields of an exported struct as accessible, relying on convention and export manifests to delineate public contracts from private implementation details.
+* **Construction-contract invariant safety**: Invariants are protected through the struct's construction contract rather than modifier keywords. Structs without custom `__init__` constructors are plain-data structs with publicly mutable fields on `var` bindings. Structs declaring `__init__` constructors restrict field mutation to their defining module, requiring external mutations to invoke explicit implementation methods.
 
 ### Future considerations & exploratory directions
 
 The following proposals are preserved as prospective enhancements for future language versions and compiler roadmaps:
 
-1. **Compiler-enforced private access for underscore identifiers**: Future compiler versions may elevate the underscore convention (`_private_field`) to a hard semantic error if accessed outside the defining module, combining clean syntax with strict compiler-enforced field privacy.
-2. **Call-site mutability markers**: To enhance visual clarity and alert code reviewers to mutating function arguments, introducing mandatory call-site markers (such as `modify(var target)`) is under evaluation.
-3. **Standard `Result<T, E>` sum type**: While optionals (`T?`) and multi-value returns handle common failure states, a standard algebraic `Result<T, E>` type with associated error payloads and `guard` integration may be introduced for rich error reporting.
-4. **Explicit move semantics**: To complement stack allocation and RVO, explicit value transfers (e.g. `move resource`) may be explored for non-copyable native resources.
+1. **Call-site mutability markers**: To enhance visual clarity and alert code reviewers to mutating function arguments, introducing mandatory call-site markers (such as `modify(var target)`) is under evaluation.
+2. **Standard `Result<T, E>` sum type**: While optionals (`T?`) and multi-value returns handle common failure states, a standard algebraic `Result<T, E>` type with associated error payloads and `guard` integration may be introduced for rich error reporting.

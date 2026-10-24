@@ -673,6 +673,13 @@ class CloneNode(ExprNode):
     self.arena_expr = arena_expr
 
 
+class MoveNode(ExprNode):
+  """Represents an explicit ownership transfer expression (e.g. 'move resource')."""
+
+  def __init__(self, name: str):
+    self.name = name
+
+
 class LambdaParamNode(ASTNode):
   """Represents a parameter in a lambda expression."""
 

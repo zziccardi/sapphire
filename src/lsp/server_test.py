@@ -1453,12 +1453,12 @@ let res = calculate(10, 3.14, "hello");"""
   var y: float;
 }
 impl Point {
-  func move(var self, dx: float, dy: float) {
+  func translate(var self, dx: float, dy: float) {
     self.x = self.x + dx;
   }
 }
 let p = Point(1.0, 2.0);
-p.move(5.0, 10.0);"""
+p.translate(5.0, 10.0);"""
 
     validate_source(self.ls, doc_uri, doc_text)
 
@@ -1467,10 +1467,10 @@ p.move(5.0, 10.0);"""
     mock_doc.source = doc_text
     self.ls.workspace.get_text_document.return_value = mock_doc
 
-    # Signature help at parameter 1 in 'p.move(5.0, 10.0)'
+    # Signature help at parameter 1 in 'p.translate(5.0, 10.0)'
     res_sig = signature_help(self.ls, SignatureHelpParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=10, character=13)
+        position=Position(line=10, character=18)
     ))
     self.assertIsNotNone(res_sig)
     self.assertEqual(res_sig.active_parameter, 1)
