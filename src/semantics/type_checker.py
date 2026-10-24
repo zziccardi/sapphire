@@ -36,6 +36,9 @@ from src.semantics.symbol_table import (
     EnumSymbol,
     ModuleSymbol,
     CoroutineType,
+    RefType,
+    SharedRefType,
+    WeakRefType,
     COROUTINE_METHODS,
     STRING_METHODS,
     ARRAY_METHODS,
@@ -680,6 +683,18 @@ class TypeChecker:
         if node.type_args:
           return CoroutineType(self._resolve_type_node(node.type_args[0]))
         return CoroutineType(NoneType())
+      if node.name == "Ref":
+        if node.type_args:
+          return RefType(self._resolve_type_node(node.type_args[0]))
+        return RefType(NoneType())
+      if node.name == "SharedRef":
+        if node.type_args:
+          return SharedRefType(self._resolve_type_node(node.type_args[0]))
+        return SharedRefType(NoneType())
+      if node.name == "WeakRef":
+        if node.type_args:
+          return WeakRefType(self._resolve_type_node(node.type_args[0]))
+        return WeakRefType(NoneType())
       if "." in node.name:
         parts = node.name.split(".")
         mod_sym = self.symbol_table.lookup(parts[0])
@@ -976,6 +991,8 @@ class TypeChecker:
       self.symbol_table.define(name, sym)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if isinstance(expr_type, RefType) and isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
+        self.error(f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.", node=node)
       arena_name = self._get_arena_dependency(expr_node)
       if arena_name:
         sym.arena_dependency = arena_name
@@ -1006,6 +1023,8 @@ class TypeChecker:
         self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.", node=node)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if isinstance(expr_type, RefType) and isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
+        self.error(f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.", node=node)
       arena_name = self._get_arena_dependency(expr_node)
       if arena_name:
         target_sym = self._get_target_symbol(target)
@@ -2183,6 +2202,48 @@ class TypeChecker:
           self.error(".clear() takes no arguments.")
         return PrimitiveType("none")
 
+    if isinstance(node.callee, IdentifierNode) and node.callee.name == "Ref":
+      if node.arena_expr:
+        self.error("Ref() allocations cannot specify an 'in <arena>' clause.", node=node)
+      if len(node.arguments) != 1:
+        self.error(f"Ref() constructor expects 1 argument, got {len(node.arguments)}.", node=node)
+        return RefType(PrimitiveType("none"))
+      arg_expr = node.arguments[0].expr
+      arg_type = self.visit(arg_expr)
+      node.is_ref_constructor = True
+      if node.type_args:
+        expected_inner = self._resolve_type_node(node.type_args[0])
+        if not arg_type.is_compatible(expected_inner):
+          self.error(f"Ref<{expected_inner}> expected argument of type '{expected_inner}', got '{arg_type}'.", node=node)
+        return RefType(expected_inner)
+      return RefType(arg_type)
+
+    if isinstance(node.callee, IdentifierNode) and node.callee.name == "SharedRef":
+      if node.arena_expr:
+        self.error("SharedRef() allocations cannot specify an 'in <arena>' clause.", node=node)
+      if len(node.arguments) != 1:
+        self.error(f"SharedRef() constructor expects 1 argument, got {len(node.arguments)}.", node=node)
+        return SharedRefType(PrimitiveType("none"))
+      arg_expr = node.arguments[0].expr
+      arg_type = self.visit(arg_expr)
+      node.is_shared_ref_constructor = True
+      if isinstance(arg_type, RefType):
+        if isinstance(arg_expr, IdentifierNode) and not isinstance(arg_expr, MoveNode):
+          self.error(f"Cannot copy move-only type '{arg_type}'; use explicit 'move {arg_expr.name}' to transfer ownership.", node=node)
+        inner_t = arg_type.inner_type
+      else:
+        inner_t = arg_type
+      if node.type_args:
+        expected_inner = self._resolve_type_node(node.type_args[0])
+        if not inner_t.is_compatible(expected_inner):
+          self.error(f"SharedRef<{expected_inner}> expected argument of type '{expected_inner}', got '{inner_t}'.", node=node)
+        return SharedRefType(expected_inner)
+      return SharedRefType(inner_t)
+
+    if isinstance(node.callee, IdentifierNode) and node.callee.name == "WeakRef":
+      self.error("WeakRef cannot be constructed directly; use 'shared_ref.downgrade()'.", node=node)
+      return WeakRefType(PrimitiveType("none"))
+
     signature = None
     is_constructor = False
 
@@ -2263,7 +2324,33 @@ class TypeChecker:
       is_test_assert = getattr(signature, "is_testing_assertion", False)
       if param_idx < len(expected_param_types):
         param_type = expected_param_types[param_idx]
-        if not is_test_assert and not arg_type.is_compatible(param_type):
+        param_is_var = False
+        param_mutabilities = getattr(signature, "param_mutabilities", None)
+        if param_mutabilities:
+          mut_idx = param_idx
+          if getattr(signature, "has_self", False) and isinstance(callee_node, MemberAccessNode):
+            mut_idx = param_idx + 1
+          if mut_idx < len(param_mutabilities):
+            param_is_var = param_mutabilities[mut_idx]
+
+        effective_arg_type = arg_type
+        # Auto-borrowing
+        if isinstance(arg_type, RefType) and not isinstance(param_type, RefType):
+          effective_arg_type = arg_type.inner_type
+          arg.is_auto_borrow = True
+        elif isinstance(arg_type, SharedRefType) and not isinstance(param_type, SharedRefType):
+          if param_is_var:
+            self.error(f"Cannot pass 'SharedRef<{arg_type.inner_type}>' as mutable 'var' parameter; shared references are read-only borrows.")
+          else:
+            effective_arg_type = arg_type.inner_type
+            arg.is_auto_borrow = True
+
+        # Explicit move check when passing to RefType parameter
+        if isinstance(param_type, RefType):
+          if isinstance(arg.expr, IdentifierNode) and not isinstance(arg.expr, MoveNode):
+            self.error(f"Cannot pass move-only type '{arg_type}' by value; use explicit 'move {arg.expr.name}' to transfer ownership.")
+
+        if not is_test_assert and not effective_arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
       else:
         # Extra parameter
@@ -2421,6 +2508,28 @@ class TypeChecker:
         node.is_instance_method = not is_static
         return method
       self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
+      return PrimitiveType("none")
+
+    if isinstance(receiver_type, SharedRefType):
+      if node.member == "share":
+        node.is_shared_ref_share = True
+        node.is_instance_method = True
+        return FunctionType([receiver_type], receiver_type, param_names=["self"], has_self=True)
+      elif node.member == "downgrade":
+        node.is_shared_ref_downgrade = True
+        node.is_instance_method = True
+        return FunctionType([receiver_type], WeakRefType(receiver_type.inner_type), param_names=["self"], has_self=True)
+      receiver_type = receiver_type.inner_type
+      node.is_auto_deref = True
+    elif isinstance(receiver_type, RefType):
+      receiver_type = receiver_type.inner_type
+      node.is_auto_deref = True
+    elif isinstance(receiver_type, WeakRefType):
+      if node.member == "upgrade":
+        node.is_weak_ref_upgrade = True
+        node.is_instance_method = True
+        return FunctionType([receiver_type], OptionalType(SharedRefType(receiver_type.inner_type)), param_names=["self"], has_self=True)
+      self.error(f"WeakRef has no member '{node.member}'; call '.upgrade()' to access the underlying value.", node=node)
       return PrimitiveType("none")
 
     if not isinstance(receiver_type, StructType):

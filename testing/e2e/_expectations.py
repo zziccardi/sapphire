@@ -131,4 +131,21 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_deep_optional_chaining_on_structs": 49,
         "test_guard_unwrapping_with_block_closure": 26,
     },
+    "ownership_and_move_test.sp": {
+        "test_move_assignment": 30,
+        "test_move_into_function": 10,
+        "test_move_reinitialization": 15,
+    },
+    "heap_smart_refs_test.sp": {
+        "test_unique_ref": 42,
+        "test_shared_ref_cycle_breaking": 42,
+        "test_shared_from_move": 99,
+    },
+    "recursion_test.sp": {
+        "test_direct_recursion": 120,
+        "test_branching_recursion": 13,
+        "test_accumulator_recursion": 55,
+        "test_mutual_recursion": 1,
+        "test_struct_method_recursion": 15,
+    },
 }

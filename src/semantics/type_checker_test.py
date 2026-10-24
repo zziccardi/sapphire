@@ -5007,6 +5007,155 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot access member 'x' on moved variable 'p'.", str(ctx.exception))
 
+  def test_ref_constructor_and_auto_deref(self):
+    """Verifies Ref() creates Ref<T> and auto-dereferences fields and methods."""
+    self._check("""
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    impl Point {
+      func get_sum(): int {
+        return self.x + self.y;
+      }
+    }
+    func test() {
+      let r = Ref(Point { x = 10, y = 20 });
+      let sum = r.get_sum();
+      let x_val = r.x;
+    }
+    """)
+
+  def test_ref_requires_explicit_move_on_assignment(self):
+    """Verifies that copying Ref<T> without explicit 'move' is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func test() {
+        var a = Ref(Point { x = 10 });
+        let b = a; // Error: cannot copy move-only type Ref<Point>
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Ref<Point>'; use explicit 'move a' to transfer ownership.", str(ctx.exception))
+
+  def test_ref_explicit_move_succeeds_and_invalidates_source(self):
+    """Verifies that 'let b = move a;' succeeds and invalidates 'a'."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func test() {
+        var a = Ref(Point { x = 10 });
+        let b = move a;
+        let v = a.x; // Error: use of moved variable
+      }
+      """)
+    self.assertIn("Use of moved variable 'a'.", str(ctx.exception))
+
+  def test_ref_function_passing_move_vs_borrow(self):
+    """Verifies that passing Ref<T> to T borrows, but passing to Ref<T> requires move."""
+    self._check("""
+    struct Point {
+      var x: int;
+    }
+    func read_point(p: Point) {
+      let v = p.x;
+    }
+    func take_ref(r: Ref<Point>) {
+      let v = r.x;
+    }
+    func test() {
+      var a = Ref(Point { x = 10 });
+      read_point(a); // Safe auto-borrow; 'a' is not moved!
+      take_ref(move a); // Explicit move transfers ownership
+    }
+    """)
+
+  def test_ref_function_passing_lvalue_without_move_rejected(self):
+    """Verifies that passing an lvalue Ref<T> by value without 'move' is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func take_ref(r: Ref<Point>) {}
+      func test() {
+        var a = Ref(Point { x = 10 });
+        take_ref(a); // Error: must use move
+      }
+      """)
+    self.assertIn("Cannot pass move-only type 'Ref<Point>' by value; use explicit 'move a' to transfer ownership.", str(ctx.exception))
+
+  def test_shared_ref_direct_and_from_moved_ref(self):
+    """Verifies SharedRef() constructor from value and from moved Ref."""
+    self._check("""
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      // Direct construction
+      let s1 = SharedRef(Point { x = 10 });
+      let x1 = s1.x;
+
+      // Promotion from unique Ref
+      var r = Ref(Point { x = 20 });
+      let s2 = SharedRef(move r);
+      let x2 = s2.x;
+    }
+    """)
+
+  def test_shared_ref_share_downgrade_and_upgrade(self):
+    """Verifies SharedRef .share(), .downgrade(), and WeakRef .upgrade()."""
+    self._check("""
+    struct Point {
+      var x: int;
+    }
+    func test() {
+      let s = SharedRef(Point { x = 10 });
+      let s2 = s.share();
+      let w = s.downgrade();
+      if let active ?= w.upgrade() {
+        let v = active.x;
+      }
+    }
+    """)
+
+  def test_weak_ref_direct_access_rejected(self):
+    """Verifies that accessing members directly on WeakRef without upgrade() is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func test() {
+        let s = SharedRef(Point { x = 10 });
+        let w = s.downgrade();
+        let v = w.x; // Error: must call .upgrade()
+      }
+      """)
+    self.assertIn("WeakRef has no member 'x'; call '.upgrade()' to access the underlying value.", str(ctx.exception))
+
+  def test_shared_ref_as_mutable_var_param_rejected(self):
+    """Verifies that passing SharedRef to a mutable 'var' parameter is rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func mutate(var p: Point) {
+        p.x = 20;
+      }
+      func test() {
+        let s = SharedRef(Point { x = 10 });
+        mutate(s);
+      }
+      """)
+    self.assertIn("Cannot pass 'SharedRef<Point>' as mutable 'var' parameter; shared references are read-only borrows.", str(ctx.exception))
+
+
 
 if __name__ == "__main__":
   unittest.main()

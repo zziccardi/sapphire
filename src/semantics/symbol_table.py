@@ -479,6 +479,73 @@ class CoroutineType(Type):
     return f"Coroutine<{self.yield_type}>"
 
 
+class RefType(Type):
+  """Represents unique heap ownership 'Ref<T>'."""
+
+  def __init__(self, inner_type: Type):
+    self.inner_type = inner_type
+    self.is_move_only = True
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, RefType):
+      return self.inner_type.is_compatible(other.inner_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, RefType):
+      return False
+    return self.inner_type == other.inner_type
+
+  def __repr__(self) -> str:
+    return f"Ref<{self.inner_type}>"
+
+
+class SharedRefType(Type):
+  """Represents reference-counted heap ownership 'SharedRef<T>'."""
+
+  def __init__(self, inner_type: Type):
+    self.inner_type = inner_type
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, SharedRefType):
+      return self.inner_type.is_compatible(other.inner_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, SharedRefType):
+      return False
+    return self.inner_type == other.inner_type
+
+  def __repr__(self) -> str:
+    return f"SharedRef<{self.inner_type}>"
+
+
+class WeakRefType(Type):
+  """Represents non-owning weak reference 'WeakRef<T>'."""
+
+  def __init__(self, inner_type: Type):
+    self.inner_type = inner_type
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, WeakRefType):
+      return self.inner_type.is_compatible(other.inner_type)
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    return super().is_compatible(other)
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, WeakRefType):
+      return False
+    return self.inner_type == other.inner_type
+
+  def __repr__(self) -> str:
+    return f"WeakRef<{self.inner_type}>"
+
+
 COROUTINE_METHODS: Set[str] = {
     "step",
     "is_done",
@@ -743,8 +810,23 @@ class SymbolTable:
     self.current_scope.define_type("bool", PrimitiveType("bool"))
     self.current_scope.define_type("String", StringType())
     self.current_scope.define_type("none", NoneType())
+    # TODO: Remove `void`?
     self.current_scope.define_type("void", NoneType())
     self.current_scope.define_type("Coroutine", CoroutineType(NoneType()))
+    self.current_scope.define_type("Ref", RefType(NoneType()))
+    self.current_scope.define_type("SharedRef", SharedRefType(NoneType()))
+    self.current_scope.define_type("WeakRef", WeakRefType(NoneType()))
+    self.current_scope.define(
+        "Ref",
+        FunctionSymbol("Ref", FunctionType([NoneType()], RefType(NoneType()))),
+    )
+    self.current_scope.define(
+        "SharedRef",
+        FunctionSymbol(
+            "SharedRef",
+            FunctionType([NoneType()], SharedRefType(NoneType())),
+        ),
+    )
     arena_t = ArenaType()
     self.current_scope.define_type("Arena", arena_t)
     self.current_scope.define(

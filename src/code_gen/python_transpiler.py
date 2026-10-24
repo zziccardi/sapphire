@@ -477,6 +477,75 @@ def _sapphire_map_get(m, key):
 
 def _sapphire_map_clear(m):
   m.clear()
+
+class _SapphireRef:
+  def __init__(self, value):
+    super().__setattr__('_value', value)
+  def __getattr__(self, name):
+    return getattr(self._value, name)
+  def __setattr__(self, name, val):
+    if name == '_value':
+      super().__setattr__(name, val)
+    else:
+      setattr(self._value, name, val)
+  def __repr__(self):
+    return f"Ref({self._value!r})"
+
+class _SapphireSharedControlBlock:
+  def __init__(self, value):
+    self.value = value
+    self.strong_count = 1
+    self.weak_count = 0
+
+class _SapphireSharedRef:
+  def __init__(self, target):
+    if isinstance(target, _SapphireRef):
+      super().__setattr__('_cb', _SapphireSharedControlBlock(target._value))
+    elif isinstance(target, _SapphireSharedControlBlock):
+      super().__setattr__('_cb', target)
+    else:
+      super().__setattr__('_cb', _SapphireSharedControlBlock(target))
+
+  def share(self):
+    self._cb.strong_count += 1
+    return _SapphireSharedRef(self._cb)
+
+  def downgrade(self):
+    self._cb.weak_count += 1
+    return _SapphireWeakRef(self._cb)
+
+  def __getattr__(self, name):
+    if name in ('_cb', 'share', 'downgrade'):
+      return super().__getattribute__(name)
+    return getattr(self._cb.value, name)
+
+  def __setattr__(self, name, val):
+    if name == '_cb':
+      super().__setattr__(name, val)
+    else:
+      setattr(self._cb.value, name, val)
+
+  def __repr__(self):
+    return f"SharedRef({self._cb.value!r})"
+
+class _SapphireWeakRef:
+  def __init__(self, cb):
+    self._cb = cb
+
+  def upgrade(self):
+    if self._cb is not None and self._cb.strong_count > 0:
+      self._cb.strong_count += 1
+      return _SapphireSharedRef(self._cb)
+    return None
+
+  def __repr__(self):
+    return f"WeakRef({self._cb.value!r})" if (self._cb and self._cb.strong_count > 0) else "WeakRef(expired)"
+
+def Ref(val):
+  return _SapphireRef(val)
+
+def SharedRef(val):
+  return _SapphireSharedRef(val)
 """
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
