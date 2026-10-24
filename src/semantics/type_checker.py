@@ -661,6 +661,8 @@ class TypeChecker:
             pass
 
   def _resolve_return_types(self, node: Any) -> List[Type]:
+    if isinstance(node, FunctionTypeNode):
+      return [self._resolve_type_node(t) for t in node.return_types]
     if hasattr(node, "return_types") and node.return_types:
       return [self._resolve_type_node(t) for t in node.return_types]
     elif hasattr(node, "return_type") and node.return_type:
@@ -1432,8 +1434,7 @@ class TypeChecker:
           if cond_type != PrimitiveType("bool"):
             self.error("While condition must resolve to 'bool'.")
         else:
-          if not node.init_binding.is_unwrap:
-            self.error("Init-statement in 'while' must be followed by a condition unless using optional unwrapping '?='.")
+          self.error("While statement requires an explicit boolean condition.", node=node)
 
         self.visit(node.block)
         self.symbol_table.exit_scope()
@@ -2546,7 +2547,12 @@ class TypeChecker:
 
     # Special member __proto__
     if node.member == "__proto__":
-      # returns optional of same struct type
+      if not receiver_type.is_prototype:
+        self.error(
+            f"Cannot access '__proto__' on standard struct '{receiver_type.name}'; '__proto__' is only available on 'proto' instances.",
+            node=node,
+        )
+        return PrimitiveType("none")
       return OptionalType(receiver_type)
 
     # Special member __del__
@@ -2629,12 +2635,6 @@ class TypeChecker:
       return sym.symbol_type
     if getattr(sym, "is_parameter", False):
       self.error(f"Cannot move out of borrowed parameter '{node.name}'.", node=node)
-      return sym.symbol_type
-    if not sym.is_mutable:
-      self.error(
-          f"Cannot move constant '{node.name}'; declare with 'var' to allow ownership transfer.",
-          node=node,
-      )
       return sym.symbol_type
     if sym in self.moved_symbols:
       self.error(f"Use of moved variable '{node.name}'.", node=node)

@@ -83,9 +83,11 @@ impl TreeNode {
   func path_to_root(): String {
     var path = self.name;
     var curr = self.parent;
-    while let p ?= curr {
-      path = p.name + "/" + path;
-      curr = p.parent;
+    while curr != none {
+      if let p ?= curr {
+        path = p.name + "/" + path;
+        curr = p.parent;
+      }
     }
     return "/" + path;
   }
@@ -153,9 +155,11 @@ func demo_doubly_linked_and_tree() {
   // Backward traversal from tail node
   print("Backward traversal from tail:");
   var curr: DoublyLinkedNode? = n3;
-  while let node ?= curr {
-    print("  Node value: " + String.from(node.value));
-    curr = node.prev;
+  while curr != none {
+    if let node ?= curr {
+      print("  Node value: " + String.from(node.value));
+      curr = node.prev;
+    }
   }
 
   // Hierarchical tree with upward parent pointers

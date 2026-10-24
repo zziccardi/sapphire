@@ -61,6 +61,8 @@ class PrimitiveType(Type):
     self.name = name
 
   def __eq__(self, other: object) -> bool:
+    if isinstance(other, NoneType) and self.name in ("none", "void"):
+      return True
     if not isinstance(other, PrimitiveType):
       return False
     return self.name.lower() == other.name.lower()
@@ -148,12 +150,35 @@ class FunctionType(Type):
     else:
       return [self.return_type]
 
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, OptionalType):
+      return self.is_compatible(other.base_type)
+    if not isinstance(other, FunctionType):
+      return False
+    if len(self.param_types) != len(other.param_types):
+      return False
+    for p1, p2 in zip(self.param_types, other.param_types):
+      if not p2.is_compatible(p1):
+        return False
+    ret1 = self.return_type
+    ret2 = other.return_type
+    is_void1 = isinstance(ret1, (NoneType, InferredType)) or (isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void"))
+    is_void2 = isinstance(ret2, (NoneType, InferredType)) or (isinstance(ret2, PrimitiveType) and ret2.name in ("none", "void"))
+    if is_void1 and is_void2:
+      return True
+    return ret1.is_compatible(ret2)
+
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, FunctionType):
       return False
+    ret1 = self.return_type
+    ret2 = other.return_type
+    is_void1 = isinstance(ret1, (NoneType, InferredType)) or (isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void"))
+    is_void2 = isinstance(ret2, (NoneType, InferredType)) or (isinstance(ret2, PrimitiveType) and ret2.name in ("none", "void"))
+    ret_eq = (is_void1 and is_void2) or (ret1 == ret2)
     return (
         self.param_types == other.param_types
-        and self.return_type == other.return_type
+        and ret_eq
         and self.param_mutabilities == other.param_mutabilities
     )
 
@@ -165,7 +190,13 @@ class FunctionType(Type):
       else:
         params_reprs.append(repr(t))
     params_str = ", ".join(params_reprs)
-    return f"({params_str}) -> {self.return_type}"
+    if isinstance(self.return_type, PrimitiveType) and self.return_type.name in ("none", "void"):
+      ret_str = "()"
+    elif isinstance(self.return_type, NoneType):
+      ret_str = "()"
+    else:
+      ret_str = str(self.return_type)
+    return f"({params_str}) -> {ret_str}"
 
 
 class StructField:
@@ -367,6 +398,20 @@ class RangeType(Type):
 
 class NoneType(Type):
   """Represents the special type of the 'none' literal."""
+
+  def __eq__(self, other: object) -> bool:
+    if isinstance(other, NoneType):
+      return True
+    if isinstance(other, PrimitiveType) and other.name in ("none", "void"):
+      return True
+    return False
+
+  def is_compatible(self, other: "Type") -> bool:
+    if isinstance(other, NoneType):
+      return True
+    if isinstance(other, PrimitiveType) and other.name in ("none", "void"):
+      return True
+    return super().is_compatible(other)
 
   def __repr__(self) -> str:
     return "none"

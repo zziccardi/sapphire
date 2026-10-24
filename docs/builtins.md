@@ -1,4 +1,4 @@
-# Built-in functions and types in Sapphire
+# Built-in functions and types
 
 This document provides a comprehensive reference for the standard built-in functions, primitive types, collections, and memory management constructs in the Sapphire language.
 
@@ -15,11 +15,11 @@ The `print` function is Sapphire's primary output primitive for writing textual 
 #### Signature and definition
 
 ```sapphire
-func print(value: String): void
+func print(value: String)
 ```
 
 * **Parameters**: `value` – a `String` expression (or an expression evaluated to a string via string concatenation).
-* **Return type**: `void` (an alias for `none`).
+* **Return type**: None (returns no value).
 
 #### Description and behavior
 

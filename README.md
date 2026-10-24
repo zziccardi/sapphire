@@ -126,7 +126,8 @@ if let target ?= target_ref {
   call-site type inference and explicit type arguments (`Stack<int>`).
 
 ### First-class coroutines
-* Coroutines are natively supported via `Coroutine<T>`.
+* Coroutines are natively supported via `Coroutine<T>` for value generators and
+  `Coroutine` for sequencing/flow control.
 * Bare `yield;` is used for sequencing; `yield <expr>;` is used for value
   streams.
 
@@ -143,7 +144,10 @@ if let target ?= target_ref {
   runtime stack-trace demanglers. When a runtime error occurs in Love2D, both
   the terminal and Love2D error screen display original Sapphire `.sp`
   filenames, line numbers, and source line snippets.
-* **Live hot-reloading & dev mode (`sapphire run --dev`)**: Automatically watches `.sp` project files, performs fast incremental re-compilation, patches existing living prototype/struct instances in-place without losing state, and executes `@on_reload` lifecycle hooks.
+* **Live hot-reloading & dev mode (`sapphire run --dev`)**: Automatically
+  watches `.sp` project files, performs fast incremental re-compilation, patches
+  existing living prototype/struct instances in-place without losing state, and
+  executes `@on_reload` lifecycle hooks.
 
 ## CLI overview
 

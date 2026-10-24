@@ -11,7 +11,7 @@ func fibonacci(count: int): Coroutine<int> {
   }
 }
 
-func cutscene(): Coroutine<void> {
+func cutscene(): Coroutine {
   print("Step 1: NPC waves");
   yield;
   print("Step 2: NPC walks across the room");

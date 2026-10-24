@@ -357,6 +357,9 @@ class ASTBuilder(SapphireVisitor):
     if ctx.returnTypeList():
       return_types = self.visit(ctx.returnTypeList())
       param_types = [self.visit(t) for t in ctx.type_()] if ctx.type_() else []
+    elif ctx.LPAREN() and len(ctx.LPAREN()) >= 2:
+      param_types = [self.visit(t) for t in ctx.type_()] if ctx.type_() else []
+      return_types = []
     else:
       param_types = [self.visit(t) for t in ctx.type_()[:-1]] if len(ctx.type_()) > 1 else []
       return_types = [self.visit(ctx.type_()[-1])]

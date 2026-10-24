@@ -25,7 +25,7 @@ trait WsgiModule {
   func make_server(
       self, host: String, port: int,
       app: ([String: String],
-            (String, [[String]]) -> void) -> [BytesHandle]): WsgiServer;
+            (String, [[String]]) -> ()) -> [BytesHandle]): WsgiServer;
 }
 
 // 4. Host variable bindings
@@ -39,7 +39,7 @@ var wsgiref: WsgiModule;
 @export("app")
 func wsgi_handler(
     environ: [String: String],
-    start_response: (String, [[String]]) -> void): [BytesHandle] {
+    start_response: (String, [[String]]) -> ()): [BytesHandle] {
   let method = environ.get("REQUEST_METHOD") ?? "GET";
   let path = environ.get("PATH_INFO") ?? "/";
   print("Processing " + method + " request for " + path);
@@ -68,7 +68,7 @@ func main() {
     "PATH_INFO": "/api/status",
   };
 
-  let mock_start_response = (status: String, headers: [[String]]) -> void {
+  let mock_start_response = (status: String, headers: [[String]]) -> {
     print("HTTP Response Status: " + status);
   };
 

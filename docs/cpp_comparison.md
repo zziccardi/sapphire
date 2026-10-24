@@ -1,4 +1,4 @@
-# Sapphire vs. C++: Design Rationale & Pain Point Mitigations
+# Sapphire vs. C++
 
 This document outlines how Sapphire's core architecture and language design intentionally address common pain points, historical pitfalls, and cognitive overhead encountered in **C++**, while preserving systems-level performance, deterministic resource management, and bare-metal control.
 

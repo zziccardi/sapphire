@@ -1,4 +1,4 @@
-# Sapphire vs. Rust: Design Rationale & Pain Point Mitigations
+# Sapphire vs. Rust
 
 This document outlines how Sapphire's core architecture and language design intentionally address common pain points, friction, and ergonomic challenges encountered in **Rust**, while preserving systems-level performance, memory safety, and zero-cost abstractions.
 

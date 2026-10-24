@@ -1242,14 +1242,29 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
     # 44. __proto__ property access
+    # Standard struct rejecting __proto__
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Person {}
+      impl Person {
+        func __init__() {}
+      }
+      func test() {
+        let p = Person();
+        let parent = p.__proto__;
+      }
+      """)
+    self.assertIn("Cannot access '__proto__' on standard struct 'Person'; '__proto__' is only available on 'proto' instances.", str(ctx.exception))
+
+    # Prototype struct allowing __proto__
     self._check("""
-    struct Person {}
-    impl Person {
-      func __init__() {}
+    let a = Arena();
+    proto Goblin {
+      var hp: int;
     }
     func test() {
-      let p = Person();
-      let parent = p.__proto__;
+      let g = Goblin { hp = 100 } in a;
+      let parent = g.__proto__;
     }
     """)
 
@@ -2611,9 +2626,13 @@ class TestTypeChecker(unittest.TestCase):
   def test_compiler_fixes_and_inference(self):
     """Verifies parenthesized types, optional lambda parameter inference, and struct initializer context propagation."""
     # 1. Parenthesized optional function types
+    # TODO: Remove void?
     self._check("""
     func test_parenthesized_type(cb: ((int) -> void)?) {
       let x: ((int) -> void)? = cb;
+    }
+    func test_unit_callback(cb: (String) -> ()) {
+      let x: (String) -> () = cb;
     }
     """)
 
@@ -2669,14 +2688,13 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("While condition must resolve to 'bool'", str(ctx.exception))
 
-    # 7. Standard while let binding without condition (should error)
-    with self.assertRaises(SemanticError) as ctx:
+    # 7. Standard while let binding without condition (syntax error)
+    with self.assertRaises(SyntaxError):
       self._check("""
       func test() {
         while let x = 42 { }
       }
       """)
-    self.assertIn("Init-statement in 'while' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
 
     # 8. Left operand of ?? not optional (should error)
     with self.assertRaises(SemanticError) as ctx:
@@ -4924,16 +4942,17 @@ class TestTypeChecker(unittest.TestCase):
       checker.check(ast)
     self.assertIn("Cannot mutate field 'x' of constant struct variable 'p'.", str(ctx.exception))
 
-  def test_move_constant_rejected(self):
-    """Verifies that moving a let constant produces a semantic error."""
+  def test_move_constant_allowed(self):
+    """Verifies that moving a let constant succeeds and invalidates subsequent reads."""
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
         let a = 10;
         let b = move a;
+        let c = a;
       }
       """)
-    self.assertIn("Cannot move constant 'a'; declare with 'var' to allow ownership transfer.", str(ctx.exception))
+    self.assertIn("Use of moved variable 'a'.", str(ctx.exception))
 
   def test_move_use_after_move_rejected(self):
     """Verifies that reading a moved variable produces a semantic error."""
