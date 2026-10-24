@@ -23,15 +23,17 @@ This directory contains the Visual Studio Code extension client for the **Sapphi
 
 ### 1. Requirements
 Ensure you have the following installed in your development environment:
-- Node.js (v14.15+) and `npm`
+- Node.js (v20+) and `npm`
 - Python 3.14+ (with `pygls` installed in the Sapphire workspace virtualenv)
 
-### 2. Compile the Extension
+### 2. Compile & test the extension
 From this directory (`tools/vscode-extension`), run:
 
 ```bash
 npm install
 npm run compile
+npm test          # Runs tests using Node.js built-in test runner (no third-party dependencies)
+npm run coverage  # Runs native test coverage
 ```
 
 ### 3. Launching in debug mode
