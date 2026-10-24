@@ -94,8 +94,8 @@ class FunctionTypeNode(TypeNode):
       self.return_types = [return_types]
 
   @property
-  def return_type(self) -> TypeNode:
-    return self.return_types[0]
+  def return_type(self) -> Optional[TypeNode]:
+    return self.return_types[0] if self.return_types else None
 
 
 # ==========================================

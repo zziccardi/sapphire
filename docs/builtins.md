@@ -15,11 +15,11 @@ The `print` function is Sapphire's primary output primitive for writing textual 
 #### Signature and definition
 
 ```sapphire
-func print(value: String): void
+func print(value: String)
 ```
 
 * **Parameters**: `value` – a `String` expression (or an expression evaluated to a string via string concatenation).
-* **Return type**: `void` (an alias for `none`).
+* **Return type**: None (returns no value).
 
 #### Description and behavior
 

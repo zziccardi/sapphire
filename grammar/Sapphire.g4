@@ -125,7 +125,7 @@ baseType
     ;
 
 functionType
-    : LPAREN (type (COMMA type)*)? RPAREN ARROW (LPAREN returnTypeList RPAREN | type)
+    : LPAREN (type (COMMA type)*)? RPAREN ARROW (LPAREN returnTypeList? RPAREN | type)
     ;
 
 statement
@@ -230,7 +230,7 @@ withClause
 
 whileStatement
     : WHILE expression block
-    | WHILE letOrVarBinding (SEMICOLON expression)? block
+    | WHILE letOrVarBinding SEMICOLON expression block
     ;
 
 letOrVarBinding

@@ -38,10 +38,11 @@ through four key pillars:
   object-slicing risks. Dynamic prototypal delegation is opt-in and data-only,
   and uses copy-on-write (CoW) to protect prototypes.
 * **Scope-bound memory safety**: Reference types (including `String`, `Array`,
-  `Map`, `Arena`, `Range`, and all user-defined `struct` and `proto` types) are
-  passed by constant reference by default. Compile-time scope-bound aliasing
-  rules guarantee memory safety and reference validity across call sites
-  without requiring lifetime annotations or manual pointer arithmetic.
+  `Map`, `Arena`, `Range`, and all `proto` types), as well as stack-allocated
+  user-defined `struct` types, are passed by **constant reference (borrow)**
+  by default. Compile-time scope-bound aliasing rules guarantee memory safety
+  and reference validity across call sites without requiring lifetime
+  annotations or manual pointer arithmetic.
 * **Deterministic lifecycle control**: Opt-in dynamic prototypal references
   are allocated in managed, lexically scoped arenas. The compiler enforces
   strict escape-checking to automatically tear down allocations at scope
@@ -120,8 +121,13 @@ Variables are immutable constants by default to encourage safety. Mutability mus
     on assignment.
   * **The `move` keyword**: Explicit ownership transfers use the `move` keyword
     (e.g. `let b = move a;` or `process(move a);`), mirroring `clone` for deep
-    duplication. Moving is only permitted on mutable variables (`var`); moving a
-    constant declared with `let` produces a compile-time error.
+    duplication. Moving transfers exclusive ownership and statically
+    invalidates the source identifier in the current scope.
+    * Moving is permitted on both constants (`let`) and mutable variables
+      (`var`). Ownership transfer is orthogonal to in-place mutation; allowing
+      `move` on immutable `let` bindings prevents developers from having to
+      declare variables as mutable `var` simply to transfer ownership, thereby
+      upholding Sapphire's core principle of immutability by default.
   * **Move-only types (`Ref<T>`)**: Types representing exclusive heap ownership
     (`Ref<T>`) are move-only. Assigning a `Ref<T>` to another variable without
     `move` (e.g. `let b = a;`) raises a compile-time `SemanticError`. Ownership
@@ -480,9 +486,11 @@ if let active_target ?= target; active_target.health > 50 {
 }
 
 while let score = get_score(); score < 100 {
-  // `score` is initialized once; `score < 100` is re-evaluated ever iteration
+  // `score` is initialized once; `score < 100` is re-evaluated every iteration
 }
 ```
+
+* **Mandatory boolean condition for `while` loops**: Unlike `if` statement headers (where `if let x ?= opt` can stand alone without a subsequent check), `while` statements **always require an explicit boolean condition** following the semicolon (e.g. `while let score = get_score(); score < 100 { ... }` or `while condition { ... }`). Conditionless `while-let` bindings are prohibited to ensure termination conditions remain explicit and transparent.
 
 ### Nil-coalescing operator (`??`)
 Sapphire provides the binary coalescing operator `??` to supply a fallback value
@@ -499,9 +507,11 @@ Sapphire provides Swift-style `guard` statements to enforce function and loop
 preconditions, avoid deep nesting, and promote unwrapped variables into the
 surrounding scope:
 
+<!-- TODO: Only initializations should be followed by semicolons; fix case
+     below where conditions are also separated by them. -->
 ```sapphire
 func process_user(users: [String: User], id: String): int {
-  guard let user ?= users[id];
+  guard let user ?= users.get(id);
         user.is_active;
         user.score > 0
   else {
@@ -531,7 +541,7 @@ with let src ?= open_file("source.txt", "r");
 ```
 
 * **RAII & destructors**: Any resource bound inside a `with` statement must define a `func __del__()` destructor (or be a built-in `Arena`).
-* **Deterministic LIFO teardown**: Acquired resources are automatically cleaned up via `__del__()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on error/exception.
+* **Deterministic LIFO teardown**: Acquired resources are automatically cleaned up via `__del__()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on early scope exit.
 * **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly destroyed via their `__del__()` destructors before executing the optional `else` block.
 * **Lexical scoping**: Variables bound in `with` clauses are scoped strictly to the `with` body block.
 
@@ -542,9 +552,10 @@ return value(s) using colon syntax.
 
 * **Primitive value types**: Primitive numeric/boolean types (`int`, `float`,
   `bool`) and `none` are passed by **value** by default.
-* **Reference types**: Reference types – including `String`, `Array`, `Map`,
-  `Arena`, `Range`, and all user-defined `struct`s and `proto`s – are passed by
-  **constant reference** by default.
+* **Reference & struct types**: Reference types (`String`, `Array`, `Map`,
+  `Arena`, `Range`, and `proto` types), as well as user-defined `struct` value
+  types, are passed by **constant reference (borrow)** by default to eliminate
+  copy overhead without pointer syntax.
 * **Mutable references**: Indicated by prefixing the parameter with `var`,
   causing it to be passed by mutable reference. Callers may not pass variables
   declared with `let` to these parameters. This applies to both primitive and
@@ -627,8 +638,10 @@ Functions are first-class citizens. To avoid double-colon confusion, function ty
 ```sapphire
 // Function type declaration
 var math_op: (int, int) -> int;
-var callback: (String) -> void;  // `void` is an alias for `none`
+var callback: (String) -> ();  // Functions returning nothing use empty unit `()`
 ```
+
+For functions that do not produce a return value, the return type is represented by the empty unit `()` (e.g. `(String) -> ()`), mirroring unit types in modern systems languages. Standard named functions simply omit the return type and colon annotation entirely (e.g. `func handle_event(e: Event) { ... }`).
 
 ### Anonymous functions (lambdas)
 
@@ -665,9 +678,9 @@ let sum_of_even_squares = numbers
 
 Sapphire provides first-class support for frame-steppable coroutines and generators via the built-in `Coroutine<T>` type and the `yield` statement.
 
-* **Declaration**: Functions returning a coroutine declare `Coroutine<T>` (yielding values of type `T`) or `Coroutine<void>` / `Coroutine` (yielding flow control without producing payload values).
+* **Declaration**: Functions returning a coroutine declare `Coroutine<T>` (yielding values of type `T`) or `Coroutine` (yielding flow control without producing payload values).
 * **Yield syntax**:
-  * In `Coroutine<void>`, use bare `yield;` to pause execution until the next `.step()` tick.
+  * In `Coroutine` (flow-only), use bare `yield;` to pause execution until the next `.step()` tick.
   * In `Coroutine<T>`, use `yield <expr>;` to yield a value of type `T`.
 * **Disambiguation with `match` expressions**: Any `yield` statement inside a multi-statement `match` case block is strictly bound to evaluating that match arm. To yield from a coroutine based on pattern matching, evaluate the `match` expression to a value first and then yield it at the coroutine level.
 * **Completion**: Coroutines complete when execution reaches the end of the body or hits a bare `return;`. Returning values via `return <expr>;` from a coroutine is prohibited at compile time.
@@ -678,7 +691,7 @@ Sapphire provides first-class support for frame-steppable coroutines and generat
 
 ```sapphire
 // 1. Frame-based sequencing
-func cutscene(npc: NPC): Coroutine<void> {
+func cutscene(npc: NPC): Coroutine {
   npc.play_anim("wave");
   yield;
   npc.walk_to(x = 100.0, y = 50.0);
@@ -813,7 +826,7 @@ impl FileHandle {
 
 * **Implicit mutable self**: In alignment with Sapphire's method conventions, `self` is implicitly available as a mutable reference within the body of `__del__()`.
 * **Zero parameters**: Destructors take exactly zero parameters (`func __del__()`). Declaring parameters on `__del__` is a compile-time `SemanticError`.
-* **Modifier constraints**: Marking `__del__` as `static` is strictly prohibited. Destructors must return `void` (or `none`).
+* **Modifier constraints**: Marking `__del__` as `static` is strictly prohibited. Destructors specify no return type.
 * **No manual invocation**: Calling `__del__()` directly as an ordinary method (`file.__del__()`) is forbidden at compile time. Destructors are exclusively invoked by the compiler.
 * **Automatic LIFO execution**: The compiler automatically emits destructor calls in reverse order of declaration (LIFO) when stack-allocated structs exit their enclosing lexical scope, on early `return`, or on loop control jumps (`break` and `continue`).
 * **RVO elision**: Returning a struct identifier by value from a function transfers ownership to the caller, eliding the local destructor invocation.
@@ -1072,13 +1085,13 @@ To prevent the unpredictability of JavaScript-style dynamic prototypes and keep 
 
 #### The `__proto__` property
 
-Every struct instance automatically exposes a built-in, compiler-generated `__proto__` property to inspect its prototype chain:
+Every `proto` instance automatically exposes a built-in, compiler-generated `__proto__` property to inspect its prototype chain (standard `struct` declarations do not possess prototype tables or a `__proto__` property, upholding Sapphire's zero-overhead guarantee):
 * **Immutability**: The `__proto__` property is read-only. It cannot be reassigned at runtime, preventing prototype-pollution vulnerabilities and allowing the compiler to perform layout optimizations.
-* **Type safety**: For any struct `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
+* **Type safety**: For any prototype type `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
 * **Prototype assignment**:
-  * For instances created via a standard constructor (e.g., `Enemy() in my_arena`), `__proto__` evaluates to `none`.
+  * For prototype instances created via a standard initializer (e.g., `Enemy { ... } in my_arena`), `__proto__` evaluates to `none`.
   * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
-  * Since static inheritance is resolved at compile time via delegation, it does not create a runtime parent object. Therefore, statically inherited instances that are not cloned will also have their `__proto__` set to `none`.
+  * Standard `struct` instances do not possess prototype tables or a `__proto__` property; attempting to access `.__proto__` on a standard `struct` produces a compile-time `SemanticError`.
 
 ## 12. Compiler & runtime implementation
 

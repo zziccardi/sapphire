@@ -1682,7 +1682,7 @@ struct Container {
 func top_process(p_param: Point) {
   let top_a = 1, top_b = 2;
   let top_c = top_a;
-  while let active ?= p_param {
+  while let active ?= p_param; active.x > 0 {
     let active_val = active;
   }
   let m = [1: 2];
@@ -1695,7 +1695,7 @@ impl Point {
   func process(p_param: Point) {
     let a = 1, b = 2;
     let c = a;
-    while let active ?= p_param {
+    while let active ?= p_param; active.x > 0 {
       let active_val = active;
     }
     let m = [1: 2];

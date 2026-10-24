@@ -28,8 +28,8 @@ struct Button {
   var label: String;
   var state: WidgetState = WidgetState.Default;
   var theme: ComponentTheme;
-  var parent: Button?;                // Optional parent widget reference
-  var on_click: ((String) -> void)?;  // Optional click listener callback
+  var parent: Button?;              // Optional parent widget reference
+  var on_click: ((String) -> ())?;  // Optional click listener callback
 }
 
 impl Button {
