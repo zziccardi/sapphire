@@ -242,22 +242,22 @@ forStatement
     ;
 
 expression
-    : expression LBRACKET expression RBRACKET                     # IndexExpr
-    | expression typeArgumentList? LPAREN argumentList? RPAREN (IN expression)?    # CallExpr
-    | expression (DOT | OPT_DOT) memberAccess                     # MemberAccessExpr
-    | (SUB | ADD | NOT) expression                                # UnaryExpr
-    | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?                 # CloneExpr
-    | MOVE IDENTIFIER                                             # MoveExpr
-    | expression AS type                                          # CastExpr
-    | expression (MUL | DIV | MOD) expression                     # MultiplicativeExpr
-    | expression (ADD | SUB) expression                           # AdditiveExpr
-    | expression (EQ | NEQ | LT | LE | GT | GE) expression        # CompareExpr
-    | expression COALESCE expression                              # CoalesceExpr
-    | expression AND expression                                   # LogicalAndExpr
-    | expression OR expression                                    # LogicalOrExpr
-    | <assoc=right> expression QUESTION expression COLON expression # TernaryExpr
-    | lambdaExpression                                            # LambdaExpr
-    | primaryExpression                                           # PrimaryExpr
+    : expression LBRACKET expression RBRACKET                                    # IndexExpr
+    | expression typeArgumentList? LPAREN argumentList? RPAREN (IN expression)?  # CallExpr
+    | expression (DOT | OPT_DOT) memberAccess                                    # MemberAccessExpr
+    | (SUB | ADD | NOT) expression                                               # UnaryExpr
+    | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?              # CloneExpr
+    | MOVE IDENTIFIER                                                            # MoveExpr
+    | expression AS type                                                         # CastExpr
+    | expression (MUL | DIV | MOD) expression                                    # MultiplicativeExpr
+    | expression (ADD | SUB) expression                                          # AdditiveExpr
+    | expression (EQ | NEQ | LT | LE | GT | GE) expression                       # CompareExpr
+    | expression COALESCE expression                                             # CoalesceExpr
+    | expression AND expression                                                  # LogicalAndExpr
+    | expression OR expression                                                   # LogicalOrExpr
+    | <assoc=right> expression QUESTION expression COLON expression              # TernaryExpr
+    | lambdaExpression                                                           # LambdaExpr
+    | primaryExpression                                                          # PrimaryExpr
     ;
 
 lambdaExpression
