@@ -26,13 +26,13 @@ struct Vector2D {
 }
 
 impl Vector2D {
-  func translate(dx: float, dy: float) {
+  var func translate(dx: float, dy: float) {
     self.x += dx;
     self.y += dy;
   }
 
   // Calculates the Manhattan distance to another Vector2D point.
-  const func get_distance_to(other: Vector2D): float {
+  func get_distance_to(other: Vector2D): float {
     let dx = self.x - other.x;
     let dy = self.y - other.y;
     var abs_dx = dx;
@@ -52,7 +52,7 @@ impl Vector2D {
 
 // 2. Behavioral traits (love2d engine contracts)
 trait Updatable {
-  func update(dt: float);
+  var func update(dt: float);
 }
 
 trait Drawable {
@@ -85,7 +85,7 @@ impl Entity {
 }
 
 impl Updatable for Entity {
-  func update(dt: float) {
+  var func update(dt: float) {
     if self.health <= 0 {
       self.active = false;
       return;
@@ -133,8 +133,8 @@ impl GameEngine {
 
 // 5. Core love2d-style engine callbacks
 trait Love2D {
-  func load();
-  func update(dt: float);
+  var func load();
+  var func update(dt: float);
   func draw();
 }
 
@@ -142,7 +142,7 @@ impl Love2D for GameEngine {
   // Initializes game state, entities, and parameters.
   // This is called once at the start of the game loop.
   // Simulates `love.load()` in love2d.
-  func load() {
+  var func load() {
     self.state = GameState.Playing;
     self.score = 0;
     self.frame_count = 0;
@@ -159,7 +159,7 @@ impl Love2D for GameEngine {
   // Process physics, inputs, AI updates, & state transitions.
   // This is called once per frame with a delta-time param.
   // Simulates `love.update(dt)` in love2d.
-  func update(dt: float) {
+  var func update(dt: float) {
     self.frame_count += 1;
 
     match self.state {

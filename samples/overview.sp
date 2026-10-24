@@ -9,7 +9,7 @@ let MAX_PLAYERS = 100;
 
 // 1. Traits defining contracts
 trait Damageable {
-  func take_damage(amount: int);
+  var func take_damage(amount: int);
 }
 
 // 2. Struct declarations (static inheritance & fields)
@@ -49,13 +49,13 @@ impl Character {
     self.name = name;
   }
 
-  // Const method (cannot modify self)
-  const func get_health_ratio(): float {
+  // Immutable method by default (cannot modify self)
+  func get_health_ratio(): float {
     return self.health / self.max_health;
   }
 
-  // Mutable method (can modify self)
-  func heal(amount: int) {
+  // Mutable method (explicitly declared with var func)
+  var func heal(amount: int) {
     self.health += amount;
     if self.health > self.max_health {
       self.health = self.max_health;
@@ -65,7 +65,7 @@ impl Character {
 
 // Implement trait for Character
 impl Damageable for Character {
-  func take_damage(amount: int) {
+  var func take_damage(amount: int) {
     self.health -= amount;
     if self.health < 0 {
       self.health = 0;

@@ -45,7 +45,7 @@ impl ApiClient {
   }
 
   // Executes an HTTP call with default and named parameters
-  const func send_request(
+  func send_request(
       url: String, method: String = "GET", body: String? = none,
       timeout_ms: int = 5000): HttpResponse {
     let full_url = self.base_url + url;

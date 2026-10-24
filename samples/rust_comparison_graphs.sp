@@ -24,7 +24,7 @@ struct GraphNode {
 }
 
 impl GraphNode {
-  func add_edge(var neighbor: GraphNode) {
+  var func add_edge(var neighbor: GraphNode) {
     self.neighbors.push(neighbor);
   }
 
@@ -61,7 +61,7 @@ struct DoublyLinkedNode {
 }
 
 impl DoublyLinkedNode {
-  func link_next(var following: DoublyLinkedNode) {
+  var func link_next(var following: DoublyLinkedNode) {
     self.next = following;
     following.prev = self;
   }
@@ -74,13 +74,13 @@ struct TreeNode {
 }
 
 impl TreeNode {
-  func add_child(var child: TreeNode) {
+  var func add_child(var child: TreeNode) {
     child.parent = self;
     self.children.push(child);
   }
 
   // Navigate upward from any child node to the root
-  const func path_to_root(): String {
+  func path_to_root(): String {
     var path = self.name;
     var curr = self.parent;
     while let p ?= curr {

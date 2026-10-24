@@ -73,7 +73,7 @@ implBlock
     ;
 
 implMember
-    : (STATIC | CONST)? functionDeclaration
+    : (STATIC | VAR)? functionDeclaration
     ;
 
 traitDeclaration
@@ -85,7 +85,7 @@ returnTypeList
     ;
 
 traitMember
-    : annotation* (STATIC | CONST)? FUNC typeParamList? IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
+    : annotation* (STATIC | VAR)? FUNC typeParamList? IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
     ;
 
 functionDeclaration

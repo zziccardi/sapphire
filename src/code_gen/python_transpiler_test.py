@@ -249,7 +249,7 @@ class TestPythonTranspiler(unittest.TestCase):
       func __init__(v: int) {
         self.val = v;
       }
-      const func get_val(): int {
+      func get_val(): int {
         return self.val;
       }
       static func create_default(): Counter {

@@ -454,11 +454,11 @@ class TestLuaTranspiler(unittest.TestCase):
       self.assertEqual(cm.exception.code, 1)
 
   def test_trait_member_modifiers(self):
-    """Verifies parsing and building AST for const and static trait members."""
+    """Verifies parsing and building AST for var and static trait members."""
     code = """
     trait Printable {
       static func create(): Printable;
-      const func display(): String;
+      var func display(): String;
     }
     """
     input_stream = InputStream(code)
@@ -469,7 +469,7 @@ class TestLuaTranspiler(unittest.TestCase):
     builder = ASTBuilder()
     ast = builder.visit(tree)
     self.assertEqual(ast.declarations[0].members[0].modifier, "static")
-    self.assertEqual(ast.declarations[0].members[1].modifier, "const")
+    self.assertEqual(ast.declarations[0].members[1].modifier, "var")
 
   def test_lua_execution_if_available(self):
     """Executes transpiled Lua code using system Lua interpreter if present."""

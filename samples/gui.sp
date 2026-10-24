@@ -33,8 +33,8 @@ struct Button {
 }
 
 impl Button {
-  // Const method: does not mutate self
-  const func get_background(): String {
+  // Immutable method: does not mutate self
+  func get_background(): String {
     if self.state == WidgetState.Disabled {
       return "#E0E0E0";
     }
@@ -42,7 +42,7 @@ impl Button {
   }
 
   // Mutating method
-  func set_state(new_state: WidgetState) {
+  var func set_state(new_state: WidgetState) {
     self.state = new_state;
   }
 

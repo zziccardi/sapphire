@@ -98,12 +98,12 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
       self.damage = dmg;
       self.name = name;
     }
-    const func get_damage(): int {
+    func get_damage(): int {
       return self.damage;
     }
   }
   ```
-* `self` is implicit in non-static methods. Methods marked `const` cannot mutate `self`.
+* `self` is implicit in non-static methods. Methods default to immutable `self`; mutating methods must be explicitly declared with `var func`.
 
 ### 3.7 Inheritance & Prototypal State Delegation
 * **Static Structural Inheritance**: `struct Child: Parent1, Parent2 { ... }`. Under the hood, this compiles to composition and forwarding. **No up-casting** is permitted.

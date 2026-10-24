@@ -27,7 +27,7 @@ impl Point {
     self.y = y;
   }
 
-  func translate(dx: float, dy: float) {
+  var func translate(dx: float, dy: float) {
     self.x += dx;
     self.y += dy;
   }
@@ -64,7 +64,7 @@ impl Enemy {
     self.damage = damage;
   }
 
-  func take_damage(amount: int) {
+  var func take_damage(amount: int) {
     self.hp -= amount;
     if self.hp < 0 {
       self.hp = 0;

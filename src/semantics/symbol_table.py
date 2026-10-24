@@ -188,7 +188,7 @@ class StructMethod:
                modifier: Optional[str]):
     self.name = name
     self.method_type = method_type
-    self.modifier = modifier  # 'static', 'const', or None
+    self.modifier = modifier  # 'static', 'var', or None
 
 
 class GenericTypeParameter(Type):

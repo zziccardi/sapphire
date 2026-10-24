@@ -25,7 +25,7 @@ struct Transform2D {
 }
 
 impl Transform2D {
-  func translate(dx: float, dy: float) {
+  var func translate(dx: float, dy: float) {
     self.x += dx;
     self.y += dy;
   }
@@ -38,7 +38,7 @@ struct RigidBody {
 }
 
 impl RigidBody {
-  func apply_force(fx: float, fy: float) {
+  var func apply_force(fx: float, fy: float) {
     self.vx += fx / self.mass;
     self.vy += fy / self.mass;
   }
@@ -59,11 +59,11 @@ struct Player: Transform2D, RigidBody {
 // ============================================================================
 
 trait Renderable {
-  const func render(): String;
+  func render(): String;
 }
 
 impl Renderable for Player {
-  const func render(): String {
+  func render(): String {
     return f"Player {self.name} at ({self.x}, {self.y})";
   }
 }
@@ -73,7 +73,7 @@ struct Obstacle {
 }
 
 impl Renderable for Obstacle {
-  const func render(): String {
+  func render(): String {
     return f"Obstacle [{self.label}])";
   }
 }

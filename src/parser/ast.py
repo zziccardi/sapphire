@@ -246,10 +246,10 @@ class FuncDeclNode(DeclNode):
 
 
 class ImplMemberNode(ASTNode):
-  """Represents a member inside an impl block (e.g. static/const/mutable methods)."""
+  """Represents a member inside an impl block (e.g. static/var/immutable methods)."""
 
   def __init__(self, modifier: Optional[str], func_decl: FuncDeclNode):
-    self.modifier = modifier  # 'static', 'const', or None
+    self.modifier = modifier  # 'static', 'var', or None
     self.func_decl = func_decl
 
 

@@ -16,14 +16,14 @@ struct Player: Position, Health {
 }
 
 impl Position {
-  func move_by(dx: float, dy: float) {
+  var func move_by(dx: float, dy: float) {
     self.x += dx;
     self.y += dy;
   }
 }
 
 impl Health {
-  func take_damage(amount: int) {
+  var func take_damage(amount: int) {
     self.hp -= amount;
     if self.hp < 0 {
       self.hp = 0;
