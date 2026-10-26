@@ -86,6 +86,24 @@ Note: The high-level compilation driver function `transpile_file()` is exported 
 pipenv run python src/run_transpiler.py samples/overview.sp [python|lua]
 ```
 
+## Testing & verification
+
+### Running unit and integration tests
+
+Run the following to execute all unit tests under `src/` (which automatically includes all samples compilation tests):
+
+```bash
+pipenv run test
+```
+
+### Verifying sample programs compilation
+
+To exclusively verify that all 25+ demo programs in `samples/` compile cleanly across both Python and Lua 5.1 target backends without writing artifacts to disk:
+
+```bash
+pipenv run check-samples
+```
+
 ## Test coverage
 
 Run the following to execute all unit tests under `src/` & track code coverage:

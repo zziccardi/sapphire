@@ -1,4 +1,4 @@
-# Sapphire VS Code extension
+# VS Code extension
 
 This directory contains the Visual Studio Code extension client for the **Sapphire** programming language. It interfaces with the Sapphire language server to provide rich, editor-level IDE support.
 

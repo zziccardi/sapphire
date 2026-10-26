@@ -1,4 +1,4 @@
-# Sapphire language server
+# Language server
 
 This directory contains the Python-based Language Server Protocol (LSP) server implementation for the Sapphire programming language.
 
@@ -25,8 +25,9 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 2. **Semantic tokens**: Rich syntax highlighting. An AST-walking semantic subclass of `TypeChecker` maps identifiers and definitions to semantic types (e.g. `struct`, `interface`, `parameter`, `variable`, `function`, `method`, `property`) and modifier states (e.g. `declaration`, `static`, `readonly`), delta-encoding them for the editor.
 3. **Hover**: Displays type signatures, parameter scopes, and declaration kind metadata when hovering over variables, functions, structs, fields, parameters, or traits.
 4. **Member auto-completion**: Auto-suggests fields and methods of a struct when the user types a dot `.` on a variable or inside `self` methods.
-5. **Go to Definition**: Jump directly to variable, function, struct, trait, enum, field, or inheritance declaration locations (`F12` / `Cmd+Click`).
-6. **Signature Help**: Parameter hints, docstrings, and active parameter tracking when invoking functions, constructors, or methods.
+5. **Go-to-definition**: Jump directly to variable, function, struct, trait, enum, field, or inheritance declaration locations (`F12` / `Cmd+Click`).
+6. **Signature help**: Parameter hints, docstrings, and active parameter tracking when invoking functions, constructors, or methods.
+7. **Document symbols & outline**: Hierarchical symbols for VS Code's Outline view, Breadcrumbs, and Go to Symbol in File (`Cmd+Shift+O`). Extracts structs, prototypes, enums, traits, impl blocks, methods, functions, and top-level variables/constants.
 
 ## Requirements
 
@@ -36,8 +37,8 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 ## Files
 
 - [server.py](src/lsp/server.py): The main LSP server entrypoint that runs the server on `stdio` and manages the event hooks.
+- [document_symbols.py](src/lsp/document_symbols.py): Translates AST declarations into hierarchical LSP `DocumentSymbol` trees.
 - [semantic_tokens.py](src/lsp/semantic_tokens.py): Implements position tracking and LSP relative delta-encoding for Sapphire symbols.
-- [semantic_tokens_test.py](src/lsp/semantic_tokens_test.py): Unit tests for token generation and relative offset calculations.
 
 ## Diagnostics
 

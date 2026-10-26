@@ -1,4 +1,4 @@
-# Sapphire cross-backend integration & end-to-end tests
+# Cross-backend integration tests
 
 ## Overview
 This directory contains end-to-end (e2e) integration tests used to verify runtime behavior and consistency across Sapphire's target transpiler backends (**Python** and **Lua 5.1**).

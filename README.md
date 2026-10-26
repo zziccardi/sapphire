@@ -26,12 +26,6 @@ described in the spec.
 ## Sapphire at a glance
 
 ```sapphire
-let arena = Arena();
-
-trait Damageable {
-  var func take_damage(amount: int);
-}
-
 struct Position {
   var x: float = 0.0;
   var y: float = 0.0;
@@ -44,17 +38,24 @@ proto Entity {
   let name: String;
 }
 
+trait Damageable {
+  // Functions that mutate `self` must be marked `var`
+  var func take_damage(amount: int);
+}
+
 impl Damageable for Entity {
   var func take_damage(amount: int) {
     self.health = self.health > amount ? self.health - amount : 0;
   }
 }
 
-// Const-ref by default, explicit `var` for mutation, named args with defaults
+// Const-ref by default; explicit `var` for mutation; named args with defaults
 func attack(attacker: Entity, var target: Entity, bonus: int = 0) {
   target.take_damage(amount = 15 + bonus);
   print(f"{attacker.name} struck {target.name}! {target.health} HP remaining");
 }
+
+let arena = Arena();
 
 // Scoped prototype allocated within an explicit lexical arena
 let base_goblin = Entity {
