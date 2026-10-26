@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from lsprotocol.types import SemanticTokensParams
+from lsprotocol.types import SemanticTokensParams, DocumentSymbolParams, TextDocumentIdentifier
 
 # Import server components
 from src.lsp.server import (
@@ -11,6 +11,7 @@ from src.lsp.server import (
     did_change,
     did_save,
     semantic_tokens_full,
+    document_symbol,
     definition,
     signature_help,
     main,
@@ -2522,6 +2523,39 @@ func run_draw(x: float) {
       ))
       self.assertIsNotNone(res_fallback_sym)
       self.assertIn("function", res_fallback_sym.contents.value)
+
+  def test_document_symbol_feature(self):
+    doc_uri = "file:///outline_test.sp"
+    doc_text = """
+    struct Player {
+      var hp: int;
+    }
+    func greet(): void {}
+    """
+    # 1. Test when uri is not in ast_cache but workspace provides doc
+    mock_doc = MagicMock()
+    mock_doc.source = doc_text
+    self.ls.workspace.get_text_document = MagicMock(return_value=mock_doc)
+
+    params = DocumentSymbolParams(text_document=TextDocumentIdentifier(uri=doc_uri))
+    symbols = document_symbol(self.ls, params)
+    self.assertEqual(len(symbols), 2)
+    self.assertEqual(symbols[0].name, "Player")
+    self.assertEqual(symbols[1].name, "greet")
+
+    # 2. Test when uri is already in ast_cache
+    symbols_cached = document_symbol(self.ls, params)
+    self.assertEqual(len(symbols_cached), 2)
+
+    # 3. Test when workspace doc has no source or ast is missing/invalid
+    invalid_uri = "file:///empty.sp"
+    self.ls.workspace.get_text_document = MagicMock(return_value=None)
+    invalid_params = DocumentSymbolParams(text_document=TextDocumentIdentifier(uri=invalid_uri))
+    self.assertEqual(document_symbol(self.ls, invalid_params), [])
+
+    # 4. Test when ast_cache has a non-ProgramNode object
+    self.ls.ast_cache[invalid_uri] = "not a ProgramNode"
+    self.assertEqual(document_symbol(self.ls, invalid_params), [])
 
 
 if __name__ == "__main__":

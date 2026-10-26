@@ -45,6 +45,9 @@ from lsprotocol.types import (
     TEXT_DOCUMENT_COMPLETION,
     TEXT_DOCUMENT_DEFINITION,
     TEXT_DOCUMENT_SIGNATURE_HELP,
+    TEXT_DOCUMENT_DOCUMENT_SYMBOL,
+    DocumentSymbol,
+    DocumentSymbolParams,
     PublishDiagnosticsParams,
     WORKSPACE_DID_CHANGE_WATCHED_FILES,
 )
@@ -61,6 +64,7 @@ from src.lsp.semantic_tokens import (
     TOKEN_MODIFIERS,
     find_node_at_position,
 )
+from src.lsp.document_symbols import extract_document_symbols
 
 
 
@@ -330,6 +334,25 @@ def semantic_tokens_full(ls: SapphireLanguageServer,
 
   tokens_data = ls.tokens_cache.get(uri, [])
   return SemanticTokens(data=tokens_data)
+
+
+@server.feature(TEXT_DOCUMENT_DOCUMENT_SYMBOL)
+def document_symbol(
+    ls: SapphireLanguageServer, params: DocumentSymbolParams
+) -> list:
+  """Triggered to populate the Outline pane, Breadcrumbs, and Go to Symbol in File."""
+  uri = params.text_document.uri
+  if uri not in ls.ast_cache:
+    doc = ls.workspace.get_text_document(uri)
+    if doc and getattr(doc, "source", None):
+      validate_source(ls, uri, doc.source)
+
+  from src.parser.ast import ProgramNode
+  ast = ls.ast_cache.get(uri)
+  if not ast or not isinstance(ast, ProgramNode):
+    return []
+
+  return extract_document_symbols(ast)
 
 
 def _format_ast_expr(expr: Any) -> str:

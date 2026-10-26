@@ -396,6 +396,16 @@ class ASTBuilder(SapphireVisitor):
       node.name_line = name_token.line
       node.name_column = name_token.column
       node.name_length = len(name_token.text)
+      node.bindings_info = [
+          {
+              "name": b["name"],
+              "val_type": b["val_type"],
+              "line": b["token"].line,
+              "column": b["token"].column,
+              "length": len(b["token"].text),
+          }
+          for b in bindings
+      ]
     return node
 
   def visitAssignmentStatement(self, ctx: SapphireParser.AssignmentStatementContext) -> AssignmentNode:
