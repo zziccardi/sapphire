@@ -31,7 +31,7 @@ especially well-suited for interactive applications, simulation, and game
 engines.
 
 Unlike other performance-oriented languages, Sapphire distinguishes itself
-through four key pillars:
+through five key pillars:
 * **Zero-overhead static & dynamic reuse**: Inheritance is treated as
   compile-time syntactic delegation (composition and generated forwarding),
   completely eliminating virtual-method tables (vtables), pointer chasing, and
@@ -47,6 +47,12 @@ through four key pillars:
   are allocated in managed, lexically scoped arenas. The compiler enforces
   strict escape-checking to automatically tear down allocations at scope
   boundaries.
+* **Deterministic, exception-free error model**: Control flow completely
+  eliminates throwable exceptions (`try`/`catch`/`throw`) and stack unwinding.
+  Errors and uninitialized states are handled predictably through first-class
+  optionals (`T?`), multiple-return destructuring (`T, bool`), and Swift-style
+  `guard` statements that promote validated values into outer scopes without
+  excessive indentation.
 * **Modern API & host-environment ergonomics**: Native support for named
   parameters, default values, and expressive optional unwrapping makes
   interfaces self-documenting. First-class host annotations (`@extern`,
