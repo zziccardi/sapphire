@@ -1,36 +1,41 @@
 # Sapphire vs. Swift
 
-This document outlines how Sapphire's core architecture and language design compare with **Swift**, highlighting shared modern ergonomics, pain point mitigations, and architectural divergences in memory management, polymorphism, and runtime predictability.
+This document compares Sapphire's architecture and language design with
+**Swift**, examining shared ergonomic features as well as differences in
+memory management, polymorphism, and runtime predictability.
 
-## 1. Executive Summary & Core Motivation
+## 1. Overview & Motivation
 
-Introduced by Apple in 2014, Swift demonstrated how modern language design could replace legacy object-oriented languages (specifically Objective-C) with expressive syntax, strong static typing, value-type ergonomics, and first-class null safety. Swift popularized language features that have since become industry benchmarks: `guard` statements with scope promotion, optional binding, pattern matching, protocol-oriented programming, and named parameters.
+Swift introduced expressive syntax, value-type ergonomics, and null safety
+to mainstream software development—popularizing language features such as
+`guard` statements with scope promotion, optional binding, and named
+parameters.
 
-However, Swift was fundamentally engineered for general-purpose application development across Apple's platforms, carrying architectural trade-offs to support Objective-C interoperability, dynamic frameworks, and binary resilience:
+However, Swift's design reflects its role in application development across
+Apple platforms, incorporating specific architectural trade-offs:
 
-1. **Automatic Reference Counting (ARC) overhead & retain cycles**: Reference types (`class`) incur atomic retain/release overhead on assignments and copies. Cyclical references require manual `weak` and `unowned` annotations to avoid memory leaks.
-2. **Dual object models & virtual method tables (vtables)**: Swift retains traditional class hierarchies with dynamic method overriding via vtables, inducing cache misses, pointer chasing, and inhibiting compiler inlining.
-3. **Existential container overhead (`any Protocol`)**: Dynamic polymorphism using protocol types relies on existential containers (inline buffer + heap fallback) and protocol witness tables, introducing allocation overhead and indirect dispatch.
-4. **Hidden control flow via throwable exceptions**: Error propagation uses `throws`, `try`, and `catch`, introducing invisible branch points and stack unwinding.
-5. **Runtime heaviness & embedding friction**: Swift's extensive runtime, ABI resilience metadata, and multithreaded cooperative task pool make embedding into lightweight scripting engines, game loops, or simulation contexts non-trivial.
+1. **Automatic Reference Counting (ARC) overhead**: Reference types (`class`)
+   incur atomic retain/release overhead on assignments and copies. Cyclical
+   references require manual `weak` and `unowned` annotations to avoid memory
+   leaks.
+2. **Dual object models & virtual method tables (vtables)**: Swift retains
+   class hierarchies with dynamic method overriding via vtables, inducing
+   cache misses, pointer chasing, and inhibiting compiler inlining.
+3. **Existential container overhead (`any Protocol`)**: Dynamic polymorphism
+   using protocol types relies on existential containers (inline buffer + heap
+   fallback) and protocol witness tables, introducing allocation overhead and
+   indirect dispatch.
+4. **Throwable exceptions**: Error propagation uses `throws`, `try`, and
+   `catch`, introducing non-local branch points and stack unwinding.
+5. **Runtime heaviness & embedding friction**: Swift's extensive runtime, ABI
+   resilience metadata, and multithreaded task pool make embedding into
+   lightweight scripting engines, game loops, or simulation contexts
+   non-trivial.
 
-Sapphire embraces Swift's greatest ergonomic breakthroughs—especially its expressive API clarity, optionals, and `guard` statements—while discarding class hierarchies, vtables, universal ARC, and throwable exceptions in favor of **zero-cost systems performance, lexical memory arenas, and data-only prototypal delegation**:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               SAPPHIRE TRIAD                                │
-│                                                                             │
-│          Systems Performance                   Dynamic Ergonomics           │
-│        (Monomorphization, RAII,            (Live Hot-Reload, `proto`,       │
-│       Zero-Vtable Delegation)                 Syntactic Delegation)         │
-│                    \                                   /                    │
-│                     \                                 /                     │
-│                      ▼                               ▼                      │
-│                             Modern Safety & Clarity                         │
-│                       (Swift-Style Optionals, `guard`,                      │
-│                        Named Arguments, No Exceptions)                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Sapphire adopts Swift-style syntax for optionals, `guard` statements, and named
+arguments, while replacing class hierarchies, universal ARC, vtables, and
+exceptions with a **stack-first memory model, lexical arenas, zero-vtable
+delegation, and explicit fallibility**.
 
 ## 2. Detailed Pain Point & Architectural Analysis
 
@@ -274,7 +279,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 
 | Dimension | Swift | Sapphire | Rationale / Concession in Sapphire |
 | :--- | :--- | :--- | :--- |
-| **Class-Based OOP & Subclassing** | Full support for `class` inheritance, virtual method overrides, and `super` dispatch. | **No classes**. Structural inheritance is syntactic delegation; up-casting is forbidden. | **Trade-off:** Cannot build deeply nested, open class hierarchies. In exchange, vtable overhead, object slicing, and cache misses are eradicated. |
+| **Class-Based OOP & Subclassing** | Full support for `class` inheritance, virtual method overrides, and `super` dispatch. | **No classes**. Structural inheritance is syntactic delegation; up-casting is forbidden. | **Trade-off:** Cannot build deeply nested, open class hierarchies. In exchange, vtable overhead, object slicing, and cache misses are eliminated. |
 | **Open World Dynamic Polymorphism** | Open protocols (`any Protocol`) allow dynamic libraries to add conforming types at runtime. | Heterogeneous trait collections (`[Trait]`) synthesize closed tagged unions at compile time. | **Trade-off:** Storing heterogeneous traits requires module or whole-program visibility of implementors. In exchange, witness tables, heap boxing, and fat pointers are eliminated. |
 | **Multithreaded Structured Concurrency** | Rich async/await runtime, actors, task groups, and OS thread pool scheduling. | Single-threaded, deterministic, frame-steppable coroutines (`Coroutine<T>`). | **Trade-off:** Does not provide automated background thread-pool dispatching for CPU-bound tasks. In exchange, delivers deterministic frame timing without thread jitter. |
 | **Universal ABI Stability & SDK Interop** | Stable ABI on Apple OS platforms, runtime metadata reflection, and direct C/C++/Obj-C interop. | Lightweight host annotations (`@extern`, `@export`); targets Python and Lua backends. | **Trade-off:** Lacks native binary ABI compatibility with Apple operating system frameworks. In exchange, embeds cleanly into lightweight scripting hosts. |

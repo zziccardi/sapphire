@@ -1,92 +1,157 @@
 # Sapphire vs. Rust
 
-This document outlines how Sapphire's core architecture and language design intentionally address common pain points, friction, and ergonomic challenges encountered in **Rust**, while preserving systems-level performance, memory safety, and zero-cost abstractions.
+This document compares Sapphire's architecture and language design with
+**Rust**, focusing on memory management, polymorphism, ergonomics, and
+compilation model.
 
-## 1. Executive Summary & Core Motivation
+## 1. Overview & Motivation
 
-Rust demonstrated to the industry that manual memory management and garbage collection are not the only two options: compile-time ownership and affine type systems can achieve deterministic performance with rigorous safety. However, Rust's specific mechanisms—particularly **explicit lifetime annotations (`'a`)**, **the borrow checker's rigidity with cyclic data structures**, **the absence of structural code reuse**, and **the difficulty of rapid prototyping**—impose substantial cognitive overhead.
+Rust demonstrates that compile-time ownership and affine types can provide
+memory safety and deterministic performance without garbage collection.
+However, mechanisms such as explicit lifetime annotations (`'a`), borrow
+checker constraints on cyclic or self-referential structures, the lack of
+structural code reuse, and long compilation times can add friction during
+development and prototyping.
 
-Sapphire is designed around a pragmatic thesis:
-
-> **Combine the safety and zero-cost performance of modern systems languages with the rapid-prototyping ergonomics of dynamic languages and the clean API clarity of modern languages.**
-
-Addressing Rust's primary friction points is an explicit, first-class design priority of Sapphire.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               SAPPHIRE TRIAD                                │
-│                                                                             │
-│          Systems Performance           Dynamic Ergonomics                   │
-│        (Monomorphization, RAII,     (Live Hot-Reload, `proto`,              │
-│          Stack-first memory)            Syntactic Delegation)               │
-│                    \                         /                              │
-│                     \                       /                               │
-│                      ▼                     ▼                                │
-│                           Modern API Clarity                                │
-│                     (Swift-style optionals, `guard`,                        │
-│                        named/default parameters)                            │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Sapphire targets a different balance:
+* **Memory Safety Without Lifetimes**: Non-primitives are borrowed by constant
+  reference by default, with call-site exclusivity checks replacing lifetime
+  annotations.
+* **Prototyping & Dynamic Ergonomics**: Opt-in prototypal state delegation
+  (`proto` / `clone`) and lexical arenas simplify graph and entity modeling,
+  while live hot-reloading allows fast iteration loops.
+* **API Clarity**: Modern ergonomics such as Swift-style `guard` statements,
+  named arguments, and explicit optionals reduce syntactic noise.
 
 ## 2. Detailed Pain Point Analysis
 
-### 2.1 Lifetime Annotations (`'a`) & Borrow Checker Rigidity
+### 2.1 Lifetime Annotations (`'a`) and Borrow Checker Constraints
 
 * **The Rust Pain Point**:
-  Rust requires developers to explicitly annotate references with lifetimes (`&'a T`, `<'a, 'b: 'a>`) whenever references cross function boundaries or reside inside structs. This introduces "lifetime contagion": adding a single borrowed reference to an inner data structure often forces lifetime parameters onto every enclosing struct and function signature. Moreover, safe Rust strictly forbids returning references to data created inside an inner block or moving values while borrowed.
+  Rust requires developers to explicitly annotate references with lifetimes
+  (`&'a T`, `<'a, 'b: 'a>`) whenever references cross function boundaries or
+  reside inside structs. Adding a borrowed reference can require propagating
+  lifetime parameters onto enclosing structs and functions. Additionally, safe
+  Rust strictly forbids returning references to data created inside an inner
+  block or moving values while borrowed.
 * **Sapphire's Solution**:
   Sapphire achieves reference safety without lifetime annotations:
-  1. **Const-Reference by Default**: Non-primitive types (`struct`, `Array`, `Map`, `String`, `proto`) are passed by **constant reference** by default. Callers do not need explicit reference or pointer syntax (`&`).
-  2. **Call-Site Reference Exclusivity**: Instead of complex global lifetime tracking, Sapphire enforces a localized, compile-time scope-bound aliasing check: inside a single function or method invocation, a reference path cannot be passed mutably (`var`) if it is already referenced elsewhere (mutably or immutably) within that same call ([docs/SPEC.md §8.1](SPEC.md#81-scope-bound-aliasing-rules-call-site-reference-exclusivity)).
-  3. **By-Value Returns with RVO**: Returning references to local stack frames is statically prohibited, preventing use-after-free bugs entirely. Returning structs is done by value; the compiler guarantees **Return-Value Optimization (RVO)** and copy elision directly into the caller's stack frame ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)).
-  4. **No Lifetime Syntax**: The language contains no lifetime parameters or lifetime subtyping rules.
+  1. **Const-Reference by Default**: Non-primitive types (`struct`, `Array`,
+     `Map`, `String`, `proto`) are passed by **constant reference** by default.
+     Callers do not need explicit reference or pointer syntax (`&`).
+  2. **Call-Site Reference Exclusivity**: Instead of complex global lifetime
+     tracking, Sapphire enforces a localized, compile-time scope-bound aliasing
+     check: inside a single function or method invocation, a reference path
+     cannot be passed mutably (`var`) if it is already referenced elsewhere
+     (mutably or immutably) within that same call
+     ([docs/SPEC.md §8.1](SPEC.md#81-scope-bound-aliasing-rules-call-site-reference-exclusivity)).
+  3. **By-Value Returns with RVO**: Returning references to local stack frames
+     is statically prohibited, preventing use-after-free bugs entirely.
+     Returning structs is done by value; the compiler guarantees
+     **Return-Value Optimization (RVO)** and copy elision directly into the
+     caller's stack frame ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)).
+  4. **No Lifetime Syntax**: The language contains no lifetime parameters or
+     lifetime subtyping rules.
 
 ### 2.2 Graphs, Cyclic Structures, and Self-Referential Data
 
 * **The Rust Pain Point**:
-  Creating graphs, trees with parent pointers, doubly linked lists, or game entity-component graphs in safe Rust is notoriously difficult. The borrow checker rejects self-referential structs, and managing cycles requires either verbose runtime-checked wrappers (`Rc<RefCell<T>>` / `Arc<Mutex<T>>`), index-based indirection, or resorting to `unsafe`.
+  Creating graphs, trees with parent pointers, doubly linked lists, or cyclic
+  entity structures in safe Rust is constrained by borrow checker rules.
+  Managing cycles typically requires reference-counted wrappers
+  (`Rc<RefCell<T>>` / `Arc<Mutex<T>>`), index-based arrays, or `unsafe` blocks.
 * **Sapphire's Solution**:
-  1. **Opt-in Prototypal State Delegation (`proto` & `clone`)**: Prototypal inheritance allows runtime objects to delegate state to an active prototype ([docs/SPEC.md §11.2](SPEC.md#112-dynamic-prototypal-inheritance)). Clones dynamically delegate field reads to their prototype, allowing zero-boilerplate state sharing without reference counting or runtime borrow checks.
-  2. **Copy-on-Write (CoW) Mutation Safety**: When a clone mutates a nested reference field, Sapphire's runtime automatically intercepts the write, performs a shallow copy of that nested reference on the clone, and applies the mutation. This isolates the clone's state without altering the prototype or causing reference corruption.
-  3. **Lexical Arenas (`Arena`)**: All `proto` instances are allocated in explicit arenas (`Entity { ... } in my_arena`). When the arena exits its lexical scope, all contained instances are automatically deallocated in bulk ([docs/SPEC.md §12.2](SPEC.md#122-stack-first-memory-model--arena-management)). Escape-checking prevents inner-arena objects from escaping to outer scopes or returning across function boundaries.
+  1. **Opt-in Prototypal State Delegation (`proto` & `clone`)**: Prototypal
+     inheritance allows runtime objects to delegate state to an active
+     prototype ([docs/SPEC.md §11.2](SPEC.md#112-dynamic-prototypal-inheritance)).
+     Clones dynamically delegate field reads to their prototype, allowing
+     state sharing without reference counting or runtime borrow checks.
+  2. **Copy-on-Write (CoW) Mutation Safety**: When a clone mutates a nested
+     reference field, Sapphire's runtime automatically intercepts the write,
+     performs a shallow copy of that nested reference on the clone, and applies
+     the mutation. This isolates the clone's state without altering the
+     prototype or causing reference corruption.
+  3. **Lexical Arenas (`Arena`)**: All `proto` instances are allocated in
+     explicit arenas (`Entity { ... } in my_arena`). When the arena exits its
+     lexical scope, all contained instances are automatically deallocated in
+     bulk ([docs/SPEC.md §12.2](SPEC.md#122-stack-first-memory-model--arena-management)).
+     Escape-checking prevents inner-arena objects from escaping to outer scopes
+     or returning across function boundaries.
 
-### 2.3 Structural Code Reuse & Composition Boilerplate
+### 2.3 Structural Code Reuse and Forwarding Boilerplate
 
 * **The Rust Pain Point**:
-  Rust intentionally avoids struct inheritance. While this avoids traditional OOP fragility, it means that sharing common fields or behavior requires manual composition (embedding `struct Base` inside `struct Derived`), followed by writing repetitive boilerplate forwarding methods for every single method on `Base`, or using complex third-party proc-macros.
+  Rust intentionally avoids struct inheritance. While this avoids traditional
+  OOP fragility, sharing common fields or behavior requires manual composition
+  (embedding `struct Base` inside `struct Derived`) followed by writing
+  forwarding methods for every method on `Base`.
 * **Sapphire's Solution**:
-  1. **Syntactic Delegation (`struct Child: Parent1, Parent2`)**: Sapphire permits structural inheritance syntax, but treats it strictly as **compile-time syntactic delegation** ([docs/SPEC.md §11.1](SPEC.md#111-static-inheritance)). The compiler inlines/nests parent layouts and automatically generates method-forwarding wrappers.
-  2. **Zero Runtime Dispatch Penalty**: Because forwarding is resolved statically at compile time, the calls direct-dispatch with no pointer chasing, and are prime candidates for full inlining.
-  3. **Strict Prohibition of Up-Casting (`Child as Parent`)**: Sapphire forbids casting child structs to parent structs. This completely eliminates object slicing, eliminates method-dispatch ambiguities, and prevents accidental runtime indirection.
+  1. **Syntactic Delegation (`struct Child: Parent1, Parent2`)**: Sapphire
+     permits structural inheritance syntax, but treats it strictly as
+     **compile-time syntactic delegation**
+     ([docs/SPEC.md §11.1](SPEC.md#111-static-inheritance)). The compiler
+     inlines/nests parent layouts and automatically generates
+     method-forwarding wrappers.
+  2. **Zero Runtime Dispatch Penalty**: Because forwarding is resolved
+     statically at compile time, the calls direct-dispatch with no pointer
+     chasing, and are prime candidates for full inlining.
+  3. **Strict Prohibition of Up-Casting (`Child as Parent`)**: Sapphire
+     forbids casting child structs to parent structs. This eliminates object
+     slicing, eliminates method-dispatch ambiguities, and prevents accidental
+     runtime indirection.
 
-### 2.4 Polymorphism Without Vtables or Object-Safety Woes
+### 2.4 Polymorphism Without Vtables or Object-Safety Constraints
 
 * **The Rust Pain Point**:
   Dynamic polymorphism in Rust relies on trait objects (`dyn Trait`), which:
   - Incur vtable lookups and 2-word fat pointer overhead.
-  - Suffer from strict "object safety" rules: traits cannot use generics or methods returning `Self`.
+  - Suffer from strict "object safety" rules: traits cannot use generics or
+    methods returning `Self`.
   - Prevent compiler inlining across dynamic call sites.
 * **Sapphire's Solution**:
-  1. **Monomorphization by Default**: Generic structs, functions, and implementations are fully monomorphized at compile time with zero runtime overhead ([docs/SPEC.md §15](SPEC.md#15-generics--parametric-polymorphism)).
-  2. **Zero-Vtable Heterogeneous Trait Collections (`[Trait]`)**: An array typed as `[Renderable]` can store any struct implementing `Renderable` without vtables or fat pointers ([docs/SPEC.md §11.1](SPEC.md#traits-compile-time-contracts--implicit-subtyping)). The native compiler synthesizes an internal closed tagged union (sum type) with contiguous memory layout and inlinable jump/branch tables to direct static function calls.
-  3. **Data-Only Dynamic Delegation**: Methods on `proto` objects are dispatched statically based on concrete type; only state delegation is dynamic.
+  1. **Monomorphization by Default**: Generic structs, functions, and
+     implementations are fully monomorphized at compile time with zero runtime
+     overhead ([docs/SPEC.md §15](SPEC.md#15-generics--parametric-polymorphism)).
+  2. **Zero-Vtable Heterogeneous Trait Collections (`[Trait]`)**: An array
+     typed as `[Renderable]` can store any struct implementing `Renderable`
+     without vtables or fat pointers
+     ([docs/SPEC.md §11.1](SPEC.md#traits-compile-time-contracts--implicit-subtyping)).
+     The native compiler synthesizes an internal closed tagged union (sum type)
+     with contiguous memory layout and inlinable jump/branch tables to direct
+     static function calls.
+  3. **Data-Only Dynamic Delegation**: Methods on `proto` objects are
+     dispatched statically based on concrete type; only state delegation is
+     dynamic.
 
-### 2.5 Prototyping Friction & Slow Iteration Loops
+### 2.5 Compilation Speed and Iteration Loops
 
 * **The Rust Pain Point**:
-  Rust's strict type system and slow compiler times (heavy LLVM backend, monomorphization cascades) make quick, exploratory iteration painful. In domains like game development or simulations, tweaking logic, balance numbers, or component architecture often requires extensive recompilation or architectural refactoring.
+  Rust's strict type system and compile times (monomorphization cascades and
+  LLVM optimization passes) can slow down exploratory iteration. In domains
+  like game development or simulations, tweaking logic, balance numbers, or
+  component layouts often requires extensive recompilation.
 * **Sapphire's Solution**:
-  1. **Live Hot-Reloading (`sapphire run --dev`)**: Sapphire natively watches source files, performs fast incremental recompilation, patches living in-memory prototypes and structs in place, and triggers `@on_reload` lifecycle callbacks without resetting runtime application state ([docs/SPEC.md §14.4](SPEC.md#144-live-hot-reloading--on_reload-lifecycle-hook)).
+  1. **Live Hot-Reloading (`sapphire run --dev`)**: Sapphire natively watches
+     source files, performs fast incremental recompilation, patches living
+     in-memory prototypes and structs in place, and triggers `@on_reload`
+     lifecycle callbacks without resetting runtime application state
+     ([docs/SPEC.md §14.4](SPEC.md#144-live-hot-reloading--on_reload-lifecycle-hook)).
   2. **High-Level Expressiveness**:
      - Python-style string interpolation: `f"Player {name} has {hp} HP"`.
-     - Named parameters with default values: `attack(defender = enemy, bonus = 10)`.
+     - Named parameters with default values:
+       `attack(defender = enemy, bonus = 10)`.
      - Multiple return values with destructuring: `let x, y = get_pos();`.
-     - Top-level scripting: Execution can start immediately without boilerplate `fn main()` harnesses.
+     - Top-level scripting: Execution can start immediately without boilerplate
+       `fn main()` harnesses.
 
 ### 2.6 Control Flow & Error/Optional Ergonomics
 
 * **The Rust Pain Point**:
-  Handling optional values and fallibility in Rust can lead to deeply nested `match` or `if let` blocks ("rightward drift"). While Rust's `?` operator is powerful for early returns with `Result`, safe unwrapping of `Option` often requires awkward `.as_ref()` conversions, and Rust lacks a construct like Swift's `guard` to promote unwrapped values into outer scope.
+  Handling optional values and fallibility in Rust can lead to nested `match`
+  or `if let` blocks. While Rust's `?` operator is powerful for early returns
+  with `Result`, safe unwrapping of `Option` often requires `.as_ref()`
+  conversions, and Rust lacks a construct like Swift's `guard` to promote
+  unwrapped values into outer scope.
 * **Sapphire's Solution**:
   1. **Swift-Style `guard` Statements**:
      ```sapphire
@@ -124,9 +189,9 @@ Sapphire's design intentionally chooses ergonomics and simplicity in areas where
 | Feature | Rust | Sapphire | Sapphire Advantage / Difference |
 | :--- | :--- | :--- | :--- |
 | **Reference Syntax** | Explicit `&T`, `&mut T` | Passed by constant reference by default; `var` for mutable parameters | Clean syntax without visual pointer markers |
-| **Lifetime Annotations** | Mandatory for reference-holding structs and cross-scope borrows (`'a`) | None | Zero lifetime contagion or borrow checker fights |
+| **Lifetime Annotations** | Mandatory for reference-holding structs and cross-scope borrows (`'a`) | None | Eliminates lifetime annotations via call-site exclusivity |
 | **Aliasing Rules** | Dynamic/static borrow checker (`&T` XOR `&mut T` across entire lifetimes) | Scope-bound call-site reference exclusivity | Focused, predictable rules verified at the call site |
-| **Cyclic / Graph Data** | Requires `Rc<RefCell<T>>`, unsafe, or index generational arenas | Opt-in `proto`, `clone`, Copy-on-Write, and lexical `Arena` | Natural state sharing with zero reference-cycle overhead |
+| **Cyclic / Graph Data** | Requires `Rc<RefCell<T>>`, unsafe, or index generational arenas | Opt-in `proto`, `clone`, Copy-on-Write, and lexical `Arena` | Direct state delegation within arenas without reference-counting overhead |
 | **Structural Reuse** | Composition only; manual forwarding boilerplate | Syntactic delegation (`struct Child: Parent`) with auto-forwarding | Zero-vtable code reuse without forwarding boilerplate |
 | **Up-casting** | Not allowed on structs; allowed via `dyn Trait` | Strictly forbidden (`Child as Parent` rejected) | Eliminates object slicing and method override ambiguity |
 | **Dynamic Dispatch** | Vtables via `dyn Trait` fat pointers | Zero vtables; traits compile to monomorphized code or closed tagged unions | Enables direct jumps and compiler inlining |
