@@ -291,7 +291,7 @@ pipenv run sapphire run samples/overview.sp --dev
    * Do not delete or mangle docstrings, inline architectural comments, or existing specs.
    * When modifying language semantics or adding built-ins, update `docs/SPEC.md`, `docs/compiler.md`, or `docs/builtins.md` accordingly.
 4. **Code Quality Standards**:
-   * Python codebase: Follow PEP 8, maintain 2-space or 4-space consistency with surrounding files, include explicit type annotations where appropriate.
+   * Python codebase: Follow the Google Python Style Guide rather than PEP 8, maintain 2-space or 4-space consistency with surrounding files, include explicit type annotations where appropriate.
    * Sapphire code: Follow `docs/SPEC.md §2` (80 chars max line length, 2-space indentation, semicolon terminated).
 5. **Pre-Completion Checklist**:
    * [ ] `pipenv run test` passes with zero failures or errors.
