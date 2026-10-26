@@ -1,11 +1,11 @@
 """Extracts hierarchical LSP DocumentSymbol instances from Sapphire AST.
 
 This module inspects the top-level ProgramNode AST and translates all defined symbols
-(structs, prototypes, enums, traits, impl blocks, functions, and variables/constants)
+(structs, prototypes, enums, traits, impl blocks, methods, functions, and variables/constants)
 into LSP DocumentSymbol trees for VS Code's Outline view, Breadcrumbs, and Go-to-Symbol.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from lsprotocol.types import DocumentSymbol, Position, Range, SymbolKind
 from src.parser.ast import (
     ArrayTypeNode,
@@ -73,6 +73,16 @@ def _ensure_contained(full_range: Range, sel_range: Range) -> None:
     full_range.end = Position(line=sel_range.end.line, character=sel_range.end.character)
 
 
+def _get_name_position(node: Any, fallback_name: str) -> Tuple[int, int, int]:
+  """Returns (line, col, length) for a node's symbol name, with robust fallbacks."""
+  line = getattr(node, "name_line", None) or getattr(node, "start_line", 1)
+  col = getattr(node, "name_column", None)
+  if col is None:
+    col = getattr(node, "start_column", 0) or 0
+  length = getattr(node, "name_length", None) or len(fallback_name)
+  return line, col, length
+
+
 def _format_func_signature(parameters: list, return_types: list) -> str:
   """Formats parameter list and return types into a signature string."""
   params_parts = []
@@ -89,7 +99,7 @@ def _format_func_signature(parameters: list, return_types: list) -> str:
 
 
 def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
-  """Extracts all symbols defined in the given ProgramNode AST."""
+  """Extracts all symbols defined in the given ProgramNode AST, ordered by position."""
   symbols: List[DocumentSymbol] = []
   if not isinstance(ast, ProgramNode):
     return symbols
@@ -106,20 +116,16 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
       detail_str = "".join(details) or ("proto" if decl.is_prototype else "struct")
 
       full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line = getattr(decl, "name_line", decl.start_line)
-      name_col = getattr(decl, "name_column", decl.start_column)
-      name_len = getattr(decl, "name_length", len(decl.name))
-      sel_range = _create_range(name_line, name_col, name_line, (name_col or 0) + name_len)
+      name_line, name_col, name_len = _get_name_position(decl, decl.name)
+      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
       _ensure_contained(full_range, sel_range)
 
       field_symbols: List[DocumentSymbol] = []
       for field in decl.fields:
         f_type_str = _format_type_node(field.field_type)
         f_range = _create_range(field.start_line, field.start_column, field.end_line, field.end_column)
-        fn_line = getattr(field, "name_line", field.start_line)
-        fn_col = getattr(field, "name_column", field.start_column)
-        fn_len = getattr(field, "name_length", len(field.name))
-        f_sel_range = _create_range(fn_line, fn_col, fn_line, (fn_col or 0) + fn_len)
+        fn_line, fn_col, fn_len = _get_name_position(field, field.name)
+        f_sel_range = _create_range(fn_line, fn_col, fn_line, fn_col + fn_len)
         _ensure_contained(f_range, f_sel_range)
 
         field_symbols.append(
@@ -146,19 +152,15 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
     # 2. Enum Declarations
     elif isinstance(decl, EnumDeclNode):
       full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line = getattr(decl, "name_line", decl.start_line)
-      name_col = getattr(decl, "name_column", decl.start_column)
-      name_len = getattr(decl, "name_length", len(decl.name))
-      sel_range = _create_range(name_line, name_col, name_line, (name_col or 0) + name_len)
+      name_line, name_col, name_len = _get_name_position(decl, decl.name)
+      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
       _ensure_contained(full_range, sel_range)
 
       member_symbols: List[DocumentSymbol] = []
       for m in decl.members:
         m_range = _create_range(m.start_line, m.start_column, m.end_line, m.end_column)
-        mn_line = getattr(m, "name_line", m.start_line)
-        mn_col = getattr(m, "name_column", m.start_column)
-        mn_len = getattr(m, "name_length", len(m.name))
-        m_sel = _create_range(mn_line, mn_col, mn_line, (mn_col or 0) + mn_len)
+        mn_line, mn_col, mn_len = _get_name_position(m, m.name)
+        m_sel = _create_range(mn_line, mn_col, mn_line, mn_col + mn_len)
         _ensure_contained(m_range, m_sel)
 
         detail = f"= {m.value}" if m.value is not None else None
@@ -186,19 +188,15 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
     # 3. Trait Declarations
     elif isinstance(decl, TraitDeclNode):
       full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line = getattr(decl, "name_line", decl.start_line)
-      name_col = getattr(decl, "name_column", decl.start_column)
-      name_len = getattr(decl, "name_length", len(decl.name))
-      sel_range = _create_range(name_line, name_col, name_line, (name_col or 0) + name_len)
+      name_line, name_col, name_len = _get_name_position(decl, decl.name)
+      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
       _ensure_contained(full_range, sel_range)
 
       method_symbols: List[DocumentSymbol] = []
       for tm in decl.members:
         tm_range = _create_range(tm.start_line, tm.start_column, tm.end_line, tm.end_column)
-        tmn_line = getattr(tm, "name_line", tm.start_line)
-        tmn_col = getattr(tm, "name_column", tm.start_column)
-        tmn_len = getattr(tm, "name_length", len(tm.name))
-        tm_sel = _create_range(tmn_line, tmn_col, tmn_line, (tmn_col or 0) + tmn_len)
+        tmn_line, tmn_col, tmn_len = _get_name_position(tm, tm.name)
+        tm_sel = _create_range(tmn_line, tmn_col, tmn_line, tmn_col + tmn_len)
         _ensure_contained(tm_range, tm_sel)
 
         detail_sig = _format_func_signature(tm.parameters, tm.return_types)
@@ -232,20 +230,30 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
           else f"impl {decl.struct_name}"
       )
       full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      sel_line = getattr(decl, "struct_name_line", decl.start_line)
-      sel_col = getattr(decl, "struct_name_column", decl.start_column)
-      sel_len = getattr(decl, "struct_name_length", len(decl.struct_name))
-      sel_range = _create_range(sel_line, sel_col, sel_line, (sel_col or 0) + sel_len)
+      sel_line = (
+          getattr(decl, "struct_name_line", None)
+          or getattr(decl, "trait_name_line", None)
+          or getattr(decl, "start_line", 1)
+      )
+      sel_col = getattr(decl, "struct_name_column", None)
+      if sel_col is None:
+        sel_col = getattr(decl, "trait_name_column", None)
+      if sel_col is None:
+        sel_col = getattr(decl, "start_column", 0) or 0
+      sel_len = (
+          getattr(decl, "struct_name_length", None)
+          or getattr(decl, "trait_name_length", None)
+          or len(decl.struct_name)
+      )
+      sel_range = _create_range(sel_line, sel_col, sel_line, sel_col + sel_len)
       _ensure_contained(full_range, sel_range)
 
       methods: List[DocumentSymbol] = []
       for m in decl.members:
         fn = m.func_decl
         fn_range = _create_range(fn.start_line, fn.start_column, fn.end_line, fn.end_column)
-        fnn_line = getattr(fn, "name_line", fn.start_line)
-        fnn_col = getattr(fn, "name_column", fn.start_column)
-        fnn_len = getattr(fn, "name_length", len(fn.name))
-        fn_sel = _create_range(fnn_line, fnn_col, fnn_line, (fnn_col or 0) + fnn_len)
+        fnn_line, fnn_col, fnn_len = _get_name_position(fn, fn.name)
+        fn_sel = _create_range(fnn_line, fnn_col, fnn_line, fnn_col + fnn_len)
         _ensure_contained(fn_range, fn_sel)
 
         detail_sig = _format_func_signature(fn.parameters, fn.return_types)
@@ -273,10 +281,8 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
     # 5. Top-level Functions
     elif isinstance(decl, FuncDeclNode):
       full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line = getattr(decl, "name_line", decl.start_line)
-      name_col = getattr(decl, "name_column", decl.start_column)
-      name_len = getattr(decl, "name_length", len(decl.name))
-      sel_range = _create_range(name_line, name_col, name_line, (name_col or 0) + name_len)
+      name_line, name_col, name_len = _get_name_position(decl, decl.name)
+      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
       _ensure_contained(full_range, sel_range)
 
       detail_sig = _format_func_signature(decl.parameters, decl.return_types)
@@ -326,5 +332,11 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
                   detail=v_type or None,
               )
           )
+
+  # Sort all symbols and their children strictly by start position in document
+  symbols.sort(key=lambda s: (s.range.start.line, s.range.start.character))
+  for s in symbols:
+    if s.children:
+      s.children.sort(key=lambda c: (c.range.start.line, c.range.start.character))
 
   return symbols

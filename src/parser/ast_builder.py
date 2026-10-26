@@ -229,13 +229,12 @@ class ASTBuilder(SapphireVisitor):
 
     node = ImplBlockNode(struct_name, trait_name, members, type_params=type_params, trait_type_args=trait_type_args, struct_type_args=struct_type_args)
     # Positioning for Language Server:
-    struct_token = getattr(ctx.structName, "start", ctx.structName)
+    struct_token = ctx.structName
     node.struct_name_line = getattr(struct_token, "line", None)
     node.struct_name_column = getattr(struct_token, "column", None)
     node.struct_name_length = len(struct_name)
     if trait_name:
-      t_tok = ctx.traitName
-      trait_token = getattr(t_tok, "start", t_tok)
+      trait_token = getattr(ctx.traitName, "start", ctx.traitName)
       node.trait_name_line = getattr(trait_token, "line", None)
       node.trait_name_column = getattr(trait_token, "column", None)
       node.trait_name_length = len(trait_name)

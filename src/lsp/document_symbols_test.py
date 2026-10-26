@@ -288,6 +288,82 @@ class TestDocumentSymbols(unittest.TestCase):
     self.assertEqual(fn_sym.kind, SymbolKind.Function)
     self.assertEqual(fn_sym.detail, "(bonus: float): float")
 
+  def test_symbols_definition_order_and_impl_block_ranges(self):
+    source = """let A = 1;
+
+struct First {
+  let x: int;
+}
+
+impl First {
+  func foo() {}
+}
+
+struct Second {
+  let y: int;
+}
+
+impl Second {
+  func bar() {}
+}
+
+func helper() {}
+"""
+    ast = _parse_to_ast(source)
+    symbols = extract_document_symbols(ast)
+    expected_names = ["A", "First", "impl First", "Second", "impl Second", "helper"]
+    actual_names = [s.name for s in symbols]
+    self.assertEqual(actual_names, expected_names)
+
+    # Verify ranges are strictly ascending and impl blocks are not placed at line 0
+    for i in range(len(symbols) - 1):
+      s1 = symbols[i]
+      s2 = symbols[i + 1]
+      self.assertLess(
+          (s1.range.start.line, s1.range.start.character),
+          (s2.range.start.line, s2.range.start.character),
+      )
+    # "impl First" should start around line 7 (0-based line 6), not 0
+    impl_first = symbols[2]
+    self.assertGreater(impl_first.range.start.line, symbols[1].range.start.line)
+    self.assertGreater(impl_first.selection_range.start.line, 0)
+
+  def test_get_name_position_and_impl_fallback_columns(self):
+    from src.lsp.document_symbols import _get_name_position
+    # 1. Test node with name_column = None
+    class MockNode:
+      name_line = None
+      start_line = 4
+      name_column = None
+      start_column = 2
+      name_length = None
+
+    line, col, length = _get_name_position(MockNode(), "fallback")
+    self.assertEqual((line, col, length), (4, 2, 8))
+
+    # 2. Test ImplBlockNode with struct_name_column = None, trait_name_column = 6
+    impl_trait_only = ImplBlockNode("MyStruct", "MyTrait", [])
+    impl_trait_only.start_line = 10
+    impl_trait_only.struct_name_line = None
+    impl_trait_only.struct_name_column = None
+    impl_trait_only.trait_name_line = 10
+    impl_trait_only.trait_name_column = 6
+    ast_t = ProgramNode([impl_trait_only])
+    syms_t = extract_document_symbols(ast_t)
+    self.assertEqual(len(syms_t), 1)
+    self.assertEqual(syms_t[0].selection_range.start.character, 6)
+
+    # 3. Test ImplBlockNode with both struct_name_column = None and trait_name_column = None
+    impl_none = ImplBlockNode("MyStruct", None, [])
+    impl_none.start_line = 15
+    impl_none.start_column = 4
+    impl_none.struct_name_line = None
+    impl_none.struct_name_column = None
+    ast_none = ProgramNode([impl_none])
+    syms_none = extract_document_symbols(ast_none)
+    self.assertEqual(len(syms_none), 1)
+    self.assertEqual(syms_none[0].selection_range.start.character, 4)
+
   def test_var_decl_without_bindings_info_fallback(self):
     # Construct VarDeclNode manually without bindings_info
     var_decl = VarDeclNode(is_mutable=False, names=["alpha", "beta"], val_types=[BasicTypeNode("int"), None])
