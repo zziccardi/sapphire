@@ -205,6 +205,7 @@ sapphire test
 ## Repository structure
 
 * `docs/`: Core documentation including the [language spec](docs/SPEC.md),
+  [style guide](docs/style_guide.md),
   [Rust comparison](docs/rust_comparison.md),
   [C++ comparison](docs/cpp_comparison.md),
   [Swift comparison](docs/swift_comparison.md),
