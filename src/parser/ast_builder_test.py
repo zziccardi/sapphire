@@ -679,6 +679,45 @@ class TestASTBuilder(unittest.TestCase):
     d_empty = node_empty.to_dict()
     self.assertIsNone(d_empty["expr"])
 
+  def test_multi_binding_if_statement_ast(self):
+    """Verifies AST construction for multi-binding if statements with and without conditions."""
+    from src.parser.ast import IfNode, HeaderBindingNode
+
+    code = """
+    func test() {
+      if let a ?= opt1; let b ?= opt2; a > 0 && b > 0 {
+        let x = 1;
+      } else {
+        let y = 2;
+      }
+    }
+    """
+    ast = self._get_ast(code)
+    func_decl = ast.declarations[0]
+    if_node = func_decl.body.statements[0]
+    self.assertIsInstance(if_node, IfNode)
+    self.assertEqual(len(if_node.bindings), 2)
+    self.assertEqual(if_node.bindings[0].let_name, "a")
+    self.assertTrue(if_node.bindings[0].is_unwrap)
+    self.assertEqual(if_node.bindings[1].let_name, "b")
+    self.assertTrue(if_node.bindings[1].is_unwrap)
+    self.assertIsNotNone(if_node.condition)
+    self.assertIsNotNone(if_node.then_block)
+    self.assertIsNotNone(if_node.else_block)
+
+    # Conditionless multi-binding
+    code_no_cond = """
+    func test2() {
+      if let x ?= opt1; let y ?= opt2 {
+        let z = 3;
+      }
+    }
+    """
+    ast2 = self._get_ast(code_no_cond)
+    if_node2 = ast2.declarations[0].body.statements[0]
+    self.assertEqual(len(if_node2.bindings), 2)
+    self.assertIsNone(if_node2.condition)
+
   def test_move_expression(self):
     """Verifies parsing of explicit move expressions on variables."""
     ast = self._get_ast("let b = move a;")

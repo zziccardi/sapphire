@@ -206,16 +206,12 @@ returnStatement
 
 ifStatement
     : IF expression block (ELSE ifStatement | ELSE block)?
-    | IF letOrVarBinding (SEMICOLON expression)? block (ELSE ifStatement | ELSE block)?
+    | IF letOrVarBinding (SEMICOLON letOrVarBinding)* (SEMICOLON expression)? block (ELSE ifStatement | ELSE block)?
     ;
 
 guardStatement
-    : GUARD guardClause (SEMICOLON guardClause)* ELSE block
-    ;
-
-guardClause
-    : letOrVarBinding
-    | expression
+    : GUARD expression ELSE block
+    | GUARD letOrVarBinding (SEMICOLON letOrVarBinding)* (SEMICOLON expression)? ELSE block
     ;
 
 whileStatement

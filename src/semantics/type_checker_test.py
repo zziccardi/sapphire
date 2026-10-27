@@ -129,6 +129,68 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code2)
 
+  def test_multi_binding_if_statement_type_checking(self):
+    """Verifies type checking, unwrapping, condition validation, and scoping for multi-binding if statements."""
+    # 1. Valid multi-binding if with unwraps and compound boolean condition
+    code_valid = """
+    func test(opt_a: int?, opt_b: String?): int {
+      if let a ?= opt_a; let b ?= opt_b; a > 0 && b.size() > 0 {
+        return a + b.size();
+      } else {
+        return -1;
+      }
+    }
+    """
+    self._check(code_valid)
+
+    # 2. Error: non-optional unwrap in second binding
+    code_invalid_unwrap = """
+    func test(opt_a: int?, non_opt: int) {
+      if let a ?= opt_a; let b ?= non_opt {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid_unwrap)
+    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(ctx.exception))
+
+    # 3. Error: condition expression resolves to non-bool
+    code_non_bool = """
+    func test(opt_a: int?, opt_b: int?) {
+      if let a ?= opt_a; let b ?= opt_b; a + b {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_non_bool)
+    self.assertIn("If condition must resolve to 'bool'", str(ctx.exception))
+
+    # 4. Error: multiple boolean conditions separated by semicolons are rejected by syntax
+    code_semicolon_conditions = """
+    func test(a: int, b: int) {
+      if a > 0; b > 0 {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SyntaxError):
+      self._check(code_semicolon_conditions)
+
+    # 5. Scope isolation: unwrapped bindings are not defined outside the if block
+    code_leak = """
+    func test(opt_a: int?) {
+      if let a ?= opt_a {
+        let inside = a;
+      }
+      let outside = a; // Error: undefined 'a'
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_leak)
+    self.assertIn("Undefined identifier 'a'", str(ctx.exception))
+
     # 3. ?? operator
     code3 = """
     func test() {
@@ -3882,7 +3944,7 @@ class TestTypeChecker(unittest.TestCase):
     # 1. Valid guard statement with scope promotion
     self._check("""
     func test(opt: int?, flag: bool): int {
-      guard let x ?= opt; flag; x > 0 else {
+      guard let x ?= opt; flag && x > 0 else {
         return 0;
       }
       return x * 2; // 'x' is promoted to outer scope as non-optional int

@@ -293,7 +293,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 | **Variable Declarations** | `let` (immutable), `var` (mutable) | `let` (immutable), `var` (mutable) | Identical constant-by-default philosophy |
 | **Null Representation** | `nil` | `none` | Clean null-safety without raw pointers |
 | **Optional Binding Syntax** | `if let x = opt` or `if let x` | `if let x ?= opt` | Explicit `?=` unwrapping assignment operator |
-| **Precondition Enforcement** | `guard let x = opt else { ... }` | `guard let x ?= opt else { ... }` | Shared scope-promotion semantics; Sapphire uses semicolon clause delimiters |
+| **Precondition Enforcement** | `guard let x = opt else { ... }` | `guard let x ?= opt else { ... }` | Shared scope-promotion semantics; Sapphire uses semicolon binding delimiters and boolean operator condition combinations |
 | **String Interpolation** | `"Hello \(name)"` | `f"Hello {name}"` | Python-style f-strings with support for nested quotes and brace escaping |
 | **Parameter Semantics** | Value copy by default; `inout` for mutation | **Constant reference borrow** by default; `var` for mutable parameters | Avoids unnecessary struct copying without requiring reference punctuation |
 | **Call-Site Aliasing Rules** | Exclusive access memory law (dynamic/static) | Compile-time scope-bound call-site reference exclusivity | Guarantees mutable borrow exclusivity at call sites without lifetime syntax |

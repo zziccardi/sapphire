@@ -1601,7 +1601,7 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
     code = """
     func test_guard(opt: int?, flag: bool): int {
-      guard let x ?= opt; flag; x > 0 else {
+      guard let x ?= opt; flag && x > 0 else {
         return -1;
       }
       return x * 10;
@@ -1618,6 +1618,79 @@ class TestPythonTranspiler(unittest.TestCase):
 
     res4 = self._transpile_and_run(code, "test_guard(-5, True)")
     self.assertEqual(res4, -1)
+
+  def test_multi_binding_if_statement_execution(self):
+    """Verifies Python transpilation and execution of multi-binding if statements."""
+    code = """
+    func test_multi_if(opt_a: int?, opt_b: int?, flag: bool): int {
+      if let a ?= opt_a; let b ?= opt_b; flag && (a + b > 10) {
+        return a + b;
+      } else {
+        return -1;
+      }
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_multi_if(6, 7, True)")
+    self.assertEqual(res1, 13)
+
+    res2 = self._transpile_and_run(code, "test_multi_if(None, 7, True)")
+    self.assertEqual(res2, -1)
+
+    res3 = self._transpile_and_run(code, "test_multi_if(6, None, True)")
+    self.assertEqual(res3, -1)
+
+    res4 = self._transpile_and_run(code, "test_multi_if(6, 7, False)")
+    self.assertEqual(res4, -1)
+
+    res5 = self._transpile_and_run(code, "test_multi_if(2, 3, True)")
+    self.assertEqual(res5, -1)
+
+  def test_multi_binding_if_raii_lifo_cleanup(self):
+    """Verifies that multi-binding if cleans up partially acquired resources on failure and all on block exit."""
+    code = """
+    var events: [String] = [];
+
+    struct Resource {
+      var name: String;
+      var is_closed: bool;
+    }
+    impl Resource {
+      func __del__() {
+        if !self.is_closed {
+          self.is_closed = true;
+          events.push("dispose:" + self.name);
+        }
+      }
+    }
+
+    func get_res(name: String, ok: bool): Resource? {
+      if ok {
+        return Resource { name = name, is_closed = false };
+      }
+      return none;
+    }
+
+    func run_test(ok_a: bool, ok_b: bool, cond: bool) {
+      if let a ?= get_res(name = "resA", ok = ok_a);
+         let b ?= get_res(name = "resB", ok = ok_b);
+         cond {
+        events.push("inside");
+      } else {
+        events.push("fallback");
+      }
+    }
+    """
+    # Case 1: Both succeed and condition holds -> inside -> LIFO dispose resB then resA
+    res1 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = true, cond = true); return events; }", "main()")
+    self.assertEqual(res1, ["inside", "dispose:resB", "dispose:resA"])
+
+    # Case 2: First succeeds, second fails -> dispose resA before fallback
+    res2 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = false, cond = true); return events; }", "main()")
+    self.assertEqual(res2, ["dispose:resA", "fallback"])
+
+    # Case 3: Both succeed, but condition fails -> dispose resB, resA before fallback
+    res3 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = true, cond = false); return events; }", "main()")
+    self.assertEqual(res3, ["dispose:resB", "dispose:resA", "fallback"])
 
   def test_guard_destructuring_and_clause_node(self):
     """Verifies Python transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""

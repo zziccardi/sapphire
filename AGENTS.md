@@ -55,7 +55,7 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 ### 3.3 Optionals & Unwrapping
 * Optionals are denoted by `?` (e.g. `int?`, `Player?`). Null is represented as `none`.
 * **Safe Unwrapping**: `if let target ?= optional_val { ... }`.
-* **Init Statements**: Semicolon-delimited initialization in `if` and `while`: `if let x ?= get_val(); x > 10 { ... }`.
+* **Init & Multi-Binding Statements**: Semicolon-delimited bindings in `if` and `guard`: `if let x ?= get_val(); let y ?= get_other(); x + y > 10 { ... }`. Conditions must use boolean operators (`&&`, `||`).
 * **Nil-coalescing**: `let val = opt ?? default_val;`.
 * **Optional chaining**: `let name = target?.get_name();`.
 * **Guard statement**:

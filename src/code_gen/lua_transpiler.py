@@ -1838,23 +1838,46 @@ class LuaTranspiler(BaseTranspiler):
     pass
 
   def visit_IfNode(self, node: IfNode) -> None:
-    if node.init_binding:
-      self._lift_match_expressions(node.init_binding.expr)
-    if node.condition:
-      self._lift_match_expressions(node.condition)
+    bindings = getattr(node, "bindings", [node.init_binding] if getattr(node, "init_binding", None) else [])
 
-    self.newline()
-    if node.init_binding:
-      let_name = node.init_binding.let_name
-      if node.init_binding.is_unwrap:
+    if not bindings:
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+      self.newline()
+      self.emit("if ")
+      self.visit(node.condition)
+      self.emit(" then")
+      self.indent()
+      self.visit(node.then_block)
+      self.dedent()
+      if node.else_block:
+        self.newline()
+        self.emit("else")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
+      self.newline()
+      self.emit("end")
+      return
+
+    if len(bindings) == 1:
+      binding = bindings[0]
+      self._lift_match_expressions(binding.expr)
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+      let_names = getattr(binding, "let_names", [binding.let_name])
+      let_name = binding.let_name
+
+      self.newline()
+      if binding.is_unwrap:
         val_var = f"_val_{let_name}"
         self.emit(f"local {val_var} = ")
-        self.visit(node.init_binding.expr)
+        self.visit(binding.expr)
         self.newline()
 
-        # Map identifier to temporary variable during condition check
         old_map = self._identifier_map.copy()
-        self._identifier_map[let_name] = val_var
+        if len(let_names) == 1:
+          self._identifier_map[let_name] = val_var
 
         self.emit(f"if {val_var} ~= nil")
         if node.condition:
@@ -1862,54 +1885,155 @@ class LuaTranspiler(BaseTranspiler):
           self.visit(node.condition)
         self.emit(" then")
 
-        # Restore identifier map
         self._identifier_map = old_map
 
         self.indent()
         self.newline()
-        self.emit(f"local {let_name} = {val_var}")
-        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        if len(let_names) > 1:
+          for idx, name in enumerate(let_names):
+            self.emit(f"local {name} = {val_var}[{idx + 1}]")
+            if idx < len(let_names) - 1:
+              self.newline()
+        else:
+          self.emit(f"local {let_name} = {val_var}")
+
+        st_name = self._expr_destructible_struct(binding.expr)
         if st_name:
-          self.variable_types[let_name] = st_name
-          if not hasattr(node.then_block, "_block_destructibles"):
-            node.then_block._block_destructibles = []
-          node.then_block._block_destructibles.append(let_name)
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
         self.visit(node.then_block)
         self.dedent()
       else:
         # Standard bind + condition
         self.emit(f"local {let_name} = ")
-        self.visit(node.init_binding.expr)
+        self.visit(binding.expr)
         self.newline()
-        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        st_name = self._expr_destructible_struct(binding.expr)
         if st_name:
-          self.variable_types[let_name] = st_name
-          if not hasattr(node.then_block, "_block_destructibles"):
-            node.then_block._block_destructibles = []
-          node.then_block._block_destructibles.append(let_name)
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
         self.emit("if ")
         self.visit(node.condition)
         self.emit(" then")
         self.indent()
         self.visit(node.then_block)
         self.dedent()
-    else:
-      self.emit("if ")
-      self.visit(node.condition)
-      self.emit(" then")
-      self.indent()
-      self.visit(node.then_block)
-      self.dedent()
+
+      if node.else_block:
+        self.newline()
+        self.emit("else")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
+
+      self.newline()
+      self.emit("end")
+      return
+
+    # Multi-binding (len(bindings) > 1) with sequential short-circuiting and LIFO destructors
+    self._temp_if_count = getattr(self, "_temp_if_count", 0) + 1
+    cond_flag = f"_if_ok_{self._temp_if_count}"
+
+    for b in bindings:
+      self._lift_match_expressions(b.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
+    self.newline()
+    self.emit(f"local {cond_flag} = false")
+
+    def emit_binding_level(idx: int, prior_destructibles: List[str]):
+      if idx < len(bindings):
+        b = bindings[idx]
+        let_names = getattr(b, "let_names", [b.let_name])
+        let_name = b.let_name
+        st_name = self._expr_destructible_struct(b.expr)
+        current_destructibles = list(prior_destructibles)
+        if st_name:
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
+          current_destructibles.extend(let_names)
+
+        if b.is_unwrap:
+          val_var = f"_val_{let_name}_{idx + 1}"
+          self.newline()
+          self.emit(f"local {val_var} = ")
+          self.visit(b.expr)
+          self.newline()
+          self.emit(f"if {val_var} ~= nil then")
+          self.indent()
+          self.newline()
+          if len(let_names) > 1:
+            for n_idx, name in enumerate(let_names):
+              self.emit(f"local {name} = {val_var}[{n_idx + 1}]")
+              if n_idx < len(let_names) - 1:
+                self.newline()
+          else:
+            self.emit(f"local {let_name} = {val_var}")
+
+          emit_binding_level(idx + 1, current_destructibles)
+          self.dedent()
+          if prior_destructibles:
+            self.newline()
+            self.emit("else")
+            self.indent()
+            for d_var in reversed(prior_destructibles):
+              self.newline()
+              self.emit(f"_sapphire_del({d_var})")
+            self.dedent()
+          self.newline()
+          self.emit("end")
+        else:
+          self.newline()
+          self.emit(f"local {let_name} = ")
+          self.visit(b.expr)
+          emit_binding_level(idx + 1, current_destructibles)
+      else:
+        # All bindings acquired; check condition if present
+        if node.condition:
+          self.newline()
+          self.emit("if ")
+          self.visit(node.condition)
+          self.emit(" then")
+          self.indent()
+          self.newline()
+          self.emit(f"{cond_flag} = true")
+          self.visit(node.then_block)
+          self.dedent()
+          if prior_destructibles:
+            self.newline()
+            self.emit("else")
+            self.indent()
+            for d_var in reversed(prior_destructibles):
+              self.newline()
+              self.emit(f"_sapphire_del({d_var})")
+            self.dedent()
+          self.newline()
+          self.emit("end")
+        else:
+          self.newline()
+          self.emit(f"{cond_flag} = true")
+          self.visit(node.then_block)
+
+    emit_binding_level(0, [])
 
     if node.else_block:
       self.newline()
-      self.emit("else")
+      self.emit(f"if not {cond_flag} then")
       self.indent()
       self.visit(node.else_block)
       self.dedent()
-
-    self.newline()
-    self.emit("end")
+      self.newline()
+      self.emit("end")
 
   def _visit_loop_body(self, block: BlockNode, has_continue: bool) -> None:
     if has_continue:

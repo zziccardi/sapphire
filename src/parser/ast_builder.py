@@ -433,16 +433,17 @@ class ASTBuilder(SapphireVisitor):
     elif ctx.ifStatement():
       else_block = self.visit(ctx.ifStatement())
 
-    init_binding = None
+    bindings = []
     if ctx.letOrVarBinding():
-      init_binding = self.visit(ctx.letOrVarBinding())
+      b_contexts = ctx.letOrVarBinding() if isinstance(ctx.letOrVarBinding(), list) else [ctx.letOrVarBinding()]
+      bindings = [self.visit(b) for b in b_contexts]
 
     condition = None
     if ctx.expression():
       condition = self.visit(ctx.expression())
 
     then_block = self.visit(ctx.block(0))
-    return IfNode(init_binding, condition, then_block, else_block)
+    return IfNode(condition=condition, then_block=then_block, else_block=else_block, bindings=bindings)
 
   def visitWhileStatement(self, ctx: SapphireParser.WhileStatementContext) -> WhileNode:
     init_binding = None
@@ -457,19 +458,17 @@ class ASTBuilder(SapphireVisitor):
     return WhileNode(init_binding, condition, block)
 
   def visitGuardStatement(self, ctx: SapphireParser.GuardStatementContext) -> GuardStmtNode:
-    clauses = []
-    for clause_ctx in ctx.guardClause():
-      clauses.append(self.visit(clause_ctx))
-    else_block = self.visit(ctx.block())
-    return GuardStmtNode(clauses, else_block)
-
-  def visitGuardClause(self, ctx: SapphireParser.GuardClauseContext) -> GuardClauseNode:
+    bindings = []
     if ctx.letOrVarBinding():
-      binding = self.visit(ctx.letOrVarBinding())
-      return GuardClauseNode(binding=binding)
-    else:
+      b_contexts = ctx.letOrVarBinding() if isinstance(ctx.letOrVarBinding(), list) else [ctx.letOrVarBinding()]
+      bindings = [self.visit(b) for b in b_contexts]
+
+    condition = None
+    if ctx.expression():
       condition = self.visit(ctx.expression())
-      return GuardClauseNode(condition=condition)
+
+    else_block = self.visit(ctx.block())
+    return GuardStmtNode(else_block=else_block, bindings=bindings, condition=condition)
 
   def visitLetOrVarBinding(self, ctx: SapphireParser.LetOrVarBindingContext) -> HeaderBindingNode:
     is_mutable = ctx.VAR() is not None

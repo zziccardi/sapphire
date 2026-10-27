@@ -1353,29 +1353,39 @@ class TypeChecker:
     return first_type
 
   def visit_IfNode(self, node: IfNode) -> None:
-    if node.init_binding:
+    if node.bindings:
       self.symbol_table.enter_scope()
-      expr_type = self.visit(node.init_binding.expr)
-      if node.init_binding.is_unwrap:
-        if not isinstance(expr_type, OptionalType):
-          self.error("Expression in optional unwrapping must resolve to an optional type.")
-          unwrapped_type = expr_type
+      has_unwrap = False
+      for binding in node.bindings:
+        expr_type = self.visit(binding.expr)
+        if binding.is_unwrap:
+          has_unwrap = True
+          if not isinstance(expr_type, OptionalType):
+            self.error("Expression in optional unwrapping must resolve to an optional type.", node=binding.expr)
+            unwrapped_type = expr_type
+          else:
+            unwrapped_type = expr_type.base_type
         else:
-          unwrapped_type = expr_type.base_type
-      else:
-        unwrapped_type = expr_type
+          unwrapped_type = expr_type
 
-      self.symbol_table.define(
-          node.init_binding.let_name,
-          VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
-      )
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        if len(let_names) > 1:
+          elem_t = unwrapped_type.element_type if isinstance(unwrapped_type, ArrayType) else unwrapped_type
+          for name in let_names:
+            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+        else:
+          self.symbol_table.define(
+              binding.let_name,
+              VariableSymbol(binding.let_name, unwrapped_type, is_mutable=binding.is_mutable)
+          )
 
       if node.condition:
         cond_type = self.visit(node.condition)
         if cond_type != PrimitiveType("bool"):
-          self.error("If condition must resolve to 'bool'.")
+          c_node = node.condition if (hasattr(node.condition, "start_line") and isinstance(node.condition.start_line, int)) else None
+          self.error("If condition must resolve to 'bool'.", node=c_node)
       else:
-        if not node.init_binding.is_unwrap:
+        if not has_unwrap:
           self.error("Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='.")
 
       pre_branch_moved = set(self.moved_symbols)
@@ -1394,7 +1404,8 @@ class TypeChecker:
     else:
       cond_type = self.visit(node.condition)
       if cond_type != PrimitiveType("bool"):
-        self.error("If condition must resolve to 'bool'.")
+        c_node = node.condition if (hasattr(node.condition, "start_line") and isinstance(node.condition.start_line, int)) else None
+        self.error("If condition must resolve to 'bool'.", node=c_node)
 
       pre_branch_moved = set(self.moved_symbols)
       self.visit(node.then_block)

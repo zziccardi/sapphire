@@ -509,21 +509,60 @@ class GuardClauseNode(ASTNode):
 
 
 class GuardStmtNode(StmtNode):
-  """Represents a guard statement (e.g. 'guard clause1; clause2 else { ... }')."""
+  """Represents a guard statement (e.g. 'guard let a ?= x; a > 0 else { ... }')."""
 
-  def __init__(self, clauses: List[GuardClauseNode], else_block: BlockNode):
-    self.clauses = clauses
+  def __init__(
+      self,
+      clauses: Optional[List[GuardClauseNode]] = None,
+      else_block: Optional[BlockNode] = None,
+      bindings: Optional[List[HeaderBindingNode]] = None,
+      condition: Optional[ASTNode] = None,
+  ):
+    if clauses is not None:
+      self.clauses = clauses
+      self.bindings = [c.binding for c in clauses if c.binding is not None]
+      conds = [c.condition for c in clauses if c.condition is not None]
+      self.condition = conds[0] if conds else None
+    else:
+      self.bindings = bindings or []
+      self.condition = condition
+      self.clauses = [GuardClauseNode(binding=b) for b in self.bindings]
+      if self.condition:
+        self.clauses.append(GuardClauseNode(condition=self.condition))
     self.else_block = else_block
 
 
 class IfNode(StmtNode):
-  """Represents an if/else conditional statement, supporting init-statements."""
+  """Represents an if/else conditional statement, supporting multi-bindings and conditions."""
 
-  def __init__(self, init_binding: Optional[HeaderBindingNode], condition: Optional[ASTNode], then_block: BlockNode, else_block: Optional[Union[BlockNode, 'IfNode']] = None):
-    self.init_binding = init_binding
+  def __init__(
+      self,
+      init_binding: Optional[HeaderBindingNode] = None,
+      condition: Optional[ASTNode] = None,
+      then_block: Optional[BlockNode] = None,
+      else_block: Optional[Union[BlockNode, 'IfNode']] = None,
+      bindings: Optional[List[HeaderBindingNode]] = None,
+  ):
+    if bindings is not None:
+      self.bindings = bindings
+    elif init_binding is not None:
+      self.bindings = [init_binding]
+    else:
+      self.bindings = []
     self.condition = condition
     self.then_block = then_block
     self.else_block = else_block
+
+  @property
+  def init_binding(self) -> Optional[HeaderBindingNode]:
+    return self.bindings[0] if self.bindings else None
+
+  @init_binding.setter
+  def init_binding(self, val: Optional[HeaderBindingNode]):
+    if val is not None:
+      self.bindings = [val]
+    else:
+      self.bindings = []
 
 
 class WhileNode(StmtNode):

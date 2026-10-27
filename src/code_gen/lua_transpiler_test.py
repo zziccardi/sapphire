@@ -1403,7 +1403,7 @@ class TestLuaTranspiler(unittest.TestCase):
     """Verifies Lua transpilation of guard statements."""
     code = """
     func test_guard(opt: int?, flag: bool): int {
-      guard let x ?= opt; flag; x > 0 else {
+      guard let x ?= opt; flag && x > 0 else {
         return -1;
       }
       return x * 10;
@@ -1413,7 +1413,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local _guard_val_1 = opt", lua_code)
     self.assertIn("if _guard_val_1 == nil then", lua_code)
     self.assertIn("return (-1)", lua_code)
-    self.assertIn("if not (flag) then", lua_code)
+    self.assertIn("if not ((flag and (x > 0))) then", lua_code)
 
   def test_guard_destructuring_and_clause_node_lua(self):
     """Verifies Lua transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
@@ -1436,6 +1436,58 @@ class TestLuaTranspiler(unittest.TestCase):
     tr.visit_GuardClauseNode(clause1)
     tr.visit_GuardClauseNode(clause2)
     self.assertIn("1", tr.get_output())
+
+  def test_multi_binding_if_statement_lua(self):
+    """Verifies Lua transpilation of multi-binding if statements."""
+    code = """
+    func test_multi_if(opt_a: int?, opt_b: int?, flag: bool): int {
+      if let a ?= opt_a; let b ?= opt_b; flag && (a + b > 10) {
+        return a + b;
+      } else {
+        return -1;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _val_a_1 = opt_a", lua_code)
+    self.assertIn("if _val_a_1 ~= nil then", lua_code)
+    self.assertIn("local a = _val_a_1", lua_code)
+    self.assertIn("local _val_b_2 = opt_b", lua_code)
+    self.assertIn("if _val_b_2 ~= nil then", lua_code)
+    self.assertIn("local b = _val_b_2", lua_code)
+    self.assertIn("if (flag and ((a + b) > 10)) then", lua_code)
+    self.assertIn("local _if_ok_1 = false", lua_code)
+    self.assertIn("_if_ok_1 = true", lua_code)
+    self.assertIn("if not _if_ok_1 then", lua_code)
+
+  def test_multi_binding_if_raii_lifo_cleanup_lua(self):
+    """Verifies that multi-binding if cleans up partially acquired resources on failure and all on block exit in Lua."""
+    code = """
+    struct Resource {
+      var name: String;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+
+    func get_res(name: String, ok: bool): Resource? {
+      if ok {
+        return Resource { name = name };
+      }
+      return none;
+    }
+
+    func run_test(ok_a: bool, ok_b: bool, cond: bool) {
+      if let a ?= get_res(name = "resA", ok = ok_a);
+         let b ?= get_res(name = "resB", ok = ok_b);
+         cond {
+        let x = 1;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+    self.assertIn("_sapphire_del(a)", lua_code)
 
   def test_coroutine_transpilation_and_methods(self):
     """Verifies Lua transpilation of top-level coroutines, struct method coroutines, and yields."""
