@@ -44,12 +44,12 @@ Sapphire targets a different balance:
      check: inside a single function or method invocation, a reference path
      cannot be passed mutably (`var`) if it is already referenced elsewhere
      (mutably or immutably) within that same call
-     ([docs/SPEC.md §8.1](SPEC.md#81-scope-bound-aliasing-rules-call-site-reference-exclusivity)).
+     ([docs/SPEC.md (Scope-Bound Aliasing Rules)](SPEC.md#scope-bound-aliasing-rules-call-site-reference-exclusivity)).
   3. **By-Value Returns with RVO**: Returning references to local stack frames
      is statically prohibited, preventing use-after-free bugs entirely.
      Returning structs is done by value; the compiler guarantees
      **Return-Value Optimization (RVO)** and copy elision directly into the
-     caller's stack frame ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)).
+     caller's stack frame ([docs/SPEC.md (Calling Conventions)](SPEC.md#calling-conventions-vs-storage-semantics)).
   4. **No Lifetime Syntax**: The language contains no lifetime parameters or
      lifetime subtyping rules.
 
@@ -63,7 +63,7 @@ Sapphire targets a different balance:
 * **Sapphire's Solution**:
   1. **Opt-in Prototypal State Delegation (`proto` & `clone`)**: Prototypal
      inheritance allows runtime objects to delegate state to an active
-     prototype ([docs/SPEC.md §11.2](SPEC.md#112-dynamic-prototypal-inheritance)).
+     prototype ([docs/SPEC.md (Prototypal State Delegation)](SPEC.md#prototypal-state-delegation-proto-clone)).
      Clones dynamically delegate field reads to their prototype, allowing
      state sharing without reference counting or runtime borrow checks.
   2. **Copy-on-Write (CoW) Mutation Safety**: When a clone mutates a nested
@@ -74,7 +74,7 @@ Sapphire targets a different balance:
   3. **Lexical Arenas (`Arena`)**: All `proto` instances are allocated in
      explicit arenas (`Entity { ... } in my_arena`). When the arena exits its
      lexical scope, all contained instances are automatically deallocated in
-     bulk ([docs/SPEC.md §12.2](SPEC.md#122-stack-first-memory-model--arena-management)).
+     bulk ([docs/SPEC.md (Memory Architecture)](SPEC.md#memory-architecture-arenas-smart-references)).
      Escape-checking prevents inner-arena objects from escaping to outer scopes
      or returning across function boundaries.
 
@@ -89,7 +89,7 @@ Sapphire targets a different balance:
   1. **Syntactic Delegation (`struct Child: Parent1, Parent2`)**: Sapphire
      permits structural inheritance syntax, but treats it strictly as
      **compile-time syntactic delegation**
-     ([docs/SPEC.md §11.1](SPEC.md#111-static-inheritance)). The compiler
+     ([docs/SPEC.md (Static Structural Inheritance)](SPEC.md#static-structural-inheritance)). The compiler
      inlines/nests parent layouts and automatically generates
      method-forwarding wrappers.
   2. **Zero Runtime Dispatch Penalty**: Because forwarding is resolved
@@ -111,11 +111,11 @@ Sapphire targets a different balance:
 * **Sapphire's Solution**:
   1. **Monomorphization by Default**: Generic structs, functions, and
      implementations are fully monomorphized at compile time with zero runtime
-     overhead ([docs/SPEC.md §15](SPEC.md#15-generics--parametric-polymorphism)).
+     overhead ([docs/SPEC.md (Generics & Parametric Polymorphism)](SPEC.md#generics-parametric-polymorphism)).
   2. **Zero-Vtable Heterogeneous Trait Collections (`[Trait]`)**: An array
      typed as `[Renderable]` can store any struct implementing `Renderable`
      without vtables or fat pointers
-     ([docs/SPEC.md §11.1](SPEC.md#traits-compile-time-contracts--implicit-subtyping)).
+     ([docs/SPEC.md (Traits)](SPEC.md#traits-compile-time-contracts-implicit-subtyping)).
      The native compiler synthesizes an internal closed tagged union (sum type)
      with contiguous memory layout and inlinable jump/branch tables to direct
      static function calls.
@@ -140,7 +140,7 @@ Sapphire targets a different balance:
      source files, performs fast incremental recompilation, patches living
      in-memory prototypes and structs in place, and triggers `@on_reload`
      lifecycle callbacks without resetting runtime application state
-     ([docs/SPEC.md §14.4](SPEC.md#144-live-hot-reloading--on_reload-lifecycle-hook)).
+     ([docs/SPEC.md (Live Hot-Reloading)](SPEC.md#live-hot-reloading-on_reload-lifecycle-hook)).
   2. **High-Level Expressiveness**:
      - Python-style string interpolation: `f"Player {name} has {hp} HP"`.
      - Named parameters with default values:
@@ -168,14 +168,14 @@ Sapphire targets a different balance:
        return user.score;
      }
      ```
-     `guard` keeps the "happy path" un-indented and cleanly exits early on precondition failures ([docs/SPEC.md §7.3](SPEC.md#73-guard-statements-guard--else---)).
+     `guard` keeps the "happy path" un-indented and cleanly exits early on precondition failures ([docs/SPEC.md (Guard Statements)](SPEC.md#guard-statements-guard-else-)).
   2. **Rich Optional Syntax**:
      - Optional modifier (`T?`) with `none`.
      - Semicolon-separated init headers: `if let target ?= enemy; target.hp > 0 { ... }`.
      - Nil-coalescing fallback: `let active = target ?? default_player;`.
      - Optional chaining: `let name = target?.get_profile()?.name;`.
   3. **Deterministic Cleanup Without `try`/`finally`**:
-     Deterministic RAII via `__del__()` destructors and scoped `with` blocks ensuring LIFO teardown without runtime exception overhead ([docs/SPEC.md §7.4](SPEC.md#74-with-statements-with----) & [§9.2](SPEC.md#92-deterministic-destructors-__del__)).
+     Deterministic RAII via `__del__()` destructors and scoped `with` blocks ensuring LIFO teardown without runtime exception overhead ([docs/SPEC.md (Deterministic Destructors)](SPEC.md#deterministic-destructors-__del__)).
 
 ## 3. Explicit Trade-offs: What Sapphire Gives Up vs. Rust
 

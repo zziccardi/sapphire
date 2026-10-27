@@ -294,7 +294,7 @@ pipenv run sapphire run samples/overview.sp --dev
    * When modifying language semantics or adding built-ins, update `docs/SPEC.md`, `docs/compiler.md`, or `docs/builtins.md` accordingly.
 4. **Code Quality Standards**:
    * Python codebase: Follow the Google Python Style Guide rather than PEP 8, maintain 2-space or 4-space consistency with surrounding files, include explicit type annotations where appropriate.
-   * Sapphire code: Follow `docs/style_guide.md` (and `docs/SPEC.md §2`) (80 chars max line length, 2-space indentation, semicolon terminated).
+   * Sapphire code: Follow `docs/style_guide.md` (80 chars max line length, 2-space indentation, semicolon terminated).
 5. **Pre-Completion Checklist**:
    * [ ] `pipenv run test` passes with zero failures or errors.
    * [ ] Affected e2e/integration tests pass across all relevant backends.

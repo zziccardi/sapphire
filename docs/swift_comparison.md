@@ -47,7 +47,7 @@ delegation, and explicit fallibility**.
   Furthermore, bidirectional relationships (e.g. parent-child nodes, observer patterns, or delegate callbacks) form **retain cycles**, leading to silent memory leaks unless developers meticulously decorate references with `weak` or `unowned`. Destructors (`deinit`) execute only when reference counts drop to zero, leading to non-deterministic deallocation timings when instances are captured in background tasks.
 
 * **Sapphire's Solution**:
-  Sapphire eliminates universal ARC in favor of a predictable, stack-first hierarchy with lexical arenas and caller-driven ownership ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics) & [§12.2](SPEC.md#stack-first-memory-model--arena-management)):
+  Sapphire eliminates universal ARC in favor of a predictable, stack-first hierarchy with lexical arenas and caller-driven ownership ([docs/SPEC.md (Memory Architecture)](SPEC.md#memory-architecture-arenas-smart-references)):
   1. **Stack Allocation by Default**: User-defined `struct` instances are stack-allocated by default with deterministic LIFO teardown. Destructors (`func __del__()`) execute predictably upon scope exit or loop jumps (`break`/`continue`), and local returns utilize compiler-enforced Return-Value Optimization (RVO) copy elision.
   2. **Lexical Arenas (`Arena`)**: Dynamic objects and prototypes live in explicit, lexically scoped arenas (`let arena = Arena(); let e = Entity { ... } in arena;`). When the arena exits its lexical block, all contained allocations are destroyed in bulk in zero-cost fashion. Compile-time **escape-checking** prevents inner-arena references from escaping into outer scopes or returning across function boundaries.
   3. **No Retain Cycles in Prototypes**: Cloned prototypes (`clone base`) delegate state live to their prototype without reference-counting cycles.
@@ -76,11 +76,11 @@ delegation, and explicit fallibility**.
   Additionally, subtyping permits up-casting (`let animal: Animal = dog`), conflating structural reuse with dynamic polymorphism and introducing object-slicing risks or dispatch confusion.
 
 * **Sapphire's Solution**:
-  Sapphire completely eliminates classes and eliminates virtual method tables from standard structural code ([docs/SPEC.md §16.1](SPEC.md#isolating-and-minimizing-virtual-method-tables-vtables)):
+  Sapphire completely eliminates classes and eliminates virtual method tables from standard structural code ([docs/SPEC.md (Minimizing Vtables)](SPEC.md#isolating-and-minimizing-virtual-method-tables-vtables)):
   1. **No Classes**: All data types in Sapphire are `struct`s or `proto`s.
-  2. **Syntactic Delegation (Auto-Forwarding)**: Structural inheritance (`struct Child: Parent1, Parent2`) is compile-time syntactic sugar for composition and generated forwarding methods ([docs/SPEC.md §11.1.3](SPEC.md#syntactic-delegation-transparent-forwarding)). The compiler inlines parent layouts and resolves forwarded calls directly to static functions, incurring zero runtime indirection and enabling full inlining.
-  3. **Strict Prohibition of Struct Up-Casting**: Up-casting a child struct to a parent struct type (e.g. `cat as Animal`) is statically rejected at compile time ([docs/SPEC.md §5.2.1](SPEC.md#prohibited-conversions-with-the-as-operator)). Object slicing is physically impossible.
-  4. **Data-Only Prototypal State Delegation**: Dynamic inheritance is restricted to data fields via `proto` and `clone`. Methods defined in `impl` blocks are always dispatched statically based on concrete types ([docs/SPEC.md §11.2.2](SPEC.md#structural-safety--method-dispatch-constraints)).
+  2. **Syntactic Delegation (Auto-Forwarding)**: Structural inheritance (`struct Child: Parent1, Parent2`) is compile-time syntactic sugar for composition and generated forwarding methods ([docs/SPEC.md (Syntactic Delegation)](SPEC.md#syntactic-delegation-transparent-forwarding)). The compiler inlines parent layouts and resolves forwarded calls directly to static functions, incurring zero runtime indirection and enabling full inlining.
+  3. **Strict Prohibition of Struct Up-Casting**: Up-casting a child struct to a parent struct type (e.g. `cat as Animal`) is statically rejected at compile time ([docs/SPEC.md (Prohibited Conversions)](SPEC.md#prohibited-conversions-with-the-as-operator)). Object slicing is physically impossible.
+  4. **Data-Only Prototypal State Delegation**: Dynamic inheritance is restricted to data fields via `proto` and `clone`. Methods defined in `impl` blocks are always dispatched statically based on concrete types ([docs/SPEC.md (Prototypal State Delegation)](SPEC.md#prototypal-state-delegation-proto-clone)).
 
 ```swift
 // Swift: Class inheritance with vtable dynamic dispatch
@@ -127,7 +127,7 @@ boss.take_damage(amount = 20); // Statically resolved; zero vtable lookup
   Heterogeneous arrays (e.g. `[any Renderable]`) store arrays of existential containers, resulting in fragmented memory, pointer indirection, and unpredictable heap allocations.
 
 * **Sapphire's Solution**:
-  Sapphire achieves zero-vtable heterogeneous trait collections without fat pointers or existential containers ([docs/SPEC.md §11.1.4](SPEC.md#traits-compile-time-contracts--implicit-subtyping)):
+  Sapphire achieves zero-vtable heterogeneous trait collections without fat pointers or existential containers ([docs/SPEC.md (Traits)](SPEC.md#traits-compile-time-contracts-implicit-subtyping)):
   1. **Compiler-Synthesized Tagged Unions**: An array typed as `[Renderable]` does not use boxed containers or witness tables. Instead, the native compiler inspects all concrete struct types implementing `Renderable` and synthesizes an internal closed tagged union (sum type).
   2. **Contiguous Memory & Direct Jump Tables**: Heterogeneous trait collections are stored contiguously in memory. Iteration and method calls compile into inlinable branch/jump tables that dispatch directly to concrete static functions.
   3. **No Silent Heap Boxing**: Structs stored in trait collections never trigger silent heap promotions.
@@ -167,10 +167,10 @@ for item in items {
   * **Interoperability complexity**: Scripting host engines (like Lua 5.1 in Love2D) cannot handle unwinding exceptions cleanly across FFI boundaries.
 
 * **Sapphire's Solution**:
-  Sapphire **completely omits throwable exceptions** (`try`/`catch`/`throw`) ([docs/SPEC.md §16.3](SPEC.md#avoiding-throwable-exceptions)):
+  Sapphire **completely omits throwable exceptions** (`try`/`catch`/`throw`) ([docs/SPEC.md (Avoiding Throwable Exceptions)](SPEC.md#avoiding-throwable-exceptions)):
   1. **Explicit, Type-Safe Fallibility**: Functions model fallibility exclusively through optionals (`T?`), multiple return values (`T, bool`), or tagged unions with exhaustive `match` expressions.
   2. **Predictable CPU Branching**: Without stack unwinding machinery, control flow remains entirely local and linear, making execution predictable and easily mapped to low-level target environments.
-  3. **Deterministic RAII Resource Teardown**: Clean resource management does not depend on `finally` blocks or exception unwinding. Resources are cleaned up deterministically in LIFO order via struct `__del__()` destructors on lexical scope exit ([docs/SPEC.md §9.2](SPEC.md#deterministic-destructors-__del__)).
+  3. **Deterministic RAII Resource Teardown**: Clean resource management does not depend on `finally` blocks or exception unwinding. Resources are cleaned up deterministically in LIFO order via struct `__del__()` destructors on lexical scope exit ([docs/SPEC.md (Deterministic Destructors)](SPEC.md#deterministic-destructors-__del__)).
 
 ```swift
 // Swift: Exception unwinding with try/catch
@@ -206,7 +206,7 @@ guard let cfg ?= load_config("settings.json") else {
   Swift provides six distinct access control levels: `open`, `public`, `package`, `internal` (default), `fileprivate`, and `private`. Developers must annotate individual struct fields, properties, initializers, and methods with these specifiers. This results in visual clutter, boilerplate member-wise initializers, and complex inheritance-visibility interactions (e.g. `open` vs `public` for subclassing).
 
 * **Sapphire's Solution**:
-  Sapphire intentionally omits member-level access control keywords in favor of a **module-manifest and construction-contract encapsulation model** ([docs/SPEC.md §9.1.1](SPEC.md#member-encapsulation-via-construction-contract) & [§13](SPEC.md#13-module-system--encapsulation)):
+  Sapphire intentionally omits member-level access control keywords in favor of a **module-manifest and construction-contract encapsulation model** ([docs/SPEC.md (Member Encapsulation)](SPEC.md#member-encapsulation-via-construction-contract) & [Module System](SPEC.md#module-system-encapsulation)):
   1. **Module-Private by Default**: All top-level symbols (`struct`, `enum`, `trait`, `func`) are private to their source file unless explicitly listed in a single `export { ... }` block.
   2. **Encapsulation via Construction Contracts**:
      * **Plain-Old-Data Structs (no `__init__`)**: Structs without a custom constructor (e.g. `Vector2`, `Point`) have transparent, publicly readable and writable fields. No boilerplate getters and setters.
@@ -243,7 +243,7 @@ w.use();             // Allowed: mutation through authorized methods
   Swift features a comprehensive structured concurrency system (`async`/`await`, `Task`, `TaskGroup`, and `actor` isolation). While powerful for I/O-bound networked applications and UI event loops, Swift's cooperative thread pool dynamically schedules tasks across OS worker threads. In simulations, physics engines, and game loops, this non-deterministic threading introduces scheduling jitter, lock contention, and frame-rate hitching.
 
 * **Sapphire's Solution**:
-  Sapphire focuses on deterministic, single-threaded cooperative execution via first-class **coroutines** (`Coroutine<T>`) ([docs/SPEC.md §8.4](SPEC.md#coroutines-coroutinet)):
+  Sapphire focuses on deterministic, single-threaded cooperative execution via first-class **coroutines** (`Coroutine<T>`) ([docs/SPEC.md (Coroutines)](SPEC.md#coroutines-coroutinet)):
   1. **Frame-Steppable Generators**: Declared with `Coroutine<T>` or `Coroutine<void>`. Use bare `yield;` to pause execution until the next tick, or `yield <expr>;` to stream values.
   2. **Explicit Step Control**: Stepped deterministically from game loops using `.step()`, `.is_done()`, and `.reset()`.
   3. **Zero Thread-Context Switching**: Eliminates multithreading race conditions, thread synchronization primitives, and non-deterministic frame scheduling.
@@ -269,7 +269,7 @@ while !anim.is_done() {
   Swift requires a substantial runtime layer, dynamic metadata tables, and the LLVM compiler toolchain. Embedding Swift as a guest scripting language inside a game engine or simulation runtime is difficult. Furthermore, Swift provides no native mechanism for live code hot-reloading without terminating process state.
 
 * **Sapphire's Solution**:
-  Sapphire is designed specifically for scripting host interoperability and instant developer feedback ([docs/SPEC.md §14](SPEC.md#14-host-runtime-interoperability--annotations)):
+  Sapphire is designed specifically for scripting host interoperability and instant developer feedback ([docs/SPEC.md (Host Runtime Interoperability)](SPEC.md#host-runtime-interoperability-annotations)):
   1. **Native Host Annotations**: Host engine symbols are bound effortlessly using `@extern var love: LoveEngine;` and callbacks are exported with `@export("love.update") func update(dt: float)`.
   2. **Live Hot-Reloading (`sapphire run --dev`)**: In dev mode, Sapphire recompiles modified files on the fly, patches prototype metatables in place without losing active application/game state, and invokes `@on_reload` lifecycle hooks.
   3. **Multi-Backend Transpilation**: Compiles directly to clean Python and Lua 5.1 (e.g. for Love2D) with standard V3 source maps (`.lua.map`) and runtime call-stack demangling.

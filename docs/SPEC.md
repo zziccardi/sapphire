@@ -2,11 +2,14 @@
 {: .no_toc }
 
 This document establishes the foundational design, syntax rules, and
-architectural specifications for **Sapphire**, a new general-purpose programming
+architectural specifications for **Sapphire**, a general-purpose programming
 language. Sapphire prioritizes predictability, type safety, explicit function
 signatures, and highly ergonomic prototypal inheritance without traditional
 class-based OOP boilerplate or virtual method table (vtable) performance
 penalties.
+
+For code style, formatting, and naming guidelines, see the separate
+[style guide](style_guide.md).
 
 <!-- Used by Jekyll -->
 <details markdown="block">
@@ -18,7 +21,7 @@ penalties.
 {:toc}
 </details>
 
-## 1. Design philosophy & value proposition
+## Design philosophy & value proposition
 
 Sapphire occupies a unique niche in the language ecosystem: it combines the
 **safety and bare-metal performance of a systems language** (incorporating
@@ -34,238 +37,272 @@ Unlike other performance-oriented languages, Sapphire distinguishes itself
 through five key pillars:
 * **Zero-overhead static & dynamic reuse**: Inheritance is treated as
   compile-time syntactic delegation (composition and generated forwarding),
-  completely eliminating virtual-method tables (vtables), pointer chasing, and
+  completely eliminating virtual-method tables (vtables), pointer-chasing, and
   object-slicing risks. Dynamic prototypal delegation is opt-in and data-only,
   and uses copy-on-write (CoW) to protect prototypes.
-* **Scope-bound memory safety**: Reference types (including `String`, `Array`,
-  `Map`, `Arena`, `Range`, and all `proto` types), as well as stack-allocated
-  user-defined `struct` types, are passed by **constant reference (borrow)**
-  by default. Compile-time scope-bound aliasing rules guarantee memory safety
-  and reference validity across call sites without requiring lifetime
-  annotations or manual pointer arithmetic.
-* **Deterministic lifecycle control**: Opt-in dynamic prototypal references
-  are allocated in managed, lexically scoped arenas. The compiler enforces
-  strict escape-checking to automatically tear down allocations at scope
-  boundaries.
-* **Deterministic, exception-free error model**: Control flow completely
-  eliminates throwable exceptions (`try`/`catch`/`throw`) and stack unwinding.
-  Errors and uninitialized states are handled predictably through first-class
-  optionals (`T?`), multiple-return destructuring (`T, bool`), and Swift-style
-  `guard` statements that promote validated values into outer scopes without
-  excessive indentation.
-* **Modern API & host-environment ergonomics**: Native support for named
-  parameters, default values, and expressive optional unwrapping makes
-  interfaces self-documenting. First-class host annotations (`@extern`,
-  `@export`) compile to zero-overhead bindings for interoperability with
-  scripting environments.
+* **Scope-bound memory safety**: Non-primitive types are passed by **constant
+  reference** by default. Call-site reference exclusivity (aliasing rules)
+  eliminates data corruption from unexpected mutations without lifetime
+  annotations or borrow-checker gymnastics.
+* **Deterministic resource management**: Structs support deterministic RAII via
+  `__del__()` destructors with return-value optimization (RVO).
+  Dynamic prototypes and managed objects reside in explicit, lexically scoped
+  `Arena`s with escape-checking.
+* **Ergonomic, expressive API clarity**: Functions feature explicit signatures
+  with named arguments and default values. Control flow emphasizes safety
+  through Swift-style optionals (`?`), safe unwrapping (`if let ?=`), guard
+  clauses (`guard ... else`), and exhaustive pattern-matching (`match`).
+* **Predictable multi-target compilation**: Sapphire compiles to efficient,
+  readable code across multiple execution targets (defaulting to Python and
+  Lua 5.1/LuaJIT for game frameworks like Love2D), while enforcing strict
+  compile-time type checks and deterministic semantics across all backends.
 
-## 2. Style, formatting, & comments
+## Program entry & top-level script execution
 
-For the complete Sapphire style, formatting, and naming conventions, see the
-separate [style guide](style_guide.md).
+Sapphire supports top-level script-style execution. Programs do not require a
+mandatory `func main()` entry point. Top-level statements (variable
+initializations, function calls, conditional branches, and loops) are
+executed sequentially upon program execution. If a `func main()` function is
+defined, it will be automatically invoked after any top-level statements
+execute. Return statements (`return`) at top-level module scope are prohibited
+and produce a compile-time error.
 
-## 3. Program entry & top-level script execution
+## Types, literals, & string interpolation
 
-Sapphire supports top-level script-style execution. Programs do not require a mandatory `func main()` entry point. Top-level statements (variable initializations, function calls, conditional branches, and loops) are executed sequentially upon program execution. If a `func main()` function is defined, it will be automatically invoked after any top-level statements execute. Return statements (`return`) at top-level module scope are prohibited and produce a compile-time error.
+### Primitive scalar types
 
-## 4. Variable declaration & memory semantics
+Sapphire provides a core set of statically verified primitive scalar types.
+All primitive scalars are passed by value:
 
-Variables are immutable constants by default to encourage safety. Mutability must be explicitly declared.
+* **`int`**: 64-bit signed two's complement integer (`int64`).
+* **`float`**: 64-bit IEEE-754 double-precision floating-point number
+  (`float64`).
+* **`bool`**: Boolean logical values, either `true` or `false`.
+* **`none`**: The unit type representing the absence of a value or an empty
+  optional state.
+* **`void`**: Designates functions that return no value.
 
-* **`let`**: Declares a constant variable (immutable).
-* **`var`**: Declares a mutable variable.
-* **Value vs. reference types**: Primitive scalar types (`int`, `float`, `bool`)
-  and `none` are value types. Standard user-defined `struct` types are
-  strictly **value types and stack-allocated by default** (unless explicitly
-  allocated within an arena via `in my_arena`).
-  * Dynamic collections (`String`, `Array`, `Map`, `Arena`, `Range`) and all
-    `proto` types use managed reference semantics within explicit arenas.
-  * **Flat unboxed struct layouts**: When a `struct` contains another `struct`
-    as a field, it is embedded flat and inline in contiguous memory (zero
-    pointer indirection, zero heap allocation overhead). Copy-on-Write (CoW) is
-    strictly isolated to dynamic heap containers (`String`, `Array`, `Map`).
-* **Copy, move, and ownership semantics**:
-  * **Trivially copyable types**: Structs composed entirely of primitive
-    scalars and other trivially copyable structs implement implicit bitwise copy
-    on assignment.
-  * **The `move` keyword**: Explicit ownership transfers use the `move` keyword
-    (e.g. `let b = move a;` or `process(move a);`), mirroring `clone` for deep
-    duplication. Moving transfers exclusive ownership and statically
-    invalidates the source identifier in the current scope.
-    * Moving is permitted on both constants (`let`) and mutable variables
-      (`var`). Ownership transfer is orthogonal to in-place mutation; allowing
-      `move` on immutable `let` bindings prevents developers from having to
-      declare variables as mutable `var` simply to transfer ownership, thereby
-      upholding Sapphire's core principle of immutability by default.
-  * **Move-only types (`Ref<T>`)**: Types representing exclusive heap ownership
-    (`Ref<T>`) are move-only. Assigning a `Ref<T>` to another variable without
-    `move` (e.g. `let b = a;`) raises a compile-time `SemanticError`. Ownership
-    transfers must be explicit: `let b = move a;`.
-  * **Compile-time use-after-move enforcement**: Moving a variable transfers
-    ownership and statically invalidates the source identifier in the current
-    scope. Any subsequent read, borrow, or move of an invalidated identifier
-    produces a compile-time error (`Use of moved variable 'a'`).
-  * **Re-initialization**: Assigning a new value to a moved mutable variable
-    (`var`) restores its validity and liveness in that scope.
-  * **Whole-variable moves**: Moves are restricted to whole root variables
-    (`move resource`); partial moves of individual struct fields are prohibited
-    to prevent partially deconstructed states.
-* **Function parameter modes**:
-  * Non-primitive types are passed by **constant reference (borrow)** by default
-    to eliminate copy overhead without pointer syntax. The caller retains
-    ownership.
-  * Mutable parameters must be explicitly declared with `var` in signatures
-    (`func update(var target: Entity)`), representing an **exclusive mutable
-    borrow**. The caller retains ownership.
-  * Ownership transfer into a function is determined at the call site: callers
-    pass `move arg` (e.g. `ingest(move resource)`), transferring ownership into
-    the callee's parameter binding and invalidating the caller's variable.
-  * Returning stack structs from functions is done **by value** with
-    compiler-enforced **return-value optimization (RVO)** and copy
-    elision, constructing the instance directly in the caller's stack frame.
-    Returning raw borrowed references to local stack frames is statically
-    prohibited to eliminate use-after-free bugs without requiring lifetime annotations.
-* **Type inference:** Within function bodies, variable types are inferred by default unless explicitly annotated.
-* **Implicit type-widening**: The type system automatically coerces and widens `int` values to `float` where appropriate. An `int` expression can be assigned to a `float` variable or passed as a `float` parameter.
-* **Multi-variable declarations & assignments**: Multiple variables can be declared or assigned simultaneously using comma separation (e.g. `let x, y = getPosition();` or `x, y = 10.0, 20.0;`).
+### String literals & interpolation
 
-```sapphire
-let speed: int = 60;
-let name = "Hero";  // Type inferred as String
-
-// Python-style string interpolation
-let msg = f"Hello {name}, speed: {speed}!";
-
-var health = 100;
-health = 90;  // Valid mutation
-
-let x, y = 10.0, 20.0;  // Multi-variable declaration
-```
-
-### String interpolation
-
-Sapphire supports Python-style string interpolation using the `f"..."` prefix:
+Strings are immutable UTF-8 text sequences. Sapphire supports Python-style
+string interpolation using the `f"..."` prefix:
 
 * **Syntax**: `f"literal {expression} literal"`
-* **Nested quotes**: Expressions inside interpolation braces support nested quotes (e.g. `f"Hello {user.get("name")}"`).
-* **Brace escaping**: Double curly braces `{{` and `}}` within an f-string evaluate to literal `{` and `}` characters.
-* **Automatic type coercion**: Primitive types (`int`, `float`, `bool`), `none`, and `enum` variants are automatically coerced to strings inside `{expression}`.
-* **Structs**: User-defined `struct` types cannot be interpolated directly and cause a compile-time error; explicit conversion methods (e.g. `{player.to_string()}`) must be called.
+* **Nested quotes**: Expressions inside interpolation braces support nested
+  quotes (e.g. `f"Hello {user.get(\"name\")}"`).
+* **Brace escaping**: Double curly braces `{{` and `}}` within an f-string
+  evaluate to literal `{` and `}` characters.
+* **Automatic type coercion**: Primitive types (`int`, `float`, `bool`),
+  `none`, and `enum` variants are automatically coerced to strings inside
+  `{expression}`.
+* **Structs**: User-defined `struct` types cannot be interpolated directly and
+  cause a compile-time error; explicit conversion methods (e.g.
+  `{player.to_string()}`) must be called.
 
-## 5. Core operators & expressions
+```sapphire
+let name = "Hero";
+let speed = 60;
+let msg = f"Hello {name}, speed: {speed}!";
+let escaped = f"Literal braces: {{count}}";
+```
 
-This section outlines the basic syntax of Sapphire's core operators, expressions, and collection access.
+### Collection types & literals
+
+* **Array literals (`[T]`)**: Arrays are ordered, strongly typed, homogeneous
+  sequences defined as comma-separated values inside square brackets:
+  ```sapphire
+  let numbers: [int] = [10, 20, 30];
+  ```
+* **Map literals (`[K: V]`)**: Maps are strongly typed key-value dictionaries
+  defined inside curly braces (`{key: value}`). Keys must be `String`, `int`,
+  or an `enum` type:
+  ```sapphire
+  let scores: [String: int] = {"alice": 100, "bob": 95};
+  ```
+* **Range type (`Range`)**: Created via the built-in `range()` function for
+  numeric sequences in `for-in` loops:
+  ```sapphire
+  let r: Range = range(0, 10, step = 2);
+  ```
+
+## Variables, operators, & expressions
+
+### Variable bindings (`let` and `var`)
+
+Variables are immutable constants by default to encourage safety. Mutability
+must be explicitly declared:
+
+* **`let`**: Declares an immutable constant binding.
+* **`var`**: Declares a mutable variable binding.
+* **Type inference**: Variable types are inferred by default from their initial
+  value expressions unless explicitly annotated with `: Type`.
+* **Implicit type-widening**: The type system automatically coerces and widens
+  `int` values to `float` where appropriate. An `int` expression can be assigned
+  to a `float` variable or passed as a `float` parameter.
+* **Multi-variable declarations & assignments**: Multiple variables can be
+  declared or assigned simultaneously using comma separation:
+  ```sapphire
+  let x, y = 10.0, 20.0;
+  x, y = 30.0, 40.0;
+  ```
+
+### Operator precedence & associativity
+
+Sapphire operators follow standard mathematical precedence, evaluated from
+highest to lowest:
+
+| Category | Operators | Associativity |
+| :--- | :--- | :--- |
+| **Postfix / Primary** | `()`, `[]`, `.`, `?.` | Left-to-right |
+| **Unary** | `-`, `+`, `!` | Right-to-left |
+| **Multiplicative** | `*`, `/`, `%` | Left-to-right |
+| **Additive** | `+`, `-` | Left-to-right |
+| **Relational** | `<`, `<=`, `>`, `>=` | Left-to-right |
+| **Equality** | `==`, `!=` | Left-to-right |
+| **Logical AND** | `&&` | Left-to-right |
+| **Logical OR** | `\|\|` | Left-to-right |
+| **Nil-Coalescing** | `??` | Right-to-left |
+| **Ternary** | `? :` | Right-to-left |
+| **Type Cast** | `as` | Left-to-right |
+| **Assignment** | `=`, `+=`, `-=`, `*=`, `/=` | Right-to-left |
 
 ### Core operators
 
-Sapphire supports standard operator families with well-defined precedence (e.g., multiplicative operators bind tighter than additive operators):
-
-* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo).
-* **Unary**: `-` (negation/additive inverse), `+` (prefix positive), `!` (logical NOT).
-* **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `<=` (less than or equal), `>` (greater than), `>=` (greater than or equal).
-* **Logical**: `&&` (logical AND), `||` (logical OR).
-* **Ternary**: `condition ? true_expr : false_expr`.
-* **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`.
-* **Type casting**: `as` (infallible static type conversion, e.g. `x as float`).
+* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication),
+  `/` (division), `%` (modulo). Division by zero raises a runtime panic.
+* **Unary**: `-` (negation), `+` (unary plus), `!` (logical NOT).
+* **Comparison**: `==` (equality), `!=` (inequality), `<` (less than),
+  `<=` (less or equal), `>` (greater than), `>=` (greater or equal). Operands
+  must have compatible types.
+* **Logical**: `&&` (short-circuiting AND), `||` (short-circuiting OR).
 
 ### Ternary expressions (the `? :` operator)
 
-Sapphire supports C-style inline conditional expressions using the `? :` ternary operator:
-
-* **Syntax**: `condition ? true_expr : false_expr`
-* **Expression context only**: The ternary operator is scoped strictly to expression contexts, avoiding any syntactic or parsing ambiguity with optional type annotations (`int?`).
-* **Condition type safety**: The condition must evaluate to a boolean expression (`bool`).
-* **Branch compatibility & type inference**: The true and false branches must have compatible types. Widening (e.g., `int` and `float` coercing to `float`) and optional wrapping (e.g., `int` and `none` producing `int?`) are handled automatically by the compiler.
-* **Mandatory parentheses for nested ternaries**: Unparenthesized nested ternary expressions (e.g., `a ? b : c ? d : e`) are strictly forbidden and produce a compile-time error. Nested ternary expressions must be explicitly enclosed in parentheses: `a ? b : (c ? d : e)`.
+Sapphire supports inline conditional expressions using `? :`:
 
 ```sapphire
-let age = 20;
-let status = age >= 18 ? "Adult" : "Minor";
-
-// Numeric widening (int 10 and float 2.5 produce float)
-let val: float = is_high ? 10 : 2.5;
-
-// Optional wrapping (int 42 and none produce int?)
-let num: int? = active ? 42 : none;
-
-// Nested ternary with mandatory parentheses
-let grade = score >= 90 ? "A" : (score >= 80 ? "B" : "C");
+let label = score >= 60 ? "Pass" : "Fail";
 ```
+
+* **Expression context only**: Scoped strictly as an inline expression.
+* **Condition type safety**: The condition must evaluate to a boolean.
+* **Branch compatibility**: The true and false branches must evaluate to
+  compatible types. If one branch evaluates to `none`, the result type is
+  inferred as an optional `T?`.
+* **Mandatory parentheses for nested ternaries**: Unparenthesized nested
+  ternaries produce a compile-time `SyntaxError`. Nested ternaries must be
+  explicitly disambiguated with parentheses:
+  ```sapphire
+  let status = x > 0 ? "Positive" : (x < 0 ? "Negative" : "Zero");
+  ```
 
 ### Type casting (the `as` operator)
 
-The `as` operator is used for infallible, compile-time guaranteed static type conversions:
+The `as` operator performs infallible, compile-time guaranteed static
+conversions between compatible scalar types:
 
-* **Numeric conversions**: Widening and narrowing between numeric types (`int as float`, `float as int` which truncates decimals, `bool as int` where `true` -> 1 and `false` -> 0).
-* **Enum conversions**: Static conversion from an enum variant to its underlying primitive representation (`enum_variant as int` or `enum_variant as String`).
-
-```sapphire
-let f: float = 10 as float;  // 10.0
-let i: int = 3.14 as int;    // 3 (truncated)
-let b: int = true as int;    // 1
-
-let dir_code: int = Direction.North as int;       // 1
-let dir_str: String = Direction.North as String;  // "North"
-```
+* **Numeric conversions**: Widening and narrowing between numeric types
+  (`int` to `float` and `float` to `int` via truncation toward zero).
+* **Enum conversions**: Static conversion from an enum variant to its
+  underlying primitive type (`Direction.North as int` or `DrawMode.Fill as
+  String`).
 
 #### Prohibited conversions with the `as` operator
 
-1. **Fallible string parsing**: Parsing strings into primitive types (e.g. `"123" as int`) or enum variants (e.g. `"North" as Direction`) using `as` is prohibited at compile-time. Fallible parsing must use instance methods (`"123".to_int()`, `"3.14".to_float()`, `"true".to_bool()`) or static associated functions (`Direction.from("North")`).
-2. **Struct up-casting**: Up-casting child struct instances to parent struct types (e.g. `cat as Animal`) is strictly prohibited to eliminate object slicing and method-dispatch ambiguities.
+The `as` operator is strictly restricted to infallible conversions:
+1. **Fallible string parsing**: Parsing strings into primitive types (e.g.
+   `"123" as int`) is rejected at compile time; use `int.from(str)` or
+   `float.from(str)` which return optionals (`int?`, `float?`).
+2. **Struct up-casting**: Up-casting child struct instances to parent struct
+   types (e.g. `cat as Animal`) is statically prohibited to eliminate object
+   slicing and dispatch ambiguity.
 
-### Expressions & collection access
+### Collection access & indexing
 
-* **Array literals & type syntax**: Arrays are defined as comma-separated values inside square brackets. Array types are annotated using `[T]` (or `Array<T>`). Trailing commas in literals are optional and recommended for multi-line literals. Arrays are strongly typed and homogeneous; all elements must have compatible types:
-  ```sapphire
-  let numbers = [10, 20, 30];  // Inferred as `[int]`
-  ```
-* **Array indexing & safe access**:
-  * **Standard indexing (`array[i]`)**: Reads the element at index `i` and returns concrete type `T`. Constant indices are validated at compile-time. Dynamic indexing performs runtime bounds checking and panics/halts on out-of-bounds access.
-    ```sapphire
-    let first = numbers[0];  // `int`
-    let item = numbers[dynamic_idx];  // `int` (panics if out of bounds)
-    ```
-  * **Safe optional lookup (`array.get(i)`)**: Returns an optional `T?`, safely evaluating to `none` if the index is out of bounds without raising runtime exceptions:
-    ```sapphire
-    if let item ?= numbers.get(dynamic_idx) {
-      print(f"Item: {item}");
-    }
-    ```
-* **Map literals & type syntax**: Maps are defined as key–value pairs separated by colons inside curly braces (`{key: value}`). Map types are annotated using `[K: V]` (or `Map<K, V>`). Entries are separated by commas. Trailing commas are supported and encouraged. Maps are strongly typed and strictly homogeneous: all keys must have compatible key types (`String`, `int`, or an `enum`), and all values must have compatible value types. Mixing different key types or value types in the same map is prohibited:
-  ```sapphire
-  let scores = {"alice": 100, "bob": 95};  // [String: int]
-  let config = {1: "low", 2: "high"};      // [int: String]
+* **Array indexing**:
+  * **Standard indexing (`array[i]`)**: Reads element at index `i` (0-based)
+    and returns `T`. Dynamic out-of-bounds indexing halts with a runtime panic.
+  * **Safe lookup (`array.get(i)`)**: Returns optional `T?`, safely evaluating
+    to `none` on out-of-bounds access.
+* **Map indexing**:
+  * **Standard indexing (`map[key]`)**: Reads value for `key` and returns `V`.
+    Dynamic missing-key access panics at runtime.
+  * **Safe lookup (`map.get(key)`)**: Returns optional `V?`, evaluating to
+    `none` if the key is absent.
+* **Map built-in methods**: `Map` instances support `size(): int`,
+  `empty(): bool`, `contains(key: K): bool`, `keys(): [K]`, `values(): [V]`,
+  and mutating methods on `var` maps: `insert(key: K, value: V): V`,
+  `remove(key: K): V?`, and `clear(): void`.
 
-  // [Direction: int]
-  let dir_speeds = {
-      Direction.North: 10,
-      Direction.South: 5,
-  };
-  ```
-* **Map indexing & safe access**:
-  * **Standard indexing (`map[key]`)**: Values in a map are accessed by key using square brackets and return concrete type `V`. Constant keys are validated at compile time; dynamic key access panics/halts if the key does not exist.
-    ```sapphire
-    let alice_score = scores["alice"];  // `int`
-    ```
-  * **Safe optional lookup (`map.get(key)`)**: Returns an optional `V?`, evaluating to `none` when a key is absent at runtime:
-    ```sapphire
-    if let val ?= scores.get(user_key) {
-      print(f"Score: {val}");
-    }
-    ```
-* **Map built-in methods**: `Map` instances support `size(): int`, `empty(): bool`, `contains(key: K): bool`, `get(key: K): V?`, `keys(): [K]`, `values(): [V]`, and mutating methods `insert(key: K, value: V): V`, `remove(key: K): V?`, and `clear(): void` on mutable map instances (`var`).
-* **Optional chaining**: To safely traverse properties or methods of an optional instance without unwrapping it first, Sapphire supports the optional chaining operator `?.`. If the receiver is `none`, the entire expression evaluates to `none`:
-  ```sapphire
-  let name = target?.get_name();
-  ```
+## Optionals & null safety
 
-## 6. Control flow & pattern matching
+Sapphire completely forbids null pointers. Instead, it supports type-safe
+optionals utilizing the `?` modifier and a `none` keyword representing the
+empty state.
 
-Sapphire supports conditional execution, pattern matching, and iteration loops.
+```sapphire
+var target: Enemy? = none;
+let damage: int? = 15;
+```
 
-### Conditionals (if/else)
+### Safe unwrapping (`if let ?=`)
 
-Sapphire supports standard conditional execution via `if`, `else if`, and `else` blocks. Parentheses around the condition are optional:
+To unwrap optionals safely, Sapphire provides the conditional unwrapping
+operator `?=` used within conditional headers:
+
+```sapphire
+if let active_target ?= target {
+  // active_target is guaranteed to be non-optional Enemy within this block
+} else {
+  // Executed if target is none
+}
+```
+
+### Optional chaining (`?.`)
+
+To safely traverse properties or invoke methods on an optional instance without
+manual unwrapping, Sapphire provides the optional chaining operator `?.`:
+
+```sapphire
+let name: String? = target?.get_name();
+```
+
+* **Short-circuiting**: If the receiver is `none`, property access and method
+  calls are short-circuited, and the entire expression evaluates to `none`.
+* **Static type rules**: Accessing a property or method of type `T` on an
+  optional `Receiver?` evaluates to `T?`. If `T` is already an optional type,
+  the result remains `T?` (optional types do not nest into `T??`).
+
+### Nil-coalescing operator (`??`)
+
+The binary coalescing operator `??` provides a default fallback value when
+evaluating an optional:
+
+```sapphire
+let active_enemy: Enemy = target ?? default_enemy;
+```
+
+The right-hand operand must evaluate to a type compatible with the optional's
+underlying base type.
+
+### Pattern matching on optionals
+
+Optional values can be matched directly using `match` expressions by pattern
+matching on `none` and concrete values:
+
+```sapphire
+let status = match target {
+  none -> "No target",
+  enemy -> f"Targeting {enemy.name}",
+};
+```
+
+## Control flow & pattern matching
+
+### Conditionals (`if`/`else`)
+
+Sapphire supports conditional execution via `if`, `else if`, and `else`
+blocks. Parentheses around conditions are optional:
 
 ```sapphire
 let score = 85;
@@ -278,18 +315,77 @@ if score >= 90 {
 }
 ```
 
+### Multi-binding `if` statements
+
+`if` statement headers support declaring one or more variable bindings before
+an optional boolean condition, separated by semicolons. Semicolons strictly
+delimit variable bindings, while multiple condition checks must be composed
+using boolean operators (`&&` or `||`):
+
+```sapphire
+if let active_target ?= target;
+   let weapon ?= equipped_weapon;
+   active_target.health > 50 && weapon.durability > 0 {
+  // `active_target` and `weapon` unwrapped and verified against condition
+}
+```
+
+Bindings and conditions evaluate sequentially from left to right. If any
+unwrapping fails or the condition evaluates to `false`, evaluation immediately
+short-circuits. If partially acquired resources define `__del__`, they are
+cleaned up in LIFO order upon short-circuit failure.
+
+### Guard statements (`guard ... else { ... }`)
+
+Sapphire provides Swift-style `guard` statements to enforce function and loop
+preconditions, avoid deeply nested blocks, and promote unwrapped variables
+into the surrounding scope:
+
+```sapphire
+func process_user(users: [String: User], id: String): int {
+  guard let user ?= users.get(id); user.is_active && user.score > 0 else {
+    return -1;
+  }
+
+  // `user` is unwrapped as non-optional `User` in the outer scope
+  return user.score * 10;
+}
+```
+
+* **Semicolon binding separation**: Multiple variable bindings within a `guard`
+  header are separated by semicolons (`let a ?= opt_a; let b ?= opt_b;`),
+  followed by an optional boolean condition.
+* **Scope promotion**: Variables unwrapped inside `guard` clauses are bound in
+  the **surrounding outer scope** for all statements following the `guard`.
+* **Control-flow termination**: The `else` block executes if any clause
+  evaluates to `none` or `false`. The compiler statically verifies that every
+  code path inside the `else` block terminates control flow via `return`,
+  `break`, or `continue`.
+
 ### Match expressions
 
-Sapphire provides a first-class `match` construct for pattern matching, supporting both safe value transformation (expressions) and side-effect control flow (statements).
+Sapphire provides a first-class `match` construct for pattern matching,
+supporting both safe value transformation (expressions) and side-effect
+control flow (statements).
 
 * **Syntax**: `match subject { pattern -> body, ... }`
-* **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
-* **Multi-statement blocks**: In a value-producing `match` expression, cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Omitting `yield` in a value-producing block is a compile-time `SemanticError`. Using `return` inside a match block returns from the *enclosing function*.
-* **Type consistency across arms**: All arms of a value-producing `match` expression must evaluate or yield compatible types `T`. If an arm explicitly yields `none`, the overall expression type is inferred as `T?`.
-* **Side-effect branching (statements)**: When used strictly as a statement (e.g. `match x { ... }` without variable assignment), multi-statement blocks do not require `yield` statements. A trailing semicolon is not required.
-* **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
-* **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
-* **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
+* **Single-expression cases**: Cases with a single expression implicitly
+  evaluate to that expression's value.
+* **Multi-statement blocks**: In a value-producing `match` expression, cases
+  using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a
+  value. Omitting `yield` in a value-producing block is a compile-time error.
+  Using `return` inside a match block returns from the enclosing function.
+* **Type consistency**: All arms of a value-producing `match` must yield
+  compatible types `T`. If an arm yields `none`, the overall expression type
+  is inferred as `T?`.
+* **Side-effect statements**: When used strictly as a statement (e.g. without
+  variable assignment), blocks do not require `yield` statements.
+* **Mandatory comma separators**: Every case branch (including multi-statement
+  blocks ending in `}`) must be followed by a comma `,`.
+* **Default case**: The wildcard pattern uses the ellipsis token `... ->`.
+* **Exhaustiveness**: The compiler statically verifies that all variants of
+  `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...`
+  default branch is present.
 
 ```sapphire
 // Value-producing match expression
@@ -302,17 +398,7 @@ let label = match status {
   ... -> "Unknown Error",
 };
 
-// Explicit optional yielding (type inferred as `String?`)
-let result: String? = match status {
-  HttpStatus.Ok -> "Success",
-  HttpStatus.InternalError -> {
-    log("Internal server error encountered");
-    yield none;
-  },
-  ... -> none,
-};
-
-// Side-effect-only usage (no trailing semicolon required)
+// Side-effect-only usage
 match direction {
   Direction.North -> {
     move_player(dx = 0, dy = -1);
@@ -328,242 +414,113 @@ match direction {
 
 ### Control-flow loops
 
-Sapphire supports conditional iteration and collection traversal:
-
 #### `while` loop
 
-Executes a block of code as long as the condition evaluates to `true`. No parentheses are required around the condition:
+Executes a block of code as long as the condition evaluates to `true`:
 
 ```sapphire
 var count = 5;
 while count > 0 {
-  print(count);
+  print(String.from(count));
   count -= 1;
 }
 ```
 
 #### `for-in` loop
 
-Iterates over elements in a collection (arrays or maps) or numerical ranges generated by `range()`.
+Iterates over elements in an array, entries in a map, or numeric sequences
+generated by `range()`:
 
-* **Scoping & mutability**: By default, loop variables (e.g., `name` or
-  `key, val`) are implicitly declared as immutable constants scoped strictly to
-  the loop body block.
-* **Array iteration**: Uses a single loop variable to iterate over array
-  elements (`for item in array`).
-* **Map iteration**: Uses dual key-value loop variables (`for key, val in map`)
-  to iterate over entries in a map.
+* **Scoping & mutability**: By default, loop variables are implicitly declared
+  as immutable constants scoped to the loop block.
+* **Array iteration**: Uses a single variable (`for item in array`).
+* **Map iteration**: Uses dual key-value variables (`for key, val in map`).
 * **Range iteration**: Uses a single integer loop variable over a half-open
-  range (`[start, stop)`) generated by `range(stop)`, `range(start, stop)`, or
-  `range(start, stop, step)`.
-* **Mutable loop variables**: To allow mutation of loop variables within the
-  block, they can be explicitly declared using the `var` keyword
-  (`for var key, val in map`):
-
-```sapphire
-let names = ["Alice", "Bob", "Charlie"];
-
-// Array iteration: single loop variable
-for name in names {
-  print(name);
-}
-
-let inventory = { "potions": 5, "elixirs": 2 };
-
-// Map iteration: dual key-value loop variables
-for key, val in inventory {
-  print(key + ": " + val);
-}
-
-// Python-style numeric range iteration
-for i in range(0, 10, step = 2) {
-  print(String.from(i));
-}
-
-// Mutable loop variables: `var` binding
-for var key, val in inventory {
-  val = val + 1;
-  print(key + ": " + val);
-}
-```
+  range generated by `range(stop)` or `range(start, stop, step)`:
+  ```sapphire
+  for i in range(0, 10, step = 2) {
+    print(String.from(i));
+  }
+  ```
+* **Mutable loop variables**: Declared with `var`
+  (e.g. `for var item in items`).
 
 #### Loop control statements (`break` & `continue`)
 
-Sapphire provides explicit loop control statements to alter execution flow inside `while` and `for-in` loops:
+* **`break;`**: Immediately terminates the innermost enclosing loop.
+* **`continue;`**: Immediately terminates the current iteration and advances
+  to the next iteration.
+* **Scope restriction**: Using `break` or `continue` outside an enclosing loop
+  produces a compile-time error.
 
-* **`break;`**: Immediately terminates the innermost enclosing loop and transfers execution to the statement following the loop block.
-* **`continue;`**: Immediately terminates the current iteration of the innermost enclosing loop and skips directly to the loop condition evaluation (`while`) or the next element advancement (`for-in`).
-* **Scope restriction**: Using `break` or `continue` outside of an enclosing loop block produces a compile-time error.
+## Functions, closures, & coroutines
 
-```sapphire
-// Skipping odd numbers with continue; stopping at 8 with break
-var i = 0;
-while i < 10 {
-  i += 1;
-  if i % 2 != 0 {
-    continue;
-  }
-  if i > 8 {
-    break;
-  }
-  print(f"Even count: {i}");
-}
+### Function declarations & return types
 
-// Searching an array with break and continue
-let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-for num in numbers {
-  if num % 2 == 0 {
-    continue;  // Skip even numbers
-  }
-  if num > 7 {
-    break;     // Stop processing once number exceeds 7
-  }
-  print(f"Odd number: {num}");
-}
-```
-
-## 7. Optionals (null safety) & conditional bindings
-
-The language completely forbids null pointers. Instead, it supports type-safe
-optionals utilizing a `?` modifier and a `none` keyword representing the empty
-state.
-
-To unwrap optionals, Sapphire provides a conditional unwrapping operator `?=`
-used within conditional headers:
+Named functions must fully declare parameter types and explicit return types
+using colon syntax:
 
 ```sapphire
-var target: Enemy? = none;
-let damage: int? = 15;
-
-if let active_target ?= target {
-  // active_target is guaranteed to be non-optional within this block
-} else {
-  // Optionals also support standard fallback blocks via `else` or `else if`
-}
-```
-
-### Multi-binding `if` statements
-`if` and `guard` statement headers support declaring one or more variable bindings
-before an optional boolean condition, separated by semicolons. Semicolons
-strictly delimit variable bindings (`let a ?= ...; let b ?= ...;`), while multiple
-condition checks must be composed using boolean operators (`&&` or `||`):
-
-```sapphire
-if let active_target ?= target;
-   let weapon ?= equipped_weapon;
-   active_target.health > 50 && weapon.durability > 0 {
-  // `active_target` and `weapon` are unwrapped once and verified against the
-  // condition
-}
-```
-
-* **Sequential short-circuiting**: Bindings and the condition evaluate sequentially from left to right; if any unwrapping fails or the condition evaluates to `false`, evaluation immediately short-circuits. If partially acquired resources define `__del__`, they are cleaned up in LIFO order upon short-circuit failure.
-
-### Nil-coalescing operator (`??`)
-Sapphire provides the binary coalescing operator `??` to supply a fallback value
-when unwrapping an optional:
-
-```sapphire
-let active_enemy = target ?? default_enemy;
-
-// `active_enemy` is guaranteed to be non-optional
-```
-
-### Guard statements (`guard ... else { ... }`)
-Sapphire provides Swift-style `guard` statements to enforce function and loop
-preconditions, avoid deep nesting, and promote unwrapped variables into the
-surrounding scope:
-
-```sapphire
-func process_user(users: [String: User], id: String): int {
-  guard let user ?= users.get(id); user.is_active && user.score > 0 else {
-    return -1;
-  }
-
-  // `user` is unwrapped as non-optional `User` in the outer scope
-  return user.score * 10;
-}
-```
-
-* **Semicolon binding separation**: Multiple variable bindings within a `guard` header are separated by semicolons (`let a ?= opt_a; let b ?= opt_b;`), followed by an optional boolean condition (`user.is_active && user.score > 0`). Clauses can include optional bindings (`let x ?= opt`, including multi-variable destructuring, e.g. `let x, y ?= get_pair()`).
-* **Scope promotion**: Variables unwrapped inside `guard` clauses are bound in the **surrounding outer scope** for all statements following the `guard`.
-* **Control-flow termination**: The `else` block executes if any clause evaluates to `none` or `false`. The compiler statically verifies that every code path inside the `else` block terminates control flow via `return`, `break`, or `continue`.
-
-## 8. Functions & closures
-
-Named functions must fully declare the types of all parameters and the explicit
-return value(s) using colon syntax.
-
-* **Primitive value types**: Primitive numeric/boolean types (`int`, `float`,
-  `bool`) and `none` are passed by **value** by default.
-* **Reference & struct types**: Reference types (`String`, `Array`, `Map`,
-  `Arena`, `Range`, and `proto` types), as well as user-defined `struct` value
-  types, are passed by **constant reference (borrow)** by default to eliminate
-  copy overhead without pointer syntax.
-* **Mutable references**: Indicated by prefixing the parameter with `var`,
-  causing it to be passed by mutable reference. Callers may not pass variables
-  declared with `let` to these parameters. This applies to both primitive and
-  reference types.
-* **Named parameters**: Call-site arguments can be named explicitly using the
-`=` operator, mirroring assignment semantics and preserving the colon for types.
-* **Default parameters**: Parameters can define default values using the `=`
-operator in the function signature. If omitted at the call site, the default
-value is evaluated and used instead.
-* **Multiple Return Values**: Functions can declare multiple return types as a comma-separated list following the colon (e.g.,
-`func getPosition(): float, float`). Return statements accept comma-separated
-expressions (`return x, y;`).
-
-```sapphire
-func calculate_damage(attacker: Player, var defender: Enemy,
+func calculate_damage(attacker: Player, target: Enemy,
                       is_critical: bool = false): int {
-  var base_damage = attacker.attack_power;
-  if is_critical {
-    base_damage *= 2;
-  }
-  defender.health -= base_damage;
-  return base_damage;
+  let base_dmg = attacker.attack_power - target.defense;
+  let multiplier = is_critical ? 2 : 1;
+  return base_dmg > 0 ? base_dmg * multiplier : 0;
 }
-
-// Function with multiple return values
-func get_position(entity: Player): float, float {
-  return entity.x, entity.y;
-}
-
-// Invocation using multi-variable destructuring
-let pos_x, pos_y = get_position(current_player);
-
-// Invocation using named parameters via assignment syntax (is_critical defaults
-// to false)
-calculate_damage(defender = target_enemy, attacker = current_player);
-
-// Invocation overriding the default parameter value
-calculate_damage(current_player, target_enemy, is_critical = true);
-
-// Ownership transfer via caller-driven `move`
-var resource = load_mesh("model.obj");
-render_pipeline.consume(move resource);
-// `resource` is now statically invalidated and cannot be accessed again
 ```
+
+* **Named parameters**: Callers may invoke functions using named arguments
+  (e.g. `calculate_damage(attacker = p, target = e, is_critical = true)`).
+* **Default parameters**: Parameters with default values must appear after
+  positional parameters without defaults.
+* **Void functions**: Functions returning nothing omit the return type or
+  specify `: void`.
+
+### Calling conventions vs. storage semantics
+
+Sapphire distinguishes clearly between **storage semantics** and
+**calling conventions**:
+
+* **Primitive scalars** (`int`, `float`, `bool`, `none`) are passed by
+  **value**.
+* **Non-primitive types** (user-defined `struct`s, `proto`s, and collections
+  `String`, `Array`, `Map`, `Arena`, `Range`) are passed by **constant
+  reference (borrow)** by default to eliminate copy overhead without pointer
+  syntax. The caller retains ownership, and the callee cannot mutate the value.
+* **Value returns with RVO**: Returning a stack struct from a function is done
+  by value with compiler-enforced Return-Value Optimization (RVO) copy elision,
+  constructing the instance directly in the caller's stack frame. Returning
+  borrowed references to local stack frames is statically prohibited.
 
 ### Call-site parameter modes: borrowing vs. moving
 
-Sapphire gives the caller explicit control over ownership transfer at the call site:
-* **Constant borrow (default)**: Passing an identifier without `move` passes it by constant reference. The caller retains ownership, and the callee cannot mutate the value.
-* **Exclusive mutable borrow (`var`)**: Passing to a parameter declared with `var` gives the callee exclusive mutable access. The caller retains ownership after the call completes.
-* **Ownership transfer (`move`)**: Passing `move <identifier>` transfers
-  ownership into the function. The variable may be declared with either `let` or
-  `var`. The caller's variable is statically invalidated and cannot be read,
-  borrowed, or moved again.
+Callers have explicit control over parameter mutability and ownership transfer:
+
+* **Constant borrow (default)**: Passing an identifier without modifiers passes
+  it by constant reference. The caller retains ownership, and the callee cannot
+  mutate the value.
+* **Exclusive mutable borrow (`var`)**: Declared with `var` in the function
+  signature (`func update(var target: Entity)`). Gives the callee exclusive
+  mutable access. The caller retains ownership after the call completes. Callers
+  cannot pass immutable `let` constants to `var` parameters.
+* **Ownership transfer (`move`)**: Callers pass `move <identifier>` (e.g.
+  `consume(move resource)`). Ownership is transferred into the function, and
+  the caller's variable is statically invalidated in the current scope. Moving
+  is permitted on both `let` constants and `var` variables.
 
 ### Scope-bound aliasing rules (call-site reference exclusivity)
 
-To guarantee reference safety and eliminate data corruption from unexpected aliasing mutations without requiring complex lifetime annotations, Sapphire's compiler enforces compile-time **scope-bound aliasing rules (call-site reference exclusivity)** at call sites:
-* **Reference types only**: Primitive value types (`int`, `float`, `bool`) and
-  `none` are value-copied and ignored by this check. All reference types
-  (`String`, `Array`, `Map`, `Arena`, `Range`, and user-defined `struct` and
-  `proto` types) are reference-passed and validated.
-* **Overlapping mutability restrictions**: Inside any single function or method call, a reference path (a root variable name and its nested member accesses, e.g., `player` or `player.pos`) cannot be passed as a mutable parameter (`var`) if it is already referenced (either mutably or immutably) within the same call.
-* **Implicit-receiver checking**: In a non-static method call (`p.heal(...)`), the receiver is implicitly treated as an argument (passed mutably for mutating `var func` methods, or as a constant reference for immutable methods).
+To guarantee reference safety and eliminate data corruption without lifetime
+annotations, the compiler enforces compile-time **reference exclusivity**:
+
+* **Reference types only**: Evaluated across all reference paths (`String`,
+  `Array`, `Map`, `Arena`, and user-defined `struct` and `proto` types).
+* **Overlapping mutability restrictions**: Inside any single function or method
+  call, a reference path (e.g. `player` or `player.pos`) cannot be passed as a
+  mutable parameter (`var`) if it is already referenced (mutably or immutably)
+  within the same call.
+* **Implicit-receiver checking**: In a method call (`p.heal(...)`), the receiver
+  is implicitly treated as an argument (passed mutably for `var func` methods).
 
 ```sapphire
 // Rejected: 'player' is passed mutably as 'target' and as a const-ref as
@@ -575,74 +532,66 @@ execute_interaction(observer = player, target = player);
 player.mutate(other = player);
 ```
 
+### Multiple returns & destructuring
+
+Functions can return multiple values separated by commas:
+
+```sapphire
+func get_player_status(): int, float, bool {
+  return 100, 50.5, true;
+}
+
+let hp, mana, is_alive = get_player_status();
+```
+
+Multiple return values are unwrapped immediately via destructuring assignments
+and cannot be stored directly as an anonymous tuple object.
+
 ### First-class functions
 
-Functions are first-class citizens. To avoid double-colon confusion, function type declarations isolate the return block via an arrow token (`->`).
+Functions are first-class citizens. Function types use the arrow token (`->`):
 
 ```sapphire
-// Function type declaration
 var math_op: (int, int) -> int;
-var callback: (String) -> ();  // Functions returning nothing use empty unit `()`
+var callback: (String) -> void;
 ```
 
-For functions that do not produce a return value, the return type is represented by the empty unit `()` (e.g. `(String) -> ()`), mirroring unit types in modern systems languages. Standard named functions simply omit the return type and colon annotation entirely (e.g. `func handle_event(e: Event) { ... }`).
+### Anonymous functions & closure capture semantics
 
-### Anonymous functions (lambdas)
-
-Anonymous functions use an arrow-based block syntax. The arrow (`->`) is mandatory even when the return type is omitted. Type inference rules apply heavily inside function closures:
-
-* **Single-parameter inference**: If an anonymous function takes a single parameter that can be contextually inferred, both the parentheses and the type annotation can be omitted.
-* **Multi-parameter syntax**: Parentheses are required when declaring multiple parameters.
-* **Single-expression shorthand**: If a lambda body consists of a single expression, the curly braces and the `return` keyword can be omitted. The result of the expression is implicitly returned.
+Sapphire supports lambda expressions with single-parameter shorthand or
+multi-parameter blocks:
 
 ```sapphire
-let numbers = [1, 2, 3, 4];
+// Single-parameter shorthand
+let doubled = numbers.map(x -> x * 2);
 
-// Explicitly typed parameter and return type
-let doubled = numbers.map((x: int) -> int {
-  return x * 2;
-});
-
-// Fully inferred single parameter and return type
-let squared = numbers.map(x -> {
-  return x * x;
-});
-
-// Single-expression shorthand
-let tripled = numbers.map(x -> x * 3);
-
-// Chaining map, filter, and reduce using single-expression lambdas
-let sum_of_even_squares = numbers
-    .map(x -> x * x)
-    .filter(x -> x % 2 == 0)
-    .reduce(initial = 0, (acc, x) -> acc + x);
+// Multi-parameter block lambda
+let add = (a: int, b: int) -> int {
+  return a + b;
+};
 ```
+
+* **Lexical capture**: Closures capture surrounding local variables by
+  constant borrowed reference by default.
+* **Escape safety**: Closures that escape their defining stack frame (e.g.
+  returned from a function or stored in a long-lived arena structure) cannot
+  capture local stack-allocated variables by reference; captured variables must
+  be moved or allocated within an `Arena` or heap `Ref<T>`.
 
 ### Coroutines (`Coroutine<T>`)
 
-Sapphire provides first-class support for frame-steppable coroutines and generators via the built-in `Coroutine<T>` type and the `yield` statement.
-
-* **Declaration**: Functions returning a coroutine declare `Coroutine<T>` (yielding values of type `T`) or `Coroutine` (yielding flow control without producing payload values).
-* **Yield syntax**:
-  * In `Coroutine` (flow-only), use bare `yield;` to pause execution until the next `.step()` tick.
-  * In `Coroutine<T>`, use `yield <expr>;` to yield a value of type `T`.
-* **Disambiguation with `match` expressions**: Any `yield` statement inside a multi-statement `match` case block is strictly bound to evaluating that match arm. To yield from a coroutine based on pattern matching, evaluate the `match` expression to a value first and then yield it at the coroutine level.
-* **Completion**: Coroutines complete when execution reaches the end of the body or hits a bare `return;`. Returning values via `return <expr>;` from a coroutine is prohibited at compile time.
-* **Runtime API**:
-  * `co.step(): T?` – Advances execution to the next `yield`, returning the yielded value (or `none` if void or completed).
-  * `co.is_done(): bool` – Returns `true` if the coroutine has terminated.
-  * `co.reset(): void` – Resets the coroutine back to its initial state.
+Sapphire provides native stackless coroutines for cooperative multitasking,
+generators, and stateful sequences:
 
 ```sapphire
-// 1. Frame-based sequencing
-func cutscene(npc: NPC): Coroutine {
-  npc.play_anim("wave");
+// Stateful task coroutine
+func task_runner(): Coroutine<void> {
+  print("Step 1");
   yield;
-  npc.walk_to(x = 100.0, y = 50.0);
-  yield;
+  print("Step 2");
 }
 
-// 2. Generator stream
+// Generator stream coroutine
 func fibonacci(count: int): Coroutine<int> {
   var a = 0;
   var b = 1;
@@ -655,16 +604,25 @@ func fibonacci(count: int): Coroutine<int> {
 }
 ```
 
-## 9. Structs & the implementation block
+* **Type declaration**: Parameterized by their yield type (`Coroutine<T>` for
+  generators yielding values of type `T`, or `Coroutine<void>` for stateful
+  routines).
+* **Yield statements**: `yield <expr>;` suspends execution and yields a value;
+  `yield;` suspends execution for void coroutines.
+* **Lifecycle methods**:
+  * `.step()`: Advances the coroutine to the next yield or return. Returns `T?`
+    for value-producing coroutines (evaluating to `none` once complete), or
+    `bool` (`true` while running, `false` when complete) for void routines.
+  * `.is_done()`: Returns boolean indicating whether routine has terminated.
+  * `.reset()`: Restarts the coroutine from the beginning.
 
-The primary data layout tool is the `struct` keyword. To strictly separate data structures from behavior, all methods (including constructors) **must** be defined inside an explicit implementation (`impl`) block; defining method signatures or bodies inside the `struct` block itself is strictly forbidden.
+## Structs & implementation blocks
 
-Sapphire provides a Python-style `__init__` initializer syntax defined inside the `impl` block. The compiler enforces that all non-optional fields declared in the `struct` be initialized within this function.
+### Struct declaration & `impl` blocks
 
-* **Implicit `self`**: For all non-static member functions, the `self` token is implicitly available within the body of the function.
-* **Immutable `self` by default**: In alignment with Sapphire's `let`-by-default philosophy, instance methods have an immutable `self` reference by default.
-* **Mutating methods (`var func`)**: Non-static methods that modify properties of `self` must be explicitly declared using `var func`.
-* **Static methods**: Declared using the explicit `static` keyword. Inside static functions, `self` is unavailable.
+The primary data layout tool is the `struct` keyword. To strictly separate data
+layout from behavior, all methods (including constructors and destructors)
+**must** be defined inside an explicit implementation (`impl`) block:
 
 ```sapphire
 struct Weapon {
@@ -694,19 +652,29 @@ impl Weapon {
 }
 ```
 
+* **Implicit `self`**: The `self` token is implicitly available within instance
+  methods.
+* **Immutable `self` by default**: Instance methods have an immutable `self`
+  reference by default.
+* **Mutating methods (`var func`)**: Non-static methods that modify properties
+  of `self` must be explicitly declared using `var func`.
+* **Static methods**: Declared using the `static` keyword. Inside static
+  functions, `self` is unavailable.
+
 ### Struct instantiation & constructor enforcement
 
-Sapphire enforces clear rules for struct instantiation to protect structural invariants:
-
-1. **Constructor instantiation (`StructName(...)`)**: When a struct defines an `__init__` constructor inside its `impl` block, instantiation **must** use constructor syntax matching the constructor's parameters:
+1. **Constructor instantiation (`StructName(...)`)**: When a struct defines
+   an `__init__` constructor inside its `impl` block, instantiation **must**
+   use constructor call syntax matching the constructor's parameters:
    ```sapphire
-   // Instantiation via __init__ constructor
    let sword = Weapon(dmg = 45, name = "Broadsword");
-   let default_sword = Weapon(dmg = 30);
    ```
-   To protect class invariants and ensure required initialization code executes, direct curly-brace literal syntax `Weapon { ... }` is strictly disallowed for structs that define `__init__`.
-
-2. **Curly-brace initializers (`StructName { ... }`)**: For plain data structs without custom `__init__` constructors, direct curly-brace initialization is the standard syntax:
+   To protect class invariants and ensure required initialization logic
+   executes, direct curly-brace literal syntax `Weapon { ... }` is strictly
+   disallowed for structs that define `__init__`.
+2. **Curly-brace initializers (`StructName { ... }`)**: For plain data structs
+   without custom `__init__` constructors, direct curly-brace initialization
+   is the standard syntax:
    ```sapphire
    struct Point {
      var x: float;
@@ -716,131 +684,49 @@ Sapphire enforces clear rules for struct instantiation to protect structural inv
    let p = Point { x = 10.0 };
    ```
 
-Fields declared with default initialization expressions or optional types (`T?`) may be omitted during initialization. The compiler statically verifies that all remaining required (non-optional) fields are initialized and that their assigned types are compatible.
-
-The following code will not compile because `sword` is a constant:
-
-```sapphire
-let sword = Weapon(dmg = 50);
-
-// This method attempts to mutate `self` via `var func use()`, which is not
-// allowed since `sword` is declared as a constant.
-sword.use();
-```
-
-### Constructor chaining in structural inheritance
-
-When a struct "inherits" from one or more parent structs (`struct Child: Parent1, Parent2`), the child constructor must initialize each parent struct that defines an `__init__` constructor using the base-initializer syntax:
-
-```sapphire
-struct Transform2D {
-  var x: float;
-  var y: float;
-}
-
-impl Transform2D {
-  func __init__(x: float, y: float) {
-    self.x = x;
-    self.y = y;
-  }
-}
-
-struct Health {
-  var hp: int;
-}
-
-impl Health {
-  func __init__(max_hp: int) {
-    self.hp = max_hp;
-  }
-}
-
-struct Player: Transform2D, Health {
-  var name: String;
-}
-
-impl Player {
-  func __init__(name: String, x: float, y: float, hp: int):
-      Transform2D(x = x, y = y),
-      Health(max_hp = hp) {
-    self.name = name;
-  }
-}
-```
-
-The compiler enforces strict initialization safety:
-1. **Mandatory parent initialization**: If a parent struct defines an `__init__` constructor, it *must* appear in the base initializer list of the child's `__init__`.
-2. **Order of execution**: Parent initializers are evaluated and executed in the exact order of their parent declaration in the `struct` definition, strictly before the child constructor body runs.
-3. **No `self` access in base arguments**: Arguments passed to parent initializers cannot reference `self` or access child fields, as the child instance is not yet fully initialized.
-4. **Field completeness check**: Parent fields initialized by base initializers are marked as initialized, satisfying compile-time definite-assignment analysis.
+Fields declared with default values or optional types (`T?`) may be omitted
+during initialization. The compiler verifies that all non-optional fields are
+initialized.
 
 ### Member encapsulation via construction contract
 
-Sapphire intentionally eliminates fine-grained member access keywords (`public`, `private`, `protected`) in favor of encapsulation tied to a struct's construction contract:
-
-1. **Plain-old-data structs (POD; no `__init__`)**:
-   * For structs without a custom `__init__` constructor (such as `Point`, `Vector2`, or `Rect`), all fields are transparent data.
-   * Direct field read and write access (`p.x = 20.0;`) is fully permitted across module boundaries, governed solely by whether the target variable is bound mutably (`var`) or immutably (`let`).
-   * This eliminates boilerplate getters and setters for pure data representations.
-
-2. **Invariant-enforcing structs (with `__init__`)**:
-   * When a struct defines an `__init__` constructor inside its `impl` block, it signals that it maintains internal invariants (such as non-negative durability, valid handles, or normalized state).
-   * Struct fields are **publicly readable, but module-write only**:
-     * External modules can freely read fields (`let dmg = sword.damage;`).
-     * External modules **cannot** directly mutate fields (`sword.damage = 100;` produces a compile-time error).
-     * Field mutations on invariant-enforcing structs from outside their defining module must occur through methods declared in the struct's `impl` block (e.g. `sword.use();`).
-   * Code within the struct's defining module retains full direct read and write access to all fields.
+Sapphire omits member-level access control keywords (`public`, `private`) in
+favor of construction-contract encapsulation:
+* **Module-level encapsulation**: Visibility is defined at the file/module
+  boundary using the `export { ... }` manifest block.
+* **Plain data structs**: Structs without `__init__` constructors expose their
+  fields for direct reading and mutation on `var` bindings.
+* **Constructed structs**: Structs declaring `__init__` constructors restrict
+  field mutations outside their defining module, requiring callers to invoke
+  explicit mutating methods (`var func`).
 
 ### Deterministic destructors (`__del__`)
 
-To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power deterministic lexical block-scope teardown, early function returns, and loop control jumps:
+Structs support deterministic RAII via destructors defined inside `impl` blocks:
 
 ```sapphire
-struct FileHandle {
-  var fd: int;
-}
-
 impl FileHandle {
-  func __init__(path: String) {
-    self.fd = open_file_descriptor(path);
-  }
-
   func __del__() {
-    if self.fd != -1 {
-      close_file_descriptor(self.fd);
-      self.fd = -1;  // Mutable `self` is implicitly accessible
+    if self.is_open {
+      self.close();
     }
   }
 }
 ```
 
-* **Implicit mutable self**: In alignment with Sapphire's method conventions, `self` is implicitly available as a mutable reference within the body of `__del__()`.
-* **Zero parameters**: Destructors take exactly zero parameters (`func __del__()`). Declaring parameters on `__del__` is a compile-time `SemanticError`.
-* **Modifier constraints**: Marking `__del__` as `static` is strictly prohibited. Destructors specify no return type.
-* **No manual invocation**: Calling `__del__()` directly as an ordinary method (`file.__del__()`) is forbidden at compile time. Destructors are exclusively invoked by the compiler.
-* **Automatic LIFO execution**: The compiler automatically emits destructor calls in reverse order of declaration (LIFO) when stack-allocated structs exit their enclosing lexical scope, on early `return`, or on loop control jumps (`break` and `continue`).
-* **RVO elision**: Returning a struct identifier by value from a function transfers ownership to the caller, eliding the local destructor invocation.
+* **LIFO destruction**: When variables exit their lexical block scope,
+  destructors are invoked automatically in reverse order of declaration.
+* **Early returns and loop exits**: The compiler injects destructor calls along
+  all early return paths and loop control jumps (`break`, `continue`).
+* **Copy elision**: When an instance is returned from a function by value, its
+  destructor in the local frame is elided via Return-Value Optimization (RVO).
 
-## 10. Enums
+## Enums
 
-Sapphire provides native support for integer-backed and string-backed enumerations via the `enum` keyword. Enums define a named set of constants with static type safety and optional explicit assignments.
-
-### Definition & auto-incrementing values
-
-Enum members are declared as comma-separated identifiers inside curly braces. Trailing commas are optional and recommended.
-
-* **Default values**: By default, integer enum members are automatically
-  assigned sequential integers starting at `0`.
-* **Explicit integer values**: Members can be assigned explicit integer values.
-  Unassigned subsequent members automatically resume auto-incrementing from the
-  previous member's value.
-* **Native String Enums**: Members can be assigned explicit string literal
-  values (e.g., `Fill = "fill"`). Any subsequent unassigned member in a string
-  enum automatically defaults to its identifier string (`Line` -> `"Line"`).
+Sapphire provides native support for integer-backed and string-backed
+enumerations via the `enum` keyword:
 
 ```sapphire
-// Default auto-incrementing integer values:
-// North = 0, East = 1, South = 2, West = 3
 enum Direction {
   North,
   East,
@@ -851,10 +737,9 @@ enum Direction {
 enum DrawMode {
   Fill = "fill",
   Line = "line",
-  Default,  // Auto-assigned "Default" (note that capitalization is maintained)
+  Default,  // Auto-assigned "Default"
 }
 
-// Explicit integer values
 enum HttpStatusCode {
   Ok = 200,
   Created = 201,
@@ -864,57 +749,22 @@ enum HttpStatusCode {
 }
 ```
 
-### Type semantics & interoperability
+* **Default values**: Integer enum members automatically increment starting at
+  `0` unless explicitly assigned.
+* **String enums**: Members can be assigned string literals. Subsequent
+  unassigned members default to their identifier string.
+* **Nominal typing**: Enums introduce named types into scope (`Direction`,
+  `DrawMode`).
+* **Strict primitive separation**: Implicit conversion to `int` or `String` is
+  prohibited. Converting requires explicit static casting (`dir as int`,
+  `mode as String`) or fallible conversion (`HttpStatusCode.from(200)`).
 
-* **Nominal typing**: Declaring an enum introduces a named type into the scope
-  (e.g., `Direction` or `DrawMode`).
-* **Type inference**: Variable bindings assigned an enum variant automatically
-  infer the enum type without requiring explicit type annotations.
-* **Strict primitive separation**: Implicit coercion of `enum` values to
-  primitive `int` or `String` types is prohibited. Converting between an `enum`
-  variant and its primitive representation requires an explicit cast
-  (`enum_val as String` or `enum_val as int`) or explicit static constructor
-  (`String.from(enum_val)`).
+## Inheritance, traits, & polymorphism
 
-```sapphire
-// Type inferred as `Direction`
-let current_dir = Direction.North;
+### Static structural inheritance
 
-let mode: DrawMode = DrawMode.Fill;
-
-// Explicit cast required for enum to String/int conversion
-let mode_str: String = DrawMode.Line as String;
-let mode_str2: String = String.from(DrawMode.Line);
-
-// Compile error: Cannot implicitly assign Enum to String or int
-// let invalid_str: String = DrawMode.Line;
-// let invalid_int: int = Direction.North;
-
-// Fallible conversion from String or int via EnumName.from
-if let mode ?= DrawMode.from("line") {
-  // mode is DrawMode.Line
-}
-
-if let code ?= HttpStatusCode.from(200) {
-  // code is HttpStatusCode.Ok
-}
-
-// Comparison
-if status == HttpStatusCode.Ok {
-  let is_ok = true;
-}
-
-// Infallible static integer conversion
-let dir_code: int = current_dir as int;
-```
-
-## 11. Inheritance & polymorphism
-
-Sapphire implements clean, type-safe inheritance divided into a compile-time mechanism and a runtime mechanism.
-
-### Static inheritance
-
-Structures can inherit the field layout, methods, and default values of one or more parent structures at compile time using a colon syntax with a comma-separated list of parents (e.g. `struct Child: Parent1, Parent2`).
+Structures can inherit the field layout and methods of one or more parent
+structures at compile time:
 
 ```sapphire
 struct Position {
@@ -934,138 +784,107 @@ struct Player: Position, Health {
 
 #### Multi-parent delegation rules
 
-* **Field layout inlining**: Fields from all parent structures are inlined into the child structure's field layout in order of parent declaration.
-* **Conflict prevention**: If two parent structures contain fields with identical names, or if a child structure declares a field with the same name as an inherited field, the compiler raises a compile-time `SemanticError`.
-* **Circular inheritance**: Circular struct delegation (e.g. `A : B` and `B : A`) is strictly forbidden and rejected at compile time.
+* **Field layout inlining**: Fields from all parent structures are inlined into
+  the child structure in order of declaration.
+* **Conflict prevention**: Duplicate field names across parents or between
+  parent and child produce a compile-time `SemanticError`.
+* **Circular inheritance**: Circular struct delegation is strictly forbidden.
 
-#### Disallowed up-casting
+#### Constructor chaining & base initializers
 
-To prevent historical OOP design flaws, Sapphire **strictly disallows up-casting** for statically inherited structures (e.g., a `Cat` reference cannot be cast or passed as an `Animal`).
-
-This design choice provides several key benefits:
-* **Eliminates object slicing**: Because a child struct cannot be assigned to a parent struct type, the compiler prevents object slicing (where child fields are silently discarded during assignment).
-* **Eliminates method-override ambiguity**: In traditional languages without vtables, calling an overridden method through an up-cast reference statically dispatches to the parent's method. Disallowing up-casting makes this class of logical bugs impossible.
-* **Separates concerns**: Static inheritance behaves strictly as a *code and layout reuse utility*. Behavioral polymorphism is offloaded entirely to **traits** (using monomorphization), ensuring that memory layout composition and dynamic typing are never conflated.
-
-#### Syntactic delegation (transparent forwarding)
-
-To retain a simple and familiar structural inheritance syntax without introducing rigid physical memory layouts, Sapphire treats the colon syntax as compiler-driven **syntactic delegation**. Under the hood, the compiler converts this inheritance into composition (field nesting) and automatically generates forwarding methods.
-
-This approach incurs **zero runtime performance penalty** and avoids the overhead typical of traditional dynamic/virtual method dispatch because resolution is done entirely at compile-time:
-* **Direct static calls (no indirection)**: Unlike virtual method tables (vtables) that require pointer chasing and dynamic lookups, the compiler resolves target functions statically and outputs direct branch/jump instructions.
-* **Inlining opportunities**: Since the forwarded calls are resolved statically, they are prime candidates for compiler inlining. When inlined, the forwarding layer is completely optimized away, resulting in absolute zero runtime instruction overhead.
-* **Compile-time offset calculation**: Any adjustment to the `self` reference pointer (from the wrapper struct to the nested composition struct) is calculated at compile-time and folded directly into CPU instructions.
-
-This provides the ergonomic benefits of traditional inheritance while giving the compiler full freedom to optimize, reorder, or pack fields under the hood.
-
-#### Alternatives for static code reuse
-
-To support data-oriented design and decouple behaviors from layout, Sapphire supports two primary alternatives:
-
-##### Traits (compile-time contracts & implicit subtyping)
-Traits define behavioral contracts without prescribing physical memory layout.
-Because Sapphire disallows struct upcasting, behavioral polymorphism is achieved via **implicit trait subtyping**:
-
-* **Trait parameter & return types**: Trait names can be used directly as parameter types (e.g. `func display(p: Printable)`) or return types (e.g. `func get_item(): Printable`).
-* **Implicit assignability**: A struct `S` that implements trait `T` (via `impl T for S` or structural method compatibility) is implicitly assignable to any target expecting type `T` or optional type `T?`.
-* **Zero-vtable heterogeneous trait collections**: Trait types can be element types for collections (e.g. `[Renderable]`). While a concrete array `[Circle]` prohibits storing `Rectangle` instances, an array typed as `[Renderable]` allows heterogeneous storage of any struct types implementing `Renderable`.
-  * **Native compilation via compiler-synthesized tagged unions**: To maintain zero vtable overhead and avoid runtime fat pointers, the native compiler synthesizes an internal closed tagged union (sum type) of all types implementing the trait. Iteration over `[Trait]` and method invocation compiles to an efficient, inlinable branch/jump table to direct static function calls over contiguous memory.
-* **Interface erasure**: Passing or returning a value typed as trait `T` narrows the caller's view strictly to the methods defined on `T`. Unrelated concrete fields of `S` cannot be accessed without explicit casting.
-* **Implicit and explicit `self` for instance methods**: Non-static trait methods implicitly operate on `self` when implemented. In standard Sapphire code, the explicit `self` parameter can be omitted in trait declarations. Specifying an explicit first `self` parameter (which may be `var self` for mutable access) is primarily used when creating bindings for external host libraries (like Love2D) to explicitly designate instance methods that transpile to colon syntax in Lua (e.g. `:draw(x, y)`).
-* **Module/static functions**: For external host bindings, omitting `self` from a trait method signature designates it as a module or static function (e.g. transpiling to Lua dot syntax `.rectangle(...)`).
+When a child struct constructor initializes parents that define `__init__`,
+it chains parent initializers using colon syntax on the constructor:
 
 ```sapphire
-// Resource-handle trait (instance methods)
-trait Image {
-  func draw(self, x: float, y: float);
-  func getWidth(self): float;
-}
-
-// Module trait (static functions)
-trait Graphics {
-  func rectangle(mode: String, x: float, y: float, w: float, h: float);
-}
-
-trait Actor {
-  func update();
-}
-
-struct Cat {
-  var lives: int;
-}
-
-struct Dog {
-  var barks: int;
-}
-
-impl Actor for Cat {
-  func update() { /* Cat logic */ }
-}
-
-impl Actor for Dog {
-  func update() { /* Dog logic */ }
-}
-
-// Polymorphic function accepting any struct implementing Actor
-func update_actor(actor: Actor): Actor {
-  actor.update();
-  return actor;
-}
-
-// Heterogeneous trait collection containing both Cat and Dog instances
-func update_all() {
-  let actors: [Actor] = [Cat { lives = 9 }, Dog { barks = 3 }];
-  for actor in actors {
-    actor.update();
+impl Player {
+  func __init__(name: String, x: float, y: float, hp: int):
+      Transform2D(x = x, y = y),
+      Health(max_hp = hp) {
+    self.name = name;
   }
 }
 ```
 
-##### Trait dispatch models and compilation strategies
+#### Disallowed up-casting
 
-Sapphire provides a three-tier model for trait-based polymorphism to ensure zero
-runtime overhead in systems code while allowing dynamic extensibility where
-required:
+Sapphire **strictly disallows up-casting** for statically inherited structures
+(e.g. `let a: Animal = cat;` or `cat as Animal` is rejected at compile time).
+
+* **Eliminates object slicing**: Child fields are never sliced away.
+* **Eliminates method ambiguity**: Dispatches are statically known at compile
+  time without vtables or dynamic lookups.
+* **Separates concerns**: Static inheritance is strictly for *layout and code
+  reuse*. Behavioral polymorphism is offloaded to **traits**.
+
+#### Syntactic delegation (transparent forwarding)
+
+Under the hood, structural inheritance compiles to **syntactic delegation**
+(field composition + generated forwarding methods). This incurs **zero
+runtime performance penalty**:
+* **Direct static calls**: Calls are resolved at compile time to direct
+  branch/jump instructions with zero pointer chasing.
+* **Compiler inlining**: Forwarding methods are prime candidates for complete
+  inlining, vanishing into zero instruction overhead.
+* **Compile-time offset calculation**: Pointer adjustments to sub-objects are
+  calculated at compile time.
+
+### Traits (compile-time contracts & implicit subtyping)
+
+Traits define behavioral contracts without prescribing physical memory layouts:
+
+```sapphire
+trait Actor {
+  func update();
+}
+
+impl Actor for Cat {
+  func update() { /* Cat update */ }
+}
+
+impl Actor for Dog {
+  func update() { /* Dog update */ }
+}
+
+func update_actor(actor: Actor): Actor {
+  actor.update();
+  return actor;
+}
+```
+
+* **Implicit subtyping**: Any struct implementing the trait's methods is
+  implicitly assignable to targets expecting the trait type or `Trait?`.
+* **Interface erasure**: Values viewed through a trait type can only access
+  methods defined on that trait.
+
+### Trait dispatch models & compilation strategies
+
+Sapphire provides a three-tier model for trait polymorphism:
 
 1. **Static monomorphization via direct trait parameters — Zero-cost calls**:
-   Functions accepting trait types directly (e.g.,
-   `func render(item: Renderable)`) are monomorphized at compile time. The
-   compiler inspects all call sites and generates specialized, direct-call code
-   for each concrete struct implementing the trait across module and package
-   boundaries. This incurs zero indirection overhead, avoids fat pointers, and
-   enables complete compiler inlining and vectorization. (Parametric generic
-   trait constraints like `<T: Trait>` are planned for future language
-   revisions to enforce cross-parameter type unification, such as ensuring two
-   arguments share the identical concrete type).
+   Functions accepting trait types directly (e.g. `func render(a: Actor)`) are
+   monomorphized at compile time. The compiler generates specialized direct-call
+   code for each concrete struct implementing the trait, enabling inlining and
+   eliminating fat pointers.
+2. **Heterogeneous trait collections (`[Trait]`) — Closed-world tagged unions**:
+   Collections of traits (e.g. `let actors: [Actor] = [Cat {}, Dog {}];`)
+   compile into internal closed tagged unions (sum types) of all concrete
+   implementors. Iteration and method dispatch compile to direct jump tables
+   over contiguous memory without heap allocations.
+3. **Dynamic trait objects across open boundaries (`Dynamic<Trait>`)**:
+   For open dynamic library (`.so`/`.dylib`) boundaries or plugin systems where
+   implementors cannot be closed at compile time, Sapphire provides an explicit
+   dynamic trait object representation:
+   * **Explicit construction**: Created via constructor syntax:
+     ```sapphire
+     let plugin: Dynamic<PluginHook> = Dynamic<PluginHook>(my_hook);
+     ```
+   * **Fat pointer layout**: Uses a standard 2-word fat pointer containing a
+     data pointer and an immutable static vtable pointer.
 
-2. **Heterogeneous trait collections (`[Trait]`) — Closed-world tagged union optimization**:
-   When storing heterogeneous collections within a module or binary (e.g.,
-   `let drawables: [Renderable] = [Circle {}, Rect {}];`), the Sapphire
-   compiler performs closed-world analysis to synthesize an internal tagged
-   union (sum type) containing all concrete types implementing `Renderable`.
-   Method invocations on elements compile into direct jump tables or compact
-   switch statements over contiguous memory buffers without heap allocation or
-   pointer-chasing.
+### Explicit composition (data-oriented design)
 
-3. **Dynamic trait objects across open boundaries (`Dynamic<Trait>`) — Native ABI**:
-   For dynamic library boundaries, plugin architectures, or dynamically loaded
-   code where the complete set of implementors is open and unknown at compile
-   time, Sapphire's native backend provides an explicit dynamic trait object
-   representation via `Dynamic<Trait>` (e.g.
-   `func register_plugin(hook: Dynamic<PluginHook>)`). Dynamic trait objects use
-   a standard 2-word fat pointer layout:
-   * A **data pointer** referencing the instance in its memory arena or
-     stack/heap frame.
-   * A **vtable pointer** referencing an immutable, statically generated
-     vtable containing function pointers for the trait's method signatures.
-
-This guarantees that developers only incur dynamic dispatch and indirection
-costs when explicitly crossing open, non-monomorphizable library boundaries,
-while idiomatic internal Sapphire code enjoys zero-overhead static
-monomorphization or tagged-union locality.
-
-##### Explicit composition (data-oriented design)
-Instead of physical inheritance, structs can explicitly compose other structures. This allows clear separation of data components, which is ideal for Entity-Component-System (ECS) architectures where systems process arrays of single components to maximize cache locality.
+Structs can explicitly compose other structs without inheritance, ideal for
+Entity-Component-System (ECS) architectures:
 
 ```sapphire
 struct PhysicsComponent {
@@ -1079,116 +898,164 @@ struct Player {
 }
 ```
 
-### Dynamic prototypal inheritance
+## Generics & parametric polymorphism
 
-Prototypal inheritance allows objects to delegate state to other objects at runtime. Instead of defining a rigid class hierarchy or instantiating duplicate structures, one object can serve as an active prototype for another. The clone dynamically delegates field lookups to its prototype: changes made to the prototype propagate live to the cloned instance, while the clone can selectively shadow (override) specific values. This is highly valuable for rapid prototyping, template-based object creation (such as defining variations of a base enemy archetype in a game), and zero-boilerplate data sharing.
+Sapphire supports zero-overhead parametric polymorphism for structures,
+implementation blocks, traits, and functions using angle brackets (`<T, U>`).
 
-In Sapphire, prototypal inheritance is opt-in and is declared using the `proto` syntax (e.g., `proto Enemy`). Standard structures (`struct`) do not support `clone` and are compiled to flat, fast layout structures with no runtime prototype lookup overhead.
+### Generic declaration syntax
 
-For prototype structures (`proto`), the compiler automatically generates a built-in `__proto__` property on every instance to access its prototype. Manual self-referential prototype pointer definitions (like `var __proto__: Struct?`) are strictly forbidden by the compiler to prevent boilerplate antipatterns.
+```sapphire
+struct Stack<T> {
+  var items: [T];
+}
 
-Prototypal delegation is executed explicitly via the `clone` keyword. Using `clone` bypasses the `__init__` function and sets up a live reference delegation back to the cloned instance. An optional initialization block syntax allows immediate local property shadowing upon cloning.
+impl Stack<T> {
+  func push(item: T) { /* ... */ }
+}
+
+trait Container<T> {
+  func get(): T;
+}
+
+func identity<T>(item: T): T {
+  return item;
+}
+```
+
+### Call-site type inference & explicit arguments
+
+* **Type-argument inference**: Type arguments are contextually inferred from
+  arguments: `let x = identity(42);` (inferred as `identity<int>(42)`).
+* **Explicit type arguments**: Type arguments can be explicitly specified:
+  `let s = Stack<int> { items = [10, 20] };`.
+
+### Compile-time monomorphization
+
+Generics incur zero runtime overhead. During compilation, the compiler tracks
+concrete type combinations, monomorphizes generic AST nodes into specialized
+concrete definitions, and emits unboxed concrete definitions for each type.
+
+## Memory architecture, arenas, & smart references
+
+Sapphire combines stack allocation, explicit lexical arenas, prototypal state
+delegation, and smart references into a unified memory model.
+
+### Stack-first memory model & deterministic RAII
+
+1. **Stack allocation by default**: Standard `struct` instances are allocated
+   directly on the stack with deterministic LIFO teardown. Destructors
+   (`__del__()`) execute in reverse declaration order upon exiting lexical
+   blocks.
+2. **RVO value returns**: Structs returned from functions are constructed
+   directly in the caller's stack frame via Return-Value Optimization (RVO)
+   copy elision, eliding local destructors.
+3. **Static use-after-free prevention**: Returning borrowed references to
+   local stack structs is rejected at compile time.
+
+### Explicit arena management
+
+For managed objects and dynamic lifecycles, Sapphire provides explicit lexical
+arenas instantiated via `Arena()`:
+
+```sapphire
+let level_arena = Arena();
+let p = Point { x = 10.0, y = 20.0 } in level_arena;
+```
+
+* **Lexical RAII teardown**: When an `Arena` binding goes out of scope, the
+  runtime tears down the arena and deallocates all allocated instances.
+* **The `in` allocation suffix**: Both `struct` and `proto` allocations can be
+  targeted to an arena using the `in <arena>` suffix.
+
+### Prototypal state delegation (`proto` & `clone`)
+
+Prototypal inheritance allows objects to delegate state to other objects at
+runtime. Clones dynamically delegate field lookups to their prototype: changes
+to the prototype propagate live to clones, while clones can selectively shadow
+values.
+
+Prototypal inheritance is opt-in and requires the `proto` keyword:
 
 ```sapphire
 let my_arena = Arena();
 
-var base_goblin = Enemy { damage = 10 } in my_arena;
+proto Enemy {
+  var damage: int;
+  var health: int;
+}
 
+// Protos require allocation within an explicit arena
+var base_goblin = Enemy { damage = 10, health = 100 } in my_arena;
+
+// Clones delegate state live to base_goblin
 let elite_goblin = clone base_goblin {
   self.health = 200;  // Shadowed locally
 };
 
-print(elite_goblin.damage);  // Outputs 10 (Delegated to base_goblin)
-
+print(String.from(elite_goblin.damage));  // 10 (delegated to base_goblin)
 base_goblin.damage = 15;
-print(elite_goblin.damage);  // Outputs 15 (Reflected live from prototype)
+print(String.from(elite_goblin.damage));  // 15 (reflected live)
 ```
-
-#### Immutability and live updates
-
-When an instance is bound using `let` (e.g., `let elite_goblin = clone base_goblin`), the variable binding and its local shadow table are immutable (meaning you cannot reassign the variable or mutate its properties directly). However, live modifications to its prototype (`base_goblin`) will still propagate through the delegation chain.
-
-#### Structural safety & method dispatch constraints
-
-To prevent the unpredictability of JavaScript-style dynamic prototypes and keep performance consistent, Sapphire enforces the following constraints:
-* **Value-shadowing only**: Users are strictly forbidden from dynamically appending entirely new fields that were not defined in the source struct blueprint.
-  * Additionally, shadowing of nested reference types implements **copy-on-write (CoW)**. Mutating properties inside a nested reference type (e.g., modifying a field of a composed struct) will automatically intercept the write, shallow-copy the immediate nested reference locally on the clone (shadowing it), and then apply the mutation. This guarantees that mutations on the clone do not propagate back to the prototype while avoiding unexpected deep-copy performance costs.
-* **Data-only delegation**: Prototypal inheritance only delegates and shadows data fields. Methods (defined inside `impl` blocks) are resolved statically at compile-time based on the concrete type of the struct. Sapphire does not support runtime overriding of methods on individual instances, which keeps method dispatch zero-cost.
-* **Opt-in proto declarations**: To prevent pointer-chasing overhead for standard structs, prototypal delegation is restricted to structures declared with the `proto` keyword. Standard structs are compiled as flat, contiguous blocks with zero pointer-chasing overhead.
 
 #### The `__proto__` property
 
-Every `proto` instance automatically exposes a built-in, compiler-generated `__proto__` property to inspect its prototype chain (standard `struct` declarations do not possess prototype tables or a `__proto__` property, upholding Sapphire's zero-overhead guarantee):
-* **Immutability**: The `__proto__` property is read-only. It cannot be reassigned at runtime, preventing prototype-pollution vulnerabilities and allowing the compiler to perform layout optimizations.
-* **Type safety**: For any prototype type `T`, the type of the `__proto__` property is the optional `T?`. Accessing the prototype requires safe optional unwrapping.
-* **Prototype assignment**:
-  * For prototype instances created via a standard initializer (e.g., `Enemy { ... } in my_arena`), `__proto__` evaluates to `none`.
-  * For instances created via `clone` (e.g., `clone base_goblin`), `__proto__` points to the prototype instance (in this case, `base_goblin`).
-  * Standard `struct` instances do not possess prototype tables or a `__proto__` property; attempting to access `.__proto__` on a standard `struct` produces a compile-time `SemanticError`.
+Every `proto` instance exposes a read-only `__proto__` property:
+* For instances created via `clone base`, `__proto__` evaluates to `base`
+  (typed as optional `T?`).
+* For root instances created directly in an arena, `__proto__` evaluates to
+  `none`.
+* Standard `struct` instances do not possess prototype tables or a `__proto__`
+  property.
 
-## 12. Compiler & runtime implementation
+#### Copy-on-Write (CoW) state isolation
 
-This section outlines how the Sapphire compiler and runtime optimize code execution and manage memory without sacrificing performance or safety.
+To prevent unexpected cross-instance mutations, mutating a property within a
+nested reference field of a cloned instance triggers **Copy-on-Write (CoW)**:
+the runtime shallow-copies the immediate nested reference locally on the clone
+before applying the mutation, isolating the prototype from mutations.
 
-### Proto compilation
+### Smart heap references (`Ref<T>`, `SharedRef<T>`, `WeakRef<T>`)
 
-To preserve the zero-overhead promise of standard structures, the compiler does not generate any prototype lookup wrappers or metadata for standard `struct` declarations.
-1. **Standard Structs**: Standard structs compile directly to flat layouts. Field lookups (e.g. `t.field`) compile to direct offset/index accesses.
-2. **Proto structures**: Structures declared with the `proto` keyword compile to instances wrapping their properties in a lookup system containing `__proto__` and `__shadow__` tables.
-3. **Copy-on-Write (CoW) Wrapper**: Field writes targeting a nested reference field inside a cloned object trigger a copy-on-write intercept. The runtime duplicates the nested reference locally to isolate the cloned instance's mutations.
+For long-lived objects, recursive data structures (trees, graphs), or instances
+that must outlive lexical scopes, Sapphire provides first-class smart pointers:
 
-### Stack-first memory model & arena management
+* **Unique heap allocation (`Ref<T>`)**: Instantiated via `Ref(value)`.
+  Exclusive owner of underlying heap memory. Strictly move-only (`let b = move
+  a;`). Bypasses arena escape analysis, allowing instances to be returned
+  freely from functions.
+* **Shared heap allocation (`SharedRef<T>`)**: Instantiated via `SharedRef(val)`
+  or `SharedRef(move r)`. Reference-counted. Duplicate handles are created
+  explicitly via `s.share()`.
+* **Weak observer (`WeakRef<T>`)**: Non-owning reference created via
+  `s.downgrade()`. Prevents cycles. Safely upgraded to `SharedRef<T>?` via
+  `if let active ?= w.upgrade() { ... }`.
+* **Transparent dereferencing**: Member access (`r.field`) and method calls
+  (`r.method()`) automatically dereference to the inner value.
 
-Sapphire enforces a clear, predictable memory hierarchy:
+### Arena escape analysis & static safety
 
-1. **Stack allocation by default for structs**: Standard `struct` instances are allocated directly on the stack with deterministic LIFO teardown upon exiting their lexical block scope. If a struct defines an implementation of `__del__()`, the compiler automatically invokes the destructor in reverse order of declaration when variables exit lexical blocks, upon loop control jumps (`break` and `continue`), or prior to function returns.
-2. **Value returns with RVO / copy elision**: When returning a stack struct from a function, it is returned by value. The compiler enforces **return-value optimization (RVO)** and copy elision to construct the return value directly in the caller's stack frame without intermediate copies. Destructors for directly returned local identifiers are elided, transferring ownership cleanly to the caller without triggering local destruction.
-3. **Static use-after-free prevention**:
-   * Downward reference passing to function calls is fully safe.
-   * Returning a borrowed reference to a local stack struct is rejected at compile time.
-   * Storing a reference to an inner-scope stack struct in an outer-scope variable or long-lived arena is statically prohibited.
-   * The compiler never performs silent heap promotion, ensuring memory allocation remains transparent and deterministic.
-4. **Explicit arena allocation for prototypes and managed structures**: All `proto` instances strictly require allocation within an explicit managed arena using the `in` suffix (`Enemy { damage = 10 } in my_arena` or `Enemy(damage = 10) in my_arena`). Standard `struct` instances can also opt into arena allocation using the `in` suffix (`Point { x = 10 } in my_arena`).
-5. **Implicit clone arena propagation**: When a prototype is cloned, it is automatically allocated in the same arena as its prototype by default, unless overridden by an explicit `in` suffix (e.g. `clone base in other_arena`).
-6. **Explicit arenas and RAII**: Developers instantiate explicit arenas via `let my_arena = Arena();`. Allocations are targeted to the arena using the `in` suffix.
-7. **Lexical scope destruction (RAII) & escape-checking**: Explicit `Arena` instances have lexical lifecycles. When the `Arena` variable goes out of scope, the runtime automatically tears down the arena and deallocates all objects (both `struct` and `proto` references) allocated within it. To prevent dangling references, the compiler statically enforces scope-bound escape rules:
-   * **Outer-scope variable escape**: A variable (`let` or `var`) declared in an outer scope cannot be assigned a reference to an object allocated in a nested/inner arena.
-   * **Function-return escape**: A function cannot return a reference to an object allocated in an arena local to the function scope.
-8. **General heap allocations (`Ref<T>`, `SharedRef<T>`, `WeakRef<T>`)**:
-   For long-lived objects, recursive data structures (trees, graphs), or instances that must outlive lexical scopes without arena escape restrictions, Sapphire provides first-class smart reference types:
-   * **Unique heap allocation (`Ref<T>`)**: Instantiated via `let r = Ref(Point { x = 1, y = 2 });`. Exclusive owner of the underlying heap memory. `Ref<T>` is strictly move-only; reassignment or passing to a value parameter requires the explicit `move` keyword (`let b = move a;`). Bypasses arena escape analysis, allowing instances to be returned freely from functions.
-   * **Shared heap allocation (`SharedRef<T>`)**: Instantiated via `let s = SharedRef(Point { x = 1, y = 2 });` (single co-allocation of control block and payload) or by adopting an existing unique reference `let s = SharedRef(move r);`. Reference-counted; duplicate handles are created via `s.share()`, while `move s` transfers the handle without touching reference counts.
-   * **Weak observer (`WeakRef<T>`)**: Non-owning reference created via `s.downgrade()`. Prevents reference cycles in graphs and hierarchies. Upgraded safely to a `SharedRef<T>?` optional via `if let active ?= w.upgrade() { ... }`.
-   * **Auto-dereferencing & transparent borrowing**: Direct member access (`r.field`) and method calls (`r.method()`) automatically dereference to the inner value. Passing `Ref<T>` or `SharedRef<T>` to functions expecting the underlying type `T` automatically borrows by constant reference without transferring ownership.
+The compiler enforces static scope-bound escape rules for arenas:
+* **Outer-scope variable escape**: A variable in an outer scope cannot be
+  assigned a reference to an object allocated in an inner/nested arena.
+* **Function-return escape**: A function cannot return a reference to an object
+  allocated in an arena local to that function.
 
-### Source map generation & runtime stack trace demangling
-
-When transpiling Sapphire (`.sp`) code to target environments (such as Lua 5.1 / Love2D), the compiler tracks AST node position metadata (`start_line`, `start_column`) to generate source-map sidecars and runtime demanglers:
-
-1. **Standard V3 source maps (`.lua.map`)**: Generated automatically during compilation using Base64 [VLQ](https://en.wikipedia.org/wiki/Variable-length_quantity) encoding. Sidecar files include embedded `sourcesContent` strings to support offline IDE debugging (such as setting breakpoints in VS Code).
-2. **Runtime stack-trace demangling**: Embedded `_SP_LINE_MAP` lookup tables pair generated line numbers with original Sapphire source lines and snippets.
-3. **Love2D error-handler hook**: Intercepts uncaught runtime errors (asset-loading failures, out-of-bounds dynamic indices, or failed optional unwrapping) and translates Lua call stack frames into original `.sp` filenames and line numbers on both terminal logs and Love2D's graphical crash screen.
-4. **CLI control**: Source maps are enabled by default and can be disabled using the `--no_sourcemap` flag.
-
-## 13. Module system & encapsulation
-
-Sapphire provides a type-safe module system with explicit encapsulation.
+## Module system & encapsulation
 
 ### Private by default
-All top-level declarations (`struct`, `enum`, `trait`, `func`, `let`, `var`) in a Sapphire source file are **module-private by default** and cannot be accessed outside their defining file unless explicitly listed in an `export` block.
+
+All top-level declarations (`struct`, `enum`, `trait`, `func`, `let`, `var`)
+are **module-private by default** and cannot be accessed outside their defining
+file unless explicitly listed in an `export` manifest.
 
 ### Explicit export manifest (`export { ... }`)
+
 A module defines its public API using an `export` manifest block:
-* **Single-block Enforcement**: Exactly one `export { ... }` block is permitted per file.
-* **Top-level placement**: The `export` block can be placed anywhere at top-level scope (e.g., at the top of the file above symbol definitions for readability, or at the bottom). Forward references to symbols defined later in the file are fully supported.
-* **Aliasing & re-exporting**: Members can be exported under aliases using `as` (e.g. `new_image as create_image`), and imported module symbols can be re-exported via dot notation (e.g. `enums.DrawMode`).
-* **Trailing Commas**: Trailing commas inside `export { ... , }` are allowed and
-  recommended.
 
 ```sapphire
-// lib/love2d/graphics.sp
-
-import lib.love2d.enums;
+// lib/graphics.sp
+import lib.enums;
 
 export {
   Image,
@@ -1206,268 +1073,180 @@ func new_image(path: String): Image {
 }
 ```
 
+* **Single-block enforcement**: Exactly one `export { ... }` block is permitted
+  per file.
+* **Top-level placement**: May be placed at the top or bottom of the module.
+  Forward references to symbols defined later in the file are fully supported.
+* **Aliasing & re-exporting**: Symbols can be exported under aliases using `as`,
+  and imported symbols can be re-exported via dot paths.
+
 ### Module imports (`import`)
-Modules are imported using dot-separated identifier paths:
 
 ```sapphire
-// Imports module namespace 'graphics'
-import lib.love2d.graphics;
+import lib.graphics;
+import lib.graphics as gfx;
 
-// Imports module namespace with custom alias 'gfx'
-import lib.love2d.graphics as gfx;
-
-// Member access via qualified dot notation
-let img = graphics.new_image("hero.png");
+let img = gfx.new_image("hero.png");
 ```
 
 ### Transpilation semantics
-* **Lua 5.1 target**: Module imports transpile to `local graphics = require("lib.love2d.graphics")`. Export manifests emit a module table `local _M = {}` populated with exported references and append `return _M`.
-* **Python target**: Module imports transpile to `import lib.love2d.graphics`. Export manifests emit `__all__ = ["Image", "new_image", "create_image", "DrawMode"]`.
 
-## 14. Host runtime interoperability & annotations
+* **Python target**: Imports transpile to native `import ...`. Export manifests
+  emit `__all__ = [...]`.
+* **Lua 5.1 target**: Imports transpile to `local mod = require(...)`. Export
+  manifests emit a module table `local _M = {}` and append `return _M`.
 
-Sapphire supports native interoperability with third-party scripting host engines (such as **Love2D** in Lua 5.1 / LuaJIT environments) through single-purpose annotation decorators:
+## Host runtime interoperability & annotations
+
+Sapphire supports native interoperability with scripting host engines (such as
+**Love2D** in Lua 5.1 / LuaJIT environments):
 
 ### `@extern` (host variable binding)
 
-The `@extern` annotation binds Sapphire variables to external host symbols
-provided at runtime.
-* **Syntax**: `@extern("external_name") var identifier: Type;` or `@extern var identifier: Type;` (where the external symbol is also named `identifier`).
-* **Runtime behavior**: Tells the transpiler to omit runtime variable initializations (`local name = ...`), permitting 100% type-safe access to host-provided engine modules.
+Binds Sapphire variables to external host symbols provided by the runtime
+environment without generating variable declarations:
+
+```sapphire
+@extern
+var love: LoveEngine;
+```
 
 ### `@export` (transpiled symbol renaming)
 
-The `@export` annotation configures symbol renaming during transpilation.
-* **Global callback export**: `@export("love.update") func handler(...) { ... }`. In Lua 5.1 target code, transpiles directly into global callback paths (e.g. `function love.update(dt) ... end`).
-* **Trait method aliasing**: `@export("native_name")` placed on a trait method signature configures the transpiler to emit `native_name` instead of the Sapphire method identifier (e.g. `@export("setColor") func setColorRGBA(r: float, g: float, b: float);`).
+* **Global callback export**: `@export("love.update") func update(dt: float)`
+  emits direct global callback paths (e.g. `function love.update(dt) ... end`).
+* **Trait method aliasing**: `@export("native_name")` placed on a trait method
+  configures the transpiler to emit `native_name` instead of the Sapphire
+  method identifier.
 
 ### Trait-based host interfaces & resource handles
 
-External host–module contracts are defined cleanly using standard Sapphire `trait`s composed inside container `struct` types:
-
-* **Resource-handle traits**: Specifying an explicit first `self` parameter (e.g. `func draw(self, x: float, y: float)`) designates an instance method on a handle object, transpiling to Lua colon syntax (`handle:draw(x, y)`).
-* **Module traits**: Omitting `self` designates a module or static function, transpiling to Lua dot syntax (`love.graphics.rectangle(...)`).
-* **Method aliases**: Overloaded host functions can be exposed as distinct, type-safe Sapphire methods annotated with `@export("native_name")`.
+External host APIs are defined cleanly using traits:
 
 ```sapphire
-// 1. Opaque resource-handle trait (instance methods take `self`)
+// Instance methods take explicit `self` (transpiles to Lua colon syntax)
 trait Image {
   func getWidth(self): float;
 }
 
-// 2. Host API trait (module functions without `self`; method aliases for
-// overloaded host APIs)
+// Module functions omit `self` (transpiles to Lua dot syntax)
 trait Graphics {
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
-  @export("setColor")
-  static func setColorObj(color: Color);
-
   static func rectangle(mode: String, x: float, y: float, w: float, h: float);
-  static func clear(r: float, g: float, b: float);
-  static func newImage(path: String): Image;
-}
-
-trait Keyboard {
-  static func isDown(key: String): bool;
-}
-
-// 3. Engine container struct
-struct LoveEngine {
-  var graphics: Graphics;
-  var keyboard: Keyboard;
-}
-
-// 4. External host variable binding
-@extern
-var love: LoveEngine;
-
-// 5. Exported engine callbacks
-@export("love.update")
-func update(dt: float) {
-  // Host call correctly transpiles to dot notation in Lua, i.e.:
-  // `love.keyboard.isDown("right")`
-  if love.keyboard.isDown(key = "right") { ... }
-}
-
-@export("love.draw")
-func draw() {
-  love.graphics.clear(r = 0.1, g = 0.1, b = 0.1);
-
-  // Transpiles to `love.graphics.setColor(1.0, 0.0, 0.0)`
-  love.graphics.setColorRgba(1.0, 0.0, 0.0);
 }
 ```
 
 ### Live hot-reloading & `@on_reload` lifecycle hook
 
-Sapphire provides native development-mode hot-reloading (`sapphire run --dev`) for real-time iteration:
-
-* **In-place patching**: In dev mode, structures and prototype metatables persist across reloads (e.g. `Struct = Struct or {}` for the Lua transpilation target), meaning living in-memory instances immediately receive updated method definitions without losing variable state.
-* **`@on_reload` Hook**: Functions annotated with `@on_reload` are automatically invoked whenever the containing module is recompiled and reloaded at runtime:
-
-```sapphire
-@on_reload
-func handle_reload() {
-  // Recompute caches, refresh UI textures, or re-index asset registries here
-
-  print("[Hot Reload] Game state patched successfully!");
-}
-```
-
-## 15. Generics & parametric polymorphism
-
-Sapphire supports zero-overhead parametric polymorphism (generics) for structures, implementation blocks, traits, and functions using angle bracket parameter syntax (`<T, U>`).
-
-### Declaration syntax
-
-* **Generic structs**: Structs can declare one or more type parameters:
+Sapphire provides development hot-reloading (`sapphire run --dev`):
+* **In-place patching**: Structures and prototype metatables persist across
+  reloads, updating method definitions without resetting application state.
+* **`@on_reload` hook**: Functions annotated with `@on_reload` are automatically
+  invoked whenever the containing module is reloaded:
   ```sapphire
-  struct Stack<T> {
-    var items: [T];
-  }
-
-  struct Pair<K, V> {
-    var key: K;
-    var value: V;
-  }
-  ```
-* **Generic implementation blocks**: Implementation blocks declare type parameters directly on the target struct or trait:
-  ```sapphire
-  impl Stack<T> {
-    func push(item: T) {
-      // ...
-    }
-  }
-
-  impl Container<T> for Stack<T> {
-    func get(): T {
-      // ...
-    }
-  }
-  ```
-* **Generic traits**: Traits specify type parameters for generic interface contracts:
-  ```sapphire
-  trait Container<T> {
-    func get(): T;
-  }
-  ```
-* **Generic functions**: Functions declare type parameters after the function name:
-  ```sapphire
-  func identity<T>(item: T): T {
-    return item;
+  @on_reload
+  func handle_reload() {
+    print("[Hot Reload] Game state patched successfully!");
   }
   ```
 
-### Call-site type inference & explicit arguments
+## Compiler pipeline & toolchain architecture
 
-* **Type-argument inference**: When invoking generic functions, type arguments are contextually inferred from argument types by default:
-  ```sapphire
-  let x = identity(42);  // Inferred as identity<int>(42)
-  ```
-* **Explicit type arguments**: Type arguments can be explicitly specified at call sites or struct initializations:
-  ```sapphire
-  let s = Stack<int> { items = [10, 20] };
-  let y = identity<float>(3.14);
-  ```
+### Source map generation & runtime stack trace demangling
 
-### Compile-time monomorphization
+When transpiling Sapphire code, the compiler tracks AST node position metadata
+to generate source-map sidecars and runtime demanglers:
 
-In accordance with Sapphire's zero-overhead design, generics do not incur any runtime performance or dynamic-dispatch penalty. During compilation:
-1. The semantic analyzer tracks all concrete type argument combinations used in the codebase.
-2. The compiler monomorphizes generic template AST nodes into specialized concrete structures (e.g. `Stack<int>` becomes `Stack__int`).
-3. The transpiler emits direct, un-boxed concrete definitions for each monomorphized type and function.
+1. **Standard V3 source maps (`.lua.map`)**: Generated using Base64 VLQ encoding
+   with embedded `sourcesContent` strings for IDE debugging.
+2. **Runtime stack-trace demangling**: Embedded `_SP_LINE_MAP` lookup tables
+   pair generated line numbers with original Sapphire lines and snippets.
+3. **Love2D error-handler hook**: Intercepts uncaught runtime errors and
+   translates host call stacks into original `.sp` filenames and line numbers on
+   terminal logs and graphical crash screens.
 
-## 16. Design decisions
-
-This section outlines the architectural decisions and design trade-offs made in Sapphire.
+## Architectural design decisions & trade-offs
 
 ### Isolating and minimizing virtual method tables (vtables)
 
-Traditional class-based object-oriented languages rely on virtual method tables
-(vtables) for all dynamic dispatch, pervasive class inheritance, and interface
-conformance. This introduces ubiquitous pointer-chasing overhead (`this -> vptr
--> vtable -> func`) and prevents compiler optimizations like cross-module
-inlining.
+Traditional object-oriented languages rely on virtual method tables (vtables)
+for all dynamic dispatch, introducing pointer-chasing overhead (`this -> vptr
+-> vtable -> func`) and inhibiting cross-module inlining.
 
-Sapphire avoids vtables across its primary language constructs by default,
-isolating them strictly to explicit open-boundary dynamic trait objects:
-* **Zero-vtable structural inheritance**: Struct inheritance (`struct Child:
-  Parent`) is treated as compile-time syntactic delegation (composition +
-  forwarding). Calls are statically bound with zero runtime dispatch overhead.
-* **Monomorphized static traits**: Behavioral polymorphism via traits is
-  monomorphized at compile time, outputting direct static function calls.
+Sapphire isolates vtables strictly to explicit open-boundary dynamic trait
+objects:
+* **Zero-vtable structural inheritance**: Struct inheritance is treated as
+  compile-time syntactic delegation (composition + forwarding).
+* **Monomorphized static traits**: Behavioral polymorphism is monomorphized at
+  compile time, outputting direct static function calls.
 * **Closed-world tagged unions**: Heterogeneous trait collections (`[Trait]`)
-  within a module or binary compile into contiguous tagged unions with direct
-  jump tables, completely eliminating vtables and fat pointers.
-* **Data-only prototypal delegation**: Dynamic prototypal delegation (`clone`)
-  is strictly restricted to data fields in an `Arena`. Methods on prototypes
-  remain statically dispatched based on the concrete struct type.
+  compile into contiguous tagged unions with direct jump tables.
+* **Data-only prototypal delegation**: Dynamic delegation (`clone`) delegates
+  data fields in an `Arena`. Methods remain statically dispatched.
 * **Explicit opt-in vtables (`Dynamic<Trait>`)**: Virtual method tables are
-  never generated implicitly. They exist solely when developers explicitly opt
-  into dynamic trait objects (`Dynamic<Trait>`) to cross open dynamic library
-  (`.so` / `.dylib`), plugin, or FFI boundaries where the set of implementors
-  cannot be closed at compile time.
+  never generated implicitly. They exist solely when developers explicitly
+  instantiate `Dynamic<Trait>` for open dynamic library or plugin boundaries.
 
 ### Avoiding physical inheritance layouts
 
-While single, flat physical inheritance avoids vtable overhead by organizing memory contiguously, it introduces severe bottlenecks for performance-critical systems like game engines:
-* **Cache-line pollution**: Grouping parent and child fields together in a single contiguous block forces unrelated fields into CPU cache lines. In data-oriented design (like ECS), updates only needing a small subset of fields (e.g., `position` and `velocity`) are slowed down by reading unrelated fields.
-* **Layout rigidity**: A rigid inheritance hierarchy prevents the compiler from reordering fields across the entire structure to minimize padding bytes and reduce memory footprint.
-* **Tight coupling**: Flat physical layouts tightly couple structures to their base, meaning modifications to a base struct invalidate layout offsets across all descendants and trigger cascading recompilations.
+Flat physical inheritance forces parent and child fields together into a single
+contiguous block, introducing:
+* **Cache-line pollution**: Reading a subset of fields in data-oriented loops
+  pulls in unrelated inherited fields.
+* **Layout rigidity**: Rigid hierarchies prevent compilers from reordering
+  fields across structures to minimize padding.
+* **Tight coupling**: Modifying a base struct invalidates layout offsets across
+  all descendants.
 
-Instead of binding developers to rigid memory layouts, Sapphire decouples the ergonomic syntax of structural inheritance from its physical representation using compile-time syntactic delegation and monomorphized traits.
+Sapphire decouples ergonomic structural inheritance from physical memory
+representation via syntactic delegation and monomorphized traits.
 
 ### Avoiding throwable exceptions
 
 Traditional exception mechanisms (`try`/`catch`/`throw`) introduce hidden
-control-flow jumps and expensive runtime stack-unwinding overhead. Sapphire
-intentionally omits throwable exceptions in favor of explicit, type-safe error
-handling:
-* **No hidden control flow**: Functions clearly express fallibility in their
-  signatures (e.g., returning optional types `T?` or multiple return values
-  `T, bool`). Callers are forced to handle error paths explicitly at call
-  sites.
+control-flow jumps and expensive stack-unwinding machinery. Sapphire omits
+throwable exceptions in favor of:
+* **Explicit fallibility**: Functions express fallibility in signatures using
+  optionals (`T?`) or multiple return values (`T, bool`).
 * **Deterministic performance**: Eliminating exception unwinding runtime
-  machinery ensures predictable CPU execution paths and simplified
-  transpilation targets across scripting host engines.
+  machinery ensures predictable CPU execution paths.
 * **Exhaustive error handling**: Combining enums with `match` expressions
-  allows the compiler to statically enforce that all error variants are
-  handled.
+  allows the compiler to enforce that all error variants are handled.
 * **Resource safety without `finally`**: Lexical RAII and arena destruction
-  guarantee that allocations and resources are automatically torn down upon
-  scope exit, eliminating the need for exception cleanup blocks.
+  guarantee that resources are automatically cleaned up on scope exit.
 
-### Module-level and construction-contract encapsulation over member access modifiers
+### Module-level and construction-contract encapsulation
 
-Traditional object-oriented languages rely on fine-grained access modifiers (`public`, `private`, `protected`) on individual struct fields and methods. Sapphire intentionally omits member-level access control keywords in favor of a cohesive **module-manifest and construction-contract encapsulation model**:
-* **Single encapsulation boundary**: Visibility is defined at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
-* **Grammar & syntax simplicity**: Eliminates verbose field-level and method-level modifier keywords (such as `pub` or `private`), keeping the AST structure lean and code uncluttered.
-* **Construction-contract invariant safety**: Invariants are protected through the struct's construction contract rather than modifier keywords. Structs without custom `__init__` constructors are plain-data structs with publicly mutable fields on `var` bindings. Structs declaring `__init__` constructors restrict field mutation to their defining module, requiring external mutations to invoke explicit implementation methods.
+Rather than fine-grained access modifier keywords (`public`, `private`),
+Sapphire relies on:
+* **Single encapsulation boundary**: Visibility is defined at the file/module
+  level using `export { ... }`.
+* **Construction-contract safety**: Invariants are protected through
+  constructors. Structs declaring `__init__` restrict field mutations outside
+  their defining module, requiring mutations to invoke explicit methods.
 
 ### Anonymous tuples vs. lightweight named structs
 
-Sapphire intentionally omits general-purpose anonymous indexed tuple types (e.g.
-`(int, String, bool)`) in favor of:
-1. **Multiple return values for function returns**: `func pos(): float, float { return x, y; }`
+Sapphire intentionally omits general-purpose anonymous tuple types
+(`(int, String, bool)`) in favor of:
+1. **Multiple return values for function returns**: `func pos(): float, float`
    destructured immediately at call sites via `let x, y = pos();`.
-2. **Lightweight named structs for persistent compound data**: Defining a dedicated
-   `struct Point { var x: float; var y: float; }`.
+2. **Lightweight named structs for persistent compound data**: Defining a
+   dedicated `struct Point { var x: float; var y: float; }`.
 
-**Rationale**:
-* **Readability and self-documentation**: Unnamed positional elements (e.g.
-  `user[0]` or `record.second`) degrade code clarity and introduce fragile
-  index-offset assumptions across refactors.
-* **Zero-cost structs**: Sapphire structs compile directly to unboxed contiguous
-  layouts with zero memory or indirection penalty, eliminating any performance
-  justification for ad-hoc anonymous tuples.
-* **Unified type system**: Preventing a parallel ecosystem of tuples vs. structs
-  keeps APIs consistent and avoids duplicate utility libraries.
+Unnamed positional elements (`tuple[0]`) degrade code readability and introduce
+fragile indexing assumptions across refactors. Because Sapphire structs compile
+to zero-cost contiguous memory, named structs provide superior clarity with
+zero performance penalty.
 
 ### Future considerations & exploratory directions
 
-The following proposals are preserved as prospective enhancements for future language versions and compiler roadmaps:
-
-1. **Call-site mutability markers**: To enhance visual clarity and alert code reviewers to mutating function arguments, introducing mandatory call-site markers (such as `modify(var target)`) is under evaluation.
-2. **Standard `Result<T, E>` sum type**: While optionals (`T?`) and multi-value returns handle common failure states, a standard algebraic `Result<T, E>` type with associated error payloads and `guard` integration may be introduced for rich error reporting.
+* **Call-site mutability markers**: Mandatory call-site markers (such as
+  `modify(var target)`) are under evaluation to alert code reviewers to mutating
+  arguments.
+* **Standard `Result<T, E>` sum type**: While optionals (`T?`) and multi-value
+  returns handle common failure states, a standard algebraic `Result<T, E>`
+  type with associated error payloads may be introduced for rich error
+  reporting.

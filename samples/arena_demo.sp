@@ -1,6 +1,6 @@
 /*
  * Sample Sapphire program demonstrating arena-based memory management as
- * defined in docs/SPEC.md (Section 10.B).
+ * defined in docs/SPEC.md (Memory architecture, arenas, & smart references).
  *
  * Key features demonstrated:
  * 1. Explicit Arenas & RAII Destruction: Creating custom Arena instances whose

@@ -46,7 +46,7 @@ vulnerabilities at compile time:
   1. **Complete Elimination of Null Pointers**: Sapphire has no `nullptr` or
      raw pointer types. Empty states are represented exclusively through
      first-class optionals (`T?`) and the `none` keyword
-     ([docs/SPEC.md §7](SPEC.md#7-optionals-null-safety--conditional-bindings)).
+     ([docs/SPEC.md (Optionals & Null Safety)](SPEC.md#optionals-null-safety)).
   2. **Compile-Time Safe Unwrapping**: Optionals must be unwrapped safely
      using conditional unwrapping (`if let x ?= opt`), Swift-style guard
      statements (`guard let x ?= opt else { ... }`), or nil-coalescing
@@ -55,11 +55,11 @@ vulnerabilities at compile time:
      checking, and collections provide safe optional lookups
      (`array.get(idx)`, `map.get(key)`) that return `none` on out-of-bounds
      access rather than triggering undefined behavior
-     ([docs/SPEC.md §5](SPEC.md#expressions--collection-access)).
+     ([docs/SPEC.md (Collection Access & Indexing)](SPEC.md#collection-access-indexing)).
   4. **Const-Reference by Default**: Non-primitive types are passed by
      constant reference by default without raw pointer syntax or manual
      address-of operators (`&`)
-     ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)).
+     ([docs/SPEC.md (Variable Bindings)](SPEC.md#variable-bindings-let-and-var)).
 
 ### 2.2 Object Slicing and Inheritance Hierarchies
 
@@ -73,19 +73,18 @@ vulnerabilities at compile time:
   1. **Strict Prohibition of Struct Up-Casting**: Sapphire strictly forbids
      casting or passing child structs as parent struct types (e.g., `cat as
      Animal` produces a compile-time error)
-     ([docs/SPEC.md §5.2.1](SPEC.md#prohibited-conversions-with-the-as-operator)
-     & [§11.1.2](SPEC.md#disallowed-up-casting)). Object slicing is eliminated
+     ([docs/SPEC.md (Prohibited Conversions)](SPEC.md#prohibited-conversions-with-the-as-operator) & [Disallowed Up-Casting](SPEC.md#disallowed-up-casting)). Object slicing is eliminated
      by construction.
   2. **Syntactic Delegation (Composition + Forwarding)**: Inheritance syntax
      (`struct Child: Parent1, Parent2`) is treated strictly as **compile-time
      syntactic delegation**
-     ([docs/SPEC.md §11.1.3](SPEC.md#syntactic-delegation-transparent-forwarding)).
+     ([docs/SPEC.md (Syntactic Delegation)](SPEC.md#syntactic-delegation-transparent-forwarding)).
      The compiler inlines parent layouts into nested composition and
      auto-generates forwarding methods, eliminating virtual inheritance
      complexities while maintaining ergonomic syntax.
   3. **Strict Separation of Data and Behavior**: Data layouts (`struct`) and
      method implementations (`impl`) are strictly segregated
-     ([docs/SPEC.md §9](SPEC.md#9-structs--the-implementation-block)),
+     ([docs/SPEC.md (Structs & Implementation Blocks)](SPEC.md#structs-implementation-blocks)),
      preventing accidental field hiding or layout corruption.
 
 ### 2.3 Virtual Method Tables (vtables) & Dynamic Dispatch Penalties
@@ -99,20 +98,20 @@ vulnerabilities at compile time:
 * **Sapphire's Solution**:
   1. **Zero-Vtable Default Architecture**: Sapphire eliminates virtual
      method tables from standard application code, struct inheritance, and
-     `[Trait]` collections ([docs/SPEC.md §16.1](SPEC.md#isolating-and-minimizing-virtual-method-tables-vtables)).
+     `[Trait]` collections ([docs/SPEC.md (Minimizing Vtables)](SPEC.md#isolating-and-minimizing-virtual-method-tables-vtables)).
   2. **Compile-Time Monomorphization**: Parametric polymorphism (generics) and
      trait implementations are monomorphized into specialized static functions
      with direct jump instructions and full inlining opportunities
-     ([docs/SPEC.md §15](SPEC.md#15-generics--parametric-polymorphism)).
+     ([docs/SPEC.md (Generics & Parametric Polymorphism)](SPEC.md#generics-parametric-polymorphism)).
   3. **Tagged-Union Heterogeneous Collections**: Heterogeneous collections
      typed by traits (e.g. `[Renderable]`) do not use fat pointers or vtables.
      The native compiler synthesizes internal closed tagged unions with
      contiguous memory layouts and inlinable branch/jump tables
-     ([docs/SPEC.md §11.1.4](SPEC.md#traits-compile-time-contracts--implicit-subtyping)).
+     ([docs/SPEC.md (Traits)](SPEC.md#traits-compile-time-contracts-implicit-subtyping)).
   4. **Data-Only Prototypal Inheritance**: Dynamic prototypal delegation
      (`proto` / `clone`) delegates and shadows state only; methods remain
      statically dispatched based on concrete types
-     ([docs/SPEC.md §11.2.2](SPEC.md#structural-safety--method-dispatch-constraints)).
+     ([docs/SPEC.md (Prototypal State Delegation)](SPEC.md#prototypal-state-delegation-proto-clone)).
   5. **Explicit Open-Boundary Dynamic Trait Objects (`Dynamic<Trait>`)**:
      Virtual method tables are never generated implicitly. Crossing open
      dynamic library boundaries (`.so` / `.dylib`) uses the explicit
@@ -131,17 +130,16 @@ vulnerabilities at compile time:
 * **Sapphire's Solution**:
   1. **No Throwable Exceptions**: Sapphire completely omits
      `throw`/`try`/`catch` language machinery
-     ([docs/SPEC.md §16.3](SPEC.md#avoiding-throwable-exceptions)).
+     ([docs/SPEC.md (Avoiding Throwable Exceptions)](SPEC.md#avoiding-throwable-exceptions)).
   2. **Explicit, Typed Fallibility**: Functions express failure explicitly in
      their signatures using optional return types (`T?`), multiple return
      values (`T, bool`), or tagged unions with pattern matching
-     ([docs/SPEC.md §6.2](SPEC.md#match-expressions) &
-     [§8](SPEC.md#8-functions--closures)). Callers must acknowledge error
+     ([docs/SPEC.md (Match Expressions)](SPEC.md#match-expressions) & [Functions](SPEC.md#functions-closures-coroutines)). Callers must acknowledge error
      paths explicitly.
   3. **Deterministic Scope Teardown**: Struct destructors (`func __del__()`)
      guarantee deterministic LIFO teardown on scope exit, early `return`, or
      loop control jumps (`break`/`continue`) without exception machinery
-     ([docs/SPEC.md §9.2](SPEC.md#deterministic-destructors-__del__)).
+     ([docs/SPEC.md (Deterministic Destructors)](SPEC.md#deterministic-destructors-__del__)).
 
 ### 2.5 Header Files, Compilation Cascades & Preprocessor Macros
 
@@ -155,12 +153,12 @@ vulnerabilities at compile time:
 * **Sapphire's Solution**:
   1. **First-Class Module System**: Modules are declared directly via file
      hierarchy and imported using clean dot-syntax (`import lib.std.math;`)
-     ([docs/SPEC.md §13.3](SPEC.md#module-imports-import)). Textual inclusion
+     ([docs/SPEC.md (Module Imports)](SPEC.md#module-imports-import)). Textual inclusion
      is eliminated.
   2. **Private by Default with Explicit Export Manifests**: All top-level
      declarations are module-private by default. Public interfaces are declared
      in a single, unambiguous `export { ... }` block per file
-     ([docs/SPEC.md §13.2](SPEC.md#explicit-export-manifest-export----)).
+     ([docs/SPEC.md (Export Manifest)](SPEC.md#explicit-export-manifest-export-)).
   3. **No Preprocessor**: Constants use `let` or `SCREAMING_SNAKE_CASE`
      bindings; code generation is handled by compile-time generics and AST
      monomorphization rather than macro token substitution.
@@ -178,17 +176,17 @@ vulnerabilities at compile time:
      reference exclusivity: within a single function or method invocation, a
      reference path cannot be passed mutably (`var`) if it is already
      referenced elsewhere (mutably or immutably) within that call
-     ([docs/SPEC.md §8.1](SPEC.md#scope-bound-aliasing-rules-call-site-reference-exclusivity)).
+     ([docs/SPEC.md (Scope-Bound Aliasing Rules)](SPEC.md#scope-bound-aliasing-rules-call-site-reference-exclusivity)).
   2. **Const by Default**: Variable bindings are immutable constants (`let`)
      by default. Mutation requires explicit `var` declarations, and
      non-static methods cannot mutate `self` unless explicitly declared with
-     `var func` ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)
-     & [§9](SPEC.md#9-structs--the-implementation-block)).
+     `var func` ([docs/SPEC.md (Variable Bindings)](SPEC.md#variable-bindings-let-and-var)
+     & [§9](SPEC.md#structs-implementation-blocks)).
   3. **Copy-on-Write (CoW) Mutation Safety**: In prototypal delegation,
      mutating a nested reference field inside a cloned object automatically
      triggers a shallow Copy-on-Write intercept, isolating the clone's state
      from the prototype
-     ([docs/SPEC.md §11.2.2](SPEC.md#structural-safety--method-dispatch-constraints)).
+     ([docs/SPEC.md (Prototypal State Delegation)](SPEC.md#prototypal-state-delegation-proto-clone)).
 
 ### 2.7 Dangling References, Escapes & Lifetime Bugs
 
@@ -201,16 +199,16 @@ vulnerabilities at compile time:
   1. **By-Value Returns with Guaranteed RVO**: Returning local stack structs is
      always performed by value with compiler-enforced Return-Value Optimization
      (RVO) and copy elision, constructing the instance directly in the
-     caller's stack frame ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)
-     & [§12.2](SPEC.md#stack-first-memory-model--arena-management)).
+     caller's stack frame ([docs/SPEC.md (Variable Bindings)](SPEC.md#variable-bindings-let-and-var)
+     & [§12.2](SPEC.md#memory-architecture-arenas-smart-references)).
   2. **Prohibited Local Reference Returns**: Returning borrowed references to
      local stack frames is statically rejected at compile time
-     ([docs/SPEC.md §4](SPEC.md#4-variable-declaration--memory-semantics)).
+     ([docs/SPEC.md (Variable Bindings)](SPEC.md#variable-bindings-let-and-var)).
   3. **Lexical Arenas with Escape Analysis**: Dynamic prototypes and managed
      objects reside in explicit `Arena`s. The compiler statically enforces
      escape-checking rules, prohibiting inner-arena references from being
      assigned to outer-scope variables or returned from functions
-     ([docs/SPEC.md §12.2](SPEC.md#stack-first-memory-model--arena-management)).
+     ([docs/SPEC.md (Memory Architecture)](SPEC.md#memory-architecture-arenas-smart-references)).
 
 ## 3. Explicit Trade-offs: What Sapphire Gives Up vs. C++
 
