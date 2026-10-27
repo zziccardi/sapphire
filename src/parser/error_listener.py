@@ -35,7 +35,7 @@ def format_syntax_error_message(recognizer: Any, offendingSymbol: Any, msg: str)
             if tok.text == "match":
               return (
                   f"Missing semicolon ';' after closing brace '}}' of match expression. "
-                  f"Match expressions used as statements must end with a semicolon ';' (e.g. 'match ... }};')."
+                  f"Match expressions (e.g. in variable declarations or returns) must end with a semicolon ';' (e.g. 'let x = match ... }};')."
               )
             curr -= 1
     except Exception:  # pragma: no cover

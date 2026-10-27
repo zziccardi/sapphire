@@ -1682,8 +1682,7 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     impl SubBase {
-      func __init__(x: int, y: int) {
-        self.x = x;
+      func __init__(x: int, y: int): Base(x = x) {
         self.y = y;
       }
     }
@@ -2985,6 +2984,163 @@ class TestTypeChecker(unittest.TestCase):
       let player = Character(id = 1, name = "Galahad");
     }
     """)
+
+  def test_constructor_chaining_single_and_multi_parent(self):
+    """Verifies constructor chaining with single-line and multi-line Layout Variation A."""
+    code = """
+    struct Transform2D {
+      var x: float;
+      var y: float;
+    }
+    impl Transform2D {
+      func __init__(x: float, y: float) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    struct Health {
+      var hp: int;
+    }
+    impl Health {
+      func __init__(max_hp: int) {
+        self.hp = max_hp;
+      }
+    }
+    struct Player: Transform2D, Health {
+      var name: String;
+    }
+    impl Player {
+      func __init__(name: String, x: float, y: float, hp: int):
+          Transform2D(x = x, y = y),
+          Health(max_hp = hp) {
+        self.name = name;
+      }
+    }
+    func test() {
+      let p = Player(name = "Hero", x = 1.0, y = 2.0, hp = 100);
+    }
+    """
+    self._check(code)
+
+  def test_constructor_chaining_missing_parent_init(self):
+    """Verifies error when parent with __init__ is omitted from child constructor."""
+    code = """
+    struct Base {
+      var x: int;
+    }
+    impl Base {
+      func __init__(x: int) {
+        self.x = x;
+      }
+    }
+    struct Child: Base {
+      var y: int;
+    }
+    impl Child {
+      func __init__(x: int, y: int) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("must initialize parent struct 'Base'", str(ctx.exception))
+
+  def test_constructor_chaining_invalid_parent(self):
+    """Verifies error when initializing a struct that is not an inherited parent."""
+    code = """
+    struct Other {
+      var a: int;
+    }
+    impl Other {
+      func __init__(a: int) { self.a = a; }
+    }
+    struct Base {
+      var x: int;
+    }
+    impl Base {
+      func __init__(x: int) { self.x = x; }
+    }
+    struct Child: Base {
+      var y: int;
+    }
+    impl Child {
+      func __init__(x: int, y: int): Base(x = x), Other(a = 1) {
+        self.y = y;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("'Other' is not a parent of struct 'Child'", str(ctx.exception))
+
+  def test_constructor_chaining_duplicate_parent(self):
+    """Verifies error when initializing the same parent multiple times."""
+    code = """
+    struct Base {
+      var x: int;
+    }
+    impl Base {
+      func __init__(x: int) { self.x = x; }
+    }
+    struct Child: Base {
+      var y: int;
+    }
+    impl Child {
+      func __init__(x: int, y: int): Base(x = x), Base(x = y) {
+        self.y = y;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("Duplicate initialization of parent struct 'Base'", str(ctx.exception))
+
+  def test_constructor_chaining_rejects_self_reference(self):
+    """Verifies error when referencing self in base initializer arguments."""
+    code = """
+    struct Base {
+      var x: int;
+    }
+    impl Base {
+      func __init__(x: int) { self.x = x; }
+    }
+    struct Child: Base {
+      var y: int;
+    }
+    impl Child {
+      func __init__(y: int): Base(x = self.y) {
+        self.y = y;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("References to 'self' are not allowed in base initializer arguments", str(ctx.exception))
+
+  def test_constructor_chaining_non_init_method_rejected(self):
+    """Verifies that base initializers are rejected on regular methods and functions."""
+    code = """
+    struct Base {
+      var x: int;
+    }
+    impl Base {
+      func __init__(x: int) { self.x = x; }
+    }
+    struct Child: Base {
+      var y: int;
+    }
+    impl Child {
+      func __init__(x: int, y: int): Base(x = x) { self.y = y; }
+      func update(x: int): Base(x = x) {
+        self.x = x;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code)
+    self.assertIn("Base initializers are only permitted on constructor '__init__'", str(ctx.exception))
 
   def test_clone_shadow_let_field(self):
     self._check("""

@@ -89,7 +89,15 @@ traitMember
     ;
 
 functionDeclaration
-    : annotation* FUNC tp1=typeParamList? functionName tp2=typeParamList? LPAREN parameterList? RPAREN (COLON returnTypeList)? block
+    : annotation* FUNC tp1=typeParamList? functionName tp2=typeParamList? LPAREN parameterList? RPAREN (COLON (baseInitializerList | returnTypeList))? block
+    ;
+
+baseInitializerList
+    : baseInitializer (COMMA baseInitializer)*
+    ;
+
+baseInitializer
+    : identifierPath typeArgumentList? LPAREN argumentList? RPAREN
     ;
 
 functionName
@@ -136,11 +144,16 @@ statement
     | guardStatement
     | whileStatement
     | forStatement
+    | matchStatement
     | returnStatement
     | breakStatement
     | continueStatement
     | yieldStatement
     | expressionStatement
+    ;
+
+matchStatement
+    : matchExpression SEMICOLON?
     ;
 
 breakStatement

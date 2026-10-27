@@ -296,6 +296,31 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("Item._init_sapphire", lua_code)
     self.assertIn("Item.init({[1] = 100})", lua_code)
 
+  def test_constructor_chaining_lua(self):
+    """Verifies that constructor chaining emits parent _init_sapphire calls in Lua."""
+    code = """
+    struct Transform2D {
+      var x: float;
+      var y: float;
+    }
+    impl Transform2D {
+      func __init__(x: float, y: float) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    struct Player: Transform2D {
+      var name: String;
+    }
+    impl Player {
+      func __init__(name: String, x: float, y: float): Transform2D(x = x, y = y) {
+        self.name = name;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("Transform2D._init_sapphire(self, x, y)", lua_code)
+
   def test_func_default_params_and_void_return(self):
     """Verifies default parameters and void returns transpile cleanly."""
     code = """

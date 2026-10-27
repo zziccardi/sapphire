@@ -1437,6 +1437,35 @@ class LuaTranspiler(BaseTranspiler):
       else:
         self.emit("end)")
     else:
+      if func.name == "__init__" and getattr(func, "base_initializers", None):
+        for base_init in func.base_initializers:
+          parent_name = base_init.callee.name
+          p_members = self.struct_methods.get(parent_name, [])
+          p_init = next((m for m in p_members if getattr(m, "func_decl", None) and m.func_decl.name == "__init__"), None)
+          param_names = [p.name for p in p_init.func_decl.parameters if p.name != "self"] if p_init else []
+
+          args_strs = ["self"]
+          if param_names:
+            args_by_name = {}
+            for idx, arg in enumerate(base_init.arguments):
+              temp = LuaTranspiler()
+              temp.known_structs = self.known_structs
+              temp.visit(arg.expr)
+              val = temp.get_output()
+              if arg.name:
+                args_by_name[arg.name] = val
+              elif idx < len(param_names):
+                args_by_name[param_names[idx]] = val
+            args_strs.extend(args_by_name.get(p_name, "nil") for p_name in param_names)
+          else:
+            for arg in base_init.arguments:
+              temp = LuaTranspiler()
+              temp.known_structs = self.known_structs
+              temp.visit(arg.expr)
+              args_strs.append(temp.get_output())
+
+          self.newline()
+          self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
       self.visit(func.body)
     self.dedent()
     self.newline()

@@ -926,6 +926,19 @@ class PythonTranspiler(BaseTranspiler):
     else:
       self.emit(f"def {func_name}({', '.join(params)}):")
       self.indent()
+      if func.name == "__init__" and getattr(func, "base_initializers", None):
+        for base_init in func.base_initializers:
+          self.newline()
+          args_list = ["self"]
+          for arg in base_init.arguments:
+            temp = PythonTranspiler()
+            temp.visit(arg.expr)
+            val = temp.get_output()
+            if arg.name:
+              args_list.append(f"{arg.name}={val}")
+            else:
+              args_list.append(val)
+          self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
       self.visit(func.body)
       self.dedent()
 

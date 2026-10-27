@@ -1157,13 +1157,13 @@ func main() {
     self.assertIn("DrawMode", [i.label for i in comp_res.items])
 
   def test_missing_semicolon_after_match_lsp_diagnostic(self):
-    """Verifies LSP diagnostics return helpful missing semicolon message for match statements."""
+    """Verifies LSP diagnostics return helpful missing semicolon message for match expressions."""
     doc_uri = "file:///missing_semi.sp"
     doc_text = """
     func main() {
-      match 1 {
-        1 -> { let a = 1; },
-        ... -> { let b = 2; },
+      let x = match 1 {
+        1 -> { yield 1; },
+        ... -> { yield 2; },
       }
       let y = 10;
     }

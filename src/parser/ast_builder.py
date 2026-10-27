@@ -290,14 +290,31 @@ class ASTBuilder(SapphireVisitor):
     type_params = self.visitTypeParamList(tp_ctx) if tp_ctx else []
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
+    base_initializers = self.visitBaseInitializerList(ctx.baseInitializerList()) if ctx.baseInitializerList() else []
     body = self.visit(ctx.block()) if ctx.block() else None
-    node = FuncDeclNode(name, params, return_types, body, annotations=annotations, type_params=type_params)
+    node = FuncDeclNode(name, params, return_types, body, annotations=annotations, type_params=type_params, base_initializers=base_initializers)
     # Positioning for Language Server:
     name_token = ctx.functionName().IDENTIFIER().getSymbol() if ctx.functionName().IDENTIFIER() else ctx.functionName().INIT().getSymbol()
     node.name_line = name_token.line
     node.name_column = name_token.column
     node.name_length = len(name_token.text)
     return node
+
+  def visitBaseInitializerList(self, ctx: SapphireParser.BaseInitializerListContext) -> List[CallNode]:
+    return [self.visitBaseInitializer(b) for b in ctx.baseInitializer()]
+
+  def visitBaseInitializer(self, ctx: SapphireParser.BaseInitializerContext) -> CallNode:
+    callee_name = ctx.identifierPath().getText()
+    callee = IdentifierNode(callee_name)
+    token = ctx.identifierPath().start
+    callee.line = token.line
+    callee.column = token.column
+    type_args = self.visitTypeArgumentList(ctx.typeArgumentList()) if ctx.typeArgumentList() else []
+    args = self.visit(ctx.argumentList()) if ctx.argumentList() else []
+    call_node = CallNode(callee, args, type_args=type_args)
+    call_node.line = token.line
+    call_node.column = token.column
+    return call_node
 
   def visitParameterList(self, ctx: SapphireParser.ParameterListContext) -> List[ParameterNode]:
     return [self.visit(p) for p in ctx.parameter()]
@@ -415,6 +432,12 @@ class ASTBuilder(SapphireVisitor):
 
   def visitExpressionStatement(self, ctx: SapphireParser.ExpressionStatementContext) -> ExprStmtNode:
     return ExprStmtNode(self.visit(ctx.expression()))
+
+  def visitMatchStatement(self, ctx: SapphireParser.MatchStatementContext) -> ExprStmtNode:
+    node = ExprStmtNode(self.visit(ctx.matchExpression()))
+    node.line = ctx.start.line
+    node.column = ctx.start.column
+    return node
 
   def visitReturnStatement(self, ctx: SapphireParser.ReturnStatementContext) -> ReturnNode:
     exprs = [self.visit(e) for e in ctx.expression()] if ctx.expression() else []

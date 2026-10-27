@@ -69,8 +69,37 @@ through five key pillars:
   on a subsequent line, params should be indented to align with the opening
   parenthesis.
 * **Statement termination**: All statements must be explicitly terminated with a
-  semicolon (`;`). This prevents syntax parsing ambiguities with multi-line
-  statements and expressions.
+  semicolon (`;`), with the exception of blocks ending in `}` where permitted
+  (such as standalone `if`, `while`, `for`, and `match` statements). This
+  prevents syntax parsing ambiguities with multi-line statements and expressions.
+* **Constructor chaining (base initializers)**: When a struct constructor
+  invokes parent constructors (`: Parent1(...), Parent2(...)`):
+  * **Single-line layout**: If the constructor signature, base initializer
+    list, and opening brace `{` fit within the 80-character line length limit,
+    they may remain on a single line:
+    ```sapphire
+    impl Player {
+      func __init__(name: String, x: float, y: float): Position(x, y) {
+        self.name = name;
+      }
+    }
+    ```
+  * **Multi-line layout (Layout Variation A)**: If the declaration exceeds 80
+    characters or spans multiple parent initializers, the colon must remain on
+    the constructor signature line, each parent initializer must be placed on
+    its own line indented **4 spaces** (2 extra spaces beyond standard body
+    indentation), and the opening brace `{` is placed on the final parent
+    initializer line. Child property assignments in the constructor body use
+    standard **2-space** indentation:
+    ```sapphire
+    impl Player {
+      func __init__(name: String, x: float, y: float, hp: int):
+          Transform2D(x = x, y = y),
+          Health(max_hp = hp) {
+        self.name = name;
+      }
+    }
+    ```
 * **Naming conventions**: All variable names should use `snake_case`. Built-in
 functions will use `snake_case` as well; user-defined functions/methods can use
 either `snake_case` or `PascalCase` but should be consistent.
@@ -323,7 +352,7 @@ Sapphire provides a first-class `match` construct for pattern matching, supporti
 * **Single-expression cases**: Cases with a single expression implicitly evaluate to that expression's value.
 * **Multi-statement blocks**: In a value-producing `match` expression, cases using a block `{ ... }` **must** explicitly use `yield <expr>;` to output a value. Omitting `yield` in a value-producing block is a compile-time `SemanticError`. Using `return` inside a match block returns from the *enclosing function*.
 * **Type consistency across arms**: All arms of a value-producing `match` expression must evaluate or yield compatible types `T`. If an arm explicitly yields `none`, the overall expression type is inferred as `T?`.
-* **Side-effect branching (statements)**: When used strictly as a statement (e.g. `match x { ... }` without variable assignment), multi-statement blocks do not require `yield` statements.
+* **Side-effect branching (statements)**: When used strictly as a statement (e.g. `match x { ... }` without variable assignment), multi-statement blocks do not require `yield` statements. A trailing semicolon is not required.
 * **Mandatory comma separators**: Every case branch (including multi-statement blocks ending in `}`) must be followed by a comma `,`.
 * **Default case**: The default/wildcard pattern uses the ellipsis token `... ->`.
 * **Exhaustiveness**: The compiler statically verifies that all cases of `enum`, `bool`, and `optional` subjects are handled or an ellipsis `...` default branch is present.
@@ -339,7 +368,7 @@ let label = match status {
   ... -> "Unknown Error",
 };
 
-// Explicit optional yielding (type inferred as String?)
+// Explicit optional yielding (type inferred as `String?`)
 let result: String? = match status {
   HttpStatus.Ok -> "Success",
   HttpStatus.InternalError -> {
@@ -349,7 +378,7 @@ let result: String? = match status {
   ... -> none,
 };
 
-// Side-effect-only usage
+// Side-effect-only usage (no trailing semicolon required)
 match direction {
   Direction.North -> {
     move_player(dx = 0, dy = -1);
@@ -360,7 +389,7 @@ match direction {
   ... -> {
     log("Horizontal movement");
   },
-};
+}
 ```
 
 ### Control-flow loops
@@ -765,6 +794,52 @@ let sword = Weapon(dmg = 50);
 sword.use();
 ```
 
+### Constructor chaining in structural inheritance
+
+When a struct "inherits" from one or more parent structs (`struct Child: Parent1, Parent2`), the child constructor must initialize each parent struct that defines an `__init__` constructor using the base-initializer syntax:
+
+```sapphire
+struct Transform2D {
+  var x: float;
+  var y: float;
+}
+
+impl Transform2D {
+  func __init__(x: float, y: float) {
+    self.x = x;
+    self.y = y;
+  }
+}
+
+struct Health {
+  var hp: int;
+}
+
+impl Health {
+  func __init__(max_hp: int) {
+    self.hp = max_hp;
+  }
+}
+
+struct Player: Transform2D, Health {
+  var name: String;
+}
+
+impl Player {
+  func __init__(name: String, x: float, y: float, hp: int):
+      Transform2D(x = x, y = y),
+      Health(max_hp = hp) {
+    self.name = name;
+  }
+}
+```
+
+The compiler enforces strict initialization safety:
+1. **Mandatory parent initialization**: If a parent struct defines an `__init__` constructor, it *must* appear in the base initializer list of the child's `__init__`.
+2. **Order of execution**: Parent initializers are evaluated and executed in the exact order of their parent declaration in the `struct` definition, strictly before the child constructor body runs.
+3. **No `self` access in base arguments**: Arguments passed to parent initializers cannot reference `self` or access child fields, as the child instance is not yet fully initialized.
+4. **Field completeness check**: Parent fields initialized by base initializers are marked as initialized, satisfying compile-time definite-assignment analysis.
+
 ### Member encapsulation via construction contract
 
 Sapphire intentionally eliminates fine-grained member access keywords (`public`, `private`, `protected`) in favor of encapsulation tied to a struct's construction contract:
@@ -1011,6 +1086,48 @@ func update_all() {
   }
 }
 ```
+
+##### Trait dispatch models and compilation strategies
+
+Sapphire provides a three-tier model for trait-based polymorphism to ensure zero
+runtime overhead in systems code while allowing dynamic extensibility where
+required:
+
+<!-- TODO: Validate this. I don't think we've implemented trait constraints. -->
+1. **Static parametric polymorphism (`<T: Trait>`) — Open monomorphization**:
+   Generic functions and structs bounded by traits (e.g.,
+   `func render<T: Renderable>(item: T)`) are monomorphized at compile time.
+   The compiler generates specialized, direct-call code for each concrete type
+   used at call sites across module and package boundaries. This incurs zero
+   indirection overhead and enables complete compiler inlining and
+   vectorization.
+
+2. **Heterogeneous trait collections (`[Trait]`) — Closed-world tagged union optimization**:
+   When storing heterogeneous collections within a module or binary (e.g.,
+   `let drawables: [Renderable] = [Circle {}, Rect {}];`), the Sapphire
+   compiler performs closed-world analysis to synthesize an internal tagged
+   union (sum type) containing all concrete types implementing `Renderable`.
+   Method invocations on elements compile into direct jump tables or compact
+   switch statements over contiguous memory buffers without heap allocation or
+   pointer-chasing.
+
+<!-- TODO: Document `Dynamic` in builtins.md -->
+3. **Dynamic trait objects across open boundaries (`Dynamic<Trait>`) — Native ABI**:
+   For dynamic library boundaries, plugin architectures, or dynamically loaded
+   code where the complete set of implementors is open and unknown at compile
+   time, Sapphire's native backend provides an explicit dynamic trait object
+   representation via `Dynamic<Trait>` (e.g.
+   `func register_plugin(hook: Dynamic<PluginHook>)`). Dynamic trait objects use
+   a standard 2-word fat pointer layout:
+   * A **data pointer** referencing the instance in its memory arena or
+     stack/heap frame.
+   * A **vtable pointer** referencing an immutable, statically generated
+     vtable containing function pointers for the trait's method signatures.
+
+This guarantees that developers only incur dynamic dispatch and indirection
+costs when explicitly crossing open, non-monomorphizable library boundaries,
+while idiomatic internal Sapphire code enjoys zero-overhead static
+monomorphization or tagged-union locality.
 
 ##### Explicit composition (data-oriented design)
 Instead of physical inheritance, structs can explicitly compose other structures. This allows clear separation of data components, which is ideal for Entity-Component-System (ECS) architectures where systems process arrays of single components to maximize cache locality.
@@ -1372,6 +1489,25 @@ Traditional object-oriented languages rely on fine-grained access modifiers (`pu
 * **Single encapsulation boundary**: Visibility is defined at the file/module level using the `export { ... }` manifest block. If a top-level `struct`, `enum`, `trait`, or `func` is exported, it is accessible outside the defining module; otherwise, it remains module-private.
 * **Grammar & syntax simplicity**: Eliminates verbose field-level and method-level modifier keywords (such as `pub` or `private`), keeping the AST structure lean and code uncluttered.
 * **Construction-contract invariant safety**: Invariants are protected through the struct's construction contract rather than modifier keywords. Structs without custom `__init__` constructors are plain-data structs with publicly mutable fields on `var` bindings. Structs declaring `__init__` constructors restrict field mutation to their defining module, requiring external mutations to invoke explicit implementation methods.
+
+### Anonymous tuples vs. lightweight named structs
+
+Sapphire intentionally omits general-purpose anonymous indexed tuple types (e.g.
+`(int, String, bool)`) in favor of:
+1. **Multiple return values for function returns**: `func pos(): float, float { return x, y; }`
+   destructured immediately at call sites via `let x, y = pos();`.
+2. **Lightweight named structs for persistent compound data**: Defining a dedicated
+   `struct Point { var x: float; var y: float; }`.
+
+**Rationale**:
+* **Readability and self-documentation**: Unnamed positional elements (e.g.
+  `user[0]` or `record.second`) degrade code clarity and introduce fragile
+  index-offset assumptions across refactors.
+* **Zero-cost structs**: Sapphire structs compile directly to unboxed contiguous
+  layouts with zero memory or indirection penalty, eliminating any performance
+  justification for ad-hoc anonymous tuples.
+* **Unified type system**: Preventing a parallel ecosystem of tuples vs. structs
+  keeps APIs consistent and avoids duplicate utility libraries.
 
 ### Future considerations & exploratory directions
 
