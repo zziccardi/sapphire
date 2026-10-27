@@ -1093,14 +1093,16 @@ Sapphire provides a three-tier model for trait-based polymorphism to ensure zero
 runtime overhead in systems code while allowing dynamic extensibility where
 required:
 
-<!-- TODO: Validate this. I don't think we've implemented trait constraints. -->
-1. **Static parametric polymorphism (`<T: Trait>`) — Open monomorphization**:
-   Generic functions and structs bounded by traits (e.g.,
-   `func render<T: Renderable>(item: T)`) are monomorphized at compile time.
-   The compiler generates specialized, direct-call code for each concrete type
-   used at call sites across module and package boundaries. This incurs zero
-   indirection overhead and enables complete compiler inlining and
-   vectorization.
+1. **Static monomorphization via direct trait parameters — Zero-cost calls**:
+   Functions accepting trait types directly (e.g.,
+   `func render(item: Renderable)`) are monomorphized at compile time. The
+   compiler inspects all call sites and generates specialized, direct-call code
+   for each concrete struct implementing the trait across module and package
+   boundaries. This incurs zero indirection overhead, avoids fat pointers, and
+   enables complete compiler inlining and vectorization. (Parametric generic
+   trait constraints like `<T: Trait>` are planned for future language
+   revisions to enforce cross-parameter type unification, such as ensuring two
+   arguments share the identical concrete type).
 
 2. **Heterogeneous trait collections (`[Trait]`) — Closed-world tagged union optimization**:
    When storing heterogeneous collections within a module or binary (e.g.,
@@ -1111,7 +1113,6 @@ required:
    switch statements over contiguous memory buffers without heap allocation or
    pointer-chasing.
 
-<!-- TODO: Document `Dynamic` in builtins.md -->
 3. **Dynamic trait objects across open boundaries (`Dynamic<Trait>`) — Native ABI**:
    For dynamic library boundaries, plugin architectures, or dynamically loaded
    code where the complete set of implementors is open and unknown at compile
