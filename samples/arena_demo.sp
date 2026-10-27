@@ -1,6 +1,6 @@
 /*
  * Sample Sapphire program demonstrating arena-based memory management as
- * defined in docs/SPEC.md (Section 10.B).
+ * defined in docs/SPEC.md (Memory architecture, arenas, & smart references).
  *
  * Key features demonstrated:
  * 1. Explicit Arenas & RAII Destruction: Creating custom Arena instances whose
@@ -93,15 +93,15 @@ func demo_explicit_arenas(): int {
   let combat_arena = Arena();
 
   // Allocate a standard struct in level_arena using 'in'
-  let spawn_point = Point { x = 100.0, y = 200.0 } in level_arena;
+  let spawn_point = Point(x = 100.0, y = 200.0) in level_arena;
 
-  // Allocate a proto instance in level_arena via struct initializer syntax
-  let base_goblin = Enemy {
+  // Allocate a proto instance in level_arena via constructor call
+  let base_goblin = Enemy(
     name = "Goblin Archer",
     hp = 50,
     pos = spawn_point,
-    damage = 12,
-  } in level_arena;
+    damage = 12
+  ) in level_arena;
 
   // Implicit clone arena propagation: minion inherits level_arena from base
   let minion = clone base_goblin {
@@ -128,16 +128,16 @@ func demo_scoped_raii_cleanup(): float {
     // Local arena created within a nested block
     let temp_arena = Arena();
 
-    let origin = Point { x = 5.0, y = 10.0 } in temp_arena;
-    let p1 = Particle { pos = origin, lifetime = 1.5 } in temp_arena;
-    let p2 = Particle { pos = origin, lifetime = 2.5 } in temp_arena;
+    let origin = Point(x = 5.0, y = 10.0) in temp_arena;
+    let p1 = Particle(pos = origin, lifetime = 1.5) in temp_arena;
+    let p2 = Particle(pos = origin, lifetime = 2.5) in temp_arena;
 
-    let temp_boss = Boss {
+    let temp_boss = Boss(
       name = "Dungeon Boss",
       hp = 500,
       pos = origin,
-      phase = 1,
-    } in temp_arena;
+      phase = 1
+    ) in temp_arena;
 
     total_lifetime = p1.lifetime + p2.lifetime;
 

@@ -1202,14 +1202,29 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_match_res_1", "".join(pt.code))
 
 
+  def test_match_statement_without_semicolon(self):
+    """Verifies that standalone match statement ending in '}' does not require a semicolon."""
+    code = """
+    func compute(): int {
+      var count = 0;
+      match 1 {
+        1 -> { count = 10; },
+        ... -> { count = 20; },
+      }
+      return count;
+    }
+    """
+    res = self._transpile_and_run(code, "compute()")
+    self.assertEqual(res, 10)
+
   def test_missing_semicolon_after_match_error_message(self):
-    """Verifies clear syntax error message when semicolon is omitted after match statement."""
+    """Verifies clear syntax error message when semicolon is omitted after match expression."""
     import io, sys
     bad_code = """
     func main() {
-      match 1 {
-        1 -> { let a = 1; },
-        ... -> { let b = 2; },
+      let x = match 1 {
+        1 -> 1,
+        ... -> 2,
       }
       let y = 10;
     }
@@ -1595,6 +1610,43 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("for i in range(0, 10, 2):", py_code)
     res = self._transpile_and_run(code, "test_range()")
     self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
+
+  def test_range_iteration_with_keyword_arguments(self):
+    """Verifies Python transpilation and execution of range() loops with keyword arguments."""
+    code = """
+    func test_range_kw(): int {
+      var sum = 0;
+      for i in range(0, 10, step = 2) {
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("for i in range(0, 10, 2):", py_code)
+    res = self._transpile_and_run(code, "test_range_kw()")
+    self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
+
+  def test_optional_chaining_method_call_execution(self):
+    """Verifies Python transpilation and execution of method calls on optional targets."""
+    code = """
+    struct Hero {
+      var name: String;
+    }
+    impl Hero {
+      func get_greeting(): String {
+        return "Hello " + self.name;
+      }
+    }
+    func test_opt_call(h: Hero?): String {
+      let greeting = h?.get_greeting();
+      return greeting ?? "None";
+    }
+    """
+    res1 = self._transpile_and_run(code, 'test_opt_call(Hero(name="Link"))')
+    self.assertEqual(res1, "Hello Link")
+    res2 = self._transpile_and_run(code, "test_opt_call(None)")
+    self.assertEqual(res2, "None")
 
   def test_guard_statement_execution(self):
     """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
@@ -2014,6 +2066,48 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(y)", test_code)
     self.assertIn("_sapphire_del(x)", test_code)
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
+
+  def test_constructor_chaining_execution(self):
+    """Verifies that constructor chaining executes parent constructors and correctly initializes state."""
+    code = """
+    struct Transform2D {
+      var x: float;
+      var y: float;
+    }
+    impl Transform2D {
+      func __init__(x: float, y: float) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    struct Health {
+      var hp: int;
+    }
+    impl Health {
+      func __init__(max_hp: int) {
+        self.hp = max_hp;
+      }
+    }
+    struct Player: Transform2D, Health {
+      var name: String;
+    }
+    impl Player {
+      func __init__(name: String, x: float, y: float, hp: int):
+          Transform2D(x = x, y = y),
+          Health(max_hp = hp) {
+        self.name = name;
+      }
+      func get_stats(): float {
+        return self.x + self.y + (self.hp as float);
+      }
+    }
+    func test_player(): float {
+      let p = Player(name = "Hero", x = 10.5, y = 20.5, hp = 100);
+      return p.get_stats();
+    }
+    """
+    res = self._transpile_and_run(code, "test_player()")
+    self.assertEqual(res, 131.0)
 
 
 # ---------------------------------------------------------------------------

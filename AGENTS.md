@@ -18,10 +18,12 @@ This document serves as the primary technical reference and operating guide for 
 
 When generating or modifying Sapphire code, or extending the compiler, always uphold these core pillars:
 
-* **Zero-vtable polymorphism**: Virtual method tables (vtables) are eliminated entirely.
+* **Zero-vtable polymorphism by default**: Virtual method tables (vtables)
+  are eliminated from standard struct inheritance, traits, and collections.
   * Static code reuse uses **syntactic delegation** (composition + compiler-generated forwarding), resolving calls directly at compile time.
-  * Behavioral polymorphism is offloaded to **traits** via compile-time monomorphization and compiler-synthesized tagged unions.
+  * Behavioral polymorphism is offloaded to **traits** via compile-time monomorphization and compiler-synthesized closed tagged unions.
   * Prototypal inheritance (`proto` / `clone`) delegates **data only**; methods remain statically dispatched.
+  * Vtables are strictly isolated to explicit open-boundary dynamic trait objects (`Dynamic<Trait>`).
 * **No struct up-casting**: Statically inherited structs cannot be up-cast to parent types (e.g. `Child as Parent` is prohibited). This prevents object slicing and dispatch ambiguities.
 * **Scope-bound memory safety**: Non-primitive types are passed by **constant reference** by default. Call-site reference exclusivity (aliasing rules) eliminates data corruption without lifetime annotations.
 * **Deterministic resource management**: Structs support deterministic RAII via `__del__()` destructors with Return-Value Optimization (RVO) copy elision. Dynamic prototypes and managed objects reside in explicit, lexically scoped `Arena`s with escape-checking.
@@ -152,6 +154,7 @@ sapphire/
 │   └── Sapphire.g4         # ANTLR4 grammar specification
 ├── docs/                   # Documentation
 │   ├── SPEC.md             # Definitive language specification
+│   ├── style_guide.md      # Style, formatting, and naming guide
 │   ├── compiler.md         # Compiler pipeline architecture
 │   ├── development.md      # Setup, commands, and developer guide
 │   ├── testing.md          # std.testing and test framework guide
@@ -282,7 +285,7 @@ pipenv run sapphire run samples/overview.sp --dev
    * Update both `python_transpiler.py` and `lua_transpiler.py`.
    * Add or update unit tests in `src/` and end-to-end tests in `testing/e2e/`.
 2. **Never Violate Language Constraints**:
-   * Do **not** generate code or semantics relying on vtables or dynamic method overriding.
+   * Do **not** generate code or semantics relying on vtables or dynamic method overriding (vtables are strictly confined to explicit `Dynamic<Trait>` for open ABI boundaries).
    * Do **not** allow struct up-casting.
    * Do **not** introduce exceptions or stack-unwinding constructs into Sapphire syntax.
    * Always enforce semicolon statement termination in `.sp` code.
@@ -291,7 +294,11 @@ pipenv run sapphire run samples/overview.sp --dev
    * When modifying language semantics or adding built-ins, update `docs/SPEC.md`, `docs/compiler.md`, or `docs/builtins.md` accordingly.
 4. **Code Quality Standards**:
    * Python codebase: Follow the Google Python Style Guide rather than PEP 8, maintain 2-space or 4-space consistency with surrounding files, include explicit type annotations where appropriate.
-   * Sapphire code: Follow `docs/SPEC.md §2` (80 chars max line length, 2-space indentation, semicolon terminated).
+   * Sapphire code: Follow `docs/style_guide.md` (80 chars max line length, 2-space indentation, semicolon terminated).
+   * Markdown files: Lines should not exceed 80 characters (except when
+     needed for e.g. links), sentence case should be used for section
+     headings instead of title case, and horizontal rules ("---") should be
+     avoided.
 5. **Pre-Completion Checklist**:
    * [ ] `pipenv run test` passes with zero failures or errors.
    * [ ] Affected e2e/integration tests pass across all relevant backends.

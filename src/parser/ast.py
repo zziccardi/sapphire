@@ -224,7 +224,7 @@ class ParameterNode(ASTNode):
 class FuncDeclNode(DeclNode):
   """Represents a function declaration, supporting single or multiple return types."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None, return_type: Optional[TypeNode] = None, type_params: Optional[List[str]] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None, return_type: Optional[TypeNode] = None, type_params: Optional[List[str]] = None, base_initializers: Optional[List['CallNode']] = None):
     self.name = name
     self.parameters = parameters
     if return_types is not None:
@@ -239,6 +239,7 @@ class FuncDeclNode(DeclNode):
     self.body = body
     self.annotations = annotations or []
     self.type_params = type_params or []
+    self.base_initializers = base_initializers or []
 
   @property
   def return_type(self) -> Optional[TypeNode]:

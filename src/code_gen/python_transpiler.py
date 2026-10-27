@@ -926,6 +926,19 @@ class PythonTranspiler(BaseTranspiler):
     else:
       self.emit(f"def {func_name}({', '.join(params)}):")
       self.indent()
+      if func.name == "__init__" and getattr(func, "base_initializers", None):
+        for base_init in func.base_initializers:
+          self.newline()
+          args_list = ["self"]
+          for arg in base_init.arguments:
+            temp = PythonTranspiler()
+            temp.visit(arg.expr)
+            val = temp.get_output()
+            if arg.name:
+              args_list.append(f"{arg.name}={val}")
+            else:
+              args_list.append(val)
+          self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
       self.visit(func.body)
       self.dedent()
 
@@ -1695,6 +1708,72 @@ class PythonTranspiler(BaseTranspiler):
       self.visit(node.expr)
 
   def visit_CallNode(self, node: CallNode) -> None:
+    if isinstance(node.callee, IdentifierNode) and node.callee.name == "range":
+      start_expr = None
+      stop_expr = None
+      step_expr = None
+      pos_args = [arg for arg in node.arguments if not arg.name]
+      named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
+
+      if len(pos_args) == 1 and not named_args:
+        self.emit("range(")
+        self.visit(pos_args[0].expr)
+        self.emit(")")
+        return
+      elif len(pos_args) == 2 and not named_args:
+        self.emit("range(")
+        self.visit(pos_args[0].expr)
+        self.emit(", ")
+        self.visit(pos_args[1].expr)
+        self.emit(")")
+        return
+      elif len(pos_args) == 3 and not named_args:
+        self.emit("range(")
+        self.visit(pos_args[0].expr)
+        self.emit(", ")
+        self.visit(pos_args[1].expr)
+        self.emit(", ")
+        self.visit(pos_args[2].expr)
+        self.emit(")")
+        return
+
+      if len(pos_args) >= 1:
+        if "stop" in named_args:
+          start_expr = pos_args[0].expr
+        else:
+          if len(pos_args) == 1:
+            stop_expr = pos_args[0].expr
+          else:
+            start_expr = pos_args[0].expr
+            stop_expr = pos_args[1].expr
+      if "start" in named_args:
+        start_expr = named_args["start"]
+      if "stop" in named_args:
+        stop_expr = named_args["stop"]
+      if "step" in named_args:
+        step_expr = named_args["step"]
+      elif len(pos_args) == 3:
+        step_expr = pos_args[2].expr
+
+      self.emit("range(")
+      if step_expr is not None:
+        if start_expr is not None:
+          self.visit(start_expr)
+        else:
+          self.emit("0")
+        self.emit(", ")
+        self.visit(stop_expr)
+        self.emit(", ")
+        self.visit(step_expr)
+      elif start_expr is not None:
+        self.visit(start_expr)
+        self.emit(", ")
+        self.visit(stop_expr)
+      else:
+        self.visit(stop_expr)
+      self.emit(")")
+      return
+
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_string_from", False):
       self.emit("_sapphire_string_from(")
       self.visit(node.arguments[0].expr)
@@ -2047,6 +2126,22 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(receiver)
         self.emit(")")
         return
+
+    if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+      member_name = getattr(node.callee, "target_name", None) or node.callee.member
+      self.emit("((lambda _r: _r.")
+      self.emit(member_name)
+      self.emit("(")
+      for idx, arg in enumerate(node.arguments):
+        if idx > 0:
+          self.emit(", ")
+        if arg.name:
+          self.emit(f"{arg.name}=")
+        self.visit(arg.expr)
+      self.emit(") if _r is not None else None)(")
+      self.visit(node.callee.receiver)
+      self.emit("))")
+      return
 
     if node.arena_expr:
       self.visit(node.arena_expr)

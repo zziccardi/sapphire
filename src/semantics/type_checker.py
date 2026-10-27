@@ -823,6 +823,29 @@ class TypeChecker:
 
     self.current_struct = None
 
+  def _expr_references_self(self, expr: ASTNode) -> bool:
+    if not expr:
+      return False
+    if isinstance(expr, IdentifierNode) and expr.name == "self":
+      return True
+    if isinstance(expr, MemberAccessNode):
+      return self._expr_references_self(expr.receiver)
+    if isinstance(expr, CallNode):
+      if self._expr_references_self(expr.callee):
+        return True
+      for a in expr.arguments:
+        if self._expr_references_self(a.expr):
+          return True
+    if isinstance(expr, BinaryOpNode):
+      return self._expr_references_self(expr.left) or self._expr_references_self(expr.right)
+    if isinstance(expr, UnaryOpNode):
+      return self._expr_references_self(expr.operand)
+    if isinstance(expr, TernaryExprNode):
+      return (self._expr_references_self(expr.condition) or
+              self._expr_references_self(expr.true_expr) or
+              self._expr_references_self(expr.false_expr))
+    return False
+
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func_decl = node.func_decl
     struct_type = self.current_struct
@@ -832,27 +855,71 @@ class TypeChecker:
     old_moved_symbols = set(self.moved_symbols)
     self.moved_symbols = set()
 
-    # Define 'self' unless it is a static method
-    if node.modifier != "static":
-      # By default, methods have immutable 'self'.
-      # 'self' is only mutable if the method is explicitly declared 'var func'
-      # or is the constructor '__init__' or destructor '__del__'.
-      is_mutable = (node.modifier == "var") or (func_decl.name in ("__init__", "__del__"))
-      self.symbol_table.define("self", VariableSymbol("self", struct_type, is_mutable))
-
-    # Setup constructor checking
-    old_in_init = self.is_in_init
-    old_fields = self.initialized_fields
-    if func_decl.name == "__init__":
-      self.is_in_init = True
-      self.initialized_fields = set()
-
-    # Define parameters in scope
+    # Define parameters in scope before evaluating base initializers
     for p in func_decl.parameters:
       if p.name == "self":
         continue
       ptype = self._resolve_type_node(p.param_type)
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
+
+    # Reject base initializers on non-init methods
+    if func_decl.base_initializers and func_decl.name != "__init__":
+      self.error("Base initializers are only permitted on constructor '__init__'.", node=func_decl)
+
+    # Setup constructor checking
+    old_in_init = self.is_in_init
+    old_fields = self.initialized_fields
+    parents_initialized = set()
+
+    if func_decl.name == "__init__":
+      self.is_in_init = True
+      self.initialized_fields = set()
+
+      if func_decl.base_initializers:
+        if not struct_type or not struct_type.parent_names:
+          self.error(f"Struct '{struct_type.name if struct_type else 'unknown'}' has no parent structs to initialize.", node=func_decl)
+        else:
+          for base_init in func_decl.base_initializers:
+            parent_name = base_init.callee.name
+            if parent_name not in struct_type.parent_names:
+              self.error(f"'{parent_name}' is not a parent of struct '{struct_type.name}'.", node=base_init)
+              continue
+            if parent_name in parents_initialized:
+              self.error(f"Duplicate initialization of parent struct '{parent_name}'.", node=base_init)
+              continue
+            parents_initialized.add(parent_name)
+
+            has_self_ref = False
+            for arg in base_init.arguments:
+              if self._expr_references_self(arg.expr):
+                self.error("References to 'self' are not allowed in base initializer arguments.", node=arg)
+                has_self_ref = True
+
+            parent_type = self.symbol_table.lookup_type(parent_name)
+            if isinstance(parent_type, StructType):
+              init_method = parent_type.methods.get("__init__")
+              if init_method:
+                if not has_self_ref:
+                  self._check_arguments(base_init.arguments, init_method.method_type, is_constructor=True)
+              elif base_init.arguments:
+                self.error(f"Parent struct '{parent_name}' does not define an '__init__' constructor.", node=base_init)
+
+              # Mark parent fields as initialized
+              for f_name in parent_type.fields:
+                self.initialized_fields.add(f_name)
+
+      # Enforce all parents with __init__ are initialized
+      if struct_type and struct_type.parent_names:
+        for p_name in struct_type.parent_names:
+          p_type = self.symbol_table.lookup_type(p_name)
+          if isinstance(p_type, StructType) and "__init__" in p_type.methods:
+            if p_name not in parents_initialized:
+              self.error(f"Constructor '__init__' of struct '{struct_type.name}' must initialize parent struct '{p_name}'.", node=func_decl)
+
+    # Define 'self' unless it is a static method
+    if node.modifier != "static":
+      is_mutable = (node.modifier == "var") or (func_decl.name in ("__init__", "__del__"))
+      self.symbol_table.define("self", VariableSymbol("self", struct_type, is_mutable))
 
     # Save function signature context
     resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
@@ -890,6 +957,8 @@ class TypeChecker:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    if node.base_initializers:
+      self.error("Base initializers are only permitted on constructor '__init__'.", node=node)
     if node.type_params:
       return
     # Register parameters and check body
@@ -2283,7 +2352,11 @@ class TypeChecker:
 
     if is_constructor:
       return callee_type
-    return signature.return_type
+    ret_type = signature.return_type
+    if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+      if not isinstance(ret_type, OptionalType):
+        ret_type = OptionalType(ret_type)
+    return ret_type
 
   def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False, callee_node: Optional[ASTNode] = None) -> None:
     """Helper to match argument lists against signatures (including parameter modes)."""
@@ -2930,6 +3003,8 @@ class TypeChecker:
       self.error(f"Cannot instantiate undefined struct '{node.struct_name}'.")
       return PrimitiveType("none")
 
+    raw_name = node.struct_name
+
     if struct_type.type_params:
       if node.type_args:
         resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
@@ -2938,6 +3013,22 @@ class TypeChecker:
       else:
         self.error(f"Generic struct '{node.struct_name}' requires explicit type arguments.")
         return PrimitiveType("none")
+
+    def _struct_has_init(st: StructType) -> bool:
+      if "__init__" in st.methods:
+        return True
+      if st.parent_names:
+        for p_name in st.parent_names:
+          p_type = self.symbol_table.lookup_type(p_name)
+          if isinstance(p_type, StructType) and _struct_has_init(p_type):
+            return True
+      return False
+
+    if _struct_has_init(struct_type):
+      self.error(
+          f"Cannot use literal initializer for struct '{raw_name}' because it defines an '__init__' constructor. Use constructor call syntax '{raw_name}(...)' instead."
+      )
+      return struct_type
 
     # Validate explicit arena target
     if struct_type.is_prototype and not node.arena_expr:
