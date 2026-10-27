@@ -1449,11 +1449,32 @@ In accordance with Sapphire's zero-overhead design, generics do not incur any ru
 
 This section outlines the architectural decisions and design trade-offs made in Sapphire.
 
-### Avoiding virtual method tables (vtables)
+### Isolating and minimizing virtual method tables (vtables)
 
-Traditional class-based object-oriented languages rely on virtual method tables (vtables) to resolve dynamic dispatch. This introduces vtable pointer-chasing overhead and prevents compiler optimizations like function inlining. Sapphire eliminates vtables entirely:
-* Static polymorphism is resolved entirely at compile-time via monomorphized traits, generating direct function calls.
-* Dynamic behavior resolved via prototypal delegation (`clone`) is strictly restricted to data fields. Methods remain statically dispatched based on the concrete struct type, keeping method calls free of dynamic-dispatch overhead.
+Traditional class-based object-oriented languages rely on virtual method tables
+(vtables) for all dynamic dispatch, pervasive class inheritance, and interface
+conformance. This introduces ubiquitous pointer-chasing overhead (`this -> vptr
+-> vtable -> func`) and prevents compiler optimizations like cross-module
+inlining.
+
+Sapphire avoids vtables across its primary language constructs by default,
+isolating them strictly to explicit open-boundary dynamic trait objects:
+* **Zero-vtable structural inheritance**: Struct inheritance (`struct Child:
+  Parent`) is treated as compile-time syntactic delegation (composition +
+  forwarding). Calls are statically bound with zero runtime dispatch overhead.
+* **Monomorphized static traits**: Behavioral polymorphism via traits is
+  monomorphized at compile time, outputting direct static function calls.
+* **Closed-world tagged unions**: Heterogeneous trait collections (`[Trait]`)
+  within a module or binary compile into contiguous tagged unions with direct
+  jump tables, completely eliminating vtables and fat pointers.
+* **Data-only prototypal delegation**: Dynamic prototypal delegation (`clone`)
+  is strictly restricted to data fields in an `Arena`. Methods on prototypes
+  remain statically dispatched based on the concrete struct type.
+* **Explicit opt-in vtables (`Dynamic<Trait>`)**: Virtual method tables are
+  never generated implicitly. They exist solely when developers explicitly opt
+  into dynamic trait objects (`Dynamic<Trait>`) to cross open dynamic library
+  (`.so` / `.dylib`), plugin, or FFI boundaries where the set of implementors
+  cannot be closed at compile time.
 
 ### Avoiding physical inheritance layouts
 

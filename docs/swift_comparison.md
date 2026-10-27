@@ -76,7 +76,7 @@ delegation, and explicit fallibility**.
   Additionally, subtyping permits up-casting (`let animal: Animal = dog`), conflating structural reuse with dynamic polymorphism and introducing object-slicing risks or dispatch confusion.
 
 * **Sapphire's Solution**:
-  Sapphire completely eliminates classes and virtual method tables ([docs/SPEC.md §16.1](SPEC.md#avoiding-virtual-method-tables-vtables)):
+  Sapphire completely eliminates classes and eliminates virtual method tables from standard structural code ([docs/SPEC.md §16.1](SPEC.md#isolating-and-minimizing-virtual-method-tables-vtables)):
   1. **No Classes**: All data types in Sapphire are `struct`s or `proto`s.
   2. **Syntactic Delegation (Auto-Forwarding)**: Structural inheritance (`struct Child: Parent1, Parent2`) is compile-time syntactic sugar for composition and generated forwarding methods ([docs/SPEC.md §11.1.3](SPEC.md#syntactic-delegation-transparent-forwarding)). The compiler inlines parent layouts and resolves forwarded calls directly to static functions, incurring zero runtime indirection and enabling full inlining.
   3. **Strict Prohibition of Struct Up-Casting**: Up-casting a child struct to a parent struct type (e.g. `cat as Animal`) is statically rejected at compile time ([docs/SPEC.md §5.2.1](SPEC.md#prohibited-conversions-with-the-as-operator)). Object slicing is physically impossible.
@@ -131,6 +131,7 @@ boss.take_damage(amount = 20); // Statically resolved; zero vtable lookup
   1. **Compiler-Synthesized Tagged Unions**: An array typed as `[Renderable]` does not use boxed containers or witness tables. Instead, the native compiler inspects all concrete struct types implementing `Renderable` and synthesizes an internal closed tagged union (sum type).
   2. **Contiguous Memory & Direct Jump Tables**: Heterogeneous trait collections are stored contiguously in memory. Iteration and method calls compile into inlinable branch/jump tables that dispatch directly to concrete static functions.
   3. **No Silent Heap Boxing**: Structs stored in trait collections never trigger silent heap promotions.
+  4. **Explicit Open-Boundary Dynamic Trait Objects (`Dynamic<Trait>`)**: While internal collections use zero-overhead `[Trait]` tagged unions, crossing open dynamic library boundaries uses the explicit `Dynamic<Trait>` wrapper (a clean 2-word fat pointer without Swift's 3-word inline buffer or silent heap promotions) ([docs/builtins.md](builtins.md#dynamic)).
 
 ```swift
 // Swift: Existential containers with witness table overhead
@@ -300,7 +301,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 | **Ownership Transfers** | Swift 5.9+ `consume` keyword on `~Copyable` | Caller-driven `move resource` keyword | Statically invalidates source variable; compile-time use-after-move prevention |
 | **Inheritance Model** | Single class inheritance + Protocol conformance | Syntactic delegation (`struct Child: Parent`) + Traits | Composition with auto-generated forwarding; zero vtables |
 | **Up-Casting** | Allowed on classes (`dog as Animal`) | **Strictly prohibited** (`Child as Parent` rejected) | Completely prevents object slicing and method-dispatch ambiguities |
-| **Dynamic Polymorphism** | Existential containers + Protocol Witness Tables | Compiler-synthesized closed tagged unions for `[Trait]` | Contiguous memory storage; inlinable jump tables; zero heap allocation |
+| **Dynamic Polymorphism** | Existential containers + Protocol Witness Tables | Compiler-synthesized closed tagged unions for `[Trait]`; opt-in `Dynamic<Trait>` for open ABIs | Contiguous memory storage; inlinable jump tables; zero heap allocation |
 | **Prototypal Inheritance** | None | First-class opt-in `proto` and `clone` with Copy-on-Write | Rapid simulation and template-based object prototyping |
 | **Memory Hierarchy** | ARC for classes; stack/value copy for structs | Stack-first default; lexical `Arena`s; explicit `Ref<T>` | Deterministic LIFO scope destruction; zero universal retain/release overhead |
 | **Destructors & RAII** | `deinit` on classes (run on ARC deallocation) | `func __del__()` on structs (run on lexical scope exit) | Deterministic RAII with Return-Value Optimization (RVO) copy elision |

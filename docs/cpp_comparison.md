@@ -97,8 +97,9 @@ vulnerabilities at compile time:
   preventing the compiler from performing function inlining and interprocedural
   optimizations.
 * **Sapphire's Solution**:
-  1. **Zero-Vtable Architecture**: Sapphire completely eliminates virtual
-     method tables ([docs/SPEC.md §16.1](SPEC.md#avoiding-virtual-method-tables-vtables)).
+  1. **Zero-Vtable Default Architecture**: Sapphire eliminates virtual
+     method tables from standard application code, struct inheritance, and
+     `[Trait]` collections ([docs/SPEC.md §16.1](SPEC.md#isolating-and-minimizing-virtual-method-tables-vtables)).
   2. **Compile-Time Monomorphization**: Parametric polymorphism (generics) and
      trait implementations are monomorphized into specialized static functions
      with direct jump instructions and full inlining opportunities
@@ -112,6 +113,11 @@ vulnerabilities at compile time:
      (`proto` / `clone`) delegates and shadows state only; methods remain
      statically dispatched based on concrete types
      ([docs/SPEC.md §11.2.2](SPEC.md#structural-safety--method-dispatch-constraints)).
+  5. **Explicit Open-Boundary Dynamic Trait Objects (`Dynamic<Trait>`)**:
+     Virtual method tables are never generated implicitly. Crossing open
+     dynamic library boundaries (`.so` / `.dylib`) uses the explicit
+     `Dynamic<Trait>` fat pointer wrapper, isolating dynamic dispatch strictly
+     to where an open ABI contract is required ([docs/builtins.md](builtins.md#dynamic)).
 
 ### 2.4 Exception Safety and Stack Unwinding Overhead
 
@@ -213,7 +219,7 @@ To eliminate C++'s pitfalls and complexity without introducing a garbage collect
 | Dimension | C++ | Sapphire | Rationale / Concession in Sapphire |
 | :--- | :--- | :--- | :--- |
 | **Heap Memory Deallocation Granularity** | Fine-grained, per-object heap deallocation (`delete`, `free`, `std::unique_ptr`). | Stack-first allocation + bulk lexical teardown in `Arena`s. | **Trade-off:** Individual objects inside an arena cannot be freed independently prior to whole-arena teardown. In exchange, manual memory management and use-after-free bugs are eliminated. |
-| **Open vs. Closed Polymorphism** | Open dynamic polymorphism via vtables (dynamic shared libraries can introduce new subclasses without recompiling existing code). | Closed tagged unions for `[Trait]` and compile-time monomorphization. | **Trade-off:** Heterogeneous trait collections require whole-program or module visibility of implementors to synthesize tagged unions. In exchange, vtable lookups and fat pointers are eliminated. |
+| **Open vs. Closed Polymorphism** | Open dynamic polymorphism via vtables (dynamic shared libraries can introduce new subclasses without recompiling existing code). | Closed tagged unions for `[Trait]` and compile-time monomorphization by default; explicit `Dynamic<Trait>` across open boundaries. | **Trade-off:** Internal trait collections synthesize closed tagged unions to eliminate vtable overhead. `Dynamic<Trait>` explicitly opts into vtables when crossing open library boundaries. |
 | **Move Semantics & Ownership Transfers** | Explicit rvalue references (`&&`), move constructors, and `std::move`. | Stack allocation with RVO copy elision; explicit move semantics are exploratory. | **Trade-off:** Transferring large non-arena structs without returning them requires copying or passing by reference. In exchange, value category complexity (prvalues, xvalues, lvalues) is avoided. |
 | **Encapsulation Granularity** | Fine-grained member access specifiers (`public`, `protected`, `private`, `friend`). | Unified module-level visibility via `export` manifests and underscore conventions. | **Trade-off:** All fields of an exported struct are technically accessible within that struct's module scope. In exchange, syntax remains uncluttered and header/implementation decoupling is simplified. |
 | **Low-Level Unrestricted Manipulation** | Arbitrary pointer arithmetic, reinterpret casts, union punning, inline assembly. | Infallible static casting (`as`), safe optionals, and strong type safety. | **Trade-off:** Low-level bit twiddling and raw memory overlays are constrained. In exchange, undefined behavior and raw pointer corruption are eliminated by the type system. |
@@ -228,7 +234,7 @@ To eliminate C++'s pitfalls and complexity without introducing a garbage collect
 | **Passing Semantics** | By value by default; explicit `&`, `const&`, `&&` | Passed by constant reference by default; explicit `var` for mutation | Clean signatures without pointer/reference punctuation |
 | **Structural Reuse** | Physical class inheritance (multiple, virtual) | Syntactic delegation (`struct Child: Parent`) with auto-forwarding | Zero-vtable code reuse; eliminates forwarding boilerplate |
 | **Up-casting** | Permitted; risk of object slicing or dispatch bugs | Strictly prohibited (`Child as Parent` rejected) | Prevents object slicing and method-dispatch ambiguities |
-| **Dynamic Dispatch** | Dynamic dispatch via vtables and `vptr` headers | Monomorphized traits or compiler-synthesized tagged unions | Eliminates vtable lookups, cache misses, and fat pointers |
+| **Dynamic Dispatch** | Dynamic dispatch via vtables and `vptr` headers | Monomorphized traits or closed tagged unions; opt-in `Dynamic<Trait>` | Eliminates vtables in application code while preserving open-boundary ABI flexibility |
 | **Dynamic State Modification** | Hardcoded struct layouts; requires runtime maps/variants | Opt-in prototypal delegation (`proto`, `clone`, CoW) | Rapid dynamic state prototyping without losing static dispatch |
 | **Aliasing Rules** | Unrestricted pointer aliasing; potential UB with `reinterpret_cast` | Scope-bound call-site reference exclusivity | Eliminates overlapping mutable parameter bugs at call sites |
 | **Error Handling** | Unwinding exceptions (`throw`/`try`/`catch`) | Optionals (`T?`), multiple return values, pattern matching (`match`) | No hidden control flow jumps or stack-unwinding runtime cost |

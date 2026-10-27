@@ -18,10 +18,12 @@ This document serves as the primary technical reference and operating guide for 
 
 When generating or modifying Sapphire code, or extending the compiler, always uphold these core pillars:
 
-* **Zero-vtable polymorphism**: Virtual method tables (vtables) are eliminated entirely.
+* **Zero-vtable polymorphism by default**: Virtual method tables (vtables)
+  are eliminated from standard struct inheritance, traits, and collections.
   * Static code reuse uses **syntactic delegation** (composition + compiler-generated forwarding), resolving calls directly at compile time.
-  * Behavioral polymorphism is offloaded to **traits** via compile-time monomorphization and compiler-synthesized tagged unions.
+  * Behavioral polymorphism is offloaded to **traits** via compile-time monomorphization and compiler-synthesized closed tagged unions.
   * Prototypal inheritance (`proto` / `clone`) delegates **data only**; methods remain statically dispatched.
+  * Vtables are strictly isolated to explicit open-boundary dynamic trait objects (`Dynamic<Trait>`).
 * **No struct up-casting**: Statically inherited structs cannot be up-cast to parent types (e.g. `Child as Parent` is prohibited). This prevents object slicing and dispatch ambiguities.
 * **Scope-bound memory safety**: Non-primitive types are passed by **constant reference** by default. Call-site reference exclusivity (aliasing rules) eliminates data corruption without lifetime annotations.
 * **Deterministic resource management**: Structs support deterministic RAII via `__del__()` destructors with Return-Value Optimization (RVO) copy elision. Dynamic prototypes and managed objects reside in explicit, lexically scoped `Arena`s with escape-checking.
@@ -282,7 +284,7 @@ pipenv run sapphire run samples/overview.sp --dev
    * Update both `python_transpiler.py` and `lua_transpiler.py`.
    * Add or update unit tests in `src/` and end-to-end tests in `testing/e2e/`.
 2. **Never Violate Language Constraints**:
-   * Do **not** generate code or semantics relying on vtables or dynamic method overriding.
+   * Do **not** generate code or semantics relying on vtables or dynamic method overriding (vtables are strictly confined to explicit `Dynamic<Trait>` for open ABI boundaries).
    * Do **not** allow struct up-casting.
    * Do **not** introduce exceptions or stack-unwinding constructs into Sapphire syntax.
    * Always enforce semicolon statement termination in `.sp` code.

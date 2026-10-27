@@ -122,6 +122,11 @@ Sapphire targets a different balance:
   3. **Data-Only Dynamic Delegation**: Methods on `proto` objects are
      dispatched statically based on concrete type; only state delegation is
      dynamic.
+  4. **Explicit Open-Boundary Dynamic Trait Objects (`Dynamic<Trait>`)**:
+     Unlike Rust where `dyn Trait` is often reached for inside crates, Sapphire
+     isolates dynamic vtables to explicit `Dynamic<Trait>` wrappers used solely
+     when crossing open dynamic library boundaries where whole-program closed
+     tagged-union analysis cannot be performed ([docs/builtins.md](builtins.md#dynamic)).
 
 ### 2.5 Compilation Speed and Iteration Loops
 
@@ -181,7 +186,7 @@ Sapphire's design intentionally chooses ergonomics and simplicity in areas where
 | **Heap Memory Granularity** | Individual heap allocations (`Box<T>`) freed immediately when dropped. | Stack-first allocation + Lexical Arenas (`Arena`). | **Trade-off:** Individual objects within an arena cannot be freed independently prior to whole-arena teardown. In exchange, manual reference tracking and lifetime annotations are eliminated. |
 | **Interior Reference Returns** | Can return references to struct fields using matching lifetimes (`fn get<'a>(&'a self) -> &'a Field`). | Statically forbidden. Structs must be returned by value (via RVO) or copied. | **Trade-off:** Prevents returning zero-copy sub-field references from local stack allocations. In exchange, eliminates dangling references and lifetime parameters. |
 | **Dynamic Proto Indirection** | Flat memory layouts; all layout known statically. | Standard `struct`s are flat; `proto` types use lookup and shadow tables. | **Trade-off:** Cloned `proto` property lookups carry minor pointer-chasing overhead. In exchange, grants dynamic live state delegation. |
-| **Closed vs. Open Polymorphism** | Trait objects (`dyn Trait`) can be extended across crates without recompilation (open set). | Heterogeneous trait collections (`[Trait]`) synthesize closed tagged unions at compile time. | **Trade-off:** Requires whole-program or module visibility of implementors for zero-vtable collections. In exchange, eliminates vtables and enables inlining. |
+| **Closed vs. Open Polymorphism** | Trait objects (`dyn Trait`) can be extended across crates without recompilation (open set). | Closed tagged unions for `[Trait]` within modules; explicit `Dynamic<Trait>` for open boundaries. | **Trade-off:** Internal collections require whole-program or module visibility of implementors for zero-vtable optimization. `Dynamic<Trait>` explicitly opts into vtables when crossing open library boundaries. |
 | **Toolchain & Native Target** | Mature LLVM native compiler producing optimized machine code. | Transpiles to Python / Lua 5.1; experimental LLVM generator in progress. | **Trade-off:** Sapphire prioritizes fast prototyping, host engine integration (e.g. Love2D), and syntax stabilization before finalizing its native Rust/LLVM compiler. |
 
 ## 4. Feature-by-Feature Comparison Matrix
@@ -194,7 +199,7 @@ Sapphire's design intentionally chooses ergonomics and simplicity in areas where
 | **Cyclic / Graph Data** | Requires `Rc<RefCell<T>>`, unsafe, or index generational arenas | Opt-in `proto`, `clone`, Copy-on-Write, and lexical `Arena` | Direct state delegation within arenas without reference-counting overhead |
 | **Structural Reuse** | Composition only; manual forwarding boilerplate | Syntactic delegation (`struct Child: Parent`) with auto-forwarding | Zero-vtable code reuse without forwarding boilerplate |
 | **Up-casting** | Not allowed on structs; allowed via `dyn Trait` | Strictly forbidden (`Child as Parent` rejected) | Eliminates object slicing and method override ambiguity |
-| **Dynamic Dispatch** | Vtables via `dyn Trait` fat pointers | Zero vtables; traits compile to monomorphized code or closed tagged unions | Enables direct jumps and compiler inlining |
+| **Dynamic Dispatch** | Vtables via `dyn Trait` fat pointers | Zero vtables by default; monomorphized traits and closed tagged unions; opt-in `Dynamic<Trait>` | Eliminates vtables in application code while preserving open-boundary ABI flexibility |
 | **Iteration & Dev Loops** | Full native recompile; no hot reload | Live hot-reloading (`--dev`) with in-place metatable patching | Instant game/simulation tweaking without state loss |
 | **Optional Unwrapping** | `if let Some(x) = opt`, `match`, `?` | `if let x ?= opt`, `guard let x ?= opt else`, `??`, `?.` | Swift-style readability; un-indented guard promotion |
 | **Destructors & RAII** | `Drop::drop` | `__del__()` (with RVO elision) and scoped `with` blocks | Deterministic LIFO scope destruction without exception overhead |
