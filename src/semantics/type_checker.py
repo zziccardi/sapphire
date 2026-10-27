@@ -2940,65 +2940,6 @@ class TypeChecker:
 
     return PrimitiveType("none")
 
-  def visit_WithStmtNode(self, node: WithStmtNode) -> Type:
-    has_unwrap = False
-
-    self.symbol_table.enter_scope()
-
-    for clause in node.clauses:
-      if clause.binding:
-        binding = clause.binding
-        expr_t = self.visit(binding.expr)
-        if binding.is_unwrap:
-          has_unwrap = True
-          if not isinstance(expr_t, OptionalType):
-            self.error(f"Cannot unwrap non-optional type '{expr_t}' in with clause.")
-            base_t = expr_t
-          else:
-            base_t = expr_t.base_type
-        else:
-          base_t = expr_t
-
-        let_names = getattr(binding, "let_names", [binding.let_name])
-        check_t = base_t.element_type if (len(let_names) > 1 and isinstance(base_t, ArrayType)) else base_t
-
-        # Verify check_t defines a __del__ destructor or is an Arena
-        is_destructible = False
-        if isinstance(check_t, (StructType, ArenaType)) and getattr(check_t, "has_destructor", False):
-          is_destructible = True
-
-        if not is_destructible:
-          self.error(f"Type '{check_t}' bound in with statement does not define a '__del__' destructor.")
-
-        if len(let_names) > 1:
-          for name in let_names:
-            self.symbol_table.define(name, VariableSymbol(name, check_t, is_mutable=binding.is_mutable))
-        else:
-          name = binding.let_name
-          self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))
-
-      elif clause.expr:
-        expr_t = self.visit(clause.expr)
-        is_destructible = False
-        if isinstance(expr_t, (StructType, ArenaType)) and getattr(expr_t, "has_destructor", False):
-          is_destructible = True
-
-        if not is_destructible:
-          self.error(f"Expression type '{expr_t}' in with statement does not define a '__del__' destructor.")
-
-    # Check body statements
-    self.visit(node.body)
-    self.symbol_table.exit_scope()
-
-    if node.else_body:
-      if not has_unwrap:
-        self.error("With statement with 'else' block must contain at least one '?=' unwrap clause.")
-      self.symbol_table.enter_scope()
-      self.visit(node.else_body)
-      self.symbol_table.exit_scope()
-
-    return PrimitiveType("none")
-
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:
     struct_type = self.symbol_table.lookup_type(node.struct_name)
     if not struct_type or not isinstance(struct_type, StructType):

@@ -35,7 +35,7 @@ def parse_antlr_grammar():
   constants = []
 
   control_words = {
-      "if", "else", "guard", "with", "while", "for", "in", "break", "continue",
+      "if", "else", "guard", "while", "for", "in", "break", "continue",
       "return", "match", "yield", "clone", "move", "import", "export", "as"
   }
   modifier_words = {"static", "const", "proto", "struct", "enum", "impl", "trait", "func", "let", "var"}

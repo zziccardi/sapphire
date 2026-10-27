@@ -169,7 +169,7 @@ for item in items {
   Sapphire **completely omits throwable exceptions** (`try`/`catch`/`throw`) ([docs/SPEC.md §16.3](SPEC.md#avoiding-throwable-exceptions)):
   1. **Explicit, Type-Safe Fallibility**: Functions model fallibility exclusively through optionals (`T?`), multiple return values (`T, bool`), or tagged unions with exhaustive `match` expressions.
   2. **Predictable CPU Branching**: Without stack unwinding machinery, control flow remains entirely local and linear, making execution predictable and easily mapped to low-level target environments.
-  3. **Resource Teardown via `with` & RAII**: Clean resource management does not depend on `finally` blocks or exception unwinding. Resources are cleaned up deterministically in LIFO order via struct `__del__()` destructors and scoped `with` blocks ([docs/SPEC.md §7.4](SPEC.md#with-statements-with----) & [§9.2](SPEC.md#deterministic-destructors-__del__)).
+  3. **Deterministic RAII Resource Teardown**: Clean resource management does not depend on `finally` blocks or exception unwinding. Resources are cleaned up deterministically in LIFO order via struct `__del__()` destructors on lexical scope exit ([docs/SPEC.md §9.2](SPEC.md#deterministic-destructors-__del__)).
 
 ```swift
 // Swift: Exception unwinding with try/catch
@@ -305,7 +305,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 | **Memory Hierarchy** | ARC for classes; stack/value copy for structs | Stack-first default; lexical `Arena`s; explicit `Ref<T>` | Deterministic LIFO scope destruction; zero universal retain/release overhead |
 | **Destructors & RAII** | `deinit` on classes (run on ARC deallocation) | `func __del__()` on structs (run on lexical scope exit) | Deterministic RAII with Return-Value Optimization (RVO) copy elision |
 | **Error Handling** | `throws`, `try`, `catch`, `rethrows` | Optionals (`T?`), multi-returns (`T, bool`), `match` | Zero throwable exceptions or stack unwinding; explicit typed fallibility |
-| **Scoped Resource Cleanup** | `defer { ... }` | `with let res ?= acquire() { ... }` (`__del__` RAII) | Deterministic LIFO teardown with fallible unwrapping support |
+| **Scoped Resource Cleanup** | `defer { ... }` | Lexical blocks & `guard let` (`__del__` RAII) | Deterministic LIFO teardown with safe fallible unwrapping |
 | **Access Control** | `open`, `public`, `package`, `internal`, `private` | File-private by default; single `export { ... }` manifest | Construction contracts govern field mutability; zero keyword clutter |
 | **Concurrency / Yielding** | Async/await, Actors, Task Groups (multithreaded) | Frame-steppable coroutines (`Coroutine<T>`, `yield`) | Deterministic, cooperative tick-based stepping for game and simulation loops |
 | **Host Interoperability** | Native C/C++/Obj-C bridging headers | `@extern`, `@export`, trait-based engine bindings | Zero-overhead bindings to game engines (e.g. Love2D) and host scripting runtimes |

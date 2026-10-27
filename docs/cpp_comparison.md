@@ -28,7 +28,7 @@ vulnerabilities at compile time:
   treated as compile-time composition and forwarding, while heterogeneous
   trait collections use compiler-synthesized tagged unions.
 * **Deterministic, exception-free resource management**: RAII destructors
-  (`__del__()`) and scoped `with` blocks guarantee deterministic LIFO teardown
+  (`__del__()`) and lexical block scopes guarantee deterministic LIFO teardown
   without stack unwinding.
 
 ## 2. Detailed Pain Point Analysis
@@ -133,10 +133,9 @@ vulnerabilities at compile time:
      [§8](SPEC.md#8-functions--closures)). Callers must acknowledge error
      paths explicitly.
   3. **Deterministic Scope Teardown**: Struct destructors (`func __del__()`)
-     and scoped `with` blocks guarantee deterministic LIFO teardown on scope
-     exit, early `return`, or loop control jumps (`break`/`continue`) without
-     exception machinery ([docs/SPEC.md §7.4](SPEC.md#with-statements-with----)
-     & [§9.2](SPEC.md#deterministic-destructors-__del__)).
+     guarantee deterministic LIFO teardown on scope exit, early `return`, or
+     loop control jumps (`break`/`continue`) without exception machinery
+     ([docs/SPEC.md §9.2](SPEC.md#deterministic-destructors-__del__)).
 
 ### 2.5 Header Files, Compilation Cascades & Preprocessor Macros
 
@@ -233,7 +232,7 @@ To eliminate C++'s pitfalls and complexity without introducing a garbage collect
 | **Dynamic State Modification** | Hardcoded struct layouts; requires runtime maps/variants | Opt-in prototypal delegation (`proto`, `clone`, CoW) | Rapid dynamic state prototyping without losing static dispatch |
 | **Aliasing Rules** | Unrestricted pointer aliasing; potential UB with `reinterpret_cast` | Scope-bound call-site reference exclusivity | Eliminates overlapping mutable parameter bugs at call sites |
 | **Error Handling** | Unwinding exceptions (`throw`/`try`/`catch`) | Optionals (`T?`), multiple return values, pattern matching (`match`) | No hidden control flow jumps or stack-unwinding runtime cost |
-| **Resource Management** | RAII via destructors; manual exception guards | RAII via `__del__()` (with RVO elision) and scoped `with` blocks | Deterministic LIFO teardown without exception overhead |
+| **Resource Management** | RAII via destructors; manual exception guards | RAII via `__del__()` (with RVO elision) and lexical block scopes | Deterministic LIFO teardown without exception overhead |
 | **Compilation Unit** | Textual `#include` headers, preprocessor macros | Modular `import` paths with explicit `export` manifests | Fast compilation; zero namespace pollution or header guards |
 | **Development Loops** | Slow recompilation and link cycles; external hot-reload hooks | Live hot-reloading (`--dev`) with in-place metatable patching | Instant iteration without losing runtime application state |
 | **API Ergonomics** | Positional arguments, complex overload resolution | Named parameters (`arg = val`), default parameter values, f-strings | Self-documenting call sites and expressive string formatting |

@@ -45,8 +45,6 @@ from src.parser.ast import (
     UnaryOpNode,
     VarDeclNode,
     WhileNode,
-    WithClauseNode,
-    WithStmtNode,
     YieldNode,
     ImportStmtNode,
     BasicTypeNode,
@@ -258,9 +256,3 @@ class BaseTranspiler(ABC):
 
   @abstractmethod
   def visit_GuardStmtNode(self, node: GuardStmtNode) -> None: ...
-
-  @abstractmethod
-  def visit_WithClauseNode(self, node: WithClauseNode) -> None: ...
-
-  @abstractmethod
-  def visit_WithStmtNode(self, node: WithStmtNode) -> None: ...

@@ -1437,73 +1437,6 @@ class TestLuaTranspiler(unittest.TestCase):
     tr.visit_GuardClauseNode(clause2)
     self.assertIn("1", tr.get_output())
 
-  def test_with_statement_transpilation_lua(self):
-    """Verifies that with statements transpile to Lua nil-checks and LIFO _sapphire_del calls."""
-    from src.parser.ast import WithClauseNode
-    code = """
-    struct Resource {
-      var name: String;
-    }
-    impl Resource {
-      func __del__() {}
-    }
-
-    func get_res(ok: bool): Resource? {
-      if ok {
-        return Resource { name = "opt_res" };
-      }
-      return none;
-    }
-
-    func test_with() {
-      with let r1 = Resource { name = "r1" }; let r2 = Resource { name = "r2" } {
-        let x = 1;
-      }
-    }
-
-    func test_with_unwrap(ok: bool) {
-      with let r ?= get_res(ok = ok) {
-        let name = r.name;
-        if ok {
-          return;
-        }
-      } else {
-        let err = 1;
-      }
-    }
-
-    func get_two(): [Resource] {
-      return [Resource { name = "p1" }, Resource { name = "p2" }];
-    }
-
-    func test_multi_and_raw() {
-      with Arena() {
-        let y = 1;
-      }
-      with let a, b = get_two() {
-        let z = 2;
-      }
-      with let opt_r ?= get_res(ok = true) {
-        let w = 3;
-      }
-    }
-    """
-    lua_code = self._transpile(code)
-    self.assertIn("_sapphire_del(_with_res_1)", lua_code)
-    self.assertIn("_sapphire_del(_with_res_2)", lua_code)
-    self.assertIn("if _with_res_3 ~= nil then", lua_code)
-    self.assertIn("_sapphire_del(_with_res_3)", lua_code)
-    self.assertIn("else", lua_code)
-
-    # Directly visit WithClauseNode to cover visitor
-    w_clause1 = WithClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="r", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
-    w_clause2 = WithClauseNode(expr=LiteralNode(2, "int"))
-    tr = LuaTranspiler()
-    tr.visit_WithClauseNode(w_clause1)
-    tr.visit_WithClauseNode(w_clause2)
-    self.assertIn("1", tr.get_output())
-    self.assertIn("2", tr.get_output())
-
   def test_coroutine_transpilation_and_methods(self):
     """Verifies Lua transpilation of top-level coroutines, struct method coroutines, and yields."""
     code = """
@@ -1916,25 +1849,6 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(y)", test_code)
     self.assertIn("_sapphire_del(x)", test_code)
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
-
-  def test_destructor_with_statement_no_double_cleanup(self):
-    """Verifies that a resource managed in a with block is cleaned up by with, not double-deleted by __del__."""
-    code = """
-    struct Resource {
-      var id: int;
-    }
-    impl Resource {
-      func __del__() {}
-    }
-    func test() {
-      with let r = Resource { id = 1 } {
-        let x = r.id;
-      }
-    }
-    """
-    lua_code = self._transpile(code)
-    self.assertIn("_sapphire_del(_with_res_1)", lua_code)
-    self.assertNotIn("_sapphire_del(r)", lua_code)
 
 
 

@@ -134,7 +134,6 @@ statement
     | assignmentStatement
     | ifStatement
     | guardStatement
-    | withStatement
     | whileStatement
     | forStatement
     | returnStatement
@@ -215,15 +214,6 @@ guardStatement
     ;
 
 guardClause
-    : letOrVarBinding
-    | expression
-    ;
-
-withStatement
-    : WITH withClause (SEMICOLON withClause)* block (ELSE block)?
-    ;
-
-withClause
     : letOrVarBinding
     | expression
     ;
@@ -357,7 +347,6 @@ MOVE : 'move';
 IF : 'if';
 ELSE : 'else';
 GUARD : 'guard';
-WITH : 'with';
 WHILE : 'while';
 BREAK : 'break';
 CONTINUE : 'continue';

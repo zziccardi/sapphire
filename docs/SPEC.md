@@ -533,24 +533,6 @@ func process_user(users: [String: User], id: String): int {
 * **Scope promotion**: Variables unwrapped inside `guard` clauses are bound in the **surrounding outer scope** for all statements following the `guard`.
 * **Control-flow termination**: The `else` block executes if any clause evaluates to `none` or `false`. The compiler statically verifies that every code path inside the `else` block terminates control flow via `return`, `break`, or `continue`.
 
-### With statements (`with ... { ... }`)
-Sapphire provides Python-style `with` statements for deterministic RAII resource acquisition and cleanup (e.g. file handles, sockets, database transactions, mutexes, arenas).
-
-```sapphire
-// Single or multiple semicolon-delimited resource bindings
-with let src ?= open_file("source.txt", "r");
-     let dst ?= open_file("dest.txt", "w") {
-  dst.write(src.read());
-} else {
-  print("Failed to open source or destination file");
-}
-```
-
-* **RAII & destructors**: Any resource bound inside a `with` statement must define a `func __del__()` destructor (or be a built-in `Arena`).
-* **Deterministic LIFO teardown**: Acquired resources are automatically cleaned up via `__del__()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on early scope exit.
-* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly destroyed via their `__del__()` destructors before executing the optional `else` block.
-* **Lexical scoping**: Variables bound in `with` clauses are scoped strictly to the `with` body block.
-
 ## 8. Functions & closures
 
 Named functions must fully declare the types of all parameters and the explicit
@@ -809,7 +791,7 @@ Sapphire intentionally eliminates fine-grained member access keywords (`public`,
 
 ### Deterministic destructors (`__del__`)
 
-To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power both lexical block-scope teardown and transactional `with` blocks:
+To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power deterministic lexical block-scope teardown, early function returns, and loop control jumps:
 
 ```sapphire
 struct FileHandle {

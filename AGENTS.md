@@ -66,15 +66,14 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
   // user is promoted to outer scope as non-optional User
   ```
 
-### 3.4 Resource Cleanup (`with` & `__del__`)
-* `with` statement: Deterministic LIFO teardown for RAII resources defining `__del__` (or `Arena`):
+### 3.4 Resource Cleanup (RAII & `__del__`)
+* Deterministic LIFO teardown: Scoped blocks (`{ ... }`), `if let`, and `guard` guarantee automatic cleanup for resources defining `__del__` (or `Arena`):
   ```sapphire
-  with let src ?= open_file("a.txt", "r");
-       let dst ?= open_file("b.txt", "w") {
+  {
+    let src = FileHandle { path = "a.txt", is_open = true };
+    let dst = FileHandle { path = "b.txt", is_open = true };
     dst.write(src.read());
-  } else {
-    print("Failed to open files");
-  }
+  }  // dst and src destroyed in LIFO order upon block exit
   ```
 * Struct destructors: Defined as `func __del__()` inside `impl` blocks. Automatically executed LIFO on scope exit or early return, elided upon RVO value returns.
 
