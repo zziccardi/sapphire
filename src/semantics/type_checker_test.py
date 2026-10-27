@@ -1667,6 +1667,77 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code)
     self.assertIn("Field 'x' is initialized multiple times in struct initializer", str(context.exception))
 
+  def test_struct_init_with_constructor_disallowed(self):
+    """Verifies that literal struct initializer syntax is forbidden when __init__ is defined."""
+    code = """
+    struct Weapon {
+      var damage: int;
+    }
+    impl Weapon {
+      func __init__(dmg: int) {
+        self.damage = dmg;
+      }
+    }
+    func test() {
+      let w = Weapon { damage = 50 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn(
+        "Cannot use literal initializer for struct 'Weapon' because it defines an '__init__' constructor. Use constructor call syntax 'Weapon(...)' instead.",
+        str(context.exception),
+    )
+
+  def test_generic_struct_init_with_constructor_disallowed(self):
+    """Verifies that literal initializer syntax is forbidden for generic structs defining __init__."""
+    code = """
+    struct Pair<K, V> {
+      var key: K;
+      var value: V;
+    }
+    impl Pair<K, V> {
+      func __init__(key: K, value: V) {
+        self.key = key;
+        self.value = value;
+      }
+    }
+    func test() {
+      let p = Pair<String, int> { key = "score", value = 100 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn(
+        "Cannot use literal initializer for struct 'Pair' because it defines an '__init__' constructor. Use constructor call syntax 'Pair(...)' instead.",
+        str(context.exception),
+    )
+
+  def test_inherited_struct_init_with_constructor_disallowed(self):
+    """Verifies that literal initializer is forbidden when an inherited parent defines __init__."""
+    code = """
+    struct Parent {
+      var p: int;
+    }
+    impl Parent {
+      func __init__(val: int) {
+        self.p = val;
+      }
+    }
+    struct Child: Parent {
+      var c: int;
+    }
+    func test() {
+      let c = Child { p = 1, c = 2 };
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn(
+        "Cannot use literal initializer for struct 'Child' because it defines an '__init__' constructor. Use constructor call syntax 'Child(...)' instead.",
+        str(context.exception),
+    )
+
   def test_clone_struct_inherits_from_proto(self):
     """Verifies that cloning a struct that inherits from a proto struct is valid and succeeds semantic analysis."""
     code = """
@@ -5302,6 +5373,43 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Cannot pass 'SharedRef<Point>' as mutable 'var' parameter; shared references are read-only borrows.", str(ctx.exception))
+
+  def test_optional_chaining_method_call_returns_optional(self):
+    """Verifies that invoking a method via optional chaining '?.' returns an optional type."""
+    code_valid = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_name(): String {
+        return self.name;
+      }
+    }
+    func test() {
+      let p: Player? = none;
+      let name: String? = p?.get_name();
+    }
+    """
+    ast = self._check(code_valid)
+    self.assertEqual(len(ast.errors), 0)
+
+    code_invalid = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_name(): String {
+        return self.name;
+      }
+    }
+    func test() {
+      let p: Player? = none;
+      let name: String = p?.get_name();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid)
+    self.assertIn("Cannot assign expression of type 'String?' to variable 'name' of type 'String'.", str(ctx.exception))
 
 
 

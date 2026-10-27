@@ -2352,7 +2352,11 @@ class TypeChecker:
 
     if is_constructor:
       return callee_type
-    return signature.return_type
+    ret_type = signature.return_type
+    if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+      if not isinstance(ret_type, OptionalType):
+        ret_type = OptionalType(ret_type)
+    return ret_type
 
   def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False, callee_node: Optional[ASTNode] = None) -> None:
     """Helper to match argument lists against signatures (including parameter modes)."""
@@ -2999,6 +3003,8 @@ class TypeChecker:
       self.error(f"Cannot instantiate undefined struct '{node.struct_name}'.")
       return PrimitiveType("none")
 
+    raw_name = node.struct_name
+
     if struct_type.type_params:
       if node.type_args:
         resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
@@ -3007,6 +3013,22 @@ class TypeChecker:
       else:
         self.error(f"Generic struct '{node.struct_name}' requires explicit type arguments.")
         return PrimitiveType("none")
+
+    def _struct_has_init(st: StructType) -> bool:
+      if "__init__" in st.methods:
+        return True
+      if st.parent_names:
+        for p_name in st.parent_names:
+          p_type = self.symbol_table.lookup_type(p_name)
+          if isinstance(p_type, StructType) and _struct_has_init(p_type):
+            return True
+      return False
+
+    if _struct_has_init(struct_type):
+      self.error(
+          f"Cannot use literal initializer for struct '{raw_name}' because it defines an '__init__' constructor. Use constructor call syntax '{raw_name}(...)' instead."
+      )
+      return struct_type
 
     # Validate explicit arena target
     if struct_type.is_prototype and not node.arena_expr:

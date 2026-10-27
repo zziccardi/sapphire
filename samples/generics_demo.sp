@@ -44,6 +44,12 @@ func make_pair<K, V>(k: K, v: V): Pair<K, V> {
   return Pair<K, V>(key = k, value = v);
 }
 
+// 6. Plain generic data struct without custom constructor
+struct Point<T> {
+  var x: T;
+  var y: T;
+}
+
 func main() {
   // Explicit type argument instantiation for generic struct
   let int_stack = Stack<int>(top = 10);
@@ -56,9 +62,12 @@ func main() {
   // Inferred type argument function invocation
   let y = identity(42);
 
-  // Generic struct initializer syntax
-  let pair = Pair<String, int> {
-    key = "score",
-    value = 95,
+  // Generic constructor invocation
+  let pair = Pair<String, int>(key = "score", value = 95);
+
+  // Generic struct initializer syntax for plain data struct without __init__
+  let origin = Point<float> {
+    x = 0.0,
+    y = 0.0,
   };
 }

@@ -2696,6 +2696,18 @@ class LuaTranspiler(BaseTranspiler):
     if isinstance(node.callee, MemberAccessNode):
       member_name = getattr(node.callee, "target_name", None) or node.callee.member
       receiver_name = getattr(node.callee.receiver, "name", None)
+      if node.callee.is_optional:
+        sep = ":" if getattr(node.callee, "is_instance_method", False) else "."
+        self.emit("((function(_r) if _r ~= nil then return _r")
+        self.emit(f"{sep}{member_name}(")
+        for idx, arg in enumerate(node.arguments):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(arg.expr)
+        self.emit(") else return nil end end)(")
+        self.visit(node.callee.receiver)
+        self.emit("))")
+        return
       if getattr(node.callee, "is_instance_method", False):
         self.visit(node.callee.receiver)
         self.emit(f":{member_name}(")

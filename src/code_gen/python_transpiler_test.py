@@ -1611,6 +1611,43 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_range()")
     self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
 
+  def test_range_iteration_with_keyword_arguments(self):
+    """Verifies Python transpilation and execution of range() loops with keyword arguments."""
+    code = """
+    func test_range_kw(): int {
+      var sum = 0;
+      for i in range(0, 10, step = 2) {
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("for i in range(0, 10, 2):", py_code)
+    res = self._transpile_and_run(code, "test_range_kw()")
+    self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
+
+  def test_optional_chaining_method_call_execution(self):
+    """Verifies Python transpilation and execution of method calls on optional targets."""
+    code = """
+    struct Hero {
+      var name: String;
+    }
+    impl Hero {
+      func get_greeting(): String {
+        return "Hello " + self.name;
+      }
+    }
+    func test_opt_call(h: Hero?): String {
+      let greeting = h?.get_greeting();
+      return greeting ?? "None";
+    }
+    """
+    res1 = self._transpile_and_run(code, 'test_opt_call(Hero(name="Link"))')
+    self.assertEqual(res1, "Hello Link")
+    res2 = self._transpile_and_run(code, "test_opt_call(None)")
+    self.assertEqual(res2, "None")
+
   def test_guard_statement_execution(self):
     """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
     code = """

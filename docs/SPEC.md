@@ -78,16 +78,20 @@ All primitive scalars are passed by value:
 * **`float`**: 64-bit IEEE-754 double-precision floating-point number
   (`float64`).
 * **`bool`**: Boolean logical values, either `true` or `false`.
-* **`none`**: The unit type representing the absence of a value or an empty
-  optional state.
-* **`void`**: Designates functions that return no value.
+* **`none`**: The unit value literal representing the absence of a value or an
+  empty optional state (`let x: int? = none;`). In type annotations, `none`
+  is a reserved literal token.
+* **`void`**: The semantic unit type designating functions and coroutines that
+  return no value (`func f(): void`, `Coroutine<void>`).
 
 ### String literals & interpolation
 
 Strings are immutable UTF-8 text sequences. Sapphire supports Python-style
-string interpolation using the `f"..."` prefix:
+string interpolation using the `f"..."` prefix and binary `+` concatenation:
 
 * **Syntax**: `f"literal {expression} literal"`
+* **String concatenation**: Expressions evaluate string concatenation via `+`
+  whenever either operand is a `String` (e.g. `"Hello " + name`).
 * **Nested quotes**: Expressions inside interpolation braces support nested
   quotes (e.g. `f"Hello {user.get(\"name\")}"`).
 * **Brace escaping**: Double curly braces `{{` and `}}` within an f-string
@@ -98,12 +102,19 @@ string interpolation using the `f"..."` prefix:
 * **Structs**: User-defined `struct` types cannot be interpolated directly and
   cause a compile-time error; explicit conversion methods (e.g.
   `{player.to_string()}`) must be called.
+* **Built-in methods**: Strings provide built-in methods including `.size()`,
+  `.empty()`, `.lower()`, `.upper()`, `.strip()`, `.split()`, `.contains()`,
+  `.find()`, `.to_int()`, `.to_float()`, and `.to_bool()`. For full method
+  specifications, see
+  [built-in string methods](builtins.md#built-in-methods) and
+  [string operations](builtins.md#operations-and-capabilities).
 
 ```sapphire
 let name = "Hero";
 let speed = 60;
 let msg = f"Hello {name}, speed: {speed}!";
 let escaped = f"Literal braces: {{count}}";
+let concat = "Greetings, " + name;
 ```
 
 ### Collection types & literals
@@ -113,17 +124,25 @@ let escaped = f"Literal braces: {{count}}";
   ```sapphire
   let numbers: [int] = [10, 20, 30];
   ```
+  Arrays support functional transformations and mutating operations such as
+  `.map()`, `.filter()`, `.reduce()`, `.push()`, `.pop()`, and `.sort()`. For
+  the full method suite, see
+  [built-in array methods](builtins.md#built-in-methods-1).
 * **Map literals (`[K: V]`)**: Maps are strongly typed key-value dictionaries
   defined inside curly braces (`{key: value}`). Keys must be `String`, `int`,
   or an `enum` type:
   ```sapphire
   let scores: [String: int] = {"alice": 100, "bob": 95};
   ```
+  For map operations and query methods, see
+  [built-in map methods](builtins.md#built-in-methods-2).
 * **Range type (`Range`)**: Created via the built-in `range()` function for
   numeric sequences in `for-in` loops:
   ```sapphire
   let r: Range = range(0, 10, step = 2);
   ```
+  For full `range` signatures and iteration semantics, see
+  [the range function](builtins.md#the-range-function).
 
 ## Variables, operators, & expressions
 
@@ -155,16 +174,18 @@ highest to lowest:
 | :--- | :--- | :--- |
 | **Postfix / Primary** | `()`, `[]`, `.`, `?.` | Left-to-right |
 | **Unary** | `-`, `+`, `!` | Right-to-left |
+| **Type Cast** | `as` | Left-to-right |
 | **Multiplicative** | `*`, `/`, `%` | Left-to-right |
-| **Additive** | `+`, `-` | Left-to-right |
+| **Additive / Concat** | `+`, `-` | Left-to-right |
 | **Relational** | `<`, `<=`, `>`, `>=` | Left-to-right |
 | **Equality** | `==`, `!=` | Left-to-right |
+| **Nil-Coalescing** | `??` | Left-to-right |
 | **Logical AND** | `&&` | Left-to-right |
 | **Logical OR** | `\|\|` | Left-to-right |
-| **Nil-Coalescing** | `??` | Right-to-left |
 | **Ternary** | `? :` | Right-to-left |
-| **Type Cast** | `as` | Left-to-right |
-| **Assignment** | `=`, `+=`, `-=`, `*=`, `/=` | Right-to-left |
+
+Assignment statements use `=`, `+=`, `-=`, `*=`, `/=`, or `%=`. Assignments are
+strictly statements in Sapphire rather than value-producing expressions.
 
 ### Core operators
 
@@ -190,7 +211,7 @@ let label = score >= 60 ? "Pass" : "Fail";
   compatible types. If one branch evaluates to `none`, the result type is
   inferred as an optional `T?`.
 * **Mandatory parentheses for nested ternaries**: Unparenthesized nested
-  ternaries produce a compile-time `SyntaxError`. Nested ternaries must be
+  ternaries produce a compile-time `SemanticError`. Nested ternaries must be
   explicitly disambiguated with parentheses:
   ```sapphire
   let status = x > 0 ? "Positive" : (x < 0 ? "Negative" : "Zero");
@@ -211,8 +232,10 @@ conversions between compatible scalar types:
 
 The `as` operator is strictly restricted to infallible conversions:
 1. **Fallible string parsing**: Parsing strings into primitive types (e.g.
-   `"123" as int`) is rejected at compile time; use `int.from(str)` or
-   `float.from(str)` which return optionals (`int?`, `float?`).
+   `"123" as int`) is rejected at compile time; use the `.to_int()`,
+   `.to_float()`, or `.to_bool()` instance methods on `String` which return
+   optionals (`int?`, `float?`, `bool?`). For complete API signatures, see
+   [built-in string methods](builtins.md#built-in-methods).
 2. **Struct up-casting**: Up-casting child struct instances to parent struct
    types (e.g. `cat as Animal`) is statically prohibited to eliminate object
    slicing and dispatch ambiguity.
@@ -229,10 +252,12 @@ The `as` operator is strictly restricted to infallible conversions:
     Dynamic missing-key access panics at runtime.
   * **Safe lookup (`map.get(key)`)**: Returns optional `V?`, evaluating to
     `none` if the key is absent.
-* **Map built-in methods**: `Map` instances support `size(): int`,
-  `empty(): bool`, `contains(key: K): bool`, `keys(): [K]`, `values(): [V]`,
-  and mutating methods on `var` maps: `insert(key: K, value: V): V`,
-  `remove(key: K): V?`, and `clear(): void`.
+* **Collection built-in methods**: `Array` and `Map` instances support a rich
+  set of querying and mutating methods (`size()`, `empty()`, `contains()`,
+  `insert()`, `remove()`, `clear()`, `map()`, `filter()`, `reduce()`, etc.).
+  For comprehensive documentation and signatures, see
+  [built-in array methods](builtins.md#built-in-methods-1) and
+  [built-in map methods](builtins.md#built-in-methods-2).
 
 ## Optionals & null safety
 
@@ -288,14 +313,18 @@ underlying base type.
 ### Pattern matching on optionals
 
 Optional values can be matched directly using `match` expressions by pattern
-matching on `none` and concrete values:
+matching on `none`, concrete literal values, or the default wildcard `...`:
 
 ```sapphire
 let status = match target {
   none -> "No target",
-  enemy -> f"Targeting {enemy.name}",
+  ... -> "Target acquired",
 };
 ```
+
+Match arm patterns evaluate expressions or the wildcard ellipsis (`...`). To
+conditionally unwrap an optional and bind its inner non-optional value to a new
+variable, use `if let ?=` or `guard let ?=`.
 
 ## Control flow & pattern matching
 
@@ -332,8 +361,10 @@ if let active_target ?= target;
 
 Bindings and conditions evaluate sequentially from left to right. If any
 unwrapping fails or the condition evaluates to `false`, evaluation immediately
-short-circuits. If partially acquired resources define `__del__`, they are
-cleaned up in LIFO order upon short-circuit failure.
+short-circuits. If bindings in an `if` header do not use optional unwrapping
+`?=`, they must be followed by a boolean condition expression. If partially
+acquired resources define `__del__`, they are cleaned up in LIFO order upon
+short-circuit failure.
 
 ### Guard statements (`guard ... else { ... }`)
 
@@ -507,6 +538,12 @@ Callers have explicit control over parameter mutability and ownership transfer:
   `consume(move resource)`). Ownership is transferred into the function, and
   the caller's variable is statically invalidated in the current scope. Moving
   is permitted on both `let` constants and `var` variables.
+  * **No moving out of parameters**: Borrowed function parameters cannot be
+    moved out of (`Cannot move out of borrowed parameter`).
+  * **Variable reinitialization**: Reassigning a moved mutable variable (`var`)
+    reinstates it in the current scope, enabling subsequent moves or reads.
+  * **Shared references**: `SharedRef<T>` instances are read-only shared
+    borrows and cannot be passed to mutable `var` parameters.
 
 ### Scope-bound aliasing rules (call-site reference exclusivity)
 
@@ -612,9 +649,12 @@ func fibonacci(count: int): Coroutine<int> {
 * **Lifecycle methods**:
   * `.step()`: Advances the coroutine to the next yield or return. Returns `T?`
     for value-producing coroutines (evaluating to `none` once complete), or
-    `bool` (`true` while running, `false` when complete) for void routines.
+    `none` for void routines.
   * `.is_done()`: Returns boolean indicating whether routine has terminated.
   * `.reset()`: Restarts the coroutine from the beginning.
+
+  For further details, see [coroutines](builtins.md#coroutines) in
+  `builtins.md`.
 
 ## Structs & implementation blocks
 
@@ -684,8 +724,10 @@ impl Weapon {
    let p = Point { x = 10.0 };
    ```
 
-Fields declared with default values or optional types (`T?`) may be omitted
-during initialization. The compiler verifies that all non-optional fields are
+Fields declared with explicit default values, optional types (`T?`), or
+primitive scalar types (`int`, `float`, `bool`, which default implicitly to
+`0`, `0.0`, `false`) may be omitted during initialization. The compiler
+verifies that all non-optional reference fields without defaults are
 initialized.
 
 ### Member encapsulation via construction contract
@@ -805,6 +847,13 @@ impl Player {
 }
 ```
 
+* **Mandatory parent initialization**: If any parent struct defines an
+  `__init__` constructor, the child constructor must explicitly chain-initialize
+  that parent.
+* **No `self` references**: Base initializer argument expressions cannot
+  reference `self` (`References to 'self' are not allowed in base initializer
+  arguments`).
+
 #### Disallowed up-casting
 
 Sapphire **strictly disallows up-casting** for statically inherited structures
@@ -858,28 +907,27 @@ func update_actor(actor: Actor): Actor {
 
 ### Trait dispatch models & compilation strategies
 
-Sapphire provides a three-tier model for trait polymorphism:
+Sapphire provides a tiered model for trait polymorphism:
 
-1. **Static monomorphization via direct trait parameters — Zero-cost calls**:
-   Functions accepting trait types directly (e.g. `func render(a: Actor)`) are
-   monomorphized at compile time. The compiler generates specialized direct-call
-   code for each concrete struct implementing the trait, enabling inlining and
-   eliminating fat pointers.
-2. **Heterogeneous trait collections (`[Trait]`) — Closed-world tagged unions**:
-   Collections of traits (e.g. `let actors: [Actor] = [Cat {}, Dog {}];`)
-   compile into internal closed tagged unions (sum types) of all concrete
-   implementors. Iteration and method dispatch compile to direct jump tables
-   over contiguous memory without heap allocations.
-3. **Dynamic trait objects across open boundaries (`Dynamic<Trait>`)**:
-   For open dynamic library (`.so`/`.dylib`) boundaries or plugin systems where
-   implementors cannot be closed at compile time, Sapphire provides an explicit
-   dynamic trait object representation:
-   * **Explicit construction**: Created via constructor syntax:
-     ```sapphire
-     let plugin: Dynamic<PluginHook> = Dynamic<PluginHook>(my_hook);
-     ```
-   * **Fat pointer layout**: Uses a standard 2-word fat pointer containing a
-     data pointer and an immutable static vtable pointer.
+1. **Compile-time trait contracts & runtime erasure (current toolchain)**:
+   In the multi-target transpiler toolchain (Python, Lua), trait implementations
+   are checked statically at compile time. Functions accepting trait types
+   enforce method presence, and calls are emitted directly on underlying
+   instances without runtime boxing or vtable overhead.
+2. **Static monomorphization via direct trait parameters (zero-cost calls)**:
+   Functions accepting trait types directly (e.g. `func render(a: Actor)`)
+   enable specialize direct-call code for each concrete struct implementing the
+   trait, enabling inlining and eliminating fat pointers.
+3. **Closed-world tagged unions & dynamic trait objects (native AOT roadmap)**:
+   In the planned native backend, heterogeneous trait collections (`[Trait]`)
+   lower to closed tagged unions over contiguous memory with direct jump tables.
+   For open dynamic library (`.so`/`.dylib`) boundaries, explicit dynamic trait
+   objects (`Dynamic<Trait>`) provide 2-word fat pointers with immutable static
+   vtables:
+   ```sapphire
+   // Native AOT roadmap syntax
+   let plugin = Dynamic<PluginHook>(my_hook);
+   ```
 
 ### Explicit composition (data-oriented design)
 
@@ -1111,6 +1159,10 @@ environment without generating variable declarations:
 var love: LoveEngine;
 ```
 
+* **Declaration requirements**: Variable declarations marked with `@extern`
+  must specify an explicit type annotation and cannot have an initializer
+  expression (`@extern var x = 5;` is rejected).
+
 ### `@export` (transpiled symbol renaming)
 
 * **Global callback export**: `@export("love.update") func update(dt: float)`
@@ -1140,7 +1192,8 @@ trait Graphics {
 
 ### Live hot-reloading & `@on_reload` lifecycle hook
 
-Sapphire provides development hot-reloading (`sapphire run --dev`):
+Sapphire provides development hot-reloading (`sapphire run --dev`) under the
+Lua / Love2D backend:
 * **In-place patching**: Structures and prototype metatables persist across
   reloads, updating method definitions without resetting application state.
 * **`@on_reload` hook**: Functions annotated with `@on_reload` are automatically
@@ -1175,19 +1228,20 @@ Traditional object-oriented languages rely on virtual method tables (vtables)
 for all dynamic dispatch, introducing pointer-chasing overhead (`this -> vptr
 -> vtable -> func`) and inhibiting cross-module inlining.
 
-Sapphire isolates vtables strictly to explicit open-boundary dynamic trait
-objects:
+Sapphire avoids vtables in standard operations:
 * **Zero-vtable structural inheritance**: Struct inheritance is treated as
   compile-time syntactic delegation (composition + forwarding).
-* **Monomorphized static traits**: Behavioral polymorphism is monomorphized at
-  compile time, outputting direct static function calls.
-* **Closed-world tagged unions**: Heterogeneous trait collections (`[Trait]`)
-  compile into contiguous tagged unions with direct jump tables.
+* **Compile-time trait contracts**: Behavioral polymorphism is statically
+  verified at compile time and erased at runtime in the multi-target transpiler.
+* **Closed-world tagged unions (native roadmap)**: Heterogeneous trait
+  collections (`[Trait]`) are planned to compile into contiguous tagged unions
+  with direct jump tables in the native backend.
 * **Data-only prototypal delegation**: Dynamic delegation (`clone`) delegates
   data fields in an `Arena`. Methods remain statically dispatched.
-* **Explicit opt-in vtables (`Dynamic<Trait>`)**: Virtual method tables are
-  never generated implicitly. They exist solely when developers explicitly
-  instantiate `Dynamic<Trait>` for open dynamic library or plugin boundaries.
+* **Explicit opt-in vtables (`Dynamic<Trait>`, native roadmap)**: Virtual
+  method tables are never generated implicitly. In the native compilation
+  architecture, they are reserved strictly for explicit open dynamic library
+  or plugin boundaries via `Dynamic<Trait>`.
 
 ### Avoiding physical inheritance layouts
 

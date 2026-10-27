@@ -31,18 +31,18 @@ impl Ant {
 
 @test
 func test_inherited_field(): int {
-  let d = Dog { name = "Rex" };
+  let d = Dog(name = "Rex");
   return d.legs;
 }
 
 @test
 func test_overridden_field(): int {
-  let a = Ant {};
+  let a = Ant();
   return a.legs;
 }
 
 @test
 func test_own_field(): int {
-  let a = Ant {};
+  let a = Ant();
   return a.colony;
 }

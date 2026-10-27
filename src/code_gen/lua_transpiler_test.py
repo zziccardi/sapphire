@@ -392,6 +392,25 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("(t ~= nil and t.hp or nil)", lua_code)
     self.assertIn("while (count > 0) do", lua_code)
 
+  def test_optional_chaining_method_call(self):
+    """Verifies optional chaining on method calls emits safe guard block."""
+    code = """
+    struct Target {
+      var hp: int;
+    }
+    impl Target {
+      func get_hp(): int {
+        return self.hp;
+      }
+    }
+    func test_call(t: Target?): int {
+      let val = t?.get_hp();
+      return val ?? 0;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("((function(_r) if _r ~= nil then return _r:get_hp() else return nil end end)(t))", lua_code)
+
   def test_prototypal_inheritance_and_clone_variations(self):
     """Verifies clone node transpilation with arena and without initializer block."""
     code = """
