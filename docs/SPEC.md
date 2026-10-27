@@ -31,7 +31,7 @@ especially well-suited for interactive applications, simulation, and game
 engines.
 
 Unlike other performance-oriented languages, Sapphire distinguishes itself
-through four key pillars:
+through five key pillars:
 * **Zero-overhead static & dynamic reuse**: Inheritance is treated as
   compile-time syntactic delegation (composition and generated forwarding),
   completely eliminating virtual-method tables (vtables), pointer chasing, and
@@ -47,6 +47,12 @@ through four key pillars:
   are allocated in managed, lexically scoped arenas. The compiler enforces
   strict escape-checking to automatically tear down allocations at scope
   boundaries.
+* **Deterministic, exception-free error model**: Control flow completely
+  eliminates throwable exceptions (`try`/`catch`/`throw`) and stack unwinding.
+  Errors and uninitialized states are handled predictably through first-class
+  optionals (`T?`), multiple-return destructuring (`T, bool`), and Swift-style
+  `guard` statements that promote validated values into outer scopes without
+  excessive indentation.
 * **Modern API & host-environment ergonomics**: Native support for named
   parameters, default values, and expressive optional unwrapping makes
   interfaces self-documenting. First-class host annotations (`@extern`,
@@ -473,24 +479,22 @@ if let active_target ?= target {
 }
 ```
 
-### Semicolon-separated init statements
-Both `if` and `while` statement headers support declaring an init statement
-before the condition, separated by a semicolon. This is useful for limiting the
-scope of helper variables or combining unwrapping with other checks. The init
-statement evaluates **once** before entering the block or loop, while the loop
-condition to the right of the semicolon is re-evaluated on each iteration:
+### Multi-binding `if` statements
+`if` and `guard` statement headers support declaring one or more variable bindings
+before an optional boolean condition, separated by semicolons. Semicolons
+strictly delimit variable bindings (`let a ?= ...; let b ?= ...;`), while multiple
+condition checks must be composed using boolean operators (`&&` or `||`):
 
 ```sapphire
-if let active_target ?= target; active_target.health > 50 {
-  // `active_target` is unwrapped once and its health is checked
-}
-
-while let score = get_score(); score < 100 {
-  // `score` is initialized once; `score < 100` is re-evaluated every iteration
+if let active_target ?= target;
+   let weapon ?= equipped_weapon;
+   active_target.health > 50 && weapon.durability > 0 {
+  // `active_target` and `weapon` are unwrapped once and verified against the
+  // condition
 }
 ```
 
-* **Mandatory boolean condition for `while` loops**: Unlike `if` statement headers (where `if let x ?= opt` can stand alone without a subsequent check), `while` statements **always require an explicit boolean condition** following the semicolon (e.g. `while let score = get_score(); score < 100 { ... }` or `while condition { ... }`). Conditionless `while-let` bindings are prohibited to ensure termination conditions remain explicit and transparent.
+* **Sequential short-circuiting**: Bindings and the condition evaluate sequentially from left to right; if any unwrapping fails or the condition evaluates to `false`, evaluation immediately short-circuits. If partially acquired resources define `__del__`, they are cleaned up in LIFO order upon short-circuit failure.
 
 ### Nil-coalescing operator (`??`)
 Sapphire provides the binary coalescing operator `??` to supply a fallback value
@@ -507,14 +511,9 @@ Sapphire provides Swift-style `guard` statements to enforce function and loop
 preconditions, avoid deep nesting, and promote unwrapped variables into the
 surrounding scope:
 
-<!-- TODO: Only initializations should be followed by semicolons; fix case
-     below where conditions are also separated by them. -->
 ```sapphire
 func process_user(users: [String: User], id: String): int {
-  guard let user ?= users.get(id);
-        user.is_active;
-        user.score > 0
-  else {
+  guard let user ?= users.get(id); user.is_active && user.score > 0 else {
     return -1;
   }
 
@@ -523,27 +522,9 @@ func process_user(users: [String: User], id: String): int {
 }
 ```
 
-* **Semicolon clause separation**: Guard clauses must be separated by semicolons. Clauses can include optional bindings (`let x ?= opt`, including multi-variable destructuring, e.g. `let x, y ?= get_pair()`) and boolean conditions (`x > 0`).
+* **Semicolon binding separation**: Multiple variable bindings within a `guard` header are separated by semicolons (`let a ?= opt_a; let b ?= opt_b;`), followed by an optional boolean condition (`user.is_active && user.score > 0`). Clauses can include optional bindings (`let x ?= opt`, including multi-variable destructuring, e.g. `let x, y ?= get_pair()`).
 * **Scope promotion**: Variables unwrapped inside `guard` clauses are bound in the **surrounding outer scope** for all statements following the `guard`.
 * **Control-flow termination**: The `else` block executes if any clause evaluates to `none` or `false`. The compiler statically verifies that every code path inside the `else` block terminates control flow via `return`, `break`, or `continue`.
-
-### With statements (`with ... { ... }`)
-Sapphire provides Python-style `with` statements for deterministic RAII resource acquisition and cleanup (e.g. file handles, sockets, database transactions, mutexes, arenas).
-
-```sapphire
-// Single or multiple semicolon-delimited resource bindings
-with let src ?= open_file("source.txt", "r");
-     let dst ?= open_file("dest.txt", "w") {
-  dst.write(src.read());
-} else {
-  print("Failed to open source or destination file");
-}
-```
-
-* **RAII & destructors**: Any resource bound inside a `with` statement must define a `func __del__()` destructor (or be a built-in `Arena`).
-* **Deterministic LIFO teardown**: Acquired resources are automatically cleaned up via `__del__()` in reverse order of acquisition (LIFO) upon leaving the block, whether exiting normally, via `return`, or on early scope exit.
-* **Optional unwrapping (`?=`)**: Semicolon-delimited clauses can perform fallible unwrapping (`let x ?= try_acquire()`). If unwrapping fails, any resources acquired in preceding clauses are cleanly destroyed via their `__del__()` destructors before executing the optional `else` block.
-* **Lexical scoping**: Variables bound in `with` clauses are scoped strictly to the `with` body block.
 
 ## 8. Functions & closures
 
@@ -607,9 +588,9 @@ Sapphire gives the caller explicit control over ownership transfer at the call s
 * **Constant borrow (default)**: Passing an identifier without `move` passes it by constant reference. The caller retains ownership, and the callee cannot mutate the value.
 * **Exclusive mutable borrow (`var`)**: Passing to a parameter declared with `var` gives the callee exclusive mutable access. The caller retains ownership after the call completes.
 * **Ownership transfer (`move`)**: Passing `move <identifier>` transfers
-  ownership into the function. The variable must be declared with `var`. The
-  caller's variable is statically invalidated and cannot be read, borrowed, or
-  moved again.
+  ownership into the function. The variable may be declared with either `let` or
+  `var`. The caller's variable is statically invalidated and cannot be read,
+  borrowed, or moved again.
 
 ### Scope-bound aliasing rules (call-site reference exclusivity)
 
@@ -803,7 +784,7 @@ Sapphire intentionally eliminates fine-grained member access keywords (`public`,
 
 ### Deterministic destructors (`__del__`)
 
-To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power both lexical block-scope teardown and transactional `with` blocks:
+To support automatic scope-bound resource management (RAII), structs may define an optional `__del__` destructor inside their `impl` block. Destructors power deterministic lexical block-scope teardown, early function returns, and loop control jumps:
 
 ```sapphire
 struct FileHandle {

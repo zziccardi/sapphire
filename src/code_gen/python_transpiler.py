@@ -1334,23 +1334,45 @@ class PythonTranspiler(BaseTranspiler):
     self.emit("_")
 
   def visit_IfNode(self, node: IfNode) -> None:
-    if node.init_binding:
-      self._lift_match_expressions(node.init_binding.expr)
-    if node.condition:
-      self._lift_match_expressions(node.condition)
+    bindings = getattr(node, "bindings", [node.init_binding] if getattr(node, "init_binding", None) else [])
 
-    self.newline()
-    if node.init_binding:
-      let_name = node.init_binding.let_name
-      if node.init_binding.is_unwrap:
+    if not bindings:
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+      self.newline()
+      self.emit("if ")
+      self.visit(node.condition)
+      self.emit(":")
+      self.indent()
+      self.visit(node.then_block)
+      self.dedent()
+      if node.else_block:
+        self.newline()
+        self.emit("else:")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
+      return
+
+    if len(bindings) == 1:
+      binding = bindings[0]
+      self._lift_match_expressions(binding.expr)
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+      let_names = getattr(binding, "let_names", [binding.let_name])
+      let_name = binding.let_name
+
+      self.newline()
+      if binding.is_unwrap:
         val_var = f"_val_{let_name}"
         self.emit(f"{val_var} = ")
-        self.visit(node.init_binding.expr)
+        self.visit(binding.expr)
         self.newline()
 
         # Map identifier to temporary variable during condition check
         old_map = self._identifier_map.copy()
-        self._identifier_map[let_name] = val_var
+        if len(let_names) == 1:
+          self._identifier_map[let_name] = val_var
 
         self.emit(f"if {val_var} is not None")
         if node.condition:
@@ -1363,25 +1385,34 @@ class PythonTranspiler(BaseTranspiler):
 
         self.indent()
         self.newline()
-        self.emit(f"{let_name} = {val_var}")
-        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        if len(let_names) > 1:
+          for idx, name in enumerate(let_names):
+            self.emit(f"{name} = {val_var}[{idx}]")
+            if idx < len(let_names) - 1:
+              self.newline()
+        else:
+          self.emit(f"{let_name} = {val_var}")
+
+        st_name = self._expr_destructible_struct(binding.expr)
         if st_name:
-          self.variable_types[let_name] = st_name
-          if not hasattr(node.then_block, "_block_destructibles"):
-            node.then_block._block_destructibles = []
-          node.then_block._block_destructibles.append(let_name)
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
         self.visit(node.then_block)
         self.dedent()
       else:
         # Standard bind + condition
         self.emit(f"{let_name} = ")
-        self.visit(node.init_binding.expr)
-        st_name = self._expr_destructible_struct(node.init_binding.expr)
+        self.visit(binding.expr)
+        st_name = self._expr_destructible_struct(binding.expr)
         if st_name:
-          self.variable_types[let_name] = st_name
-          if not hasattr(node.then_block, "_block_destructibles"):
-            node.then_block._block_destructibles = []
-          node.then_block._block_destructibles.append(let_name)
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
         self.newline()
         self.emit("if ")
         self.visit(node.condition)
@@ -1389,17 +1420,108 @@ class PythonTranspiler(BaseTranspiler):
         self.indent()
         self.visit(node.then_block)
         self.dedent()
-    else:
-      self.emit("if ")
-      self.visit(node.condition)
-      self.emit(":")
-      self.indent()
-      self.visit(node.then_block)
-      self.dedent()
+
+      if node.else_block:
+        self.newline()
+        self.emit("else:")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
+      return
+
+    # Multi-binding (len(bindings) > 1) with sequential short-circuiting and LIFO destructors
+    self._temp_if_count = getattr(self, "_temp_if_count", 0) + 1
+    cond_flag = f"_if_ok_{self._temp_if_count}"
+
+    for b in bindings:
+      self._lift_match_expressions(b.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
+    self.newline()
+    self.emit(f"{cond_flag} = False")
+
+    def emit_binding_level(idx: int, prior_destructibles: List[str]):
+      if idx < len(bindings):
+        b = bindings[idx]
+        let_names = getattr(b, "let_names", [b.let_name])
+        let_name = b.let_name
+        st_name = self._expr_destructible_struct(b.expr)
+        current_destructibles = list(prior_destructibles)
+        if st_name:
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
+          current_destructibles.extend(let_names)
+
+        if b.is_unwrap:
+          val_var = f"_val_{let_name}_{idx + 1}"
+          self.newline()
+          self.emit(f"{val_var} = ")
+          self.visit(b.expr)
+          self.newline()
+          self.emit(f"if {val_var} is not None:")
+          self.indent()
+          self.newline()
+          if len(let_names) > 1:
+            for n_idx, name in enumerate(let_names):
+              self.emit(f"{name} = {val_var}[{n_idx}]")
+              if n_idx < len(let_names) - 1:
+                self.newline()
+          else:
+            self.emit(f"{let_name} = {val_var}")
+
+          emit_binding_level(idx + 1, current_destructibles)
+          self.dedent()
+          if prior_destructibles:
+            self.newline()
+            self.emit("else:")
+            self.indent()
+            for d_var in reversed(prior_destructibles):
+              self.newline()
+              self.emit(f"_sapphire_del({d_var})")
+            self.newline()
+            self.emit("pass")
+            self.dedent()
+        else:
+          self.newline()
+          self.emit(f"{let_name} = ")
+          self.visit(b.expr)
+          emit_binding_level(idx + 1, current_destructibles)
+      else:
+        # All bindings acquired; check condition if present
+        if node.condition:
+          self.newline()
+          self.emit("if ")
+          self.visit(node.condition)
+          self.emit(":")
+          self.indent()
+          self.newline()
+          self.emit(f"{cond_flag} = True")
+          self.visit(node.then_block)
+          self.dedent()
+          if prior_destructibles:
+            self.newline()
+            self.emit("else:")
+            self.indent()
+            for d_var in reversed(prior_destructibles):
+              self.newline()
+              self.emit(f"_sapphire_del({d_var})")
+            self.newline()
+            self.emit("pass")
+            self.dedent()
+        else:
+          self.newline()
+          self.emit(f"{cond_flag} = True")
+          self.visit(node.then_block)
+
+    emit_binding_level(0, [])
 
     if node.else_block:
       self.newline()
-      self.emit("else:")
+      self.emit(f"if not {cond_flag}:")
       self.indent()
       self.visit(node.else_block)
       self.dedent()
@@ -1407,74 +1529,16 @@ class PythonTranspiler(BaseTranspiler):
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.loop_destructor_depth.append(len(self.destructor_stack))
     try:
-      if node.init_binding:
-        self._lift_match_expressions(node.init_binding.expr)
       if node.condition:
         self._lift_match_expressions(node.condition)
 
       self.newline()
-      if node.init_binding:
-        let_name = node.init_binding.let_name
-        if node.init_binding.is_unwrap:
-          self.emit("while True:")
-          self.indent()
-          self.newline()
-          val_var = f"_val_{let_name}"
-          self.emit(f"{val_var} = ")
-          self.visit(node.init_binding.expr)
-          self.newline()
-
-          # Map identifier to temporary variable during condition check
-          old_map = self._identifier_map.copy()
-          self._identifier_map[let_name] = val_var
-
-          self.emit(f"if not ({val_var} is not None")
-          if node.condition:
-            self.emit(" and ")
-            self.visit(node.condition)
-          self.emit("):")
-
-          # Restore map
-          self._identifier_map = old_map
-
-          self.indent()
-          self.newline()
-          self.emit("break")
-          self.dedent()
-          self.newline()
-          self.emit(f"{let_name} = {val_var}")
-          st_name = self._expr_destructible_struct(node.init_binding.expr)
-          if st_name:
-            self.variable_types[let_name] = st_name
-            if not hasattr(node.block, "_block_destructibles"):
-              node.block._block_destructibles = []
-            node.block._block_destructibles.append(let_name)
-          self.visit(node.block)
-          self.dedent()
-        else:
-          # Standard init-statement: execute once before loop begins
-          self.emit(f"{let_name} = ")
-          self.visit(node.init_binding.expr)
-          st_name = self._expr_destructible_struct(node.init_binding.expr)
-          if st_name:
-            self.variable_types[let_name] = st_name
-            if not hasattr(node.block, "_block_destructibles"):
-              node.block._block_destructibles = []
-            node.block._block_destructibles.append(let_name)
-          self.newline()
-          self.emit("while ")
-          self.visit(node.condition)
-          self.emit(":")
-          self.indent()
-          self.visit(node.block)
-          self.dedent()
-      else:
-        self.emit("while ")
-        self.visit(node.condition)
-        self.emit(":")
-        self.indent()
-        self.visit(node.block)
-        self.dedent()
+      self.emit("while ")
+      self.visit(node.condition)
+      self.emit(":")
+      self.indent()
+      self.visit(node.block)
+      self.dedent()
     finally:
       self.loop_destructor_depth.pop()
 
@@ -2134,84 +2198,6 @@ class PythonTranspiler(BaseTranspiler):
         self.indent()
         self.visit(node.else_block)
         self.dedent()
-
-  def visit_WithClauseNode(self, node: WithClauseNode) -> None:
-    if node.binding:
-      self.visit(node.binding.expr)
-    elif node.expr:
-      self.visit(node.expr)
-
-  def visit_WithStmtNode(self, node: WithStmtNode) -> None:
-    self._temp_with_count = getattr(self, "_temp_with_count", 0)
-
-    # Collect clauses and bindings
-    clause_vars = []  # List of (tmp_var, is_unwrap, binding, expr)
-    for clause in node.clauses:
-      self._temp_with_count += 1
-      tmp_var = f"_with_res_{self._temp_with_count}"
-      if clause.binding:
-        binding = clause.binding
-        self._lift_match_expressions(binding.expr)
-        self.newline()
-        self.emit(f"{tmp_var} = ")
-        self.visit(binding.expr)
-        clause_vars.append((tmp_var, binding.is_unwrap, binding, None))
-      elif clause.expr:
-        self._lift_match_expressions(clause.expr)
-        self.newline()
-        self.emit(f"{tmp_var} = ")
-        self.visit(clause.expr)
-        clause_vars.append((tmp_var, False, None, clause.expr))
-
-    has_unwrap = any(is_unwrap for _, is_unwrap, _, _ in clause_vars)
-    unwrap_vars = [tmp_var for tmp_var, is_unwrap, _, _ in clause_vars if is_unwrap]
-
-    def emit_body_with_try_finally():
-      for tmp_var, _, binding, _ in clause_vars:
-        if binding:
-          let_names = getattr(binding, "let_names", [binding.let_name])
-          if len(let_names) > 1:
-            for idx, name in enumerate(let_names):
-              self.newline()
-              self.emit(f"{name} = {tmp_var}[{idx}]")
-          else:
-            self.newline()
-            self.emit(f"{binding.let_name} = {tmp_var}")
-
-      self.newline()
-      self.emit("try:")
-      self.indent()
-      self.visit(node.body)
-      self.dedent()
-      self.newline()
-      self.emit("finally:")
-      self.indent()
-      for tmp_var, _, _, _ in reversed(clause_vars):
-        self.newline()
-        self.emit(f"_sapphire_del({tmp_var})")
-      self.dedent()
-
-    if has_unwrap:
-      cond = " and ".join(f"{v} is not None" for v in unwrap_vars)
-      self.newline()
-      self.emit(f"if {cond}:")
-      self.indent()
-      emit_body_with_try_finally()
-      self.dedent()
-      self.newline()
-      self.emit("else:")
-      self.indent()
-      for tmp_var, _, _, _ in reversed(clause_vars):
-        self.newline()
-        self.emit(f"_sapphire_del({tmp_var})")
-      if node.else_body:
-        self.visit(node.else_body)
-      else:
-        self.newline()
-        self.emit("pass")
-      self.dedent()
-    else:
-      emit_body_with_try_finally()
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> None:
     if node.arena_expr:

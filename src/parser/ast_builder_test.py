@@ -608,6 +608,23 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(stmts[0], ContinueNode)
     self.assertIsInstance(stmts[1], BreakNode)
 
+  def test_while_statement_pure_condition_and_rejected_init(self):
+    """Verifies that while loops accept pure boolean conditions and reject init statements."""
+    from src.parser.ast import WhileNode
+    ast = self._get_ast("while count > 0 { count -= 1; }")
+    while_stmt = ast.declarations[0]
+    self.assertIsInstance(while_stmt, WhileNode)
+    self.assertIsNotNone(while_stmt.condition)
+    self.assertIsNone(while_stmt.init_binding)
+
+    with self.assertRaises(SyntaxError):
+      self._get_ast("while let x = 5; x > 0 { }")
+
+  def test_const_keyword_rejected(self):
+    """Verifies that the deprecated/dead 'const' keyword in parameters is rejected by grammar."""
+    with self.assertRaises(SyntaxError):
+      self._get_ast("func foo(const x: int) {}")
+
   def test_impl_trait_prefix(self):
     """Verifies AST building for trait prefix in impl block."""
     ast = self._get_ast('impl pkg.Trait for TargetStruct {}')
@@ -679,56 +696,44 @@ class TestASTBuilder(unittest.TestCase):
     d_empty = node_empty.to_dict()
     self.assertIsNone(d_empty["expr"])
 
-
-  def test_with_statement_ast(self):
-    """Verifies AST construction for with statements with single/multiple clauses, unwrap, and else blocks."""
-    from src.parser.ast import WithStmtNode, WithClauseNode, HeaderBindingNode
+  def test_multi_binding_if_statement_ast(self):
+    """Verifies AST construction for multi-binding if statements with and without conditions."""
+    from src.parser.ast import IfNode, HeaderBindingNode
 
     code = """
     func test() {
-      with let src ?= open("in.txt"); let dst = create("out.txt") {
+      if let a ?= opt1; let b ?= opt2; a > 0 && b > 0 {
         let x = 1;
       } else {
-        let err = 0;
+        let y = 2;
       }
     }
     """
     ast = self._get_ast(code)
     func_decl = ast.declarations[0]
-    with_node = func_decl.body.statements[0]
-    self.assertIsInstance(with_node, WithStmtNode)
-    self.assertEqual(len(with_node.clauses), 2)
+    if_node = func_decl.body.statements[0]
+    self.assertIsInstance(if_node, IfNode)
+    self.assertEqual(len(if_node.bindings), 2)
+    self.assertEqual(if_node.bindings[0].let_name, "a")
+    self.assertTrue(if_node.bindings[0].is_unwrap)
+    self.assertEqual(if_node.bindings[1].let_name, "b")
+    self.assertTrue(if_node.bindings[1].is_unwrap)
+    self.assertIsNotNone(if_node.condition)
+    self.assertIsNotNone(if_node.then_block)
+    self.assertIsNotNone(if_node.else_block)
 
-    # Clause 1: let src ?= open("in.txt")
-    self.assertIsNotNone(with_node.clauses[0].binding)
-    self.assertEqual(with_node.clauses[0].binding.let_name, "src")
-    self.assertTrue(with_node.clauses[0].binding.is_unwrap)
-
-    # Clause 2: let dst = create("out.txt")
-    self.assertIsNotNone(with_node.clauses[1].binding)
-    self.assertEqual(with_node.clauses[1].binding.let_name, "dst")
-    self.assertFalse(with_node.clauses[1].binding.is_unwrap)
-
-    # Body and else block
-    self.assertIsNotNone(with_node.body)
-    self.assertIsNotNone(with_node.else_body)
-    self.assertEqual(len(with_node.body.statements), 1)
-    self.assertEqual(len(with_node.else_body.statements), 1)
-
-    # Raw expression in with clause
-    code_raw = """
-    func test() {
-      with Arena() {
-        let y = 2;
+    # Conditionless multi-binding
+    code_no_cond = """
+    func test2() {
+      if let x ?= opt1; let y ?= opt2 {
+        let z = 3;
       }
     }
     """
-    ast_raw = self._get_ast(code_raw)
-    with_raw_node = ast_raw.declarations[0].body.statements[0]
-    self.assertIsInstance(with_raw_node, WithStmtNode)
-    self.assertEqual(len(with_raw_node.clauses), 1)
-    self.assertIsNone(with_raw_node.clauses[0].binding)
-    self.assertIsNotNone(with_raw_node.clauses[0].expr)
+    ast2 = self._get_ast(code_no_cond)
+    if_node2 = ast2.declarations[0].body.statements[0]
+    self.assertEqual(len(if_node2.bindings), 2)
+    self.assertIsNone(if_node2.condition)
 
   def test_move_expression(self):
     """Verifies parsing of explicit move expressions on variables."""

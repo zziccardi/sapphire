@@ -206,19 +206,17 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local _val_active = opt_val", lua_code1)
     self.assertIn("if _val_active ~= nil and (_val_active > 40) then", lua_code1)
 
-    # 2. while let loop
+    # 2. standard while loop
     code2 = """
     func check_while() {
-      var opt_val: int? = 5;
-      while let active ?= opt_val; active > 0 {
-        opt_val = none;
+      var count = 5;
+      while count > 0 {
+        count -= 1;
       }
     }
     """
     lua_code2 = self._transpile(code2)
-    self.assertIn("while true do", lua_code2)
-    self.assertIn("local _val_active = opt_val", lua_code2)
-    self.assertIn("if not (_val_active ~= nil and (_val_active > 0)) then", lua_code2)
+    self.assertIn("while (count > 0) do", lua_code2)
 
     # 3. ?? operator
     code3 = """
@@ -242,18 +240,20 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local x = 10", lua_code4)
     self.assertIn("if (x > 5) then", lua_code4)
 
-    # 5. standard while let (no unwrap)
+    # 5. multi-binding if
     code5 = """
-    func check_std_while() {
-      var count = 5;
-      while let x = count; x > 0 {
-        count = 0;
+    func check_multi_if() {
+      let a: int? = 10;
+      let b: int? = 20;
+      if let x ?= a; let y ?= b; x + y > 15 {
+        let z = x + y;
       }
     }
     """
     lua_code5 = self._transpile(code5)
-    self.assertIn("local x = count", lua_code5)
-    self.assertIn("while (x > 0) do", lua_code5)
+    self.assertIn("local _val_x_1 = a", lua_code5)
+    self.assertIn("local _val_y_2 = b", lua_code5)
+    self.assertIn("if ((x + y) > 15) then", lua_code5)
 
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
@@ -1014,17 +1014,17 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertNotIn('scores["alice"] + 1', lua_out)
     self.assertIn('arr[1]', lua_out)  # Array indexing still gets + 1!
 
-  def test_lua_while_non_unwrap_init_statement(self):
-    """Verifies that Lua transpilation emits non-unwrapping while init-statements once before the loop."""
+  def test_lua_while_loop(self):
+    """Verifies that Lua transpilation emits while loops correctly."""
     code = """
     func test_while() {
-      while let x = count; count > 0 {
+      var count = 5;
+      while count > 0 {
         count = 0;
       }
     }
     """
     lua_out = self._transpile(code)
-    self.assertIn("local x = count", lua_out)
     self.assertIn("while (count > 0) do", lua_out)
 
   def test_lua_map_for_loop(self):
@@ -1403,7 +1403,7 @@ class TestLuaTranspiler(unittest.TestCase):
     """Verifies Lua transpilation of guard statements."""
     code = """
     func test_guard(opt: int?, flag: bool): int {
-      guard let x ?= opt; flag; x > 0 else {
+      guard let x ?= opt; flag && x > 0 else {
         return -1;
       }
       return x * 10;
@@ -1413,7 +1413,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local _guard_val_1 = opt", lua_code)
     self.assertIn("if _guard_val_1 == nil then", lua_code)
     self.assertIn("return (-1)", lua_code)
-    self.assertIn("if not (flag) then", lua_code)
+    self.assertIn("if not ((flag and (x > 0))) then", lua_code)
 
   def test_guard_destructuring_and_clause_node_lua(self):
     """Verifies Lua transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
@@ -1437,9 +1437,31 @@ class TestLuaTranspiler(unittest.TestCase):
     tr.visit_GuardClauseNode(clause2)
     self.assertIn("1", tr.get_output())
 
-  def test_with_statement_transpilation_lua(self):
-    """Verifies that with statements transpile to Lua nil-checks and LIFO _sapphire_del calls."""
-    from src.parser.ast import WithClauseNode
+  def test_multi_binding_if_statement_lua(self):
+    """Verifies Lua transpilation of multi-binding if statements."""
+    code = """
+    func test_multi_if(opt_a: int?, opt_b: int?, flag: bool): int {
+      if let a ?= opt_a; let b ?= opt_b; flag && (a + b > 10) {
+        return a + b;
+      } else {
+        return -1;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _val_a_1 = opt_a", lua_code)
+    self.assertIn("if _val_a_1 ~= nil then", lua_code)
+    self.assertIn("local a = _val_a_1", lua_code)
+    self.assertIn("local _val_b_2 = opt_b", lua_code)
+    self.assertIn("if _val_b_2 ~= nil then", lua_code)
+    self.assertIn("local b = _val_b_2", lua_code)
+    self.assertIn("if (flag and ((a + b) > 10)) then", lua_code)
+    self.assertIn("local _if_ok_1 = false", lua_code)
+    self.assertIn("_if_ok_1 = true", lua_code)
+    self.assertIn("if not _if_ok_1 then", lua_code)
+
+  def test_multi_binding_if_raii_lifo_cleanup_lua(self):
+    """Verifies that multi-binding if cleans up partially acquired resources on failure and all on block exit in Lua."""
     code = """
     struct Resource {
       var name: String;
@@ -1448,61 +1470,24 @@ class TestLuaTranspiler(unittest.TestCase):
       func __del__() {}
     }
 
-    func get_res(ok: bool): Resource? {
+    func get_res(name: String, ok: bool): Resource? {
       if ok {
-        return Resource { name = "opt_res" };
+        return Resource { name = name };
       }
       return none;
     }
 
-    func test_with() {
-      with let r1 = Resource { name = "r1" }; let r2 = Resource { name = "r2" } {
+    func run_test(ok_a: bool, ok_b: bool, cond: bool) {
+      if let a ?= get_res(name = "resA", ok = ok_a);
+         let b ?= get_res(name = "resB", ok = ok_b);
+         cond {
         let x = 1;
-      }
-    }
-
-    func test_with_unwrap(ok: bool) {
-      with let r ?= get_res(ok = ok) {
-        let name = r.name;
-        if ok {
-          return;
-        }
-      } else {
-        let err = 1;
-      }
-    }
-
-    func get_two(): [Resource] {
-      return [Resource { name = "p1" }, Resource { name = "p2" }];
-    }
-
-    func test_multi_and_raw() {
-      with Arena() {
-        let y = 1;
-      }
-      with let a, b = get_two() {
-        let z = 2;
-      }
-      with let opt_r ?= get_res(ok = true) {
-        let w = 3;
       }
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("_sapphire_del(_with_res_1)", lua_code)
-    self.assertIn("_sapphire_del(_with_res_2)", lua_code)
-    self.assertIn("if _with_res_3 ~= nil then", lua_code)
-    self.assertIn("_sapphire_del(_with_res_3)", lua_code)
-    self.assertIn("else", lua_code)
-
-    # Directly visit WithClauseNode to cover visitor
-    w_clause1 = WithClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="r", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
-    w_clause2 = WithClauseNode(expr=LiteralNode(2, "int"))
-    tr = LuaTranspiler()
-    tr.visit_WithClauseNode(w_clause1)
-    tr.visit_WithClauseNode(w_clause2)
-    self.assertIn("1", tr.get_output())
-    self.assertIn("2", tr.get_output())
+    self.assertIn("_sapphire_del(b)", lua_code)
+    self.assertIn("_sapphire_del(a)", lua_code)
 
   def test_coroutine_transpilation_and_methods(self):
     """Verifies Lua transpilation of top-level coroutines, struct method coroutines, and yields."""
@@ -1916,25 +1901,6 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(y)", test_code)
     self.assertIn("_sapphire_del(x)", test_code)
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
-
-  def test_destructor_with_statement_no_double_cleanup(self):
-    """Verifies that a resource managed in a with block is cleaned up by with, not double-deleted by __del__."""
-    code = """
-    struct Resource {
-      var id: int;
-    }
-    impl Resource {
-      func __del__() {}
-    }
-    func test() {
-      with let r = Resource { id = 1 } {
-        let x = r.id;
-      }
-    }
-    """
-    lua_code = self._transpile(code)
-    self.assertIn("_sapphire_del(_with_res_1)", lua_code)
-    self.assertNotIn("_sapphire_del(r)", lua_code)
 
 
 

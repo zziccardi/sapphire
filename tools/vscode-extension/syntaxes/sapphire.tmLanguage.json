@@ -66,11 +66,11 @@
       "patterns": [
         {
           "name": "keyword.control.sapphire",
-          "match": "\\b(as|break|clone|continue|else|export|for|guard|if|import|in|match|move|return|while|with|yield)\\b"
+          "match": "\\b(as|break|clone|continue|else|export|for|guard|if|import|in|match|move|return|while|yield)\\b"
         },
         {
           "name": "storage.modifier.sapphire",
-          "match": "\\b(const|enum|func|impl|let|proto|static|struct|trait|var)\\b"
+          "match": "\\b(enum|func|impl|let|proto|static|struct|trait|var)\\b"
         },
         {
           "name": "constant.language.sapphire",

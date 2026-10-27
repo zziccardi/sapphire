@@ -1353,29 +1353,39 @@ class TypeChecker:
     return first_type
 
   def visit_IfNode(self, node: IfNode) -> None:
-    if node.init_binding:
+    if node.bindings:
       self.symbol_table.enter_scope()
-      expr_type = self.visit(node.init_binding.expr)
-      if node.init_binding.is_unwrap:
-        if not isinstance(expr_type, OptionalType):
-          self.error("Expression in optional unwrapping must resolve to an optional type.")
-          unwrapped_type = expr_type
+      has_unwrap = False
+      for binding in node.bindings:
+        expr_type = self.visit(binding.expr)
+        if binding.is_unwrap:
+          has_unwrap = True
+          if not isinstance(expr_type, OptionalType):
+            self.error("Expression in optional unwrapping must resolve to an optional type.", node=binding.expr)
+            unwrapped_type = expr_type
+          else:
+            unwrapped_type = expr_type.base_type
         else:
-          unwrapped_type = expr_type.base_type
-      else:
-        unwrapped_type = expr_type
+          unwrapped_type = expr_type
 
-      self.symbol_table.define(
-          node.init_binding.let_name,
-          VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
-      )
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        if len(let_names) > 1:
+          elem_t = unwrapped_type.element_type if isinstance(unwrapped_type, ArrayType) else unwrapped_type
+          for name in let_names:
+            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+        else:
+          self.symbol_table.define(
+              binding.let_name,
+              VariableSymbol(binding.let_name, unwrapped_type, is_mutable=binding.is_mutable)
+          )
 
       if node.condition:
         cond_type = self.visit(node.condition)
         if cond_type != PrimitiveType("bool"):
-          self.error("If condition must resolve to 'bool'.")
+          c_node = node.condition if (hasattr(node.condition, "start_line") and isinstance(node.condition.start_line, int)) else None
+          self.error("If condition must resolve to 'bool'.", node=c_node)
       else:
-        if not node.init_binding.is_unwrap:
+        if not has_unwrap:
           self.error("Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='.")
 
       pre_branch_moved = set(self.moved_symbols)
@@ -1394,7 +1404,8 @@ class TypeChecker:
     else:
       cond_type = self.visit(node.condition)
       if cond_type != PrimitiveType("bool"):
-        self.error("If condition must resolve to 'bool'.")
+        c_node = node.condition if (hasattr(node.condition, "start_line") and isinstance(node.condition.start_line, int)) else None
+        self.error("If condition must resolve to 'bool'.", node=c_node)
 
       pre_branch_moved = set(self.moved_symbols)
       self.visit(node.then_block)
@@ -1412,37 +1423,10 @@ class TypeChecker:
     self.loop_depth += 1
     pre_loop_moved = set(self.moved_symbols)
     try:
-      if node.init_binding:
-        self.symbol_table.enter_scope()
-        expr_type = self.visit(node.init_binding.expr)
-        if node.init_binding.is_unwrap:
-          if not isinstance(expr_type, OptionalType):
-            self.error("Expression in optional unwrapping must resolve to an optional type.")
-            unwrapped_type = expr_type
-          else:
-            unwrapped_type = expr_type.base_type
-        else:
-          unwrapped_type = expr_type
-
-        self.symbol_table.define(
-            node.init_binding.let_name,
-            VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
-        )
-
-        if node.condition:
-          cond_type = self.visit(node.condition)
-          if cond_type != PrimitiveType("bool"):
-            self.error("While condition must resolve to 'bool'.")
-        else:
-          self.error("While statement requires an explicit boolean condition.", node=node)
-
-        self.visit(node.block)
-        self.symbol_table.exit_scope()
-      else:
-        cond_type = self.visit(node.condition)
-        if cond_type != PrimitiveType("bool"):
-          self.error("While condition must resolve to 'bool'.")
-        self.visit(node.block)
+      cond_type = self.visit(node.condition)
+      if cond_type != PrimitiveType("bool"):
+        self.error("While condition must resolve to 'bool'.")
+      self.visit(node.block)
 
       for sym in self.moved_symbols - pre_loop_moved:
         self.error(
@@ -2937,65 +2921,6 @@ class TypeChecker:
 
     if not self._block_terminates(node.else_block):
       self.error("Guard else block must terminate control flow (via return, break, or continue).")
-
-    return PrimitiveType("none")
-
-  def visit_WithStmtNode(self, node: WithStmtNode) -> Type:
-    has_unwrap = False
-
-    self.symbol_table.enter_scope()
-
-    for clause in node.clauses:
-      if clause.binding:
-        binding = clause.binding
-        expr_t = self.visit(binding.expr)
-        if binding.is_unwrap:
-          has_unwrap = True
-          if not isinstance(expr_t, OptionalType):
-            self.error(f"Cannot unwrap non-optional type '{expr_t}' in with clause.")
-            base_t = expr_t
-          else:
-            base_t = expr_t.base_type
-        else:
-          base_t = expr_t
-
-        let_names = getattr(binding, "let_names", [binding.let_name])
-        check_t = base_t.element_type if (len(let_names) > 1 and isinstance(base_t, ArrayType)) else base_t
-
-        # Verify check_t defines a __del__ destructor or is an Arena
-        is_destructible = False
-        if isinstance(check_t, (StructType, ArenaType)) and getattr(check_t, "has_destructor", False):
-          is_destructible = True
-
-        if not is_destructible:
-          self.error(f"Type '{check_t}' bound in with statement does not define a '__del__' destructor.")
-
-        if len(let_names) > 1:
-          for name in let_names:
-            self.symbol_table.define(name, VariableSymbol(name, check_t, is_mutable=binding.is_mutable))
-        else:
-          name = binding.let_name
-          self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))
-
-      elif clause.expr:
-        expr_t = self.visit(clause.expr)
-        is_destructible = False
-        if isinstance(expr_t, (StructType, ArenaType)) and getattr(expr_t, "has_destructor", False):
-          is_destructible = True
-
-        if not is_destructible:
-          self.error(f"Expression type '{expr_t}' in with statement does not define a '__del__' destructor.")
-
-    # Check body statements
-    self.visit(node.body)
-    self.symbol_table.exit_scope()
-
-    if node.else_body:
-      if not has_unwrap:
-        self.error("With statement with 'else' block must contain at least one '?=' unwrap clause.")
-      self.symbol_table.enter_scope()
-      self.visit(node.else_body)
-      self.symbol_table.exit_scope()
 
     return PrimitiveType("none")
 

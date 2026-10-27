@@ -26,9 +26,14 @@ described in the spec.
 ## Sapphire at a glance
 
 ```sapphire
-struct Position {
+struct Vector2 {
   var x: float = 0.0;
   var y: float = 0.0;
+}
+
+// Static structural inheritance: zero-overhead composition and auto-forwarding
+struct Position: Vector2 {
+  var z: float = 0.0;
 }
 
 // Opt-in prototypal inheritance: instances dynamically delegate state
@@ -55,6 +60,15 @@ func attack(attacker: Entity, var target: Entity, bonus: int = 0) {
   print(f"{attacker.name} struck {target.name}! {target.health} HP remaining");
 }
 
+// Swift-style guard: early exit with validated value promoted to outer scope
+func execute_turn(hero: Entity, target_opt: Entity?) {
+  guard let target ?= target_opt; target.health > 0 else {
+    print("No valid target available!");
+    return;
+  }
+  attack(attacker = hero, target = target, bonus = 10);
+}
+
 let arena = Arena();
 
 // Scoped prototype allocated within an explicit lexical arena
@@ -76,24 +90,23 @@ let hero = Entity {
 } in arena;
 
 var target_ref: Entity? = elite_goblin;
-
-// Optional unwrapping with `?=`
-if let target ?= target_ref {
-  attack(attacker = hero, target = target, bonus = 10);
-}
+execute_turn(hero = hero, target_opt = target_ref);
 ```
 
 ## Key features of Sapphire
 
 ### Dual-paradigm code reuse
 * **Traits**: Traits define interfaces/contracts (`trait Damageable`) that are
-  statically checked and dispatched.
+  statically checked and dispatched. Heterogeneous collections (`[Damageable]`)
+  eliminate vtables and fat pointers via compiler-synthesized closed tagged
+  unions.
 * **Structural delegation**: Structs can "inherit" layouts statically
-  (`struct Character: Entity`) without runtime overhead or traditional OOP
+  (`struct Position: Vector2`) without runtime overhead or traditional OOP
   boilerplate. The compiler treats this as syntactic sugar for composition and
-  automatically generates forwarding methods.
+  automatically generates forwarding methods. Struct up-casting is prohibited to
+  prevent object slicing.
 * **Prototypal delegation**: Prototypal delegation is opt-in and uses
-  the `proto` keyword (e.g. `proto Character`). Runtime objects can be created
+  the `proto` keyword (e.g. `proto Entity`). Runtime objects can be created
   by cloning existing prototypes using the `clone` keyword.
   * Nested reference fields on cloned objects support **copy-on-write (CoW)** to
     isolate mutations from the shared prototype.
@@ -101,15 +114,22 @@ if let target ?= target_ref {
     (using `in <arena>`), with clones inheriting their prototype's arena by
     default.
 
-### Null safety via optionals
+### Null safety & deterministic error handling
+* **Zero throwable exceptions**: Sapphire eliminates `try`/`catch`/`throw` and
+  invisible stack unwinding. Fallibility is handled explicitly and
+  deterministically via optionals (`T?`), multiple return destructuring, and
+  early-exit `guard` statements.
 * Null-pointer errors are prevented at compile time.
 * Optionals are denoted by a `?` suffix (e.g., `Character?`).
 * Optionals can be chained safely (`let speed = target?.speed`).
 * Optionals can be conditionally unwrapped (`let x ?= optional`) within
   Go/C++17-style init statements in `if` and `while` headers.
 * Nil-coalescing fallback values are supported via the `??` operator.
+* **Swift-style `guard` statements**: Early-exit `guard` clauses unwrap and
+  promote validated variables into the enclosing scope, eliminating rightward
+  drift.
 
-### Reference semantics & parameter modes
+### Pass-by-reference, ownership, & move semantics
 * Non-primitive types are passed by **constant reference** by default, avoiding
   reference-cycle overhead and a visual pointer syntax.
 * Mutable parameters must be explicitly marked with `var` in function signatures
@@ -117,8 +137,14 @@ if let target ?= target_ref {
 * Named parameters are supported at the call site using `=`
   (e.g., `execute_strike(bonus = 10)`); functions can also specify default
   parameter values in their signatures.
-* Compile-time aliasing rules enforce reference safety without requiring
-  lifetime annotations.
+* Compile-time aliasing rules enforce reference safety at call sites without
+  requiring lifetime annotations.
+* **Explicit ownership transfers (`move`)**: Ownership transfers use the `move`
+  keyword (e.g., `let next = move current;`), which statically invalidates the
+  source variable with compile-time use-after-move enforcement.
+* **Move-only types & RVO**: Move-only heap references (`Ref<T>`) enforce
+  exclusive ownership, while return values use return-value optimization (RVO)
+  to construct values directly in the caller's stack frame.
 
 ### Zero-overhead generics
 * Type-parameterized structs, implementation blocks, traits, and functions

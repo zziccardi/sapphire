@@ -32,3 +32,23 @@ func test_optional_unwrap_missed(): int {
   }
   return -1;
 }
+
+@test
+func test_multi_optional_unwrap(): int {
+  let a: int? = 10;
+  let b: int? = 20;
+  if let x ?= a; let y ?= b; x + y == 30 {
+    return x + y;
+  }
+  return -1;
+}
+
+@test
+func test_multi_optional_unwrap_failure(): int {
+  let a: int? = 10;
+  let b: int? = none;
+  if let x ?= a; let y ?= b; x > 0 {
+    return 1;
+  }
+  return 0;
+}

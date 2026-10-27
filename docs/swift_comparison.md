@@ -1,36 +1,41 @@
 # Sapphire vs. Swift
 
-This document outlines how Sapphire's core architecture and language design compare with **Swift**, highlighting shared modern ergonomics, pain point mitigations, and architectural divergences in memory management, polymorphism, and runtime predictability.
+This document compares Sapphire's architecture and language design with
+**Swift**, examining shared ergonomic features as well as differences in
+memory management, polymorphism, and runtime predictability.
 
-## 1. Executive Summary & Core Motivation
+## 1. Overview & Motivation
 
-Introduced by Apple in 2014, Swift demonstrated how modern language design could replace legacy object-oriented languages (specifically Objective-C) with expressive syntax, strong static typing, value-type ergonomics, and first-class null safety. Swift popularized language features that have since become industry benchmarks: `guard` statements with scope promotion, optional binding, pattern matching, protocol-oriented programming, and named parameters.
+Swift introduced expressive syntax, value-type ergonomics, and null safety
+to mainstream software development—popularizing language features such as
+`guard` statements with scope promotion, optional binding, and named
+parameters.
 
-However, Swift was fundamentally engineered for general-purpose application development across Apple's platforms, carrying architectural trade-offs to support Objective-C interoperability, dynamic frameworks, and binary resilience:
+However, Swift's design reflects its role in application development across
+Apple platforms, incorporating specific architectural trade-offs:
 
-1. **Automatic Reference Counting (ARC) overhead & retain cycles**: Reference types (`class`) incur atomic retain/release overhead on assignments and copies. Cyclical references require manual `weak` and `unowned` annotations to avoid memory leaks.
-2. **Dual object models & virtual method tables (vtables)**: Swift retains traditional class hierarchies with dynamic method overriding via vtables, inducing cache misses, pointer chasing, and inhibiting compiler inlining.
-3. **Existential container overhead (`any Protocol`)**: Dynamic polymorphism using protocol types relies on existential containers (inline buffer + heap fallback) and protocol witness tables, introducing allocation overhead and indirect dispatch.
-4. **Hidden control flow via throwable exceptions**: Error propagation uses `throws`, `try`, and `catch`, introducing invisible branch points and stack unwinding.
-5. **Runtime heaviness & embedding friction**: Swift's extensive runtime, ABI resilience metadata, and multithreaded cooperative task pool make embedding into lightweight scripting engines, game loops, or simulation contexts non-trivial.
+1. **Automatic Reference Counting (ARC) overhead**: Reference types (`class`)
+   incur atomic retain/release overhead on assignments and copies. Cyclical
+   references require manual `weak` and `unowned` annotations to avoid memory
+   leaks.
+2. **Dual object models & virtual method tables (vtables)**: Swift retains
+   class hierarchies with dynamic method overriding via vtables, inducing
+   cache misses, pointer chasing, and inhibiting compiler inlining.
+3. **Existential container overhead (`any Protocol`)**: Dynamic polymorphism
+   using protocol types relies on existential containers (inline buffer + heap
+   fallback) and protocol witness tables, introducing allocation overhead and
+   indirect dispatch.
+4. **Throwable exceptions**: Error propagation uses `throws`, `try`, and
+   `catch`, introducing non-local branch points and stack unwinding.
+5. **Runtime heaviness & embedding friction**: Swift's extensive runtime, ABI
+   resilience metadata, and multithreaded task pool make embedding into
+   lightweight scripting engines, game loops, or simulation contexts
+   non-trivial.
 
-Sapphire embraces Swift's greatest ergonomic breakthroughs—especially its expressive API clarity, optionals, and `guard` statements—while discarding class hierarchies, vtables, universal ARC, and throwable exceptions in favor of **zero-cost systems performance, lexical memory arenas, and data-only prototypal delegation**:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               SAPPHIRE TRIAD                                │
-│                                                                             │
-│          Systems Performance                   Dynamic Ergonomics           │
-│        (Monomorphization, RAII,            (Live Hot-Reload, `proto`,       │
-│       Zero-Vtable Delegation)                 Syntactic Delegation)         │
-│                    \                                   /                    │
-│                     \                                 /                     │
-│                      ▼                               ▼                      │
-│                             Modern Safety & Clarity                         │
-│                       (Swift-Style Optionals, `guard`,                      │
-│                        Named Arguments, No Exceptions)                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Sapphire adopts Swift-style syntax for optionals, `guard` statements, and named
+arguments, while replacing class hierarchies, universal ARC, vtables, and
+exceptions with a **stack-first memory model, lexical arenas, zero-vtable
+delegation, and explicit fallibility**.
 
 ## 2. Detailed Pain Point & Architectural Analysis
 
@@ -164,7 +169,7 @@ for item in items {
   Sapphire **completely omits throwable exceptions** (`try`/`catch`/`throw`) ([docs/SPEC.md §16.3](SPEC.md#avoiding-throwable-exceptions)):
   1. **Explicit, Type-Safe Fallibility**: Functions model fallibility exclusively through optionals (`T?`), multiple return values (`T, bool`), or tagged unions with exhaustive `match` expressions.
   2. **Predictable CPU Branching**: Without stack unwinding machinery, control flow remains entirely local and linear, making execution predictable and easily mapped to low-level target environments.
-  3. **Resource Teardown via `with` & RAII**: Clean resource management does not depend on `finally` blocks or exception unwinding. Resources are cleaned up deterministically in LIFO order via struct `__del__()` destructors and scoped `with` blocks ([docs/SPEC.md §7.4](SPEC.md#with-statements-with----) & [§9.2](SPEC.md#deterministic-destructors-__del__)).
+  3. **Deterministic RAII Resource Teardown**: Clean resource management does not depend on `finally` blocks or exception unwinding. Resources are cleaned up deterministically in LIFO order via struct `__del__()` destructors on lexical scope exit ([docs/SPEC.md §9.2](SPEC.md#deterministic-destructors-__del__)).
 
 ```swift
 // Swift: Exception unwinding with try/catch
@@ -274,7 +279,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 
 | Dimension | Swift | Sapphire | Rationale / Concession in Sapphire |
 | :--- | :--- | :--- | :--- |
-| **Class-Based OOP & Subclassing** | Full support for `class` inheritance, virtual method overrides, and `super` dispatch. | **No classes**. Structural inheritance is syntactic delegation; up-casting is forbidden. | **Trade-off:** Cannot build deeply nested, open class hierarchies. In exchange, vtable overhead, object slicing, and cache misses are eradicated. |
+| **Class-Based OOP & Subclassing** | Full support for `class` inheritance, virtual method overrides, and `super` dispatch. | **No classes**. Structural inheritance is syntactic delegation; up-casting is forbidden. | **Trade-off:** Cannot build deeply nested, open class hierarchies. In exchange, vtable overhead, object slicing, and cache misses are eliminated. |
 | **Open World Dynamic Polymorphism** | Open protocols (`any Protocol`) allow dynamic libraries to add conforming types at runtime. | Heterogeneous trait collections (`[Trait]`) synthesize closed tagged unions at compile time. | **Trade-off:** Storing heterogeneous traits requires module or whole-program visibility of implementors. In exchange, witness tables, heap boxing, and fat pointers are eliminated. |
 | **Multithreaded Structured Concurrency** | Rich async/await runtime, actors, task groups, and OS thread pool scheduling. | Single-threaded, deterministic, frame-steppable coroutines (`Coroutine<T>`). | **Trade-off:** Does not provide automated background thread-pool dispatching for CPU-bound tasks. In exchange, delivers deterministic frame timing without thread jitter. |
 | **Universal ABI Stability & SDK Interop** | Stable ABI on Apple OS platforms, runtime metadata reflection, and direct C/C++/Obj-C interop. | Lightweight host annotations (`@extern`, `@export`); targets Python and Lua backends. | **Trade-off:** Lacks native binary ABI compatibility with Apple operating system frameworks. In exchange, embeds cleanly into lightweight scripting hosts. |
@@ -288,7 +293,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 | **Variable Declarations** | `let` (immutable), `var` (mutable) | `let` (immutable), `var` (mutable) | Identical constant-by-default philosophy |
 | **Null Representation** | `nil` | `none` | Clean null-safety without raw pointers |
 | **Optional Binding Syntax** | `if let x = opt` or `if let x` | `if let x ?= opt` | Explicit `?=` unwrapping assignment operator |
-| **Precondition Enforcement** | `guard let x = opt else { ... }` | `guard let x ?= opt else { ... }` | Shared scope-promotion semantics; Sapphire uses semicolon clause delimiters |
+| **Precondition Enforcement** | `guard let x = opt else { ... }` | `guard let x ?= opt else { ... }` | Shared scope-promotion semantics; Sapphire uses semicolon binding delimiters and boolean operator condition combinations |
 | **String Interpolation** | `"Hello \(name)"` | `f"Hello {name}"` | Python-style f-strings with support for nested quotes and brace escaping |
 | **Parameter Semantics** | Value copy by default; `inout` for mutation | **Constant reference borrow** by default; `var` for mutable parameters | Avoids unnecessary struct copying without requiring reference punctuation |
 | **Call-Site Aliasing Rules** | Exclusive access memory law (dynamic/static) | Compile-time scope-bound call-site reference exclusivity | Guarantees mutable borrow exclusivity at call sites without lifetime syntax |
@@ -300,7 +305,7 @@ Sapphire makes deliberate engineering concessions to prioritize systems performa
 | **Memory Hierarchy** | ARC for classes; stack/value copy for structs | Stack-first default; lexical `Arena`s; explicit `Ref<T>` | Deterministic LIFO scope destruction; zero universal retain/release overhead |
 | **Destructors & RAII** | `deinit` on classes (run on ARC deallocation) | `func __del__()` on structs (run on lexical scope exit) | Deterministic RAII with Return-Value Optimization (RVO) copy elision |
 | **Error Handling** | `throws`, `try`, `catch`, `rethrows` | Optionals (`T?`), multi-returns (`T, bool`), `match` | Zero throwable exceptions or stack unwinding; explicit typed fallibility |
-| **Scoped Resource Cleanup** | `defer { ... }` | `with let res ?= acquire() { ... }` (`__del__` RAII) | Deterministic LIFO teardown with fallible unwrapping support |
+| **Scoped Resource Cleanup** | `defer { ... }` | Lexical blocks & `guard let` (`__del__` RAII) | Deterministic LIFO teardown with safe fallible unwrapping |
 | **Access Control** | `open`, `public`, `package`, `internal`, `private` | File-private by default; single `export { ... }` manifest | Construction contracts govern field mutability; zero keyword clutter |
 | **Concurrency / Yielding** | Async/await, Actors, Task Groups (multithreaded) | Frame-steppable coroutines (`Coroutine<T>`, `yield`) | Deterministic, cooperative tick-based stepping for game and simulation loops |
 | **Host Interoperability** | Native C/C++/Obj-C bridging headers | `@extern`, `@export`, trait-based engine bindings | Zero-overhead bindings to game engines (e.g. Love2D) and host scripting runtimes |

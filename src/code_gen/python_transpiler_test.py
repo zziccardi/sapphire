@@ -108,20 +108,20 @@ class TestPythonTranspiler(unittest.TestCase):
     result1 = self._transpile_and_run(code1, "run_if_let_cond()")
     self.assertEqual(result1, 42)
 
-    # 2. while let loop
+    # 2. standard while loop
     code2 = """
-    func run_while_let(): int {
-      var opt_val: int? = 5;
+    func run_while(): int {
+      var count = 5;
       var out = 0;
-      while let active ?= opt_val; active > 0 {
-        out += active;
-        opt_val = none; // terminate loop
+      while count > 0 {
+        out += count;
+        count -= 1;
       }
       return out;
     }
     """
-    result2 = self._transpile_and_run(code2, "run_while_let()")
-    self.assertEqual(result2, 5)
+    result2 = self._transpile_and_run(code2, "run_while()")
+    self.assertEqual(result2, 15)
 
     # 3. ?? operator
     code3 = """
@@ -147,20 +147,20 @@ class TestPythonTranspiler(unittest.TestCase):
     result4 = self._transpile_and_run(code4, "run_standard_if()")
     self.assertEqual(result4, 10)
 
-    # 5. standard while let (no unwrap)
+    # 5. multi-clause if let
     code5 = """
-    func run_standard_while(): int {
+    func run_multi_if(): int {
+      var opt_a: int? = 10;
+      var opt_b: int? = 20;
       var out = 0;
-      var count = 5;
-      while let x = count; count > 0 {
-        out += x;
-        count = 0; // terminate loop
+      if let a ?= opt_a; let b ?= opt_b; a + b == 30 {
+        out = a + b;
       }
       return out;
     }
     """
-    result5 = self._transpile_and_run(code5, "run_standard_while()")
-    self.assertEqual(result5, 5)
+    result5 = self._transpile_and_run(code5, "run_multi_if()")
+    self.assertEqual(result5, 30)
 
   def test_prototypal_inheritance_live_updates(self):
     """Verifies that cloned objects delegate live property lookups and allow shadowing."""
@@ -1243,24 +1243,23 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "get_score()")
     self.assertEqual(res, 100)
 
-  def test_while_non_unwrap_init_statement(self):
-    """Verifies that a while loop with a non-unwrapping init statement executes the init statement once before entering the loop."""
+  def test_while_loop_execution(self):
+    """Verifies that a while loop executes cleanly."""
     code = """
     func test_while(): int {
       var out = 0;
       var count = 5;
-      while let x = count; count > 0 {
-        out += x;
-        count = 0;
+      while count > 0 {
+        out += count;
+        count -= 1;
       }
       return out;
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("x = count", py_code)
     self.assertIn("while (count > 0):", py_code)
     res = self._transpile_and_run(code, "test_while()")
-    self.assertEqual(res, 5)
+    self.assertEqual(res, 15)
 
   def test_cow_live_prototype_update(self):
     """Verifies that reading a nested reference on a clone does not break live prototype delegation until a write occurs."""
@@ -1601,7 +1600,7 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
     code = """
     func test_guard(opt: int?, flag: bool): int {
-      guard let x ?= opt; flag; x > 0 else {
+      guard let x ?= opt; flag && x > 0 else {
         return -1;
       }
       return x * 10;
@@ -1618,6 +1617,79 @@ class TestPythonTranspiler(unittest.TestCase):
 
     res4 = self._transpile_and_run(code, "test_guard(-5, True)")
     self.assertEqual(res4, -1)
+
+  def test_multi_binding_if_statement_execution(self):
+    """Verifies Python transpilation and execution of multi-binding if statements."""
+    code = """
+    func test_multi_if(opt_a: int?, opt_b: int?, flag: bool): int {
+      if let a ?= opt_a; let b ?= opt_b; flag && (a + b > 10) {
+        return a + b;
+      } else {
+        return -1;
+      }
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_multi_if(6, 7, True)")
+    self.assertEqual(res1, 13)
+
+    res2 = self._transpile_and_run(code, "test_multi_if(None, 7, True)")
+    self.assertEqual(res2, -1)
+
+    res3 = self._transpile_and_run(code, "test_multi_if(6, None, True)")
+    self.assertEqual(res3, -1)
+
+    res4 = self._transpile_and_run(code, "test_multi_if(6, 7, False)")
+    self.assertEqual(res4, -1)
+
+    res5 = self._transpile_and_run(code, "test_multi_if(2, 3, True)")
+    self.assertEqual(res5, -1)
+
+  def test_multi_binding_if_raii_lifo_cleanup(self):
+    """Verifies that multi-binding if cleans up partially acquired resources on failure and all on block exit."""
+    code = """
+    var events: [String] = [];
+
+    struct Resource {
+      var name: String;
+      var is_closed: bool;
+    }
+    impl Resource {
+      func __del__() {
+        if !self.is_closed {
+          self.is_closed = true;
+          events.push("dispose:" + self.name);
+        }
+      }
+    }
+
+    func get_res(name: String, ok: bool): Resource? {
+      if ok {
+        return Resource { name = name, is_closed = false };
+      }
+      return none;
+    }
+
+    func run_test(ok_a: bool, ok_b: bool, cond: bool) {
+      if let a ?= get_res(name = "resA", ok = ok_a);
+         let b ?= get_res(name = "resB", ok = ok_b);
+         cond {
+        events.push("inside");
+      } else {
+        events.push("fallback");
+      }
+    }
+    """
+    # Case 1: Both succeed and condition holds -> inside -> LIFO dispose resB then resA
+    res1 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = true, cond = true); return events; }", "main()")
+    self.assertEqual(res1, ["inside", "dispose:resB", "dispose:resA"])
+
+    # Case 2: First succeeds, second fails -> dispose resA before fallback
+    res2 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = false, cond = true); return events; }", "main()")
+    self.assertEqual(res2, ["dispose:resA", "fallback"])
+
+    # Case 3: Both succeed, but condition fails -> dispose resB, resA before fallback
+    res3 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = true, cond = false); return events; }", "main()")
+    self.assertEqual(res3, ["dispose:resB", "dispose:resA", "fallback"])
 
   def test_guard_destructuring_and_clause_node(self):
     """Verifies Python transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
@@ -1672,92 +1744,6 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_map_get", py_code)
     res = self._transpile_and_run(code, "test_subscript()")
     self.assertEqual(res, 110)
-
-  def test_with_statement_transpilation_python(self):
-    """Verifies that with statements transpile to Python try...finally blocks with LIFO disposal."""
-    code = """
-    var events: [String] = [];
-
-    struct Resource {
-      var name: String;
-    }
-    impl Resource {
-      func __del__() {
-        events.push("dispose:" + self.name);
-      }
-    }
-
-    func test_with(): int {
-      with let r1 = Resource { name = "r1" }; let r2 = Resource { name = "r2" } {
-        events.push("inside");
-      }
-      return events.size();
-    }
-
-    func get_res(ok: bool): Resource? {
-      if ok {
-        return Resource { name = "opt_res" };
-      }
-      return none;
-    }
-
-    func test_with_unwrap(ok: bool): int {
-      with let r ?= get_res(ok = ok) {
-        events.push("unwrapped:" + r.name);
-      } else {
-        events.push("unwrap_failed");
-      }
-      return events.size();
-    }
-
-    func test_all_unwrap(): [String] {
-      test_with_unwrap(ok = true);
-      test_with_unwrap(ok = false);
-      return events;
-    }
-
-    func get_two(): [Resource] {
-      return [Resource { name = "p1" }, Resource { name = "p2" }];
-    }
-
-    func test_multi_and_raw(): int {
-      with Arena() {
-        events.push("raw_arena");
-      }
-      with let a, b = get_two() {
-        events.push(a.name + "+" + b.name);
-      }
-      with let opt_r ?= get_res(ok = true) {
-        events.push("no_else_unwrap");
-      }
-      return events.size();
-    }
-    """
-    py_code = self._transpile(code)
-    self.assertIn("try:", py_code)
-    self.assertIn("finally:", py_code)
-    self.assertIn("_sapphire_del(_with_res_", py_code)
-
-    res = self._transpile_and_run(code, "test_with()")
-    self.assertEqual(res, 3)
-
-    run_unwrap = self._transpile_and_run(code, "test_all_unwrap()")
-    self.assertIn("unwrapped:opt_res", run_unwrap)
-    self.assertIn("dispose:opt_res", run_unwrap)
-    self.assertIn("unwrap_failed", run_unwrap)
-
-    run_multi = self._transpile_and_run(code, "test_multi_and_raw()")
-    self.assertGreater(run_multi, 0)
-
-    # Directly visit WithClauseNode to cover visitor
-    from src.parser.ast import WithClauseNode
-    w_clause1 = WithClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="r", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
-    w_clause2 = WithClauseNode(expr=LiteralNode(2, "int"))
-    tr = PythonTranspiler()
-    tr.visit_WithClauseNode(w_clause1)
-    tr.visit_WithClauseNode(w_clause2)
-    self.assertIn("1", tr.get_output())
-    self.assertIn("2", tr.get_output())
 
   def test_coroutine_transpilation_and_methods(self):
     """Verifies Python transpilation of top-level and struct method coroutines and yield expressions."""
@@ -2028,25 +2014,6 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(y)", test_code)
     self.assertIn("_sapphire_del(x)", test_code)
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
-
-  def test_destructor_with_statement_no_double_cleanup(self):
-    """Verifies that a resource managed in a with block is cleaned up by with, not double-deleted by __del__ in Python."""
-    code = """
-    struct Resource {
-      var id: int;
-    }
-    impl Resource {
-      func __del__() {}
-    }
-    func test() {
-      with let r = Resource { id = 1 } {
-        let x = r.id;
-      }
-    }
-    """
-    py_code = self._transpile(code)
-    self.assertIn("_sapphire_del(_with_res_1)", py_code)
-    self.assertNotIn("_sapphire_del(r)", py_code)
 
 
 # ---------------------------------------------------------------------------

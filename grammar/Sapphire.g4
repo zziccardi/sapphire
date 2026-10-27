@@ -102,7 +102,7 @@ parameterList
     ;
 
 parameter
-    : (VAR | CONST)? (SELF | IDENTIFIER) (COLON type)? (ASSIGN expression)?
+    : VAR? (SELF | IDENTIFIER) (COLON type)? (ASSIGN expression)?
     ;
 
 type
@@ -134,7 +134,6 @@ statement
     | assignmentStatement
     | ifStatement
     | guardStatement
-    | withStatement
     | whileStatement
     | forStatement
     | returnStatement
@@ -207,30 +206,16 @@ returnStatement
 
 ifStatement
     : IF expression block (ELSE ifStatement | ELSE block)?
-    | IF letOrVarBinding (SEMICOLON expression)? block (ELSE ifStatement | ELSE block)?
+    | IF letOrVarBinding (SEMICOLON letOrVarBinding)* (SEMICOLON expression)? block (ELSE ifStatement | ELSE block)?
     ;
 
 guardStatement
-    : GUARD guardClause (SEMICOLON guardClause)* ELSE block
-    ;
-
-guardClause
-    : letOrVarBinding
-    | expression
-    ;
-
-withStatement
-    : WITH withClause (SEMICOLON withClause)* block (ELSE block)?
-    ;
-
-withClause
-    : letOrVarBinding
-    | expression
+    : GUARD expression ELSE block
+    | GUARD letOrVarBinding (SEMICOLON letOrVarBinding)* (SEMICOLON expression)? ELSE block
     ;
 
 whileStatement
     : WHILE expression block
-    | WHILE letOrVarBinding SEMICOLON expression block
     ;
 
 letOrVarBinding
@@ -351,13 +336,11 @@ TRAIT : 'trait';
 FOR : 'for';
 IN : 'in';
 STATIC : 'static';
-CONST : 'const';
 CLONE : 'clone';
 MOVE : 'move';
 IF : 'if';
 ELSE : 'else';
 GUARD : 'guard';
-WITH : 'with';
 WHILE : 'while';
 BREAK : 'break';
 CONTINUE : 'continue';

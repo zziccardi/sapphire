@@ -118,16 +118,78 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code1)
 
-    # 2. while let with init-statement + condition
+    # 2. while loop with condition
     code2 = """
     func test() {
-      var opt_x: int? = none;
-      while let x ?= opt_x; x < 5 {
-        let y: int = x;
+      var count: int = 0;
+      while count < 5 {
+        count += 1;
       }
     }
     """
     self._check(code2)
+
+  def test_multi_binding_if_statement_type_checking(self):
+    """Verifies type checking, unwrapping, condition validation, and scoping for multi-binding if statements."""
+    # 1. Valid multi-binding if with unwraps and compound boolean condition
+    code_valid = """
+    func test(opt_a: int?, opt_b: String?): int {
+      if let a ?= opt_a; let b ?= opt_b; a > 0 && b.size() > 0 {
+        return a + b.size();
+      } else {
+        return -1;
+      }
+    }
+    """
+    self._check(code_valid)
+
+    # 2. Error: non-optional unwrap in second binding
+    code_invalid_unwrap = """
+    func test(opt_a: int?, non_opt: int) {
+      if let a ?= opt_a; let b ?= non_opt {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_invalid_unwrap)
+    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(ctx.exception))
+
+    # 3. Error: condition expression resolves to non-bool
+    code_non_bool = """
+    func test(opt_a: int?, opt_b: int?) {
+      if let a ?= opt_a; let b ?= opt_b; a + b {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_non_bool)
+    self.assertIn("If condition must resolve to 'bool'", str(ctx.exception))
+
+    # 4. Error: multiple boolean conditions separated by semicolons are rejected by syntax
+    code_semicolon_conditions = """
+    func test(a: int, b: int) {
+      if a > 0; b > 0 {
+        let x = 1;
+      }
+    }
+    """
+    with self.assertRaises(SyntaxError):
+      self._check(code_semicolon_conditions)
+
+    # 5. Scope isolation: unwrapped bindings are not defined outside the if block
+    code_leak = """
+    func test(opt_a: int?) {
+      if let a ?= opt_a {
+        let inside = a;
+      }
+      let outside = a; // Error: undefined 'a'
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code_leak)
+    self.assertIn("Undefined identifier 'a'", str(ctx.exception))
 
     # 3. ?? operator
     code3 = """
@@ -2669,21 +2731,19 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Init-statement in 'if' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
 
-    # 5. Unwrapping non-optional in while let (should error)
-    with self.assertRaises(SemanticError) as ctx:
+    # 5. while let is rejected as a syntax error
+    with self.assertRaises(SyntaxError):
       self._check("""
       func test() {
         while let x ?= 42; x > 0 { }
       }
       """)
-    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(ctx.exception))
 
-    # 6. Non-boolean condition in while let (should error)
+    # 6. Non-boolean condition in while (should error)
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
-        var opt_x: int? = none;
-        while let x ?= opt_x; 42 { }
+        while 42 { }
       }
       """)
     self.assertIn("While condition must resolve to 'bool'", str(ctx.exception))
@@ -3882,7 +3942,7 @@ class TestTypeChecker(unittest.TestCase):
     # 1. Valid guard statement with scope promotion
     self._check("""
     func test(opt: int?, flag: bool): int {
-      guard let x ?= opt; flag; x > 0 else {
+      guard let x ?= opt; flag && x > 0 else {
         return 0;
       }
       return x * 2; // 'x' is promoted to outer scope as non-optional int
@@ -4270,142 +4330,11 @@ class TestTypeChecker(unittest.TestCase):
 
     checker.check(ast)
 
-  def test_with_statement_type_checking(self):
-    """Verifies type checking, __del__ destructor requirement, optional unwrapping, and else-block semantics for with statements."""
+  def test_arena_type_has_destructor(self):
+    """Verifies that ArenaType defines has_destructor = True."""
     from src.semantics.symbol_table import ArenaType
-
-    # ArenaType.has_destructor coverage
     arena_t = ArenaType()
     self.assertTrue(arena_t.has_destructor)
-
-    # 1. Valid with statement with destructible struct
-    self._check("""
-    struct FileStream {
-      var path: String;
-    }
-    impl FileStream {
-      func __del__() {}
-    }
-    func main() {
-      with let f = FileStream { path = "test.txt" } {
-        let p = f.path;
-      }
-    }
-    """)
-
-    # 2. Valid with statement with Arena and raw expression
-    self._check("""
-    func main() {
-      with let a = Arena() {
-        let x = 10;
-      }
-      with Arena() {
-        let y = 20;
-      }
-    }
-    """)
-
-    # 3. Valid with statement with unwrap ?= and else block
-    self._check("""
-    struct FileStream {
-      var path: String;
-    }
-    impl FileStream {
-      func __del__() {}
-    }
-    func get_file(): FileStream? {
-      return FileStream { path = "a.txt" };
-    }
-    func main() {
-      with let f ?= get_file() {
-        let p = f.path;
-      } else {
-        let err = 1;
-      }
-    }
-    """)
-
-    # 4. Valid with statement with multi-variable binding and raw struct expressions
-    self._check("""
-    struct FileStream {
-      var path: String;
-    }
-    impl FileStream {
-      func __del__() {}
-    }
-    func get_two(): [FileStream] {
-      return [FileStream { path = "a" }, FileStream { path = "b" }];
-    }
-    func test_with() {
-      with FileStream { path = "raw" } {
-        let y = 3;
-      }
-      with let a, b = get_two() {
-        let p = a.path;
-      }
-    }
-    """)
-
-    # 5. Error: Non-destructible struct bound in with
-    with self.assertRaises(SemanticError) as ctx:
-      self._check("""
-      struct NonDisposable {
-        var x: int;
-      }
-      func main() {
-        with let obj = NonDisposable { x = 1 } {
-          let y = obj.x;
-        }
-      }
-      """)
-    self.assertIn("does not define a '__del__' destructor", str(ctx.exception))
-
-    # 6. Error: Non-destructible raw expression in with
-    with self.assertRaises(SemanticError) as ctx:
-      self._check("""
-      func main() {
-        with 123 {
-          let y = 1;
-        }
-      }
-      """)
-    self.assertIn("does not define a '__del__' destructor", str(ctx.exception))
-
-    # 7. Error: With else block without ?= unwrap
-    with self.assertRaises(SemanticError) as ctx:
-      self._check("""
-      struct FileStream {
-        var path: String;
-      }
-      impl FileStream {
-        func __del__() {}
-      }
-      func main() {
-        with let f = FileStream { path = "test.txt" } {
-          let p = f.path;
-        } else {
-          let err = 1;
-        }
-      }
-      """)
-    self.assertIn("must contain at least one '?=' unwrap clause", str(ctx.exception))
-
-    # 8. Error: Cannot unwrap non-optional type in with clause
-    with self.assertRaises(SemanticError) as ctx:
-      self._check("""
-      struct FileStream {
-        var path: String;
-      }
-      impl FileStream {
-        func __del__() {}
-      }
-      func main() {
-        with let f ?= FileStream { path = "test.txt" } {
-          let p = f.path;
-        }
-      }
-      """)
-    self.assertIn("Cannot unwrap non-optional type", str(ctx.exception))
 
   def test_coroutine_type_checking(self):
     """Verifies type checking for Coroutine declarations, yields, returns, and methods."""

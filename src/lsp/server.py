@@ -731,10 +731,12 @@ def _find_local_decl(ast, name: str, line: int):
             if st_start is None or st_start <= line:
               if getattr(stmt, "name", None) == name or name in getattr(stmt, "names", []):
                 return stmt
-          elif type(stmt).__name__ in ("IfNode", "WhileNode") and getattr(stmt, "init_binding", None):
+          elif type(stmt).__name__ == "IfNode":
             if st_start is None or st_start <= line:
-              if stmt.init_binding.let_name == name:
-                return stmt.init_binding
+              for b in getattr(stmt, "bindings", [stmt.init_binding] if getattr(stmt, "init_binding", None) else []):
+                for b_name in getattr(b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []):
+                  if b_name == name:
+                    return b
           elif isinstance(stmt, ForNode):
             if st_start is None or st_start <= line:
               if getattr(stmt, "key_var", None) == name or getattr(stmt, "val_var", None) == name or getattr(stmt, "loop_var", None) == name:
@@ -756,10 +758,12 @@ def _find_local_decl(ast, name: str, line: int):
                 if st_start is None or st_start <= line:
                   if getattr(stmt, "name", None) == name or name in getattr(stmt, "names", []):
                     return stmt
-              elif type(stmt).__name__ in ("IfNode", "WhileNode") and getattr(stmt, "init_binding", None):
+              elif type(stmt).__name__ == "IfNode":
                 if st_start is None or st_start <= line:
-                  if stmt.init_binding.let_name == name:
-                    return stmt.init_binding
+                  for b in getattr(stmt, "bindings", [stmt.init_binding] if getattr(stmt, "init_binding", None) else []):
+                    for b_name in getattr(b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []):
+                      if b_name == name:
+                        return b
               elif isinstance(stmt, ForNode):
                 if st_start is None or st_start <= line:
                   if getattr(stmt, "key_var", None) == name or getattr(stmt, "val_var", None) == name or getattr(stmt, "loop_var", None) == name:
@@ -1283,10 +1287,11 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
               vtype = node_types.get(stmt)
               type_str = f": {vtype}" if vtype else ""
               add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
-          elif type(stmt).__name__ in ("IfNode", "WhileNode") and getattr(stmt, "init_binding", None):
+          elif type(stmt).__name__ == "IfNode":
             if st_start is None or st_start <= line:
-              let_name = stmt.init_binding.let_name
-              add_item(let_name, 6, f"(variable) {let_name}")
+              for b in getattr(stmt, "bindings", [stmt.init_binding] if getattr(stmt, "init_binding", None) else []):
+                for b_name in getattr(b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []):
+                  add_item(b_name, 6, f"(variable) {b_name}")
           elif isinstance(stmt, ForNode):
             if st_start is None or st_start <= line:
               if getattr(stmt, "key_var", None):
@@ -1318,10 +1323,11 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
                     vtype = node_types.get(stmt)
                     type_str = f": {vtype}" if vtype else ""
                     add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
-                elif type(stmt).__name__ in ("IfNode", "WhileNode") and getattr(stmt, "init_binding", None):
+                elif type(stmt).__name__ == "IfNode":
                   if st_start is None or st_start <= line:
-                    let_name = stmt.init_binding.let_name
-                    add_item(let_name, 6, f"(variable) {let_name}")
+                    for b in getattr(stmt, "bindings", [stmt.init_binding] if getattr(stmt, "init_binding", None) else []):
+                      for b_name in getattr(b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []):
+                        add_item(b_name, 6, f"(variable) {b_name}")
                 elif isinstance(stmt, ForNode):
                   if st_start is None or st_start <= line:
                     if getattr(stmt, "key_var", None):
@@ -1366,8 +1372,8 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
 
   # 3. Sapphire Keywords & Annotations
   KEYWORDS = [
-      "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else", "guard", "with",
-      "for", "in", "while", "break", "continue", "return", "match", "yield", "true", "false", "none", "const", "static",
+      "let", "var", "func", "struct", "proto", "enum", "trait", "impl", "if", "else", "guard",
+      "for", "in", "while", "break", "continue", "return", "match", "yield", "true", "false", "none", "static",
       "clone", "arena", "import", "export", "as"
   ]
   for kw in KEYWORDS:
