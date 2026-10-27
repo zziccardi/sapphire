@@ -102,7 +102,7 @@ parameterList
     ;
 
 parameter
-    : (VAR | CONST)? (SELF | IDENTIFIER) (COLON type)? (ASSIGN expression)?
+    : VAR? (SELF | IDENTIFIER) (COLON type)? (ASSIGN expression)?
     ;
 
 type
@@ -216,7 +216,6 @@ guardStatement
 
 whileStatement
     : WHILE expression block
-    | WHILE letOrVarBinding SEMICOLON expression block
     ;
 
 letOrVarBinding
@@ -337,7 +336,6 @@ TRAIT : 'trait';
 FOR : 'for';
 IN : 'in';
 STATIC : 'static';
-CONST : 'const';
 CLONE : 'clone';
 MOVE : 'move';
 IF : 'if';

@@ -118,12 +118,12 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code1)
 
-    # 2. while let with init-statement + condition
+    # 2. while loop with condition
     code2 = """
     func test() {
-      var opt_x: int? = none;
-      while let x ?= opt_x; x < 5 {
-        let y: int = x;
+      var count: int = 0;
+      while count < 5 {
+        count += 1;
       }
     }
     """
@@ -2731,21 +2731,19 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Init-statement in 'if' must be followed by a condition unless using optional unwrapping", str(ctx.exception))
 
-    # 5. Unwrapping non-optional in while let (should error)
-    with self.assertRaises(SemanticError) as ctx:
+    # 5. while let is rejected as a syntax error
+    with self.assertRaises(SyntaxError):
       self._check("""
       func test() {
         while let x ?= 42; x > 0 { }
       }
       """)
-    self.assertIn("Expression in optional unwrapping must resolve to an optional type", str(ctx.exception))
 
-    # 6. Non-boolean condition in while let (should error)
+    # 6. Non-boolean condition in while (should error)
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
-        var opt_x: int? = none;
-        while let x ?= opt_x; 42 { }
+        while 42 { }
       }
       """)
     self.assertIn("While condition must resolve to 'bool'", str(ctx.exception))

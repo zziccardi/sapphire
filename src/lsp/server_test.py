@@ -129,7 +129,7 @@ class TestLSPServer(unittest.TestCase):
 
   def test_semantic_tokens_full(self):
     doc_uri = "file:///test.sp"
-    doc_text = "func test() { let opt_x: int? = none; while let x = 5; x < 5 { let y = x; } while let x ?= opt_x; x < 5 { let z = x; } }"
+    doc_text = "func test() { let opt_x: int? = none; if let x = 5; x < 5 { let y = x; } if let x ?= opt_x; x < 5 { let z = x; } }"
 
     # Mock params
     params = MagicMock()
@@ -1683,7 +1683,7 @@ struct Container {
 func top_process(p_param: Point) {
   let top_a = 1, top_b = 2;
   let top_c = top_a;
-  while let active ?= p_param; active.x > 0 {
+  if let active ?= p_param; active.x > 0 {
     let active_val = active;
   }
   let m = [1: 2];
@@ -1696,7 +1696,7 @@ impl Point {
   func process(p_param: Point) {
     let a = 1, b = 2;
     let c = a;
-    while let active ?= p_param; active.x > 0 {
+    if let active ?= p_param; active.x > 0 {
       let active_val = active;
     }
     let m = [1: 2];

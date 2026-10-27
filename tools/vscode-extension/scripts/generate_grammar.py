@@ -38,7 +38,7 @@ def parse_antlr_grammar():
       "if", "else", "guard", "while", "for", "in", "break", "continue",
       "return", "match", "yield", "clone", "move", "import", "export", "as"
   }
-  modifier_words = {"static", "const", "proto", "struct", "enum", "impl", "trait", "func", "let", "var"}
+  modifier_words = {"static", "proto", "struct", "enum", "impl", "trait", "func", "let", "var"}
 
   for name, val in matches:
     if val.isalnum():

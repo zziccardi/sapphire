@@ -108,20 +108,20 @@ class TestPythonTranspiler(unittest.TestCase):
     result1 = self._transpile_and_run(code1, "run_if_let_cond()")
     self.assertEqual(result1, 42)
 
-    # 2. while let loop
+    # 2. standard while loop
     code2 = """
-    func run_while_let(): int {
-      var opt_val: int? = 5;
+    func run_while(): int {
+      var count = 5;
       var out = 0;
-      while let active ?= opt_val; active > 0 {
-        out += active;
-        opt_val = none; // terminate loop
+      while count > 0 {
+        out += count;
+        count -= 1;
       }
       return out;
     }
     """
-    result2 = self._transpile_and_run(code2, "run_while_let()")
-    self.assertEqual(result2, 5)
+    result2 = self._transpile_and_run(code2, "run_while()")
+    self.assertEqual(result2, 15)
 
     # 3. ?? operator
     code3 = """
@@ -147,20 +147,20 @@ class TestPythonTranspiler(unittest.TestCase):
     result4 = self._transpile_and_run(code4, "run_standard_if()")
     self.assertEqual(result4, 10)
 
-    # 5. standard while let (no unwrap)
+    # 5. multi-clause if let
     code5 = """
-    func run_standard_while(): int {
+    func run_multi_if(): int {
+      var opt_a: int? = 10;
+      var opt_b: int? = 20;
       var out = 0;
-      var count = 5;
-      while let x = count; count > 0 {
-        out += x;
-        count = 0; // terminate loop
+      if let a ?= opt_a; let b ?= opt_b; a + b == 30 {
+        out = a + b;
       }
       return out;
     }
     """
-    result5 = self._transpile_and_run(code5, "run_standard_while()")
-    self.assertEqual(result5, 5)
+    result5 = self._transpile_and_run(code5, "run_multi_if()")
+    self.assertEqual(result5, 30)
 
   def test_prototypal_inheritance_live_updates(self):
     """Verifies that cloned objects delegate live property lookups and allow shadowing."""
@@ -1243,24 +1243,23 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "get_score()")
     self.assertEqual(res, 100)
 
-  def test_while_non_unwrap_init_statement(self):
-    """Verifies that a while loop with a non-unwrapping init statement executes the init statement once before entering the loop."""
+  def test_while_loop_execution(self):
+    """Verifies that a while loop executes cleanly."""
     code = """
     func test_while(): int {
       var out = 0;
       var count = 5;
-      while let x = count; count > 0 {
-        out += x;
-        count = 0;
+      while count > 0 {
+        out += count;
+        count -= 1;
       }
       return out;
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("x = count", py_code)
     self.assertIn("while (count > 0):", py_code)
     res = self._transpile_and_run(code, "test_while()")
-    self.assertEqual(res, 5)
+    self.assertEqual(res, 15)
 
   def test_cow_live_prototype_update(self):
     """Verifies that reading a nested reference on a clone does not break live prototype delegation until a write occurs."""

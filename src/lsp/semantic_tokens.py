@@ -415,7 +415,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     super().visit_IfNode(node)
 
   def visit_WhileNode(self, node) -> None:
-    if node.init_binding:
+    if getattr(node, "init_binding", None):
       # Add semantic token for let_name
       mods = 1 | 4  # declaration | readonly
       self.add_token(getattr(node.init_binding, "let_name_line", None), getattr(node.init_binding, "let_name_column", None), getattr(node.init_binding, "let_name_length", None), "variable", mods)

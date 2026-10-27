@@ -2056,82 +2056,18 @@ class LuaTranspiler(BaseTranspiler):
     self._loop_stack.append(has_continue)
     self.loop_destructor_depth.append(len(self.destructor_stack))
     try:
-      if node.init_binding:
-        self._lift_match_expressions(node.init_binding.expr)
       if node.condition:
         self._lift_match_expressions(node.condition)
 
       self.newline()
-      if node.init_binding:
-        let_name = node.init_binding.let_name
-        if node.init_binding.is_unwrap:
-          self.emit("while true do")
-          self.indent()
-          self.newline()
-          val_var = f"_val_{let_name}"
-          self.emit(f"local {val_var} = ")
-          self.visit(node.init_binding.expr)
-          self.newline()
-
-          # Map identifier to temporary variable during condition check
-          old_map = self._identifier_map.copy()
-          self._identifier_map[let_name] = val_var
-
-          self.emit(f"if not ({val_var} ~= nil")
-          if node.condition:
-            self.emit(" and ")
-            self.visit(node.condition)
-          self.emit(") then")
-
-          # Restore map
-          self._identifier_map = old_map
-
-          self.indent()
-          self.newline()
-          self.emit("break")
-          self.dedent()
-          self.newline()
-          self.emit("end")
-          self.newline()
-          self.emit(f"local {let_name} = {val_var}")
-          st_name = self._expr_destructible_struct(node.init_binding.expr)
-          if st_name:
-            self.variable_types[let_name] = st_name
-            if not hasattr(node.block, "_block_destructibles"):
-              node.block._block_destructibles = []
-            node.block._block_destructibles.append(let_name)
-          self._visit_loop_body(node.block, has_continue)
-          self.dedent()
-          self.newline()
-          self.emit("end")
-        else:
-          # Standard init-statement: execute once before loop begins
-          self.emit(f"local {let_name} = ")
-          self.visit(node.init_binding.expr)
-          st_name = self._expr_destructible_struct(node.init_binding.expr)
-          if st_name:
-            self.variable_types[let_name] = st_name
-            if not hasattr(node.block, "_block_destructibles"):
-              node.block._block_destructibles = []
-            node.block._block_destructibles.append(let_name)
-          self.newline()
-          self.emit("while ")
-          self.visit(node.condition)
-          self.emit(" do")
-          self.indent()
-          self._visit_loop_body(node.block, has_continue)
-          self.dedent()
-          self.newline()
-          self.emit("end")
-      else:
-        self.emit("while ")
-        self.visit(node.condition)
-        self.emit(" do")
-        self.indent()
-        self._visit_loop_body(node.block, has_continue)
-        self.dedent()
-        self.newline()
-        self.emit("end")
+      self.emit("while ")
+      self.visit(node.condition)
+      self.emit(" do")
+      self.indent()
+      self._visit_loop_body(node.block, has_continue)
+      self.dedent()
+      self.newline()
+      self.emit("end")
     finally:
       self.loop_destructor_depth.pop()
       self._loop_stack.pop()

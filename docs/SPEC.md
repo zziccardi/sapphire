@@ -479,7 +479,7 @@ if let active_target ?= target {
 }
 ```
 
-### Semicolon-separated init and multi-binding statements
+### Multi-binding `if` statements
 `if` and `guard` statement headers support declaring one or more variable bindings
 before an optional boolean condition, separated by semicolons. Semicolons
 strictly delimit variable bindings (`let a ?= ...; let b ?= ...;`), while multiple
@@ -492,14 +492,9 @@ if let active_target ?= target;
   // `active_target` and `weapon` are unwrapped once and verified against the
   // condition
 }
-
-while let score = get_score(); score < 100 {
-  // `score` is initialized once; `score < 100` is re-evaluated every iteration
-}
 ```
 
 * **Sequential short-circuiting**: Bindings and the condition evaluate sequentially from left to right; if any unwrapping fails or the condition evaluates to `false`, evaluation immediately short-circuits. If partially acquired resources define `__del__`, they are cleaned up in LIFO order upon short-circuit failure.
-* **Mandatory boolean condition for `while` loops**: Unlike `if` statement headers (where `if let x ?= opt` can stand alone without a subsequent check), `while` statements **always require an explicit boolean condition** following the semicolon (e.g. `while let score = get_score(); score < 100 { ... }` or `while condition { ... }`). Conditionless `while-let` bindings are prohibited to ensure termination conditions remain explicit and transparent.
 
 ### Nil-coalescing operator (`??`)
 Sapphire provides the binary coalescing operator `??` to supply a fallback value
@@ -593,9 +588,9 @@ Sapphire gives the caller explicit control over ownership transfer at the call s
 * **Constant borrow (default)**: Passing an identifier without `move` passes it by constant reference. The caller retains ownership, and the callee cannot mutate the value.
 * **Exclusive mutable borrow (`var`)**: Passing to a parameter declared with `var` gives the callee exclusive mutable access. The caller retains ownership after the call completes.
 * **Ownership transfer (`move`)**: Passing `move <identifier>` transfers
-  ownership into the function. The variable must be declared with `var`. The
-  caller's variable is statically invalidated and cannot be read, borrowed, or
-  moved again.
+  ownership into the function. The variable may be declared with either `let` or
+  `var`. The caller's variable is statically invalidated and cannot be read,
+  borrowed, or moved again.
 
 ### Scope-bound aliasing rules (call-site reference exclusivity)
 

@@ -608,6 +608,23 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(stmts[0], ContinueNode)
     self.assertIsInstance(stmts[1], BreakNode)
 
+  def test_while_statement_pure_condition_and_rejected_init(self):
+    """Verifies that while loops accept pure boolean conditions and reject init statements."""
+    from src.parser.ast import WhileNode
+    ast = self._get_ast("while count > 0 { count -= 1; }")
+    while_stmt = ast.declarations[0]
+    self.assertIsInstance(while_stmt, WhileNode)
+    self.assertIsNotNone(while_stmt.condition)
+    self.assertIsNone(while_stmt.init_binding)
+
+    with self.assertRaises(SyntaxError):
+      self._get_ast("while let x = 5; x > 0 { }")
+
+  def test_const_keyword_rejected(self):
+    """Verifies that the deprecated/dead 'const' keyword in parameters is rejected by grammar."""
+    with self.assertRaises(SyntaxError):
+      self._get_ast("func foo(const x: int) {}")
+
   def test_impl_trait_prefix(self):
     """Verifies AST building for trait prefix in impl block."""
     ast = self._get_ast('impl pkg.Trait for TargetStruct {}')

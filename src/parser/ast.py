@@ -566,12 +566,12 @@ class IfNode(StmtNode):
 
 
 class WhileNode(StmtNode):
-  """Represents a while loop, supporting init-statements."""
+  """Represents a while loop."""
 
-  def __init__(self, init_binding: Optional[HeaderBindingNode], condition: Optional[ASTNode], block: BlockNode):
-    self.init_binding = init_binding
+  def __init__(self, condition: ASTNode, block: BlockNode):
     self.condition = condition
     self.block = block
+    self.init_binding = None
 
 
 class ForNode(StmtNode):

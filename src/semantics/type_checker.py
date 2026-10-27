@@ -1423,37 +1423,10 @@ class TypeChecker:
     self.loop_depth += 1
     pre_loop_moved = set(self.moved_symbols)
     try:
-      if node.init_binding:
-        self.symbol_table.enter_scope()
-        expr_type = self.visit(node.init_binding.expr)
-        if node.init_binding.is_unwrap:
-          if not isinstance(expr_type, OptionalType):
-            self.error("Expression in optional unwrapping must resolve to an optional type.")
-            unwrapped_type = expr_type
-          else:
-            unwrapped_type = expr_type.base_type
-        else:
-          unwrapped_type = expr_type
-
-        self.symbol_table.define(
-            node.init_binding.let_name,
-            VariableSymbol(node.init_binding.let_name, unwrapped_type, is_mutable=node.init_binding.is_mutable)
-        )
-
-        if node.condition:
-          cond_type = self.visit(node.condition)
-          if cond_type != PrimitiveType("bool"):
-            self.error("While condition must resolve to 'bool'.")
-        else:
-          self.error("While statement requires an explicit boolean condition.", node=node)
-
-        self.visit(node.block)
-        self.symbol_table.exit_scope()
-      else:
-        cond_type = self.visit(node.condition)
-        if cond_type != PrimitiveType("bool"):
-          self.error("While condition must resolve to 'bool'.")
-        self.visit(node.block)
+      cond_type = self.visit(node.condition)
+      if cond_type != PrimitiveType("bool"):
+        self.error("While condition must resolve to 'bool'.")
+      self.visit(node.block)
 
       for sym in self.moved_symbols - pre_loop_moved:
         self.error(

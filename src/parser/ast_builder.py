@@ -446,16 +446,9 @@ class ASTBuilder(SapphireVisitor):
     return IfNode(condition=condition, then_block=then_block, else_block=else_block, bindings=bindings)
 
   def visitWhileStatement(self, ctx: SapphireParser.WhileStatementContext) -> WhileNode:
-    init_binding = None
-    if ctx.letOrVarBinding():
-      init_binding = self.visit(ctx.letOrVarBinding())
-
-    condition = None
-    if ctx.expression():
-      condition = self.visit(ctx.expression())
-
+    condition = self.visit(ctx.expression())
     block = self.visit(ctx.block())
-    return WhileNode(init_binding, condition, block)
+    return WhileNode(condition, block)
 
   def visitGuardStatement(self, ctx: SapphireParser.GuardStatementContext) -> GuardStmtNode:
     bindings = []

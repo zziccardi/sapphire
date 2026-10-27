@@ -206,19 +206,17 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local _val_active = opt_val", lua_code1)
     self.assertIn("if _val_active ~= nil and (_val_active > 40) then", lua_code1)
 
-    # 2. while let loop
+    # 2. standard while loop
     code2 = """
     func check_while() {
-      var opt_val: int? = 5;
-      while let active ?= opt_val; active > 0 {
-        opt_val = none;
+      var count = 5;
+      while count > 0 {
+        count -= 1;
       }
     }
     """
     lua_code2 = self._transpile(code2)
-    self.assertIn("while true do", lua_code2)
-    self.assertIn("local _val_active = opt_val", lua_code2)
-    self.assertIn("if not (_val_active ~= nil and (_val_active > 0)) then", lua_code2)
+    self.assertIn("while (count > 0) do", lua_code2)
 
     # 3. ?? operator
     code3 = """
@@ -242,18 +240,20 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local x = 10", lua_code4)
     self.assertIn("if (x > 5) then", lua_code4)
 
-    # 5. standard while let (no unwrap)
+    # 5. multi-binding if
     code5 = """
-    func check_std_while() {
-      var count = 5;
-      while let x = count; x > 0 {
-        count = 0;
+    func check_multi_if() {
+      let a: int? = 10;
+      let b: int? = 20;
+      if let x ?= a; let y ?= b; x + y > 15 {
+        let z = x + y;
       }
     }
     """
     lua_code5 = self._transpile(code5)
-    self.assertIn("local x = count", lua_code5)
-    self.assertIn("while (x > 0) do", lua_code5)
+    self.assertIn("local _val_x_1 = a", lua_code5)
+    self.assertIn("local _val_y_2 = b", lua_code5)
+    self.assertIn("if ((x + y) > 15) then", lua_code5)
 
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
@@ -1014,17 +1014,17 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertNotIn('scores["alice"] + 1', lua_out)
     self.assertIn('arr[1]', lua_out)  # Array indexing still gets + 1!
 
-  def test_lua_while_non_unwrap_init_statement(self):
-    """Verifies that Lua transpilation emits non-unwrapping while init-statements once before the loop."""
+  def test_lua_while_loop(self):
+    """Verifies that Lua transpilation emits while loops correctly."""
     code = """
     func test_while() {
-      while let x = count; count > 0 {
+      var count = 5;
+      while count > 0 {
         count = 0;
       }
     }
     """
     lua_out = self._transpile(code)
-    self.assertIn("local x = count", lua_out)
     self.assertIn("while (count > 0) do", lua_out)
 
   def test_lua_map_for_loop(self):
