@@ -301,7 +301,8 @@ pipenv run sapphire run samples/overview.sp --dev
    * Markdown files: Lines should not exceed 80 characters (except when
      needed for e.g. links), sentence case should be used for section
      headings instead of title case, and horizontal rules ("---") should be
-     avoided.
+     avoided. Whenever any complete Sapphire sample code in Markdown files
+     is edited, it must compile correctly.
 5. **No Test Masking via `self.skipTest()`**:
    * Tests should only be skipped if optional prerequisite binaries (e.g.
      `lua`) are genuinely absent from `PATH`.
@@ -312,5 +313,7 @@ pipenv run sapphire run samples/overview.sp --dev
    * [ ] `pipenv run test` passes with zero failures, zero errors, and no
      unexpected skipped tests.
    * [ ] Affected e2e/integration tests pass across all relevant backends.
+   * [ ] Any edited complete Sapphire sample code in Markdown files compiles
+     correctly.
    * [ ] Newly created files adhere to repository naming and layout
      conventions.
