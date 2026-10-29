@@ -1725,8 +1725,17 @@ class LuaTranspiler(BaseTranspiler):
     returned_ids = {expr.name for expr in node.expressions if isinstance(expr, IdentifierNode)}
     destructors_to_run = [d for d in all_active_destructors if d not in returned_ids]
 
-    # If non-trivial return expressions exist alongside destructors, evaluate expressions first
-    if node.expressions and destructors_to_run and not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions):
+    # If return expressions exist alongside destructors or active arenas, evaluate expressions first
+    should_evaluate_first = bool(
+        node.expressions
+        and (destructors_to_run or all_active_arenas)
+        and (
+            all_active_arenas
+            or not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions)
+        )
+    )
+
+    if should_evaluate_first:
       ret_tmps = []
       for idx, expr in enumerate(node.expressions):
         tmp_name = f"_ret_val_{idx + 1}"
@@ -2734,11 +2743,11 @@ class LuaTranspiler(BaseTranspiler):
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
     if node.is_optional:
-      self.emit("(")
+      self.emit("((function(_r) if _r ~= nil then return _r.")
+      self.emit(node.member)
+      self.emit(" else return nil end end)(")
       self.visit(node.receiver)
-      self.emit(" ~= nil and ")
-      self.visit(node.receiver)
-      self.emit(f".{node.member} or nil)")
+      self.emit("))")
     else:
       self.visit(node.receiver)
       self.emit(f".{node.member}")

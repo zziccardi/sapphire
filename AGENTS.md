@@ -293,13 +293,24 @@ pipenv run sapphire run samples/overview.sp --dev
    * Do not delete or mangle docstrings, inline architectural comments, or existing specs.
    * When modifying language semantics or adding built-ins, update `docs/SPEC.md`, `docs/compiler.md`, or `docs/builtins.md` accordingly.
 4. **Code Quality Standards**:
-   * Python codebase: Follow the Google Python Style Guide rather than PEP 8, maintain 2-space or 4-space consistency with surrounding files, include explicit type annotations where appropriate.
-   * Sapphire code: Follow `docs/style_guide.md` (80 chars max line length, 2-space indentation, semicolon terminated).
+   * Python codebase: Follow the Google Python Style Guide rather than PEP 8,
+     maintain 2-space or 4-space consistency with surrounding files, include
+     explicit type annotations where appropriate.
+   * Sapphire code: Follow `docs/style_guide.md` (80 chars max line length,
+     2-space indentation, semicolon terminated).
    * Markdown files: Lines should not exceed 80 characters (except when
      needed for e.g. links), sentence case should be used for section
      headings instead of title case, and horizontal rules ("---") should be
      avoided.
-5. **Pre-Completion Checklist**:
-   * [ ] `pipenv run test` passes with zero failures or errors.
+5. **No Test Masking via `self.skipTest()`**:
+   * Tests should only be skipped if optional prerequisite binaries (e.g.
+     `lua`) are genuinely absent from `PATH`.
+   * Never catch runtime errors or non-zero exit codes to call
+     `self.skipTest()`; test execution failures must fail the test suite
+     with `self.fail()`.
+6. **Pre-Completion Checklist**:
+   * [ ] `pipenv run test` passes with zero failures, zero errors, and no
+     unexpected skipped tests.
    * [ ] Affected e2e/integration tests pass across all relevant backends.
-   * [ ] Newly created files adhere to repository naming and layout conventions.
+   * [ ] Newly created files adhere to repository naming and layout
+     conventions.
