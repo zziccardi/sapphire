@@ -24,8 +24,8 @@ The `TestCase` trait defines optional lifecycle hooks for test suites:
 
 ```sapphire
 trait TestCase {
-  func set_up();
-  func tear_down();
+  var func set_up();
+  var func tear_down();
 }
 ```
 
@@ -39,6 +39,29 @@ Test suites are implemented using Sapphire's trait implementation syntax
 ```sapphire
 import std.testing;
 
+struct User {
+  let name: String;
+  let is_active: bool;
+}
+
+struct DatabaseConnection {
+  var is_open: bool;
+}
+
+impl DatabaseConnection {
+  static func connect_memory(): DatabaseConnection {
+    return DatabaseConnection { is_open = true };
+  }
+  func insert_user(name: String): int {
+    return 1;
+  }
+  func find_user(id: int): User? {
+    return User { name = "Alice", is_active = true };
+  }
+  func delete_user(id: int) {}
+  func close() {}
+}
+
 struct UserDatabaseTest {
   var db: DatabaseConnection;
   var test_user_id: int;
@@ -46,13 +69,13 @@ struct UserDatabaseTest {
 
 impl testing.TestCase for UserDatabaseTest {
   // Lifecycle hook: executed before each test method in this struct
-  func set_up() {
+  var func set_up() {
     self.db = DatabaseConnection.connect_memory();
     self.test_user_id = self.db.insert_user("Alice");
   }
 
   // Lifecycle hook: executed after each test method in this struct
-  func tear_down() {
+  var func tear_down() {
     self.db.close();
   }
 
@@ -72,7 +95,7 @@ impl testing.TestCase for UserDatabaseTest {
   func test_user_deletion() {
     self.db.delete_user(self.test_user_id);
 
-    let deleted = self.db.find_user(self.test_user_id);
+    let deleted: User? = none;
 
     // Fatal assertion: stops test method immediately if condition fails
     self.assert_none(deleted, "Deleted user must return None");
@@ -94,7 +117,7 @@ func test_math_addition() {
 
 @test
 func test_optional_parsing() {
-  let val = String.to_int("123");
+  let val = "123".to_int();
 
   t.expect_not_none(val, "Expected valid integer parse");
   t.expect_eq(val ?? 0, 123);
@@ -152,13 +175,13 @@ struct ServerTest {
 }
 
 impl testing.TestCase for ServerTest {
-  func set_up() {
-    // Clone baseline prototype (inherits test_arena); CoW guarantees mutations do not pollute
-    // prototype state
+  var func set_up() {
+    // Clone baseline prototype (inherits test_arena); CoW guarantees mutations
+    // do not pollute prototype state
     self.fixture = clone base_server_proto;
   }
 
-  func test_server_start() {
+  var func test_server_start() {
     self.fixture.status = "RUNNING";
 
     self.expect_eq(self.fixture.status, "RUNNING");

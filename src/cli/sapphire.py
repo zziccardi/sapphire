@@ -10,7 +10,7 @@ import shutil
 import sys
 import subprocess
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 root_dir = os.path.abspath(os.path.join(src_dir, ".."))
@@ -43,12 +43,31 @@ def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
   return watch_files
 
 
+def _prepare_exec_env() -> Dict[str, str]:
+  """Prepares execution environment with standard Sapphire library paths."""
+  env = os.environ.copy()
+  lib_dir = os.path.join(root_dir, "lib")
+  py_paths = [root_dir, lib_dir]
+  if "PYTHONPATH" in env and env["PYTHONPATH"]:
+    py_paths.append(env["PYTHONPATH"])
+  env["PYTHONPATH"] = os.pathsep.join(py_paths)
+
+  lua_paths = [f"{lib_dir}/?.lua", f"{lib_dir}/?/init.lua"]
+  if "LUA_PATH" in env and env["LUA_PATH"]:
+    lua_paths.append(env["LUA_PATH"])
+  else:
+    lua_paths.append(";;")
+  env["LUA_PATH"] = ";".join(lua_paths)
+  return env
+
+
 def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap: bool, cmd: List[str]):
   """Spawns process and watches source files for live hot-reloading."""
   print(f"\n[Sapphire Dev Mode] Starting process with live hot-reloading: {' '.join(cmd)}")
   print("[Sapphire Dev Mode] Watching for file changes... (Press Ctrl+C to stop)")
 
-  proc = subprocess.Popen(cmd)
+  exec_env = _prepare_exec_env()
+  proc = subprocess.Popen(cmd, env=exec_env)
   watch_files = _collect_sp_watch_files(source_file)
 
   try:
@@ -85,7 +104,7 @@ def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap:
               except subprocess.TimeoutExpired:
                 proc.kill()
             print("\n--- Re-executing Sapphire Program ---")
-            proc = subprocess.Popen(cmd)
+            proc = subprocess.Popen(cmd, env=exec_env)
         except Exception as err:
           print(f"[Sapphire Dev Mode Error] Compilation failed: {err}", file=sys.stderr)
 
@@ -154,6 +173,8 @@ def run_command(args):
   sourcemap = not getattr(args, "no_sourcemap", False)
   out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
 
+  exec_env = _prepare_exec_env()
+
   if target in ("love2d", "love"):
     love_bin = _find_love_binary()
     if not love_bin:
@@ -166,7 +187,7 @@ def run_command(args):
       return
     else:
       print("\n--- Executing Love2D Engine ---")
-      result = subprocess.run(cmd)
+      result = subprocess.run(cmd, env=exec_env)
       sys.exit(result.returncode)
 
   print("\n--- Executing Sapphire Program ---")
@@ -183,7 +204,7 @@ def run_command(args):
   if dev_mode:
     _run_dev_watcher(source_file, output_file, target, sourcemap, cmd)
   else:
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, env=exec_env)
     sys.exit(result.returncode)
 
 

@@ -389,7 +389,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("(t ~= nil and t.hp or nil)", lua_code)
+    self.assertIn("((function(_r) if _r ~= nil then return _r.hp else return nil end end)(t))", lua_code)
     self.assertIn("while (count > 0) do", lua_code)
 
   def test_optional_chaining_method_call(self):
@@ -2027,13 +2027,18 @@ class TestSharedFixtures(unittest.TestCase):
       if not expectations:
         return  # Nothing to assert at runtime
 
+      lib_path = str(_E2E_DIR.parent.parent / "lib")
       for fn_name, expected in expectations.items():
         with self.subTest(fixture=fixture_name, fn=fn_name):
-          # Wrap the fixture in a tiny Lua driver that calls the function and
-          # prints its return value so we can capture it from stdout.
+          # Wrap the fixture in a Lua driver that executes within an IIFE
+          # and has package.path configured for std and lib modules.
           driver = (
-              lua_code
-              + f"\nprint(tostring({fn_name}()))\n"
+              f"package.path = \"{lib_path}/?.lua;{lib_path}/?/init.lua;\" .. package.path\n"
+              "local __mod = (function()\n"
+              f"{lua_code}\n"
+              "end)()\n"
+              f"local fn = (__mod and __mod.{fn_name}) or {fn_name}\n"
+              f"print(tostring(fn()))\n"
           )
           with tempfile.NamedTemporaryFile(
               suffix=".lua", mode="w", delete=False, encoding="utf-8"
@@ -2046,7 +2051,7 @@ class TestSharedFixtures(unittest.TestCase):
                 capture_output=True, text=True, timeout=10,
             )
             if proc.returncode != 0:
-              self.skipTest(
+              self.fail(
                   f"Lua execution failed for {fn_name}: {proc.stderr.strip()}"
               )
             raw = proc.stdout.strip()

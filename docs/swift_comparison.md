@@ -99,7 +99,7 @@ struct Health {
   var hp: int = 100;
 }
 impl Health {
-  func take_damage(amount: int) {
+  var func take_damage(amount: int) {
     self.hp -= amount;
   }
 }
@@ -109,7 +109,7 @@ struct Boss: Health {
   var phase: int = 1;
 }
 
-let boss = Boss { hp = 500, phase = 1 };
+var boss = Boss { hp = 500, phase = 1 };
 boss.take_damage(amount = 20); // Statically resolved; zero vtable lookup
 
 // Up-casting is rejected at compile time:

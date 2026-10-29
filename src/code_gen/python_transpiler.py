@@ -29,6 +29,12 @@ _curr_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals(
 if _curr_dir not in sys.path:
   sys.path.insert(0, _curr_dir)
 
+# Ensure std and lib packages can be resolved when executed directly
+_parent_dir = os.path.dirname(_curr_dir)
+for _cand in [os.path.join(_curr_dir, "lib"), os.path.join(_parent_dir, "lib"), _parent_dir]:
+  if os.path.isdir(_cand) and _cand not in sys.path:
+    sys.path.insert(0, _cand)
+
 import copy
 from enum import Enum, IntEnum
 
@@ -568,6 +574,7 @@ class PythonTranspiler(BaseTranspiler):
     self.clone_helper_counter = 0
     self._identifier_map: Dict[str, str] = {}
     self.extern_vars: Dict[str, str] = {}
+    self.global_vars: Set[str] = set()
     # Source line map: Python output line -> Sapphire source line
     self._py_lineno = 1
     self._line_map: Dict[int, int] = {}
@@ -685,6 +692,12 @@ class PythonTranspiler(BaseTranspiler):
     top_level_decls = []
     executable_stmts = []
     has_main = False
+
+    self.global_vars = set()
+    for decl in program.declarations:
+      if isinstance(decl, VarDeclNode):
+        for name in decl.names:
+          self.global_vars.add(name)
 
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
@@ -915,6 +928,10 @@ class PythonTranspiler(BaseTranspiler):
       self.newline()
       self.emit(f"def _gen_{func_name}({', '.join(raw_params)}):")
       self.indent()
+      assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
+      if assigned_globals:
+        self.newline()
+        self.emit(f"global {', '.join(sorted(assigned_globals))}")
       self.visit(func.body)
       self.dedent()
       self.newline()
@@ -926,6 +943,10 @@ class PythonTranspiler(BaseTranspiler):
     else:
       self.emit(f"def {func_name}({', '.join(params)}):")
       self.indent()
+      assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
+      if assigned_globals:
+        self.newline()
+        self.emit(f"global {', '.join(sorted(assigned_globals))}")
       if func.name == "__init__" and getattr(func, "base_initializers", None):
         for base_init in func.base_initializers:
           self.newline()
@@ -941,6 +962,65 @@ class PythonTranspiler(BaseTranspiler):
           self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
       self.visit(func.body)
       self.dedent()
+
+  def _find_assigned_globals(
+      self, node: Any, local_params: Optional[Set[str]] = None
+  ) -> Set[str]:
+    """Finds all global variables that are assigned to within node without local shadowing."""
+    if not self.global_vars:
+      return set()
+
+    local_vars = set(local_params) if local_params else set()
+    assigned = set()
+
+    def _collect_locals_and_assignments(n: Any, current_locals: Set[str]) -> None:
+      if n is None:
+        return
+      if isinstance(n, (FuncDeclNode, LambdaNode)):
+        return
+
+      if isinstance(n, VarDeclNode):
+        for name in n.names:
+          current_locals.add(name)
+      elif isinstance(n, ForNode):
+        if n.val_var:
+          current_locals.add(n.val_var)
+        if getattr(n, "key_var", None):
+          current_locals.add(n.key_var)
+      elif isinstance(n, HeaderBindingNode):
+        if getattr(n, "let_names", None):
+          for name in n.let_names:
+            current_locals.add(name)
+        elif getattr(n, "let_name", None):
+          current_locals.add(n.let_name)
+      elif isinstance(n, GuardClauseNode):
+        if n.binding:
+          if getattr(n.binding, "let_names", None):
+            for name in n.binding.let_names:
+              current_locals.add(name)
+          elif getattr(n.binding, "let_name", None):
+            current_locals.add(n.binding.let_name)
+      elif isinstance(n, AssignmentNode):
+        targets = getattr(n, "targets", [])
+        if not targets and getattr(n, "target", None):
+          targets = [n.target]
+        for t in targets:
+          if isinstance(t, IdentifierNode):
+            if t.name in self.global_vars and t.name not in current_locals:
+              assigned.add(t.name)
+
+      if isinstance(n, ASTNode):
+        for k, v in n.__dict__.items():
+          if k.startswith("_"):
+            continue
+          if isinstance(v, list):
+            for item in v:
+              _collect_locals_and_assignments(item, current_locals)
+          elif isinstance(v, ASTNode):
+            _collect_locals_and_assignments(v, current_locals)
+
+    _collect_locals_and_assignments(node, set(local_vars))
+    return assigned
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
     # Traits are compile-time monomorphic contracts and are not needed at Python runtime.
@@ -960,6 +1040,10 @@ class PythonTranspiler(BaseTranspiler):
       self.newline()
       self.emit(f"def _gen_{node.name}({', '.join(raw_params)}):")
       self.indent()
+      assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
+      if assigned_globals:
+        self.newline()
+        self.emit(f"global {', '.join(sorted(assigned_globals))}")
       self.visit(node.body)
       self.dedent()
       self.newline()
@@ -971,6 +1055,10 @@ class PythonTranspiler(BaseTranspiler):
     else:
       self.emit(f"def {node.name}({', '.join(params)}):")
       self.indent()
+      assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
+      if assigned_globals:
+        self.newline()
+        self.emit(f"global {', '.join(sorted(assigned_globals))}")
       self.visit(node.body)
       self.dedent()
 
@@ -1084,6 +1172,10 @@ class PythonTranspiler(BaseTranspiler):
     self.newline()
     self.emit(f"def {fn_name}({', '.join(params)}):")
     self.indent()
+    assigned_globals = self._find_assigned_globals(node.body, local_params=set(params))
+    if assigned_globals:
+      self.newline()
+      self.emit(f"global {', '.join(sorted(assigned_globals))}")
     self.visit(node.body)
     self.dedent()
     return fn_name
@@ -2168,11 +2260,11 @@ class PythonTranspiler(BaseTranspiler):
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
     member_name = getattr(node, "target_name", None) or node.member
     if node.is_optional:
-      self.emit("(")
+      self.emit("((lambda _r: _r.")
+      self.emit(member_name)
+      self.emit(" if _r is not None else None)(")
       self.visit(node.receiver)
-      self.emit(f".{member_name} if ")
-      self.visit(node.receiver)
-      self.emit(" is not None else None)")
+      self.emit("))")
     else:
       self.visit(node.receiver)
       self.emit(f".{member_name}")

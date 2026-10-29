@@ -161,7 +161,7 @@ must be explicitly declared:
 * **Multi-variable declarations & assignments**: Multiple variables can be
   declared or assigned simultaneously using comma separation:
   ```sapphire
-  let x, y = 10.0, 20.0;
+  var x, y = 10.0, 20.0;
   x, y = 30.0, 40.0;
   ```
 
