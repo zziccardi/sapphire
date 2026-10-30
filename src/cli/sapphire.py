@@ -19,7 +19,14 @@ if root_dir not in sys.path:  # pragma: no cover
 if src_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, src_dir)
 
+from antlr4 import FileStream, CommonTokenStream
 from src.code_gen.transpiler import transpile_file
+from src.common.errors import SapphireError
+from src.parser.ast_builder import ASTBuilder
+from src.parser.error_listener import CustomErrorListener
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
+from src.semantics.type_checker import TypeChecker, SemanticError
 
 TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
 
@@ -171,7 +178,11 @@ def run_command(args):
   ext = ".lua" if target in ("lua", "lua5.1", "love2d", "love") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
   sourcemap = not getattr(args, "no_sourcemap", False)
-  out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+  try:
+    out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+  except SapphireError as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
 
   exec_env = _prepare_exec_env()
 
@@ -221,7 +232,143 @@ def build_command(args):
   ext = ".lua" if target in ("lua", "lua5.1", "love2d", "love") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
   sourcemap = not getattr(args, "no_sourcemap", False)
-  transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+  try:
+    transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+  except SapphireError as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_command(args):
+  """Handles `parse` subcommand: parses source and prints parse tree preview."""
+  source_file = args.source
+  if not os.path.exists(source_file):
+    print(f"Error: File '{source_file}' not found.", file=sys.stderr)
+    sys.exit(1)
+
+  print(f"Reading source file: {source_file}...")
+  try:
+    input_stream = FileStream(source_file, encoding="utf-8")
+  except Exception as e:  # pragma: no cover
+    print(f"Failed to read file: {e}", file=sys.stderr)
+    sys.exit(1)
+
+  error_listener = CustomErrorListener(file_path=source_file, source_content=input_stream)
+  lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
+  stream = CommonTokenStream(lexer)
+
+  parser = SapphireParser(stream)
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
+
+  print("Parsing program...")
+  tree = parser.program()
+
+  if error_listener.errors > 0:
+    print(f"\nParsing completed with {error_listener.errors} error(s).", file=sys.stderr)
+    sys.exit(1)
+  else:
+    print("\nParsing completed successfully with 0 errors!")
+    print("\nParse Tree Preview:")
+    tree_str = tree.toStringTree(recog=parser)
+    if len(tree_str) > 500:
+      print(tree_str[:500] + " ... [TRUNCATED]")
+    else:
+      print(tree_str)
+
+
+def dump_ast_command(args):
+  """Handles `dump-ast` subcommand: parses source and outputs formatted JSON AST."""
+  import json
+  source_file = args.source
+  if not os.path.exists(source_file):
+    print(f"Error: File '{source_file}' not found.", file=sys.stderr)
+    sys.exit(1)
+
+  print(f"Reading source file: {source_file}...")
+  try:
+    input_stream = FileStream(source_file, encoding="utf-8")
+  except Exception as e:  # pragma: no cover
+    print(f"Failed to read file: {e}", file=sys.stderr)
+    sys.exit(1)
+
+  error_listener = CustomErrorListener(file_path=source_file, source_content=input_stream)
+  lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
+  stream = CommonTokenStream(lexer)
+
+  parser = SapphireParser(stream)
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
+
+  print("Parsing program to Parse Tree...")
+  tree = parser.program()
+
+  if error_listener.errors > 0:
+    print(f"\nParsing completed with {error_listener.errors} error(s). AST build aborted.", file=sys.stderr)
+    sys.exit(1)
+
+  print("Parse Tree generated successfully.")
+  print("Building AST...")
+  builder = ASTBuilder()
+  ast = builder.visit(tree)
+
+  print("AST built successfully!")
+  print("\nAST JSON Representation (Preview):")
+  ast_dict = ast.to_dict()
+  ast_json = json.dumps(ast_dict, indent=2)
+  if len(ast_json) > 1000:
+    print(ast_json[:1000] + "\n\n... [TRUNCATED] ...")
+  else:
+    print(ast_json)
+
+
+def check_command(args):
+  """Handles `check` subcommand: runs semantic analysis and type checking."""
+  source_file = args.source
+  if not os.path.exists(source_file):
+    print(f"Error: File '{source_file}' not found.", file=sys.stderr)
+    sys.exit(1)
+
+  print(f"Reading source file: {source_file}...")
+  try:
+    input_stream = FileStream(source_file, encoding="utf-8")
+  except Exception as e:  # pragma: no cover
+    print(f"Failed to read file: {e}", file=sys.stderr)
+    sys.exit(1)
+
+  error_listener = CustomErrorListener(file_path=source_file, source_content=input_stream)
+  lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
+  stream = CommonTokenStream(lexer)
+
+  parser = SapphireParser(stream)
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
+
+  print("Parsing program to Parse Tree...")
+  tree = parser.program()
+
+  if error_listener.errors > 0:
+    print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
+    sys.exit(1)
+
+  print("Building AST...")
+  builder = ASTBuilder()
+  ast = builder.visit(tree)
+
+  print("Running Semantic Analysis & Type Checker...")
+  checker = TypeChecker(source_file_path=source_file, source_content=str(input_stream))
+  try:
+    checker.check(ast)
+    print("\nSemantic Analysis completed successfully with 0 errors!")
+  except SemanticError as e:
+    print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
+    sys.exit(1)
 
 
 def test_command(args):
@@ -303,10 +450,29 @@ def main():
       "lsp", help="Start the Sapphire Language Server over stdio")
   lsp_parser.set_defaults(func=lsp_command)
 
+  # `parse` subcommand
+  parse_parser = subparsers.add_parser(
+      "parse", help="Parse Sapphire source (.sp) and print concrete parse tree")
+  parse_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
+  parse_parser.set_defaults(func=parse_command)
+
+  # `dump-ast` subcommand
+  dump_ast_parser = subparsers.add_parser(
+      "dump-ast", help="Parse Sapphire source (.sp) and dump AST in JSON format")
+  dump_ast_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
+  dump_ast_parser.set_defaults(func=dump_ast_command)
+
+  # `check` subcommand
+  check_parser = subparsers.add_parser(
+      "check", help="Run semantic analysis and type checking without generating code")
+  check_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
+  check_parser.set_defaults(func=check_command)
+
   # Handle shortcut invocation: if first argument is a file (e.g.
   # `sapphire samples/overview.sp`)
+  known_commands = ["build", "run", "test", "lsp", "parse", "dump-ast", "check"]
   if (len(sys.argv) > 1 and not sys.argv[1].startswith("-") and
-      sys.argv[1] not in ["build", "run", "test", "lsp"]):
+      sys.argv[1] not in known_commands):
     sys.argv.insert(1, "run")
 
   args = parser.parse_args()

@@ -493,7 +493,7 @@ class TestLuaTranspiler(unittest.TestCase):
       with open(sp_file, "w", encoding="utf-8") as f:
         f.write("let x: int = 1;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(sp_file, output_file="/invalid_dir_xyz/out.lua", target="lua", quiet=True)
+        transpile_file(sp_file, output_file="/invalid_dir_xyz/out.lua", target="lua", quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_trait_member_modifiers(self):
@@ -923,9 +923,9 @@ class TestLuaTranspiler(unittest.TestCase):
       self.assertTrue(os.path.exists(sub_lua))
 
   def test_transpile_file_missing_file(self):
-    """Verifies SystemExit on missing file input."""
+    """Verifies SystemExit on missing file input when raise_on_error=False."""
     with self.assertRaises(SystemExit):
-      transpile_file("/non_existent_path_xyz_123.sp", quiet=True)
+      transpile_file("/non_existent_path_xyz_123.sp", quiet=True, raise_on_error=False)
 
 
   def test_lua_match_expression_transpilation(self):

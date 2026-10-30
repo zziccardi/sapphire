@@ -200,6 +200,11 @@ sapphire run samples/love2d_demo.sp -t love2d -o main.lua --dev
 
 # Run native test suites:
 sapphire test
+
+# Inspect parse tree, AST, or type-check without code generation:
+sapphire parse samples/overview.sp
+sapphire dump-ast samples/overview.sp
+sapphire check samples/overview.sp
 ```
 
 ## Repository structure

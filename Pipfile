@@ -10,6 +10,8 @@ llvmlite = "*"
 
 [dev-packages]
 coverage = "*"
+ruff = "*"
+pyright = "*"
 
 [requires]
 python_version = "3.14"
@@ -21,3 +23,5 @@ run = "python -m src.cli.sapphire run"
 test = "sh -c 'python -m unittest discover -s src -p \"*_test.py\" && python -m unittest discover -s tools/vscode-extension/scripts -p \"*_test.py\"'"
 check-samples = "python -m unittest src/code_gen/samples_compilation_test.py"
 coverage = "sh -c 'coverage run --source=src,lib/std,tools/vscode-extension/scripts -m unittest discover -s src -p \"*_test.py\" && coverage run -a --source=src,lib/std,tools/vscode-extension/scripts -m unittest discover -s tools/vscode-extension/scripts -p \"*_test.py\" && coverage report -m && coverage html'"
+lint = "ruff check src/ lib/"
+typecheck = "pyright"

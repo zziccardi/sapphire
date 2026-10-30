@@ -722,31 +722,31 @@ class TestPythonTranspiler(unittest.TestCase):
       self.assertTrue(os.path.exists(out_path))
 
   def test_transpile_file_read_error(self):
-    """Verifies transpile_file handles missing source files by exiting."""
+    """Verifies transpile_file handles missing source files by exiting when raise_on_error=False."""
     with tempfile.TemporaryDirectory() as temp_dir:
       non_existent = os.path.join(temp_dir, "missing.sp")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(non_existent, quiet=True)
+        transpile_file(non_existent, quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_syntax_error(self):
-    """Verifies transpile_file handles syntax errors by exiting."""
+    """Verifies transpile_file handles syntax errors by exiting when raise_on_error=False."""
     with tempfile.TemporaryDirectory() as temp_dir:
       bad_sp = os.path.join(temp_dir, "syntax.sp")
       with open(bad_sp, "w", encoding="utf-8") as f:
         f.write("let x: int = ;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(bad_sp, quiet=True)
+        transpile_file(bad_sp, quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_semantic_error(self):
-    """Verifies transpile_file handles semantic errors by exiting."""
+    """Verifies transpile_file handles semantic errors by exiting when raise_on_error=False."""
     with tempfile.TemporaryDirectory() as temp_dir:
       semantic_sp = os.path.join(temp_dir, "semantic.sp")
       with open(semantic_sp, "w", encoding="utf-8") as f:
         f.write("return 42;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(semantic_sp, quiet=True)
+        transpile_file(semantic_sp, quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_raise_on_error_modes(self):
@@ -1265,7 +1265,7 @@ class TestPythonTranspiler(unittest.TestCase):
     try:
       sys.stderr = captured_stderr
       with self.assertRaises(SystemExit):
-        transpile_file(fname)
+        transpile_file(fname, raise_on_error=False)
     finally:
       sys.stderr = old_stderr
       if os.path.exists(fname):

@@ -23,20 +23,23 @@ class ASTNode:
 
   def to_dict(self) -> Dict[str, Any]:
     """Returns a dictionary representation of the AST node for serialization/debugging."""
+    def _serialize(v: Any) -> Any:
+      if isinstance(v, ASTNode):
+        return v.to_dict()
+      elif isinstance(v, list):
+        return [_serialize(item) for item in v]
+      elif isinstance(v, tuple):
+        return [_serialize(item) for item in v]
+      elif isinstance(v, dict):
+        return {k: _serialize(val) for k, val in v.items()}
+      return v
+
     result = {"node_type": self.__class__.__name__}
     for key, value in self.__dict__.items():
       # Skip language-server specific positioning keys during standard AST serialization
       if key in ("start_line", "start_column", "end_line", "end_column", "length"):
         continue
-      if isinstance(value, ASTNode):
-        result[key] = value.to_dict()
-      elif isinstance(value, list):
-        result[key] = [
-            item.to_dict() if isinstance(item, ASTNode) else item
-            for item in value
-        ]
-      else:
-        result[key] = value
+      result[key] = _serialize(value)
     return result
 
   def __repr__(self) -> str:

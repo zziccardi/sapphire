@@ -42,7 +42,7 @@ def transpile_file(
     test_mode: bool = False,
     dev_mode: bool = False,
     quiet: bool = False,
-    raise_on_error: bool = False,
+    raise_on_error: bool = True,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
