@@ -24,6 +24,7 @@ from src.parser.ast import (
 from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
+from src.code_gen.intrinsics import is_builtin_module
 from src.semantics.module_resolver import resolve_module_path
 from src.semantics.symbol_table import (
     EnumType,
@@ -79,11 +80,7 @@ class DeclarationPass:
       # Resolve imported module file path on disk
       target_file = resolve_module_path(imp.path, source_file_path=getattr(checker, "source_file_path", None))
 
-      is_builtin = (
-          imp.path in ("std.testing", "std.math")
-          or imp.path.startswith("std.testing")
-          or imp.path.startswith("std.math")
-      )
+      is_builtin = is_builtin_module(imp.path)
       if not target_file and not is_builtin and not is_predefined:
         checker.error(f"Cannot resolve imported module '{imp.path}'. Module file not found.", node=imp)
 

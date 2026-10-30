@@ -84,7 +84,22 @@ orchestrates semantic analysis across modular passes and specialized checkers:
 Stage 3 compiles the typed AST into target language code, mapping Sapphire semantics to target runtimes.
 
 ### Open/Closed Target Backend Registry (`transpiler_registry.py`)
-Target code generators register dynamically with `TranspilerRegistry` in [transpiler_registry.py](src/code_gen/transpiler_registry.py) using the `@TranspilerRegistry.register(aliases=[...], display_name=..., default_extension=...)` decorator. This decouples code generation dispatch from `transpile_file`, adhering to the Open/Closed Principle.
+Target code generators register dynamically with `TranspilerRegistry` in
+[transpiler_registry.py](src/code_gen/transpiler_registry.py) using the
+`@TranspilerRegistry.register(aliases=[...], display_name=..., default_extension=...)`
+decorator. This decouples code generation dispatch from `transpile_file`,
+adhering to the Open/Closed Principle.
+
+### Table-driven intrinsic code generation (`intrinsics.py`)
+Built-in primitive and collection operations (`String`, `Array`, `Map`,
+`range()`, and `Enum`) are dispatched via a centralized table-driven registry
+in [intrinsics.py](src/code_gen/intrinsics.py). Instead of maintaining large,
+repetitive `if/elif` call ladders across backends, `IntrinsicRegistry` maps
+`(category, method, target)` to backend-specific emitter functions. Both
+`PythonTranspiler` and `LuaTranspiler` delegate intrinsic call handling
+directly to `IntrinsicRegistry.try_emit(target, self, node)`. Centralized
+detection of built-in standard library modules is provided via
+`is_builtin_module(import_path)`.
 
 ### Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.

@@ -28,6 +28,7 @@ from src.code_gen.python_transpiler import PythonTranspiler, PYTHON_RUNTIME_PREA
 from src.code_gen.lua_transpiler import LuaTranspiler
 from src.code_gen.source_map import SourceMapBuilder
 from src.code_gen.transpiler_registry import TranspilerRegistry
+from src.code_gen.intrinsics import is_builtin_module
 from src.parser.error_listener import CustomErrorListener, format_syntax_error_message
 
 
@@ -134,7 +135,7 @@ def transpile_file(
   from src.semantics.module_resolver import resolve_module_path
 
   for imp in getattr(ast, "imports", []):
-    if imp.path in ("std.testing", "std.math") or imp.path.startswith("std.testing") or imp.path.startswith("std.math"):
+    if is_builtin_module(imp.path):
       continue
     sub_source = resolve_module_path(imp.path, source_file_path=input_file)
     if sub_source:
