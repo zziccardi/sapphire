@@ -108,7 +108,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
     self.current_node: Optional[ASTNode] = None
     self.lsp_errors: List[dict] = []
-    self.node_types: dict = {}
+    self.node_types: dict = self.context.node_types
     self.current_trait: Optional[Any] = None
 
   def visit(self, node: ASTNode) -> Any:
