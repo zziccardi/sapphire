@@ -75,28 +75,40 @@ class TestSamplesCompilation(unittest.TestCase):
   def test_standalone_sample_execution(self):
     """Verifies standalone sample programs execute cleanly via CLI runner."""
     import argparse
+    import subprocess
+    from unittest.mock import patch
     from src.cli.sapphire import run_command
+    from testing.test_utils import suppress_output
 
-    for sample_name in ["overview.sp", "sample_test.sp", "arena_demo.sp"]:
-      sample_file = _SAMPLES_DIR / sample_name
-      if not sample_file.exists():
-        continue
-      with tempfile.TemporaryDirectory() as tmp_dir:
-        out_file = os.path.join(tmp_dir, f"{sample_file.stem}.py")
-        args = argparse.Namespace(
-            source=str(sample_file),
-            target="python",
-            dev=False,
-            output=out_file,
-            no_sourcemap=True,
-        )
-        with self.subTest(sample=sample_name):
-          with self.assertRaises(SystemExit) as cm:
-            run_command(args)
-          self.assertEqual(
-              cm.exception.code, 0,
-              f"Sample {sample_name} exited with non-zero code {cm.exception.code}",
+    runnable_samples = [
+        s for s in sorted(_SAMPLES_DIR.glob("**/*.sp"))
+        if s.name != "love2d_demo.sp"
+    ]
+    orig_run = subprocess.run
+    def silent_sub_run(*args, **kwargs):
+      kwargs["stdout"] = subprocess.DEVNULL
+      kwargs["stderr"] = subprocess.DEVNULL
+      return orig_run(*args, **kwargs)
+
+    with patch("subprocess.run", silent_sub_run):
+      for sample_file in runnable_samples:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+          out_file = os.path.join(tmp_dir, f"{sample_file.stem}.py")
+          args = argparse.Namespace(
+              source=str(sample_file),
+              target="python",
+              dev=False,
+              output=out_file,
+              no_sourcemap=True,
           )
+          with self.subTest(sample=sample_file.name):
+            with suppress_output():
+              with self.assertRaises(SystemExit) as cm:
+                run_command(args)
+            self.assertEqual(
+                cm.exception.code, 0,
+                f"Sample {sample_file.name} exited with non-zero code {cm.exception.code}",
+            )
 
 
 def _register_sample_tests():

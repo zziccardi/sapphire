@@ -1404,9 +1404,12 @@ class TypeChecker:
         if not (seen_optional_none and (seen_optional_some or has_ellipsis)):
           self.error(f"Match expression for optional '{subject_type}' is not exhaustive.")
 
-    non_none_types = [t for t in case_types if not isinstance(t, NoneType)]
+    non_none_types = [
+        t for t in case_types
+        if not (isinstance(t, NoneType) or (isinstance(t, PrimitiveType) and t.name == "none"))
+    ]
     if not non_none_types:
-      return NoneType()
+      return PrimitiveType("none")
 
     if has_unyielded_block:
       self.error("Match case block in value-producing match expression must explicitly yield a value.")
@@ -1416,7 +1419,10 @@ class TypeChecker:
       if not t.is_compatible(first_type) and not first_type.is_compatible(t):
         self.error(f"Incompatible return types in match branches: '{first_type}' and '{t}'.")
 
-    has_none = any(isinstance(t, NoneType) for t in case_types)
+    has_none = any(
+        isinstance(t, NoneType) or (isinstance(t, PrimitiveType) and t.name == "none")
+        for t in case_types
+    )
     if has_none or len(non_none_types) < len(case_types):
       return OptionalType(first_type)
     return first_type
@@ -2818,7 +2824,20 @@ class TypeChecker:
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, is_mutable=False))
       param_types.append(ptype)
 
-    body_type = self.visit(node.body)
+    old_func = self.current_function
+    old_func_scope = self.current_function_scope
+    declared_ret = self._resolve_type_node(node.return_type) if node.return_type else None
+    from src.semantics.symbol_table import FunctionSymbol
+    lambda_sym = FunctionSymbol("<lambda>", None)
+    lambda_sym.return_types = [declared_ret] if declared_ret else []
+    self.current_function = lambda_sym
+    self.current_function_scope = self.symbol_table.current_scope
+
+    try:
+      body_type = self.visit(node.body)
+    finally:
+      self.current_function = old_func
+      self.current_function_scope = old_func_scope
 
     # Resolve any InferredType placeholders: if the body produced a concrete
     # return type, use it to back-fill params that remained unconstrained.

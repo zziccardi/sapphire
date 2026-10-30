@@ -309,7 +309,25 @@ pipenv run sapphire run samples/overview.sp --dev
    * Never catch runtime errors or non-zero exit codes to call
      `self.skipTest()`; test execution failures must fail the test suite
      with `self.fail()`.
-6. **Pre-Completion Checklist**:
+6. **Testing Best Practices & Invariant Verification**:
+   * **Strict Semantic Checks in Transpiler Tests**: Never wrap
+     `TypeChecker().check(ast)` in blanket `try...except Exception: pass`.
+     Transpiler test snippets must represent valid, fully-typed Sapphire code
+     unless the test explicitly targets compile-time rejection.
+   * **True Backend Verification**: Do not rely purely on substring matching
+     for code generator tests. For LLVM IR, always verify module structural
+     integrity via `llvmlite.binding.parse_assembly(ir).verify()` and assert
+     execution output with MCJIT where feasible.
+   * **Runnable Sample Execution**: In addition to cross-backend compilation
+     checks, all non-host-bound sample scripts in `samples/` must execute
+     cleanly with exit code 0 in `samples_compilation_test.py`.
+   * **Standard Library Coverage**: Standard library modules in `lib/std/`
+     are included in test coverage analysis. Ensure all additions to `lib/std/`
+     have corresponding unit tests for both happy paths and boundary values.
+   * **Negative Runtime Verification**: Verify runtime safety guards (such as
+     safe `.get()` bounds checking, nil coalescing, and coroutine exhaustion)
+     in cross-backend E2E fixtures (`testing/e2e/negative_runtime_test.sp`).
+7. **Pre-Completion Checklist**:
    * [ ] `pipenv run test` passes with zero failures, zero errors, and no
      unexpected skipped tests.
    * [ ] Affected e2e/integration tests pass across all relevant backends.

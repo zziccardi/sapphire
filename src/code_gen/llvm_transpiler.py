@@ -243,6 +243,8 @@ class LLVMTranspiler(BaseTranspiler):
         self.builder.ret(ir.Constant(self.float_type, 0.0))
       elif return_type == self.bool_type:
         self.builder.ret(ir.Constant(self.bool_type, 0))
+      elif isinstance(return_type, ir.PointerType):
+        self.builder.ret(ir.Constant(return_type, None))
       else:
         self.builder.ret_void()
 

@@ -63,11 +63,10 @@ class TestLuaTranspiler(unittest.TestCase):
     builder = ASTBuilder()
     ast = builder.visit(tree)
 
-    try:
-      checker = TypeChecker()
-      checker.check(ast)
-    except Exception:
-      pass
+    checker = TypeChecker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
 
     transpiler = LuaTranspiler()
     return transpiler.transpile(ast)
@@ -376,7 +375,7 @@ class TestLuaTranspiler(unittest.TestCase):
       var hp: int;
     }
     impl Target {
-      func set_hp(val: int = 42) {
+      var func set_hp(val: int = 42) {
         self.hp = val;
       }
     }
@@ -424,7 +423,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     func test_clone() {
       var arena = Arena();
-      var base = Monster(h = 100);
+      var base = Monster(h = 100) in arena;
       var sub = clone base {
         self.hp = 80;
       };
@@ -684,15 +683,16 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_lua_imported_module_function_call(self):
     """Verifies that calling a function on an imported module uses dot syntax, not colon syntax."""
     code = """
-    import util;
+    import std.math as math;
 
     func test(): float {
-      return util.clamp(5.0, 0.0, 10.0);
+      return math.min(5.0, 10.0);
     }
     """
     output = self._transpile(code)
-    self.assertIn("local util = require(\"util\")", output)
-    self.assertIn("util.clamp(5.0, 0.0, 10.0)", output)
+    self.assertIn("local math = require(\"std.math\")", output)
+    self.assertIn("math.min__float(5.0, 10.0)", output)
+    self.assertNotIn("math:min__float(", output)
 
   def test_lua_preamble_contains_relative_loader(self):
     """Verifies that the Lua preamble includes the dynamic relative module loader hook."""
@@ -1143,7 +1143,7 @@ class TestLuaTranspiler(unittest.TestCase):
       let f = 10 as float;
       let i = 3.14 as int;
       let b = 1 as bool;
-      let str_cast = 10 as String;
+      let s0 = String.from(10);
       let s1 = String.from(42);
       let s2 = String.from(true);
 
@@ -1156,7 +1156,7 @@ class TestLuaTranspiler(unittest.TestCase):
       let l1 = LogLevel.from("INFO");
 
       let c = Child { hp = 100, mp = 50 };
-      let parent_cast = c as Parent;
+      let hp = c.hp;
     }
     """
     lua = self._transpile(code)
@@ -1352,10 +1352,10 @@ class TestLuaTranspiler(unittest.TestCase):
     """Verifies Lua transpilation of empty yield and multi-yield inline match expressions."""
     code = """
     func test_yields(val: int): int, int {
-      let res = (match val {
-        1 -> { yield 10, 20; },
+      let opt_val: int? = (match val {
+        1 -> { yield 10; },
         2 -> { yield; },
-        ... -> { yield 30, 40; }
+        ... -> { yield 30; }
       });
       return match val {
         1 -> { yield 10, 20; },
@@ -1999,10 +1999,10 @@ class TestSharedFixtures(unittest.TestCase):
     parser = _Parser(stream)
     tree = parser.program()
     ast = _Builder().visit(tree)
-    try:
-      _Checker().check(ast)
-    except Exception:
-      pass
+    checker = _Checker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in fixture:\n{source}\nErrors: {checker.errors}")
     return LuaTranspiler(test_mode=True).transpile(ast)
 
   def _make_fixture_test(fixture_name: str):  # noqa: N805
