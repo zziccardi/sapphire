@@ -21,6 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.14"]
+    env:
+      PIPENV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - name: Checkout code
@@ -35,7 +37,7 @@ jobs:
         run: pip install --upgrade pip pipenv
 
       - name: Install dependencies
-        run: pipenv install --dev --deploy || pipenv install --dev --skip-lock
+        run: pipenv --python ${{ matrix.python-version }} install --dev --deploy || pipenv --python ${{ matrix.python-version }} install --dev --skip-lock
 
       - name: Run Python unit tests
         run: pipenv run test
