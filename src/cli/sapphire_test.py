@@ -346,6 +346,114 @@ class SapphireCLITest(unittest.TestCase):
       with patch("os.path.isfile", return_value=False):
         self.assertIsNone(_find_lua_binary())
 
+  def test_parse_subcommand_success(self):
+    test_args = ["sapphire", "parse", self.sp_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+
+  def test_parse_subcommand_file_not_found(self):
+    test_args = ["sapphire", "parse", "non_existent_file.sp"]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_parse_subcommand_syntax_error(self):
+    bad_sp = os.path.join(self.temp_dir.name, "bad_syntax.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+    test_args = ["sapphire", "parse", bad_sp]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_dump_ast_subcommand_success(self):
+    test_args = ["sapphire", "dump-ast", self.sp_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+
+  def test_dump_ast_subcommand_file_not_found(self):
+    test_args = ["sapphire", "dump-ast", "non_existent_file.sp"]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_dump_ast_subcommand_syntax_error(self):
+    bad_sp = os.path.join(self.temp_dir.name, "bad_ast.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+    test_args = ["sapphire", "dump-ast", bad_sp]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_check_subcommand_success(self):
+    test_args = ["sapphire", "check", self.sp_file]
+    with patch.object(sys, "argv", test_args):
+      with suppress_output():
+        main()
+
+  def test_check_subcommand_file_not_found(self):
+    test_args = ["sapphire", "check", "non_existent_file.sp"]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_check_subcommand_syntax_error(self):
+    bad_sp = os.path.join(self.temp_dir.name, "bad_syntax_check.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+    test_args = ["sapphire", "check", bad_sp]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_check_subcommand_semantic_error(self):
+    bad_sem = os.path.join(self.temp_dir.name, "bad_sem_check.sp")
+    with open(bad_sem, "w", encoding="utf-8") as f:
+      f.write("let x: int = \"hello\";\n")
+    test_args = ["sapphire", "check", bad_sem]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_build_subcommand_compiler_error(self):
+    bad_sp = os.path.join(self.temp_dir.name, "bad_build.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+    test_args = ["sapphire", "build", bad_sp]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_run_subcommand_compiler_error(self):
+    bad_sp = os.path.join(self.temp_dir.name, "bad_run.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+    test_args = ["sapphire", "run", bad_sp]
+    with patch.object(sys, "argv", test_args):
+      with self.assertRaises(SystemExit) as cm:
+        with suppress_output():
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -40,3 +40,7 @@ class TestGenericsChecker(unittest.TestCase):
 
     fn_type = FunctionType([PrimitiveType("int")], PrimitiveType("void"))
     self.assertEqual(GenericsChecker.mangle_type_name(fn_type), "Fn_int_to_void")
+
+  def test_substitute_ast_none_and_non_ast(self):
+    self.assertIsNone(GenericsChecker.substitute_ast(None, {}))
+    self.assertEqual(GenericsChecker.substitute_ast("literal_string", {}), "literal_string")

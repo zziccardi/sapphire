@@ -47,7 +47,10 @@ from src.semantics.symbol_table import (
 from src.cli.diagnostics import format_diagnostic
 from src.common.errors import SapphireError, SapphireTypeError, SemanticError
 from src.semantics.arena_checker import ArenaChecker
+from src.semantics.declaration_pass import DeclarationPass
 from src.semantics.generics_checker import GenericsChecker
+from src.semantics.semantic_context import SemanticContext
+from src.semantics.struct_layout_pass import StructLayoutPass
 
 
 class TypeChecker:
@@ -55,6 +58,8 @@ class TypeChecker:
 
   def __init__(self, source_file_path: Optional[str] = None, source_content: Optional[Any] = None):
     self.symbol_table = SymbolTable()
+    self.context = SemanticContext(symbol_table=self.symbol_table)
+    self.node_types: Dict[ASTNode, Type] = self.context.node_types
     self.errors: List[str] = []
     self.source_file_path: Optional[str] = source_file_path
     self.source_content: Optional[Any] = source_content
@@ -137,424 +142,29 @@ class TypeChecker:
       self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
   ) -> StructType:
     """Monomorphizes a generic struct template for a specific set of concrete type arguments."""
-    arg_names = [self._mangle_type_name(t) for t in resolved_type_args]
-    mangled_name = f"{generic_struct_type.name}__{'_'.join(arg_names)}"
-    existing = self.symbol_table.lookup_type(mangled_name)
-    if existing and isinstance(existing, StructType):
-      return existing
-
-    if not generic_struct_type.ast_decl:  # pragma: no cover
-      return generic_struct_type
-
-    param_map = dict(zip(generic_struct_type.type_params, type_arg_nodes))
-    cloned_decl = self._substitute_ast(generic_struct_type.ast_decl, param_map)
-    cloned_decl.name = mangled_name
-    cloned_decl.type_params = []
-
-    mono_struct_type = StructType(mangled_name, parent_names=cloned_decl.parent_names, is_prototype=cloned_decl.is_prototype)
-    root_scope = self.symbol_table.current_scope
-    while root_scope.parent:
-      root_scope = root_scope.parent
-    root_scope.define_type(mangled_name, mono_struct_type)
-    root_scope.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
-
-    # Resolve fields for monomorphized struct
-    for f in cloned_decl.fields:
-      ftype = self._resolve_field_type(f, mono_struct_type.name)
-      has_default = f.default_expr is not None or self._has_implicit_default_value(ftype)
-      mono_struct_type.fields[f.name] = StructField(
-          f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
-      )
-
-    # Instantiate generic impl blocks matching generic_struct_type.name
-    if hasattr(self, "program") and self.program:
-      for decl in self.program.declarations:
-        if isinstance(decl, ImplBlockNode) and decl.struct_name == generic_struct_type.name:
-          cloned_impl = self._substitute_ast(decl, param_map)
-          cloned_impl.struct_name = mangled_name
-          cloned_impl.type_params = []
-          cloned_impl.struct_type_args = []
-          cloned_impl.trait_type_args = []
-          for member in cloned_impl.members:
-            func_decl = member.func_decl
-            p_types = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
-            ret_t = self._resolve_return_types(func_decl)
-            num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
-            sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters], num_defaults=num_defaults)
-            mono_struct_type.methods[func_decl.name] = StructMethod(func_decl.name, sig, member.modifier)
-          self.program.declarations.append(cloned_impl)
-
-      self.program.declarations.append(cloned_decl)
-
-    return mono_struct_type
+    return GenericsChecker.monomorphize_struct(self, generic_struct_type, type_arg_nodes, resolved_type_args)
 
   def _monomorphize_function(
       self, func_sym: FunctionSymbol, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
   ) -> str:
     """Monomorphizes a generic function template for a specific set of concrete type arguments."""
-    arg_names = [self._mangle_type_name(t) for t in resolved_type_args]
-    mangled_name = f"{func_sym.name}__{'_'.join(arg_names)}"
-    existing = self.symbol_table.lookup(mangled_name)
-    if existing and isinstance(existing, FunctionSymbol):
-      return mangled_name
-
-    if not func_sym.ast_decl:  # pragma: no cover
-      return func_sym.name
-
-    param_map = dict(zip(func_sym.type_params, type_arg_nodes))
-    cloned_func = self._substitute_ast(func_sym.ast_decl, param_map)
-    cloned_func.name = mangled_name
-    cloned_func.type_params = []
-
-    p_types = [self._resolve_type_node(p.param_type) for p in cloned_func.parameters]
-    ret_t = self._resolve_return_types(cloned_func)
-    num_defaults = sum(1 for p in cloned_func.parameters if getattr(p, "default_expr", None) is not None)
-    mono_func_type = FunctionType(
-        p_types,
-        ret_t,
-        [p.is_mutable for p in cloned_func.parameters],
-        [p.name for p in cloned_func.parameters],
-        num_defaults=num_defaults,
-    )
-    mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
-    root_scope = self.symbol_table.current_scope
-    while root_scope.parent:
-      root_scope = root_scope.parent
-    root_scope.define(mangled_name, mono_func_sym)
-
-    if hasattr(self, "program") and self.program:
-      self.program.declarations.append(cloned_func)
-
-    saved_func = self.current_function
-    # Type check the body of the monomorphized function
-    self.visit_FuncDeclNode(cloned_func)
-    self.current_function = saved_func
-    return mangled_name
+    return GenericsChecker.monomorphize_function(self, func_sym, type_arg_nodes, resolved_type_args)
 
   def _declare_imports(self, program: ProgramNode) -> None:
     """Pre-pass to register imported module symbols."""
-    import os
-    from src.semantics.module_resolver import resolve_module_path
-
-    for imp in getattr(program, "imports", []):
-      module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
-      existing = self.symbol_table.lookup_current_scope(module_name)
-      is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
-      if not is_predefined:
-        mod_sym = ModuleSymbol(module_name, imp.path)
-        self.symbol_table.define(module_name, mod_sym)
-        self.symbol_table.define_type(module_name, ModuleType(imp.path))
-      else:
-        mod_sym = existing
-
-      if imp.path == "std.testing" or imp.path.startswith("std.testing"):
-        mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
-
-      # Resolve imported module file path on disk
-      target_file = resolve_module_path(imp.path, source_file_path=getattr(self, "source_file_path", None))
-
-      is_builtin = (imp.path in ("std.testing", "std.math") or imp.path.startswith("std.testing") or imp.path.startswith("std.math"))
-      if not target_file and not is_builtin and not is_predefined:
-        self.error(f"Cannot resolve imported module '{imp.path}'. Module file not found.", node=imp)
-
-      if target_file:
-          try:
-            with open(target_file, "r", encoding="utf-8") as f:
-              sub_code = f.read()
-            from src.parser.gen.SapphireLexer import SapphireLexer
-            from src.parser.gen.SapphireParser import SapphireParser
-            from src.parser.ast_builder import ASTBuilder
-
-            from antlr4 import InputStream, CommonTokenStream
-
-            try:
-              sub_lexer = SapphireLexer(InputStream(sub_code))
-              sub_lexer.removeErrorListeners()
-              sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
-              sub_parser.removeErrorListeners()
-              sub_ast = ASTBuilder().visit(sub_parser.program())
-              mod_file_path = os.path.abspath(target_file)
-              from pygls.uris import from_fs_path
-              mod_file_uri = from_fs_path(mod_file_path)
-              def _mark_file_uri(node):
-                if isinstance(node, ASTNode):
-                  node.file_uri = mod_file_uri
-                  for v in node.__dict__.values():
-                    if isinstance(v, list):
-                      for item in v:
-                        if isinstance(item, ASTNode):
-                          _mark_file_uri(item)
-                    elif isinstance(v, ASTNode):
-                      _mark_file_uri(v)
-              if sub_ast:
-                _mark_file_uri(sub_ast)
-
-              sub_checker = TypeChecker(source_file_path=target_file)
-              try:
-                sub_checker.check(sub_ast)
-              except Exception:
-                pass
-
-              mod_sym.file_path = os.path.abspath(target_file)
-              # Populate mod_sym exports from sub_checker
-              if getattr(sub_ast, "export_block", None):
-                for spec in sub_ast.export_block.specifiers:
-                  export_name = spec.alias or spec.symbol
-                  if spec.module_prefix:
-                    prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
-                    if isinstance(prefix_sym, ModuleSymbol):
-                      exp = prefix_sym.lookup_export(spec.symbol)
-                      if exp:
-                        mod_sym.exports[export_name] = exp
-                  else:
-                    exp = sub_checker.symbol_table.lookup_type(spec.symbol) or sub_checker.symbol_table.lookup(spec.symbol)
-                    if exp:
-                      if isinstance(exp, StructType):
-                        exp.is_imported = True
-                        exp.defining_module = mod_sym.file_path or mod_sym.module_path
-                      elif hasattr(exp, "struct_type"):
-                        exp.struct_type.is_imported = True
-                        exp.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
-                      mod_sym.exports[export_name] = exp
-              else:
-                sub_root = sub_checker.symbol_table.current_scope
-                while sub_root.parent:
-                  sub_root = sub_root.parent
-                for name, sym in sub_root.symbols.items():
-                  if hasattr(sym, "struct_type"):
-                    sym.struct_type.is_imported = True
-                    sym.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
-                  mod_sym.exports[name] = sym
-                for name, t in sub_root.types.items():
-                  if name not in ("int", "float", "bool", "String", "none", "Arena"):
-                    if isinstance(t, StructType):
-                      t.is_imported = True
-                      t.defining_module = mod_sym.file_path or mod_sym.module_path
-                    mod_sym.exports[name] = t
-              if is_builtin:
-                mod_sym.exports["TestCase"] = self.symbol_table.testcase_trait
-            except Exception:  # pragma: no cover
-              pass
-          except Exception:  # pragma: no cover
-            pass
+    DeclarationPass.declare_imports(self, program)
 
   def _validate_parameter_defaults(self, parameters: List[ParameterNode]) -> None:
     """Validates that parameters without default values do not follow parameters with default values."""
-    seen_default = False
-    for p in parameters:
-      if getattr(p, "default_expr", None) is not None:
-        seen_default = True
-      elif seen_default:
-        self.error(
-            f"Parameter without a default value '{p.name}' cannot follow a parameter with a default value.",
-            node=p,
-        )
+    DeclarationPass.validate_parameter_defaults(self, parameters)
 
   def _declare_globals(self, program: ProgramNode) -> None:
     """Pass 1: Collect struct, enum, and function declarations into global scope."""
-    for decl in program.declarations:
-      if isinstance(decl, StructDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
-          self.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        struct_type = StructType(
-            decl.name,
-            parent_names=decl.parent_names,
-            is_prototype=decl.is_prototype,
-            type_params=decl.type_params,
-            ast_decl=decl,
-            defining_module=self.source_file_path or "__main__",
-            is_imported=False,
-        )
-        self.symbol_table.define_type(decl.name, struct_type)
-        self.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
-
-      elif isinstance(decl, EnumDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
-          self.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        current_val: Union[int, str] = 0
-        is_string_enum = any(isinstance(m.value, str) for m in decl.members)
-        variants: Dict[str, Union[int, str]] = {}
-        seen_members = set()
-        for member in decl.members:
-          if member.name in seen_members:
-            self.error(f"Duplicate member '{member.name}' in enum '{decl.name}'.")
-            continue
-          seen_members.add(member.name)
-          if member.value is not None:
-            current_val = member.value
-          elif is_string_enum and isinstance(current_val, str):
-            current_val = member.name
-          variants[member.name] = current_val
-          if isinstance(current_val, int):
-            current_val += 1
-        enum_type = EnumType(decl.name, variants)
-        enum_type.ast_decl = decl
-        self.symbol_table.define_type(decl.name, enum_type)
-        self.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
-
-      elif isinstance(decl, TraitDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name) or self.symbol_table.lookup_type(decl.name):
-          self.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        trait_type = TraitType(decl.name, type_params=decl.type_params, ast_decl=decl)
-        # Populate trait method signatures
-        if decl.type_params:
-          self.symbol_table.enter_scope()
-          for tp in decl.type_params:
-            self.symbol_table.define_type(tp, GenericTypeParameter(tp))
-        for member in decl.members:
-          self._validate_parameter_defaults(member.parameters)
-          p_types = []
-          for p in member.parameters:
-            if p.name == "self" and p.param_type is None:
-              p_types.append(trait_type)
-            else:
-              p_types.append(self._resolve_type_node(p.param_type))
-          ret_t = self._resolve_return_types(member)
-          p_mutabilities = [p.is_mutable for p in member.parameters]
-          param_names = [p.name for p in member.parameters]
-          has_self = bool(param_names) and param_names[0] == "self"
-          extern_name = None
-          for ann in getattr(member, "annotations", []):
-            if ann.name == "export" and ann.arg:
-              extern_name = ann.arg
-              break
-          num_defaults = sum(1 for p in member.parameters if getattr(p, "default_expr", None) is not None)
-          param_defaults = [getattr(p, "default_expr", None) for p in member.parameters]
-          fn_type = FunctionType(
-              p_types,
-              ret_t,
-              p_mutabilities,
-              param_names=param_names,
-              has_self=has_self,
-              extern_name=extern_name,
-              num_defaults=num_defaults,
-              param_defaults=param_defaults,
-              ast_decl=member,
-          )
-          trait_type.methods[member.name] = fn_type
-        if decl.type_params:
-          self.symbol_table.exit_scope()
-        self.symbol_table.define_type(decl.name, trait_type)
-        self.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
-      elif isinstance(decl, VarDeclNode):
-        for i, name in enumerate(decl.names):
-          if self.symbol_table.lookup_current_scope(name):
-            self.error(f"Redefinition of identifier '{name}'.", node=decl)
-            continue
-          if any(a.name == "extern" for a in decl.annotations):
-            if decl.exprs:
-              self.error("An '@extern' variable declaration cannot have an initializer expression.", node=decl)
-            v_type = self._resolve_type_node(decl.val_types[i]) if (decl.val_types and i < len(decl.val_types) and decl.val_types[i]) else PrimitiveType("none")
-            if not decl.val_types or not decl.val_types[i]:
-              self.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.", node=decl)
-            sym = VariableSymbol(name, v_type, decl.is_mutable)
-            sym._from_declare_globals = True
-            self.symbol_table.define(name, sym)
-          elif decl.exprs and i < len(decl.exprs):
-            expr_node = decl.exprs[i]
-            val_t = None
-            if isinstance(expr_node, MemberAccessNode) and isinstance(expr_node.receiver, IdentifierNode):
-              mod_sym = self.symbol_table.lookup(expr_node.receiver.name)
-              if isinstance(mod_sym, ModuleSymbol):
-                exp = mod_sym.lookup_export(expr_node.member)
-                if isinstance(exp, Type):
-                  val_t = exp
-                elif hasattr(exp, "symbol_type") and isinstance(exp.symbol_type, Type):
-                  val_t = exp.symbol_type
-            elif isinstance(expr_node, IdentifierNode):
-              exp = self.symbol_table.lookup_type(expr_node.name)
-              if isinstance(exp, Type):
-                val_t = exp
-            if val_t:
-              sym = VariableSymbol(name, val_t, decl.is_mutable)
-              sym._from_declare_globals = True
-              self.symbol_table.define(name, sym)
-              self.symbol_table.define_type(name, val_t)
-
-      elif isinstance(decl, FuncDeclNode):
-        if self.symbol_table.lookup_current_scope(decl.name):
-          self.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        self._validate_parameter_defaults(decl.parameters)
-        if decl.type_params:
-          self.symbol_table.enter_scope()
-          for tp in decl.type_params:
-            self.symbol_table.define_type(tp, GenericTypeParameter(tp))
-        param_types = []
-        param_mutabilities = []
-        for p in decl.parameters:
-          ptype = self._resolve_type_node(p.param_type)
-          param_types.append(ptype)
-          param_mutabilities.append(p.is_mutable)
-        ret_type = self._resolve_return_types(decl)
-        if decl.type_params:
-          self.symbol_table.exit_scope()
-        num_defaults = sum(1 for p in decl.parameters if getattr(p, "default_expr", None) is not None)
-        param_defaults = [getattr(p, "default_expr", None) for p in decl.parameters]
-        signature = FunctionType(
-            param_types,
-            ret_type,
-            param_mutabilities,
-            param_names=[p.name for p in decl.parameters],
-            num_defaults=num_defaults,
-            param_defaults=param_defaults,
-        )
-        self.symbol_table.define(decl.name, FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl))
+    DeclarationPass.declare_globals(self, program)
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
     """Pre-pass to resolve static inheritance field copying and layout sizing."""
-    structs_to_process = [d for d in program.declarations if isinstance(d, StructDeclNode) and not d.type_params]
-    processed = set()
-
-    visiting = set()
-
-    def process_struct(node: StructDeclNode):
-      if node.name in processed:
-        return
-      if node.name in visiting:
-        self.error(f"Circular inheritance detected involving struct '{node.name}'.")
-        return
-      visiting.add(node.name)
-
-      struct_type = self.symbol_table.lookup_type(node.name)
-      if not isinstance(struct_type, StructType):
-        visiting.remove(node.name)
-        return
-
-      if node.parent_names:
-        for parent_name in node.parent_names:
-          parent_type = self.symbol_table.lookup_type(parent_name)
-          if not parent_type:
-            self.error(f"Parent struct '{parent_name}' not found for '{node.name}'.")
-          elif not isinstance(parent_type, StructType):
-            self.error(f"Parent '{parent_name}' of '{node.name}' is not a struct type.")
-          else:
-            parent_node = next((s for s in structs_to_process if s.name == parent_name), None)
-            if parent_node:
-              process_struct(parent_node)
-            for field_name, field_obj in parent_type.fields.items():
-              if field_name in struct_type.fields:
-                self.error(f"Duplicate field '{field_name}' in struct '{node.name}' inherited from multiple parents.")
-              else:
-                struct_type.fields[field_name] = field_obj
-
-      for f in node.fields:
-        ftype = self._resolve_field_type(f, node.name)
-        if f.name in struct_type.fields:
-          self.error(f"Field '{f.name}' in struct '{node.name}' shadows inherited parent field.")
-        has_default = f.default_expr is not None or self._has_implicit_default_value(ftype)
-        struct_type.fields[f.name] = StructField(
-            f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
-        )
-
-      visiting.remove(node.name)
-      processed.add(node.name)
-
-    for s in structs_to_process:
-      process_struct(s)
+    StructLayoutPass.resolve_struct_layouts(self, program)
 
   def _resolve_field_type(self, f: StructFieldNode, struct_name: str) -> Type:
     """Resolves struct field type from explicit annotation or infers it from default expression."""
@@ -672,6 +282,12 @@ class TypeChecker:
 
   def _resolve_type_node(self, node: Optional[TypeNode]) -> Type:
     """Helper to map an AST TypeNode into a semantic Type object."""
+    res = self._do_resolve_type_node(node)
+    if node and res:
+      self.context.record_type(node, res)
+    return res
+
+  def _do_resolve_type_node(self, node: Optional[TypeNode]) -> Type:
     if not node:
       return PrimitiveType("none")
     if isinstance(node, BasicTypeNode):
@@ -735,6 +351,8 @@ class TypeChecker:
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
     res = visitor(node)
+    if res is not None and isinstance(res, Type):
+      self.context.record_type(node, res)
     if isinstance(node, ExprNode) and isinstance(res, Type):
       node.inferred_type = res
     return res
@@ -1404,9 +1022,12 @@ class TypeChecker:
         if not (seen_optional_none and (seen_optional_some or has_ellipsis)):
           self.error(f"Match expression for optional '{subject_type}' is not exhaustive.")
 
-    non_none_types = [t for t in case_types if not isinstance(t, NoneType)]
+    non_none_types = [
+        t for t in case_types
+        if not (isinstance(t, NoneType) or (isinstance(t, PrimitiveType) and t.name == "none"))
+    ]
     if not non_none_types:
-      return NoneType()
+      return PrimitiveType("none")
 
     if has_unyielded_block:
       self.error("Match case block in value-producing match expression must explicitly yield a value.")
@@ -1416,7 +1037,10 @@ class TypeChecker:
       if not t.is_compatible(first_type) and not first_type.is_compatible(t):
         self.error(f"Incompatible return types in match branches: '{first_type}' and '{t}'.")
 
-    has_none = any(isinstance(t, NoneType) for t in case_types)
+    has_none = any(
+        isinstance(t, NoneType) or (isinstance(t, PrimitiveType) and t.name == "none")
+        for t in case_types
+    )
     if has_none or len(non_none_types) < len(case_types):
       return OptionalType(first_type)
     return first_type
@@ -2818,7 +2442,20 @@ class TypeChecker:
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, is_mutable=False))
       param_types.append(ptype)
 
-    body_type = self.visit(node.body)
+    old_func = self.current_function
+    old_func_scope = self.current_function_scope
+    declared_ret = self._resolve_type_node(node.return_type) if node.return_type else None
+    from src.semantics.symbol_table import FunctionSymbol
+    lambda_sym = FunctionSymbol("<lambda>", None)
+    lambda_sym.return_types = [declared_ret] if declared_ret else []
+    self.current_function = lambda_sym
+    self.current_function_scope = self.symbol_table.current_scope
+
+    try:
+      body_type = self.visit(node.body)
+    finally:
+      self.current_function = old_func
+      self.current_function_scope = old_func_scope
 
     # Resolve any InferredType placeholders: if the body produced a concrete
     # return type, use it to back-fill params that remained unconstrained.

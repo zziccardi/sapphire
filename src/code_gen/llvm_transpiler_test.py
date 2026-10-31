@@ -27,7 +27,7 @@ from src.semantics.type_checker import TypeChecker
 class TestLLVMTranspiler(unittest.TestCase):
   """Suite of unit tests verifying correct LLVM IR code generation."""
 
-  def _parse_and_transpile(self, code: str) -> str:
+  def _parse_and_transpile(self, code: str, check_types: bool = True) -> str:
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
     lexer.removeErrorListeners()
@@ -39,14 +39,22 @@ class TestLLVMTranspiler(unittest.TestCase):
     builder = ASTBuilder()
     ast = builder.visit(tree)
 
-    try:
+    if check_types:
       checker = TypeChecker()
       checker.check(ast)
-    except Exception:
-      pass
+      if checker.errors:
+        raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
 
     transpiler = LLVMTranspiler()
-    return transpiler.transpile(ast)
+    ir_out = transpiler.transpile(ast)
+
+    if check_types:
+      # Verify generated LLVM IR parses and passes LLVM module verification
+      import llvmlite.binding as llvm_binding
+      llvm_mod = llvm_binding.parse_assembly(ir_out)
+      llvm_mod.verify()
+
+    return ir_out
 
   def test_subclass_of_base_transpiler(self):
     transpiler = LLVMTranspiler()
@@ -185,7 +193,7 @@ class TestLLVMTranspiler(unittest.TestCase):
     self.assertIn("ret i64 0", self._parse_and_transpile(code_int))
     self.assertIn("ret double", self._parse_and_transpile(code_float))
     self.assertIn("ret i1 0", self._parse_and_transpile(code_bool))
-    self.assertIn("ret void", self._parse_and_transpile(code_struct))
+    self.assertIn('ret %"struct.Point"* null', self._parse_and_transpile(code_struct))
 
   def test_block_and_expr_stmt(self):
     code = """
@@ -205,7 +213,7 @@ class TestLLVMTranspiler(unittest.TestCase):
     }
     """
     with self.assertRaises(NameError):
-      self._parse_and_transpile(code_undefined)
+      self._parse_and_transpile(code_undefined, check_types=False)
 
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
@@ -321,6 +329,40 @@ class TestLLVMTranspiler(unittest.TestCase):
     node2 = VarDeclNode(is_mutable=True, names=["b"])
     node2.type_node = BasicTypeNode("float")
     transpiler.visit(node2)
+
+  def test_mcjit_execution(self):
+    """Verifies that generated LLVM IR can be JIT-compiled and executed natively."""
+    import ctypes
+    import llvmlite.binding as llvm_binding
+
+    llvm_binding.initialize_native_target()
+    llvm_binding.initialize_native_asmprinter()
+
+    code = """
+    func add(a: int, b: int): int {
+      return a + b;
+    }
+    func compute(x: int): int {
+      var y: int = 10;
+      y = y + x;
+      return y;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    mod = llvm_binding.parse_assembly(ir_out)
+    mod.verify()
+
+    target_machine = llvm_binding.Target.from_default_triple().create_target_machine()
+    engine = llvm_binding.create_mcjit_compiler(mod, target_machine)
+    engine.finalize_object()
+
+    add_ptr = engine.get_function_address("add")
+    add_fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64, ctypes.c_int64)(add_ptr)
+    self.assertEqual(add_fn(20, 22), 42)
+
+    compute_ptr = engine.get_function_address("compute")
+    compute_fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(compute_ptr)
+    self.assertEqual(compute_fn(5), 15)
 
 
 if __name__ == "__main__":

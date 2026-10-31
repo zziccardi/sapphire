@@ -80,10 +80,19 @@ sapphire build samples/overview.sp [-o custom_output.py]
 sapphire build samples/overview.sp -t lua [-o custom_output.lua]
 ```
 
-Note: The high-level compilation driver function `transpile_file()` is exported by `src/code_gen/transpiler.py`. You can also call the runner script directly via:
+Note: The high-level compilation driver function `transpile_file()` is
+exported by `src/code_gen/transpiler.py`. Additional CLI inspection
+commands include:
 
 ```bash
-pipenv run python src/run_transpiler.py samples/overview.sp [python|lua]
+# Parse source and print concrete parse tree
+pipenv run sapphire parse samples/overview.sp
+
+# Parse source and dump AST in JSON format
+pipenv run sapphire dump-ast samples/overview.sp
+
+# Run semantic analysis and type checking without code generation
+pipenv run sapphire check samples/overview.sp
 ```
 
 ## Testing & verification

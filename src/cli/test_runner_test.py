@@ -536,6 +536,67 @@ func test_bare_fail() {
     finally:
       shutil.rmtree(tmpdir, ignore_errors=True)
 
+  def test_std_testing_module_comprehensive(self):
+    """Verifies std.testing TestCase methods, assertions, and soft/hard failures."""
+    import lib.std.testing as std_t
+    from lib.std.testing import TestFailure, TestContext
+
+    ctx = TestContext("suite")
+    std_t.set_active_context(ctx)
+
+    tc = std_t.TestCase()
+    tc.set_up()
+    tc.func_set_up()
+
+    # Successful assertions
+    tc.assert_true(True)
+    tc.assert_false(False)
+    tc.assert_eq(10, 10)
+    tc.assert_ne(10, 20)
+    tc.assert_almost_eq(1.0, 1.000001)
+    tc.assert_none(None)
+    tc.assert_not_none(42)
+
+    # Soft assertions (expect_*)
+    tc.expect_true(True)
+    tc.expect_false(False)
+    tc.expect_eq("a", "a")
+    tc.expect_ne("a", "b")
+    tc.expect_almost_eq(2.0, 2.000001)
+    tc.expect_none(None)
+    tc.expect_not_none("val")
+
+    self.assertEqual(len(ctx.failures), 0)
+
+    # Soft failure recordings
+    tc.expect_true(False, "msg")
+    tc.expect_false(True, "msg")
+    tc.expect_eq(1, 2, "msg")
+    tc.expect_ne(1, 1, "msg")
+    tc.expect_almost_eq(1.0, 2.0, msg="msg")
+    tc.expect_none(42, "msg")
+    tc.expect_not_none(None, "msg")
+    self.assertEqual(len(ctx.failures), 7)
+
+    # Hard failures (assert_* raise TestFailure)
+    with self.assertRaises(TestFailure):
+      tc.assert_true(False)
+    with self.assertRaises(TestFailure):
+      tc.assert_false(True)
+    with self.assertRaises(TestFailure):
+      tc.assert_eq(1, 2)
+    with self.assertRaises(TestFailure):
+      tc.assert_ne(1, 1)
+    with self.assertRaises(TestFailure):
+      tc.assert_almost_eq(1.0, 2.0)
+    with self.assertRaises(TestFailure):
+      tc.assert_none(100)
+    with self.assertRaises(TestFailure):
+      tc.assert_not_none(None)
+
+    tc.tear_down()
+    tc.func_tear_down()
+
 
 if __name__ == "__main__":
   unittest.main()

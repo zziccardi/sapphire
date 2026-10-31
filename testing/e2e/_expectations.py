@@ -148,4 +148,12 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_mutual_recursion": 1,
         "test_struct_method_recursion": 15,
     },
+    "negative_runtime_test.sp": {
+        "test_array_out_of_bounds_safe_get": 1,
+        "test_map_missing_key_safe_get": 1,
+        "test_optional_chaining_none": 1,
+        "test_coroutine_exhaustion": 1,
+        "test_guard_unwrapping_rejection": 42,
+        "test_nil_coalescing_fallback": 99,
+    },
 }

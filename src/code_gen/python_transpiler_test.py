@@ -35,11 +35,10 @@ class TestPythonTranspiler(unittest.TestCase):
     tree = parser.program()
     builder = ASTBuilder()
     ast = builder.visit(tree)
-    try:
-      checker = TypeChecker()
-      checker.check(ast)
-    except Exception:
-      pass
+    checker = TypeChecker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
     transpiler = Transpiler()
     return transpiler.transpile(ast)
 
@@ -53,11 +52,10 @@ class TestPythonTranspiler(unittest.TestCase):
 
     builder = ASTBuilder()
     ast = builder.visit(tree)
-    try:
-      checker = TypeChecker()
-      checker.check(ast)
-    except Exception:
-      pass
+    checker = TypeChecker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
 
     transpiler = Transpiler()
     py_code = transpiler.transpile(ast)
@@ -175,8 +173,9 @@ class TestPythonTranspiler(unittest.TestCase):
         self.stock = 10;
       }
     }
-    func test_delegation() {
-      var base = Item(p = 100);
+    func test_delegation(): [int] {
+      let a = Arena();
+      var base = Item(p = 100) in a;
       var promo_item = clone base {
         self.price = 80;
       };
@@ -196,7 +195,7 @@ class TestPythonTranspiler(unittest.TestCase):
   def test_control_flow_loops(self):
     """Verifies while loops, for loops, and boolean logic transpile correctly."""
     code = """
-    func run_loops() {
+    func run_loops(): [int] {
       var sum = 0;
       var count = 3;
       while count > 0 {
@@ -256,7 +255,7 @@ class TestPythonTranspiler(unittest.TestCase):
         return Counter(v = 100);
       }
     }
-    func test_static() {
+    func test_static(): int {
       let c = Counter.create_default();
       return c.get_val();
     }
@@ -275,7 +274,7 @@ class TestPythonTranspiler(unittest.TestCase):
         self.score = s;
       }
     }
-    func test_chain() {
+    func test_chain(): [int?] {
       var n1: Node? = none;
       var n2: Node? = Node(s = 99);
 
@@ -287,19 +286,44 @@ class TestPythonTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "test_chain()")
     self.assertEqual(result, [None, 99])
 
+  def test_optional_method_call_with_arguments(self):
+    """Verifies optional method chaining with positional and named arguments."""
+    code = """
+    struct Calculator {
+      var base: int;
+    }
+    impl Calculator {
+      func add_bonus(bonus: int, factor: int = 1): int {
+        return (self.base + bonus) * factor;
+      }
+    }
+    func test_calc(): int {
+      var c: Calculator? = Calculator { base = 10 };
+      let res = c?.add_bonus(5, factor = 2);
+      var c_none: Calculator? = none;
+      let res_none = c_none?.add_bonus(5, factor = 2);
+      if res_none == none {
+        return res ?? 0;
+      }
+      return -1;
+    }
+    """
+    result = self._transpile_and_run(code, "test_calc()")
+    self.assertEqual(result, 30)
+
   def test_unary_operators(self):
     """Verifies logical NOT (!) and arithmetic negation (-) transpile correctly."""
     code = """
-    func test_unary() {
+    func test_unary(): bool, int {
       let is_true = true;
       let is_false = !is_true;
       let num = 5;
       let neg_num = -num;
-      return [is_false, neg_num];
+      return is_false, neg_num;
     }
     """
     result = self._transpile_and_run(code, "test_unary()")
-    self.assertEqual(result, [False, -5])
+    self.assertEqual(result, (False, -5))
 
 
   def test_lambda_expression(self):
@@ -349,7 +373,8 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_features(): int {
-      let b1 = Base();
+      let a = Arena();
+      let b1 = Base() in a;
       let b2 = clone b1 {
         self.x = 10;
         self.y = 20;
@@ -456,8 +481,9 @@ class TestPythonTranspiler(unittest.TestCase):
         self.health = hp;
       }
     }
-    func test_inherited_cloning() {
-      var base = Character(id_val = 1, hp = 100);
+    func test_inherited_cloning(): [int] {
+      let a = Arena();
+      var base = Character(id_val = 1, hp = 100) in a;
       var derived_clone = clone base {
         self.health = 80;
       };
@@ -488,10 +514,11 @@ class TestPythonTranspiler(unittest.TestCase):
         self.weapon = w;
       }
     }
-    func run_cow_test() {
-      var original_weapon = Weapon { damage = 10 };
-      var base_player = Player(w = original_weapon);
-      var clone_player = clone base_player;
+    func run_cow_test(): [int] {
+      let a = Arena();
+      var original_weapon = Weapon { damage = 10 } in a;
+      var base_player = Player(w = original_weapon) in a;
+      var clone_player = clone base_player in a;
 
       // Mutating clone player's weapon damage
       clone_player.weapon.damage = 15;
@@ -512,7 +539,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var x: int;
       var y: int = 10;
     }
-    func test_init() {
+    func test_init(): [int] {
       let p = Point { x = 5 };
       return [p.x, p.y];
     }
@@ -527,8 +554,9 @@ class TestPythonTranspiler(unittest.TestCase):
       var price: int = 100;
       var stock: int = 5;
     }
-    func test_defaults() {
-      let it = Item { price = 50, stock = 2 };
+    func test_defaults(): [int] {
+      let a = Arena();
+      let it = Item { price = 50, stock = 2 } in a;
       return [it.price, it.stock];
     }
     """
@@ -546,13 +574,12 @@ class TestPythonTranspiler(unittest.TestCase):
       var x: int;
     }
 
+    let my_arena = Arena();
+    let other_arena = Arena();
     var leaked_enemy: Enemy? = none;
     var leaked_point: Point? = none;
 
-    func run_scope() {
-      let my_arena = Arena();
-      let other_arena = Arena();
-
+    func run_scope(): [int] {
       let base = Enemy { hp = 100 } in my_arena;
 
       // Implicit clone arena propagation
@@ -570,7 +597,7 @@ class TestPythonTranspiler(unittest.TestCase):
       return [cloned.hp, pt.x, cloned_override.hp];
     }
 
-    func test_arena_raii() {
+    func test_arena_raii(): [int] {
       let vals = run_scope();
       return [vals[0], vals[1], vals[2]];
     }
@@ -695,31 +722,31 @@ class TestPythonTranspiler(unittest.TestCase):
       self.assertTrue(os.path.exists(out_path))
 
   def test_transpile_file_read_error(self):
-    """Verifies transpile_file handles missing source files by exiting."""
+    """Verifies transpile_file handles missing source files by exiting when raise_on_error=False."""
     with tempfile.TemporaryDirectory() as temp_dir:
       non_existent = os.path.join(temp_dir, "missing.sp")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(non_existent, quiet=True)
+        transpile_file(non_existent, quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_syntax_error(self):
-    """Verifies transpile_file handles syntax errors by exiting."""
+    """Verifies transpile_file handles syntax errors by exiting when raise_on_error=False."""
     with tempfile.TemporaryDirectory() as temp_dir:
       bad_sp = os.path.join(temp_dir, "syntax.sp")
       with open(bad_sp, "w", encoding="utf-8") as f:
         f.write("let x: int = ;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(bad_sp, quiet=True)
+        transpile_file(bad_sp, quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_semantic_error(self):
-    """Verifies transpile_file handles semantic errors by exiting."""
+    """Verifies transpile_file handles semantic errors by exiting when raise_on_error=False."""
     with tempfile.TemporaryDirectory() as temp_dir:
       semantic_sp = os.path.join(temp_dir, "semantic.sp")
       with open(semantic_sp, "w", encoding="utf-8") as f:
         f.write("return 42;\n")
       with self.assertRaises(SystemExit) as cm:
-        transpile_file(semantic_sp, quiet=True)
+        transpile_file(semantic_sp, quiet=True, raise_on_error=False)
       self.assertEqual(cm.exception.code, 1)
 
   def test_transpile_file_raise_on_error_modes(self):
@@ -1085,10 +1112,10 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies Python transpilation of empty yield and multi-yield inline match expressions."""
     code = """
     func test_yields(val: int): int, int {
-      let res = (match val {
-        1 -> { yield 10, 20; },
+      let opt_val: int? = (match val {
+        1 -> { yield 10; },
         2 -> { yield; },
-        ... -> { yield 30, 40; }
+        ... -> { yield 30; }
       });
       return match val {
         1 -> { yield 10, 20; },
@@ -1238,7 +1265,7 @@ class TestPythonTranspiler(unittest.TestCase):
     try:
       sys.stderr = captured_stderr
       with self.assertRaises(SystemExit):
-        transpile_file(fname)
+        transpile_file(fname, raise_on_error=False)
     finally:
       sys.stderr = old_stderr
       if os.path.exists(fname):
@@ -1286,8 +1313,9 @@ class TestPythonTranspiler(unittest.TestCase):
       var pos: Vector;
     }
     func test_cow(): int {
-      var base = Entity { pos = Vector { x = 10 } };
-      let cloned = clone base;
+      let a = Arena();
+      var base = Entity { pos = Vector { x = 10 } } in a;
+      var cloned = clone base in a;
       let initial_read = cloned.pos.x;
       base.pos.x = 20;
       let live_read = cloned.pos.x;
@@ -1355,7 +1383,7 @@ class TestPythonTranspiler(unittest.TestCase):
       let f = 10 as float;
       let i = 3.14 as int;
       let b = 1 as bool;
-      let str_cast = 10 as String;
+      let s0 = String.from(10);
       let s1 = String.from(42);
       let s2 = String.from(true);
 
@@ -1374,10 +1402,10 @@ class TestPythonTranspiler(unittest.TestCase):
       let l_bad = LogLevel.from("DEBUG");
 
       let c = Child { hp = 100, mp = 50 };
-      let parent_cast = c as Parent;
+      let hp = c.hp;
 
-      let cond1 = f == 10.0 && i == 3 && b == true && str_cast == "10" && s1 == "42" && s2 == "true";
-      let cond2 = p_int == 123 && p_hex == 255 && p_float == 3.14 && p_bool == true && bad_int == none && parent_cast.hp == 100;
+      let cond1 = f == 10.0 && i == 3 && b == true && s0 == "10" && s1 == "42" && s2 == "true";
+      let cond2 = p_int == 123 && p_hex == 255 && p_float == 3.14 && p_bool == true && bad_int == none && hp == 100;
       let cond3 = e1 == Status.Active && e2 == Status.Active && e_bad == none && l1 == LogLevel.Info && l2 == LogLevel.Warn && l_bad == none;
       return cond1 && cond2 && cond3;
     }
@@ -1536,8 +1564,9 @@ class TestPythonTranspiler(unittest.TestCase):
       var count: int;
     }
     func test_proxy_ops(): int {
-      let base = Container { count = 10 };
-      let c = clone base;
+      let a = Arena();
+      let base = Container { count = 10 } in a;
+      var c = clone base in a;
       c.count += 5;
       return c.count + base.count;
     }
@@ -1829,7 +1858,7 @@ class TestPythonTranspiler(unittest.TestCase):
       let c3 = GenHolder.stat_gen();
       let val3 = c3.step();
 
-      return val2 + val3;
+      return (val2 ?? 0) + (val3 ?? 0);
     }
     """
     res = self._transpile_and_run(code, "test_coroutine_runner()")
@@ -2145,10 +2174,10 @@ class TestSharedFixtures(unittest.TestCase):
     parser = _Parser(stream)
     tree = parser.program()
     ast = _Builder().visit(tree)
-    try:
-      _Checker().check(ast)
-    except Exception:
-      pass
+    checker = _Checker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{source}\nErrors: {checker.errors}")
     py_code = Transpiler(test_mode=True).transpile(ast)
     lib_path = str(_E2E_DIR.parent.parent / "lib")
     if lib_path not in sys.path:

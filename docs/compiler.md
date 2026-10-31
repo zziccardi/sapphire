@@ -52,26 +52,54 @@ The Symbol Table defined in [symbol_table.py](src/semantics/symbol_table.py) man
 - **Type System**: Standardizes compiler types: `PrimitiveType`, `OptionalType`, `FunctionType`, `StructType`, `TraitType`, and `ArrayType`.
 - **Compatibility checking (`is_compatible`)**: Enforces assignability constraints (e.g. allowing assigning `int` to `float`, assigning `none` to an optional type `T?`, and assigning non-optional `T` to `T?` while rejecting reverse optional-to-non-optional casting).
 
-### 2. Semantic Analysis Rules (`type_checker.py`, `arena_checker.py`, `generics_checker.py`)
-The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py) traverses the AST and orchestrates semantic checks, delegating specialized constraints to dedicated domain checkers:
-- **Arena & Lifetime Checker (`arena_checker.py`)**: Validates arena allocation scope chains, reference lifetime dependencies, and prevents nested arena reference escapes to outer scopes.
-- **Generics & Monomorphization Checker (`generics_checker.py`)**: Manages recursive AST parameter substitution and type mangling for generic struct and `impl` monomorphization.
-- **Global Pre-declarations**: Registers all structs, traits, and global functions first to support mutual recursion and forward-references.
-- **Static Layout Copying**: Copies layout fields and methods from parent struct to child struct for static inheritance, and enforces that no up-casting is allowed (a child type cannot be assigned to a parent type).
-- **Immutability Checking**: Enforces that constants declared with `let` cannot be reassigned.
+### 2. Semantic analysis rules & modular passes
+The `TypeChecker` class in [type_checker.py](src/semantics/type_checker.py)
+orchestrates semantic analysis across modular passes and specialized checkers:
+- **Semantic Context (`semantic_context.py`)**: Centralizes typed AST node
+  annotations, resolved call signatures, symbol tables, and compiler errors.
+- **Declaration Pass (`declaration_pass.py`)**: Handles Pass 0 (imported module
+  resolution) and Pass 1 (global struct, enum, trait, and function symbols).
+- **Struct Layout Pass (`struct_layout_pass.py`)**: Handles Pass 2, resolving
+  static composition layouts, circular inheritance checks, and field copying.
+- **Arena & Lifetime Checker (`arena_checker.py`)**: Validates arena allocation
+  scope chains, reference lifetimes, and prevents nested arena escapes.
+- **Generics & Monomorphization Checker (`generics_checker.py`)**: Manages
+  AST parameter substitution, type mangling, and monomorphization.
+- **Immutability Checking**: Enforces that constants declared with `let` cannot
+  be reassigned.
 - **Method & Constructor Safety**:
   - Verifies that methods called on constant objects are marked `const`.
-  - Inside the constructor `__init__`, enforces that all non-optional struct fields are explicitly initialized.
-  - Verifies that mutable reference (`var`) parameters are only passed mutable lvalues.
-- **Conditional Bindings & Optional Safety**: Validates unwrapping (`let x ?= optional`) and init statements where variables are registered inside the nested control-flow scope.
-- **Bidirectional Lambda Inference**: Resolves types of lambda parameters without annotations (e.g. `x -> x * 2`) by matching them against expected function types (like `(int) -> int`) in assignments or call sites.
+  - Inside the constructor `__init__`, enforces that all non-optional struct
+    fields are explicitly initialized.
+  - Verifies that mutable reference (`var`) parameters receive mutable lvalues.
+- **Conditional Bindings & Optional Safety**: Validates unwrapping
+  (`let x ?= optional`) and init statements where variables are registered
+  inside the nested control-flow scope.
+- **Bidirectional Lambda Inference**: Resolves types of lambda parameters
+  without annotations (e.g. `x -> x * 2`) by matching them against expected
+  function types (like `(int) -> int`) in assignments or call sites.
 
 ## Stage 3: Code Generation & Target Registry
 
 Stage 3 compiles the typed AST into target language code, mapping Sapphire semantics to target runtimes.
 
 ### Open/Closed Target Backend Registry (`transpiler_registry.py`)
-Target code generators register dynamically with `TranspilerRegistry` in [transpiler_registry.py](src/code_gen/transpiler_registry.py) using the `@TranspilerRegistry.register(aliases=[...], display_name=..., default_extension=...)` decorator. This decouples code generation dispatch from `transpile_file`, adhering to the Open/Closed Principle.
+Target code generators register dynamically with `TranspilerRegistry` in
+[transpiler_registry.py](src/code_gen/transpiler_registry.py) using the
+`@TranspilerRegistry.register(aliases=[...], display_name=..., default_extension=...)`
+decorator. This decouples code generation dispatch from `transpile_file`,
+adhering to the Open/Closed Principle.
+
+### Table-driven intrinsic code generation (`intrinsics.py`)
+Built-in primitive and collection operations (`String`, `Array`, `Map`,
+`range()`, and `Enum`) are dispatched via a centralized table-driven registry
+in [intrinsics.py](src/code_gen/intrinsics.py). Instead of maintaining large,
+repetitive `if/elif` call ladders across backends, `IntrinsicRegistry` maps
+`(category, method, target)` to backend-specific emitter functions. Both
+`PythonTranspiler` and `LuaTranspiler` delegate intrinsic call handling
+directly to `IntrinsicRegistry.try_emit(target, self, node)`. Centralized
+detection of built-in standard library modules is provided via
+`is_builtin_module(import_path)`.
 
 ### Python Target (`python_transpiler.py`)
 - **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
