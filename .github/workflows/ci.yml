@@ -20,7 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.15"]
+        python-version: ["3.14", "3.15"]
+    env:
+      PIPENV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - name: Checkout code
@@ -31,11 +33,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install system dependencies (Lua)
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+
       - name: Install Pipenv
         run: pip install --upgrade pip pipenv
 
       - name: Install dependencies
-        run: pipenv install --dev --deploy || pipenv install --dev --skip-lock
+        run: pipenv --python ${{ matrix.python-version }} install --dev --deploy || pipenv --python ${{ matrix.python-version }} install --dev --skip-lock
 
       - name: Run Python unit tests
         run: pipenv run test

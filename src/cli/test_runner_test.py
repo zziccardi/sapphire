@@ -12,6 +12,7 @@ from src.cli.test_runner import (
     parse_ast,
     discover_tests,
     get_source_line,
+    find_lua_binary,
     run_tests_python,
     run_tests_lua,
     run_tests,
@@ -329,10 +330,11 @@ impl TestCase for UnimportedSuite {
     _check_alignment(buf.getvalue())
 
     # --- Lua runner ---
-    buf_lua = io.StringIO()
-    with redirect_stdout(buf_lua):
-      run_tests_lua(self.sample_sp, standalone, suites)
-    _check_alignment(buf_lua.getvalue())
+    if find_lua_binary():
+      buf_lua = io.StringIO()
+      with redirect_stdout(buf_lua):
+        run_tests_lua(self.sample_sp, standalone, suites)
+      _check_alignment(buf_lua.getvalue())
 
   def test_failure_format_none_and_not_none_kinds(self):
     """Covers none/not_none failure kinds and generic kind via format_failure branches."""
@@ -479,6 +481,8 @@ func test_bare_fail() {
 
   def test_same_folder_module_import_lua(self):
     """Verifies that modules in subfolders importing sibling modules in the same folder run cleanly in Lua."""
+    if not find_lua_binary():
+      self.skipTest("Lua interpreter not found in PATH.")
     tmpdir = tempfile.mkdtemp()
     try:
       sp_dir = os.path.join(tmpdir, "sp")
