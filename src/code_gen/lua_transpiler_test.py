@@ -1946,6 +1946,28 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(x)", test_code)
     self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
 
+  def test_coroutine_yield_in_match_statement(self):
+    """Verifies Lua transpilation of coroutine yield inside a statement-level match block."""
+    code = """
+    enum Step { First, Second }
+
+    func gen(s: Step): Coroutine<int> {
+      match s {
+        Step.First -> {
+          yield 10;
+        },
+        Step.Second -> {
+          yield 20;
+        },
+      };
+      yield 30;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("coroutine.yield(10)", lua_code)
+    self.assertIn("coroutine.yield(20)", lua_code)
+    self.assertIn("coroutine.yield(30)", lua_code)
+
 
 
 # ---------------------------------------------------------------------------

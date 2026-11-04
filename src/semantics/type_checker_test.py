@@ -2447,7 +2447,7 @@ class TestTypeChecker(unittest.TestCase):
       self.assertIn("DrawMode", mod_a_sym.exports)
 
   def test_qualified_type_fallback_struct(self):
-    """Verifies dot-qualified fallback to StructType when not ending in Mode or Code."""
+    """Verifies that referencing an unexported dot-qualified module type raises a semantic error."""
     code = """
     import lib.love2d.enums;
     func test(s: enums.CustomStruct) {}
@@ -2460,8 +2460,9 @@ class TestTypeChecker(unittest.TestCase):
     ast = ASTBuilder().visit(tree)
 
     checker = TypeChecker()
-    checker.check(ast)
-    self.assertEqual(len(checker.errors), 0)
+    with self.assertRaises(SemanticError) as cm:
+      checker.check(ast)
+    self.assertIn("Module 'enums' does not export type 'CustomStruct'.", str(cm.exception))
 
 
   def test_module_import_with_error(self):
@@ -4671,6 +4672,38 @@ class TestTypeChecker(unittest.TestCase):
       yield code;
     }
     """)
+
+    # 8b. Statement-level match inside coroutine yielding directly from coroutine
+    self._check("""
+    enum Status { Ready, Busy }
+    func worker_stmt(s: Status): Coroutine<int> {
+      match s {
+        Status.Ready -> {
+          yield 10;
+        },
+        Status.Busy -> {
+          yield 20;
+        },
+      };
+    }
+    """)
+
+    # 8c. Statement-level match inside coroutine with wrong yield type raises error
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ready, Busy }
+      func bad_worker_stmt(s: Status): Coroutine<int> {
+        match s {
+          Status.Ready -> {
+            yield "not_an_int";
+          },
+          Status.Busy -> {
+            yield 20;
+          },
+        };
+      }
+      """)
+    self.assertIn("Cannot yield value of type 'String' in Coroutine<int>", str(ctx.exception))
 
     # 9. Invalid method on Coroutine
     with self.assertRaises(SemanticError) as ctx:

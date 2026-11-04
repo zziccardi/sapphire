@@ -135,6 +135,51 @@ class TestGenerics(unittest.TestCase):
     """
     ast = self._check(code)
 
+    # Verify concrete struct type argument in impl is type-checked
+    concrete_impl_code = """
+    trait Container<T> {
+      func get(): T;
+    }
+    struct Payload {
+      var v: int;
+    }
+    struct Box {
+      var p: Payload;
+    }
+    impl Container<Payload> for Box {
+      func get(): Payload {
+        return self.p;
+      }
+    }
+    func main(): int {
+      let b = Box { p = Payload { v = 7 } };
+      return b.get().v;
+    }
+    """
+    ast_concrete = self._check(concrete_impl_code)
+    py_code = PythonTranspiler().transpile(ast_concrete)
+    self.assertIn("def get(self)", py_code)
+
+    bad_concrete_impl_code = """
+    trait Container<T> {
+      func get(): T;
+    }
+    struct Payload {
+      var v: int;
+    }
+    struct Box {
+      var p: Payload;
+    }
+    impl Container<Payload> for Box {
+      func get(): int {
+        return 123;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(bad_concrete_impl_code)
+    self.assertIn("has signature () -> int, but trait 'Container' requires () -> Payload", str(ctx.exception))
+
   def test_nested_generic_type_substitution(self):
     """Verifies nested generic type parameter substitution."""
     code = """

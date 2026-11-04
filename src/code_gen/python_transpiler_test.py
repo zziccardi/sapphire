@@ -2251,6 +2251,33 @@ class TestSharedFixtures(unittest.TestCase):
     self.assertEqual(res["test_shared_ref"], 42)
     self.assertEqual(res["test_shared_from_move"], 99)
 
+  def test_coroutine_yield_in_match_statement(self):
+    """Verifies that a coroutine can yield directly inside a statement-level match block."""
+    code = """
+    enum Step { First, Second }
+
+    func gen(s: Step): Coroutine<int> {
+      match s {
+        Step.First -> {
+          yield 10;
+        },
+        Step.Second -> {
+          yield 20;
+        },
+      };
+      yield 30;
+    }
+
+    func test_coro_match(): int {
+      var c = gen(Step.First);
+      let a = c.step() ?? 0;
+      let b = c.step() ?? 0;
+      return a + b;
+    }
+    """
+    res = self._transpile_and_exec(code)
+    self.assertEqual(res["test_coro_match"], 40)
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

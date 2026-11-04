@@ -779,6 +779,8 @@ class MatchCaseNode(ASTNode):
 class MatchExprNode(ExprNode):
   """Represents a match expression (e.g. 'match status { HttpStatus.Ok -> "Success", ... -> "Error", }')."""
 
-  def __init__(self, subject: ASTNode, cases: List[MatchCaseNode]):
+  def __init__(self, subject: ASTNode, cases: List[MatchCaseNode],
+               is_statement: bool = False):
     self.subject = subject
     self.cases = cases
+    self.is_statement = is_statement

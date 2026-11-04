@@ -202,7 +202,43 @@ class TypeChecker:
     return False
 
   def _get_impl_type_params(self, decl: ImplBlockNode) -> List[str]:
-    return list(decl.type_params) if decl.type_params else []
+    type_params = list(decl.type_params) if decl.type_params else []
+    builtin_type_names = {
+        "int", "float", "String", "bool", "none", "void",
+        "Array", "Map", "Coroutine", "Ref", "SharedRef", "WeakRef", "Arena", "Range",
+    }
+    for arg in getattr(decl, "trait_type_args", []) + getattr(decl, "struct_type_args", []):
+      if isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names:
+        if "." not in arg.name and self.symbol_table.lookup_type(arg.name) is None:
+          if arg.name not in type_params:
+            type_params.append(arg.name)
+    decl.type_params = type_params
+    return type_params
+
+  def _substitute_type_params(self, t: Type, type_map: Dict[str, Type]) -> Type:
+    if isinstance(t, GenericTypeParameter) and t.name in type_map:
+      return type_map[t.name]
+    if isinstance(t, OptionalType):
+      return OptionalType(self._substitute_type_params(t.base_type, type_map))
+    if isinstance(t, ArrayType):
+      return ArrayType(self._substitute_type_params(t.element_type, type_map), size=t.size)
+    if isinstance(t, MapType):
+      return MapType(
+          self._substitute_type_params(t.key_type, type_map),
+          self._substitute_type_params(t.value_type, type_map),
+      )
+    if isinstance(t, MultiReturnType):
+      return MultiReturnType([self._substitute_type_params(sub, type_map) for sub in t.types])
+    if isinstance(t, FunctionType):
+      return FunctionType(
+          [self._substitute_type_params(p, type_map) for p in t.param_types],
+          self._substitute_type_params(t.return_type, type_map),
+          param_mutabilities=t.param_mutabilities,
+          param_names=t.param_names,
+          has_self=t.has_self,
+          num_defaults=t.num_defaults,
+      )
+    return t
 
   def _register_impl_signatures(self, program: ProgramNode) -> None:
     """Pre-pass to register methods defined inside impl blocks onto struct types."""
@@ -236,7 +272,10 @@ class TypeChecker:
           param_types = []
           param_mutabilities = []
           for p in func_decl.parameters:
-            ptype = self._resolve_type_node(p.param_type)
+            if p.name == "self" and p.param_type is None:
+              ptype = trait_type if trait_type else struct_type
+            else:
+              ptype = self._resolve_type_node(p.param_type)
             param_types.append(ptype)
             param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_return_types(func_decl)
@@ -318,7 +357,8 @@ class TypeChecker:
           exp_sym = mod_sym.lookup_export(parts[1])
           if exp_sym:
             return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
-          return EnumType(parts[1]) if ("Mode" in parts[1] or "Code" in parts[1]) else StructType(parts[1])
+          self.error(f"Module '{parts[0]}' does not export type '{parts[1]}'.", node=node)
+          return PrimitiveType("none")
       resolved = self.symbol_table.lookup_type(node.name)
       if isinstance(resolved, GenericTypeParameter):
         return resolved
@@ -418,7 +458,16 @@ class TypeChecker:
             if trait_m_name not in struct_type.methods:
               struct_type.methods[trait_m_name] = StructMethod(trait_m_name, trait_sig, None)
         else:
+          trait_type_map: Dict[str, Type] = {}
+          if trait_type.type_params and getattr(node, "trait_type_args", None):
+            resolved_args = [self._resolve_type_node(t) for t in node.trait_type_args]
+            trait_type_map = dict(zip(trait_type.type_params, resolved_args))
           for trait_method_name, trait_sig in trait_type.methods.items():
+            expected_sig = (
+                self._substitute_type_params(trait_sig, trait_type_map)
+                if trait_type_map
+                else trait_sig
+            )
             if trait_method_name not in struct_type.methods:
               self.error(
                   f"Struct '{node.struct_name}' does not implement trait method "
@@ -426,11 +475,11 @@ class TypeChecker:
               )
             else:
               impl_sig = struct_type.methods[trait_method_name].method_type
-              if impl_sig != trait_sig:
+              if impl_sig != expected_sig:
                 self.error(
                     f"Method '{trait_method_name}' in struct '{node.struct_name}' "
                     f"has signature {impl_sig}, but trait '{node.trait_name}' "
-                    f"requires {trait_sig}."
+                    f"requires {expected_sig}."
                 )
       else:
         self.error(f"Trait '{node.trait_name}' is not defined.")
@@ -934,6 +983,7 @@ class TypeChecker:
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
     subject_type = self.visit(node.subject)
+    is_stmt = getattr(node, "is_statement", False)
 
     seen_enum_variants = set()
     seen_bool_true = False
@@ -991,23 +1041,27 @@ class TypeChecker:
           self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")  # pragma: no cover
         seen_optional_some = True  # pragma: no cover
 
-      self._match_stack.append([])
-      if isinstance(case.body, BlockNode):
+      if is_stmt:
         self.visit(case.body)
-        yields = self._match_stack.pop()
-        if yields:
-          first_yield = yields[0]
-          for y in yields[1:]:
-            if not y.is_compatible(first_yield):
-              self.error(f"Incompatible yield types in match case: '{first_yield}' and '{y}'.")
-          case_types.append(first_yield)
-        else:
-          case_types.append(NoneType())
-          has_unyielded_block = True
+        case_types.append(NoneType())
       else:
-        self._match_stack.pop()
-        expr_type = self.visit(case.body)
-        case_types.append(expr_type)
+        self._match_stack.append([])
+        if isinstance(case.body, BlockNode):
+          self.visit(case.body)
+          yields = self._match_stack.pop()
+          if yields:
+            first_yield = yields[0]
+            for y in yields[1:]:
+              if not y.is_compatible(first_yield):
+                self.error(f"Incompatible yield types in match case: '{first_yield}' and '{y}'.")
+            case_types.append(first_yield)
+          else:
+            case_types.append(NoneType())
+            has_unyielded_block = True
+        else:
+          self._match_stack.pop()
+          expr_type = self.visit(case.body)
+          case_types.append(expr_type)
 
     if not has_ellipsis:
       if isinstance(subject_type, EnumType):
@@ -1021,6 +1075,9 @@ class TypeChecker:
       elif isinstance(subject_type, OptionalType):
         if not (seen_optional_none and (seen_optional_some or has_ellipsis)):
           self.error(f"Match expression for optional '{subject_type}' is not exhaustive.")
+
+    if is_stmt:
+      return PrimitiveType("none")
 
     non_none_types = [
         t for t in case_types

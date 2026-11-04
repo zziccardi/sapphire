@@ -69,7 +69,7 @@ structField
     ;
 
 implBlock
-    : IMPL typeParamList? (traitName=identifierPath (tp1=typeParamList | ta1=typeArgumentList)? FOR)? structName=IDENTIFIER (tp2=typeParamList | ta2=typeArgumentList)? LBRACE implMember* RBRACE
+    : IMPL typeParamList? (traitName=identifierPath typeArgumentList? FOR)? structName=IDENTIFIER typeArgumentList? LBRACE implMember* RBRACE
     ;
 
 implMember
@@ -89,7 +89,7 @@ traitMember
     ;
 
 functionDeclaration
-    : annotation* FUNC tp1=typeParamList? functionName tp2=typeParamList? LPAREN parameterList? RPAREN (COLON (baseInitializerList | returnTypeList))? block
+    : annotation* FUNC functionName typeParamList? LPAREN parameterList? RPAREN (COLON (baseInitializerList | returnTypeList))? block
     ;
 
 baseInitializerList
