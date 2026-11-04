@@ -5,7 +5,7 @@ for structs, enums, traits, externs, and functions).
 """
 
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 from antlr4 import InputStream, CommonTokenStream
 from pygls.uris import from_fs_path
 
@@ -47,6 +47,15 @@ from src.semantics.symbol_table import (
 class DeclarationPass:
   """Executes preliminary module imports and top-level global symbol registration."""
 
+  # Cache of parsed and typechecked modules on disk:
+  # abs_file_path -> (mtime, file_size, exports_dict)
+  _module_cache: Dict[str, Any] = {}
+
+  @classmethod
+  def clear_cache(cls) -> None:
+    """Clears the cached imported module declarations."""
+    cls._module_cache.clear()
+
   @staticmethod
   def validate_parameter_defaults(checker: Any, parameters: List[ParameterNode]) -> None:
     """Validates that parameters without default values do not follow parameters with default values."""
@@ -86,6 +95,23 @@ class DeclarationPass:
 
       if target_file:
         try:
+          mod_file_path = os.path.abspath(target_file)
+          mod_sym.file_path = mod_file_path
+          try:
+            stat_res = os.stat(mod_file_path)
+            mtime = stat_res.st_mtime_ns
+            fsize = stat_res.st_size
+          except OSError:
+            mtime = None
+            fsize = None
+
+          cached_entry = DeclarationPass._module_cache.get(mod_file_path)
+          if cached_entry is not None and mtime is not None and cached_entry[0] == mtime and cached_entry[1] == fsize:
+            mod_sym.exports.update(cached_entry[2])
+            if is_builtin:
+              mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+            continue
+
           with open(target_file, "r", encoding="utf-8") as f:
             sub_code = f.read()
 
@@ -95,7 +121,6 @@ class DeclarationPass:
             sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
             sub_parser.removeErrorListeners()
             sub_ast = ASTBuilder().visit(sub_parser.program())
-            mod_file_path = os.path.abspath(target_file)
             mod_file_uri = from_fs_path(mod_file_path)
 
             def _mark_file_uri(node):
@@ -112,13 +137,14 @@ class DeclarationPass:
             if sub_ast:
               _mark_file_uri(sub_ast)
 
-            sub_checker = checker.__class__(source_file_path=target_file)
+            from src.semantics.type_checker import TypeChecker
+            sub_checker = TypeChecker(source_file_path=target_file, source_content=sub_code)
             try:
               sub_checker.check(sub_ast)
             except Exception:
               pass
 
-            mod_sym.file_path = os.path.abspath(target_file)
+            computed_exports: Dict[str, Any] = {}
             # Populate mod_sym exports from sub_checker
             if getattr(sub_ast, "export_block", None):
               for spec in sub_ast.export_block.specifiers:
@@ -128,7 +154,7 @@ class DeclarationPass:
                   if isinstance(prefix_sym, ModuleSymbol):
                     exp = prefix_sym.lookup_export(spec.symbol)
                     if exp:
-                      mod_sym.exports[export_name] = exp
+                      computed_exports[export_name] = exp
                 else:
                   exp = sub_checker.symbol_table.lookup_type(spec.symbol) or sub_checker.symbol_table.lookup(spec.symbol)
                   if exp:
@@ -138,7 +164,7 @@ class DeclarationPass:
                     elif hasattr(exp, "struct_type"):
                       exp.struct_type.is_imported = True
                       exp.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
-                    mod_sym.exports[export_name] = exp
+                    computed_exports[export_name] = exp
             else:
               sub_root = sub_checker.symbol_table.current_scope
               while sub_root.parent:
@@ -147,13 +173,18 @@ class DeclarationPass:
                 if hasattr(sym, "struct_type"):
                   sym.struct_type.is_imported = True
                   sym.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
-                mod_sym.exports[name] = sym
+                computed_exports[name] = sym
               for name, t in sub_root.types.items():
                 if name not in ("int", "float", "bool", "String", "none", "Arena"):
                   if isinstance(t, StructType):
                     t.is_imported = True
                     t.defining_module = mod_sym.file_path or mod_sym.module_path
-                  mod_sym.exports[name] = t
+                  computed_exports[name] = t
+
+            if mtime is not None:
+              DeclarationPass._module_cache[mod_file_path] = (mtime, fsize, dict(computed_exports))
+
+            mod_sym.exports.update(computed_exports)
             if is_builtin:
               mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
           except Exception:  # pragma: no cover

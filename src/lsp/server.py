@@ -1,12 +1,12 @@
 """LSP server implementation for the Sapphire programming language.
 
-This server provides diagnostics (syntax and semantic errors) and semantic tokens for
-accurate syntax highlighting in Visual Studio Code.
+This server provides diagnostics (syntax and semantic errors) and semantic
+tokens for accurate syntax highlighting in Visual Studio Code.
 """
 
 import sys
 import os
-from typing import Optional
+from typing import List, Optional
 
 # Add parent directories to Python path to allow imports from parser and semantics
 sys.path.insert(0, os.path.abspath(
@@ -87,6 +87,7 @@ class SapphireLanguageServer(LanguageServer):
     self.ast_cache = {}
     self.node_types_cache = {}
     self.symbol_table_cache = {}
+    self.mtime_cache = {}
 
 
 server = SapphireLanguageServer("sapphire-lsp", "v0.1.0")
@@ -130,9 +131,17 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
     if getattr(s_decl, "path", None):
       mod_path_fs = _resolve_module_path(doc_uri, s_decl.path, ws_root)
       if mod_path_fs and os.path.isfile(mod_path_fs):
-        mod_uri = from_fs_path(os.path.abspath(mod_path_fs))
+        abs_mod_path = os.path.abspath(mod_path_fs)
+        mod_uri = from_fs_path(abs_mod_path)
         s_decl.target_file_uri = mod_uri
-        if mod_uri not in ls.ast_cache:
+        try:
+          stat_res = os.stat(abs_mod_path)
+          mtime_key = (stat_res.st_mtime_ns, stat_res.st_size)
+        except OSError:
+          mtime_key = None
+
+        cached_mtime = ls.mtime_cache.get(mod_uri)
+        if mod_uri not in ls.ast_cache or (mtime_key is not None and cached_mtime != mtime_key):
           try:
             with open(mod_path_fs, "r", encoding="utf-8") as f:
               sub_code = f.read()
@@ -163,6 +172,8 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
               ls.ast_cache[mod_uri] = sub_ast
               ls.symbol_table_cache[mod_uri] = sub_checker.symbol_table
               ls.node_types_cache[mod_uri] = sub_checker.node_types
+              if mtime_key is not None:
+                ls.mtime_cache[mod_uri] = mtime_key
               _preload_module_dependencies(ls, mod_uri, sub_ast, ws_root)
           except Exception:  # pragma: no cover
             pass
@@ -282,6 +293,7 @@ def did_change(ls: SapphireLanguageServer, params):
 def did_save(ls: SapphireLanguageServer, params):
   """Triggered when a document is saved."""
   doc = ls.workspace.get_text_document(params.text_document.uri)
+  ls.mtime_cache.pop(doc.uri, None)
   validate_source(ls, doc.uri, doc.source)
 
 
