@@ -2447,7 +2447,7 @@ class TestTypeChecker(unittest.TestCase):
       self.assertIn("DrawMode", mod_a_sym.exports)
 
   def test_qualified_type_fallback_struct(self):
-    """Verifies dot-qualified fallback to StructType when not ending in Mode or Code."""
+    """Verifies that referencing an unexported dot-qualified module type raises a semantic error."""
     code = """
     import lib.love2d.enums;
     func test(s: enums.CustomStruct) {}
@@ -2460,8 +2460,9 @@ class TestTypeChecker(unittest.TestCase):
     ast = ASTBuilder().visit(tree)
 
     checker = TypeChecker()
-    checker.check(ast)
-    self.assertEqual(len(checker.errors), 0)
+    with self.assertRaises(SemanticError) as cm:
+      checker.check(ast)
+    self.assertIn("Module 'enums' does not export type 'CustomStruct'.", str(cm.exception))
 
 
   def test_module_import_with_error(self):
@@ -4672,6 +4673,38 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+    # 8b. Statement-level match inside coroutine yielding directly from coroutine
+    self._check("""
+    enum Status { Ready, Busy }
+    func worker_stmt(s: Status): Coroutine<int> {
+      match s {
+        Status.Ready -> {
+          yield 10;
+        },
+        Status.Busy -> {
+          yield 20;
+        },
+      };
+    }
+    """)
+
+    # 8c. Statement-level match inside coroutine with wrong yield type raises error
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      enum Status { Ready, Busy }
+      func bad_worker_stmt(s: Status): Coroutine<int> {
+        match s {
+          Status.Ready -> {
+            yield "not_an_int";
+          },
+          Status.Busy -> {
+            yield 20;
+          },
+        };
+      }
+      """)
+    self.assertIn("Cannot yield value of type 'String' in Coroutine<int>", str(ctx.exception))
+
     # 9. Invalid method on Coroutine
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
@@ -5410,6 +5443,108 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as ctx:
       self._check(code_invalid)
     self.assertIn("Cannot assign expression of type 'String?' to variable 'name' of type 'String'.", str(ctx.exception))
+
+  def test_proto_let_mutability_and_var_param_enforcement(self):
+    """Verifies that let-bound proto instances cannot mutate fields, invoke var func, or be passed to var parameters."""
+    # 1. Field mutation on let-bound proto rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      proto Goblin {
+        var hp: int;
+      }
+      func test() {
+        let a = Arena();
+        let g = Goblin { hp = 50 } in a;
+        g.hp = 40;
+      }
+      """)
+    self.assertIn("Cannot mutate field 'hp' of constant struct variable 'g'.", str(ctx.exception))
+
+    # 2. var func call on let-bound proto rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      proto Goblin {
+        var hp: int;
+      }
+      impl Goblin {
+        var func hurt() {
+          self.hp -= 10;
+        }
+      }
+      func test() {
+        let a = Arena();
+        let g = Goblin { hp = 50 } in a;
+        g.hurt();
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'hurt' on constant variable 'g'.", str(ctx.exception))
+
+    # 3. Passing let variable to var parameter rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Point {
+        var x: int;
+      }
+      func shift(var p: Point) {
+        p.x += 1;
+      }
+      func test() {
+        let pt = Point { x = 0 };
+        shift(p = pt);
+      }
+      """)
+    self.assertIn("Cannot pass constant variable 'pt' to mutable 'var' parameter.", str(ctx.exception))
+
+  def test_nominal_trait_conformance_and_inheritance(self):
+    """Verifies that trait conformance requires explicit nominal impl (or inherited parent impl)."""
+    # 1. Structural match without impl Trait for Struct is rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      trait Speaker {
+        func speak(): String;
+      }
+      struct Duck {
+        var name: String;
+      }
+      impl Duck {
+        func speak(): String {
+          return "quack";
+        }
+      }
+      func hear(s: Speaker): String {
+        return s.speak();
+      }
+      func test() {
+        let d = Duck { name = "Donald" };
+        hear(d);
+      }
+      """)
+    self.assertIn("Argument type mismatch at position 1. Expected 'trait Speaker', got 'Duck'.", str(ctx.exception))
+
+    # 2. Child struct inheriting from parent that nominally implements trait is accepted
+    self._check("""
+    trait Speaker {
+      func speak(): String;
+    }
+    struct BaseAnimal {
+      var name: String;
+    }
+    impl Speaker for BaseAnimal {
+      func speak(): String {
+        return self.name;
+      }
+    }
+    struct Dog: BaseAnimal {
+      var breed: String;
+    }
+    func hear(s: Speaker): String {
+      return s.speak();
+    }
+    func test() {
+      let d = Dog { name = "Rex", breed = "Husky" };
+      let res = hear(d);
+    }
+    """)
 
 
 

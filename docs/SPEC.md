@@ -410,7 +410,9 @@ control flow (statements).
   compatible types `T`. If an arm yields `none`, the overall expression type
   is inferred as `T?`.
 * **Side-effect statements**: When used strictly as a statement (e.g. without
-  variable assignment), blocks do not require `yield` statements.
+  variable assignment), blocks do not require `yield` statements, and any
+  `yield` statements inside block arms suspend the enclosing `Coroutine<T>`
+  directly rather than returning a value from the `match` block.
 * **Mandatory comma separators**: Every case branch (including multi-statement
   blocks ending in `}`) must be followed by a comma `,`.
 * **Default case**: The wildcard pattern uses the ellipsis token `... ->`.
@@ -900,8 +902,10 @@ func update_actor(actor: Actor): Actor {
 }
 ```
 
-* **Implicit subtyping**: Any struct implementing the trait's methods is
-  implicitly assignable to targets expecting the trait type or `Trait?`.
+* **Explicit nominal conformance**: Any struct with an explicit
+  `impl Trait for Struct` declaration (or inheriting from a parent struct that
+  nominally implements the trait) is implicitly assignable to targets expecting
+  the trait type or `Trait?`.
 * **Interface erasure**: Values viewed through a trait type can only access
   methods defined on that trait.
 

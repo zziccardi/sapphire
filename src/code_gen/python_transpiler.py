@@ -553,16 +553,33 @@ def SharedRef(val):
 
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
 
+PYTHON_RUNTIME_MODULE_IMPORT = """# Sapphire Runtime Module Import
+import os
+import sys
+
+_curr_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+if _curr_dir not in sys.path:
+  sys.path.insert(0, _curr_dir)
+
+_parent_dir = os.path.dirname(_curr_dir)
+for _cand in [os.path.join(_curr_dir, "lib"), os.path.join(_parent_dir, "lib"), _parent_dir]:
+  if os.path.isdir(_cand) and _cand not in sys.path:
+    sys.path.insert(0, _cand)
+
+from _sapphire_runtime import *
+"""
+
 
 @TranspilerRegistry.register(aliases=["python", "py"], display_name="Python", default_extension=".py")
 class PythonTranspiler(BaseTranspiler):
 
   """AST visitor to transpile Sapphire code to Python."""
 
-  def __init__(self, test_mode: bool = False):
+  def __init__(self, test_mode: bool = False, use_runtime_module: bool = False):
     self.code: List[str] = []
     self.indent_level = 0
     self.test_mode = test_mode
+    self.use_runtime_module = use_runtime_module
     # Map struct names to their collected method AST nodes from impl blocks
     self.struct_methods: Dict[str, List[Any]] = {}
     self.struct_traits: Dict[str, Set[str]] = {}
@@ -580,10 +597,6 @@ class PythonTranspiler(BaseTranspiler):
     self._py_lineno = 1
     self._line_map: Dict[int, int] = {}
 
-  def emit(self, text: str) -> None:
-    """Emits text on the current line."""
-    self.code.append(text)
-
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
     self._py_lineno += 1
@@ -594,15 +607,6 @@ class PythonTranspiler(BaseTranspiler):
     if sp_line and sp_line > 0:
       self._line_map[self._py_lineno] = sp_line
 
-  def indent(self) -> None:
-    """Increments the indentation level."""
-    self.indent_level += 1
-
-  def dedent(self) -> None:
-    """Decrements the indentation level."""
-    if self.indent_level > 0:
-      self.indent_level -= 1
-
   def _format_param(self, p) -> str:
     if p.default_expr:
       temp = PythonTranspiler()
@@ -610,19 +614,16 @@ class PythonTranspiler(BaseTranspiler):
       return f"{p.name}={temp.get_output()}"
     return p.name
 
-  def get_output(self) -> str:
-    """Returns the final generated Python source code string."""
-    return "".join(self.code)
-
   def transpile(self, program: ProgramNode) -> str:
     """Entry point to transpile a ProgramNode AST into Python source code string."""
     self.code = []
     self._py_lineno = 1
     self._line_map = {}
 
-    # 1. Output runtime preamble
-    self.emit(PYTHON_RUNTIME_PREAMBLE)
-    self._py_lineno += PYTHON_RUNTIME_PREAMBLE.count("\n")
+    # 1. Output runtime preamble or shared runtime module import
+    preamble = PYTHON_RUNTIME_MODULE_IMPORT if self.use_runtime_module else PYTHON_RUNTIME_PREAMBLE
+    self.emit(preamble)
+    self._py_lineno += preamble.count("\n")
     self.newline()
 
     # Detect testing module import alias
@@ -635,60 +636,8 @@ class PythonTranspiler(BaseTranspiler):
     for imp in getattr(program, "imports", []):
       self.visit(imp)
 
-    def _extract_type_name(t_node) -> Optional[str]:
-      if t_node is None:
-        return None
-      if hasattr(t_node, "base_type"):
-        return _extract_type_name(t_node.base_type)
-      if hasattr(t_node, "name"):
-        return t_node.name
-      return None
-
-    def _get_return_type_names(func_node) -> List[str]:
-      res = []
-      if hasattr(func_node, "return_types") and func_node.return_types:
-        for t in func_node.return_types:
-          name = _extract_type_name(t)
-          if name:
-            res.append(name)
-      elif hasattr(func_node, "return_type") and func_node.return_type:
-        name = _extract_type_name(func_node.return_type)
-        if name:
-          res.append(name)
-      return res
-
     # 2. Collect impl block methods to attach to class definitions
-    for decl in program.declarations:
-      if getattr(decl, "type_params", None):
-        continue
-      if isinstance(decl, ImplBlockNode):
-        if decl.struct_name not in self.struct_methods:
-          self.struct_methods[decl.struct_name] = []
-        self.struct_methods[decl.struct_name].extend(decl.members)
-        if decl.trait_name:
-          if decl.struct_name not in self.struct_traits:
-            self.struct_traits[decl.struct_name] = set()
-          self.struct_traits[decl.struct_name].add(decl.trait_name)
-        for m in decl.members:
-          if getattr(m, "func_decl", None):
-            ret_names = _get_return_type_names(m.func_decl)
-            if ret_names:
-              self.method_return_types[m.func_decl.name] = ret_names
-      elif isinstance(decl, FuncDeclNode):
-        ret_names = _get_return_type_names(decl)
-        if ret_names:
-          self.func_return_types[decl.name] = ret_names
-
-    for s_name, members in self.struct_methods.items():
-      for m in members:
-        if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
-          self.structs_with_destructor.add(s_name)
-          break
-
-    for decl in program.declarations:
-      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
-        if any(p in self.structs_with_destructor for p in decl.parent_names):
-          self.structs_with_destructor.add(decl.name)
+    self._collect_struct_metadata(program, track_known_structs=False)
 
     top_level_decls = []
     executable_stmts = []
@@ -751,12 +700,6 @@ class PythonTranspiler(BaseTranspiler):
   # ==========================================
   # Visitor Dispatcher
   # ==========================================
-
-  def visit(self, node: ASTNode) -> None:
-    """Visit an AST node and emit its corresponding Python code."""
-    method_name = f"visit_{node.__class__.__name__}"
-    visitor = getattr(self, method_name, self.generic_visit)
-    visitor(node)
 
   def generic_visit(self, node: ASTNode) -> None:
     raise NotImplementedError(
@@ -1111,44 +1054,6 @@ class PythonTranspiler(BaseTranspiler):
     else:
       self.visit(stmt)
       self._visit_statements(statements[1:])
-
-  def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
-    if expr is None:
-      return None
-    if isinstance(expr, StructInitializerNode):
-      if expr.struct_name in self.structs_with_destructor:
-        return expr.struct_name
-    elif isinstance(expr, CallNode):
-      if isinstance(expr.callee, IdentifierNode):
-        if expr.callee.name in self.structs_with_destructor:
-          return expr.callee.name
-        if expr.callee.name in self.func_return_types:
-          rets = self.func_return_types[expr.callee.name]
-          if isinstance(rets, list):
-            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-              return rets[return_index]
-          elif rets in self.structs_with_destructor:
-            return rets
-      elif isinstance(expr.callee, MemberAccessNode):
-        m_name = expr.callee.member
-        if m_name in self.method_return_types:
-          rets = self.method_return_types[m_name]
-          if isinstance(rets, list):
-            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-              return rets[return_index]
-          elif rets in self.structs_with_destructor:
-            return rets
-    elif isinstance(expr, IdentifierNode):
-      if expr.name in self.variable_types:
-        st = self.variable_types[expr.name]
-        if st in self.structs_with_destructor:
-          return st
-    inferred = getattr(expr, "inferred_type", None)
-    if hasattr(inferred, "base_type"):
-      inferred = inferred.base_type
-    if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
-      return inferred.name
-    return None
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.destructor_stack.append([])
@@ -1668,30 +1573,12 @@ class PythonTranspiler(BaseTranspiler):
       self.loop_destructor_depth.pop()
 
   def visit_BreakNode(self, node: BreakNode) -> None:
-    if self.loop_destructor_depth:
-      loop_depth = self.loop_destructor_depth[-1]
-      for frame in reversed(self.destructor_stack[loop_depth:]):
-        for var_name in reversed(frame):
-          self.newline()
-          self.emit(f"_sapphire_del({var_name})")
-    elif self.destructor_stack:
-      for var_name in reversed(self.destructor_stack[-1]):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+    self._emit_loop_destructors()
     self.newline()
     self.emit("break")
 
   def visit_ContinueNode(self, node: ContinueNode) -> None:
-    if self.loop_destructor_depth:
-      loop_depth = self.loop_destructor_depth[-1]
-      for frame in reversed(self.destructor_stack[loop_depth:]):
-        for var_name in reversed(frame):
-          self.newline()
-          self.emit(f"_sapphire_del({var_name})")
-    elif self.destructor_stack:
-      for var_name in reversed(self.destructor_stack[-1]):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+    self._emit_loop_destructors()
     self.newline()
     self.emit("continue")
 

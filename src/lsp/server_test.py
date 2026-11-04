@@ -2557,6 +2557,52 @@ func run_draw(x: float) {
     self.ls.ast_cache[invalid_uri] = "not a ProgramNode"
     self.assertEqual(document_symbol(self.ls, invalid_params), [])
 
+  def test_incremental_module_caching_and_invalidation(self):
+    """Verifies DeclarationPass and LSP server cache imported modules and invalidate on file change."""
+    import os
+    import tempfile
+    from pygls.uris import from_fs_path
+    from src.semantics.declaration_pass import DeclarationPass
+
+    DeclarationPass.clear_cache()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      self.ls.workspace.root_uri = from_fs_path(tmp_dir)
+      mod_file = os.path.join(tmp_dir, "cached_mod.sp")
+      with open(mod_file, "w", encoding="utf-8") as f:
+        f.write("export { get_val }\nfunc get_val(): int { return 10; }\n")
+
+      main_file = os.path.join(tmp_dir, "main.sp")
+      main_code = "import cached_mod;\nfunc main() { let x: int = cached_mod.get_val(); }\n"
+      with open(main_file, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      main_uri = from_fs_path(main_file)
+      mod_uri = from_fs_path(os.path.abspath(mod_file))
+
+      # First validation populates both DeclarationPass._module_cache and ls.mtime_cache
+      validate_source(self.ls, main_uri, main_code)
+      self.assertIn(os.path.abspath(mod_file), DeclarationPass._module_cache)
+      self.assertIn(mod_uri, self.ls.mtime_cache)
+      call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+      self.assertEqual(call_arg.diagnostics, [])
+
+      # Second validation hits cache without error
+      self.ls.text_document_publish_diagnostics.reset_mock()
+      validate_source(self.ls, main_uri, main_code)
+      call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+      self.assertEqual(call_arg.diagnostics, [])
+
+      # Modify imported module on disk (change return type to String and file size)
+      with open(mod_file, "w", encoding="utf-8") as f:
+        f.write('export { get_val }\nfunc get_val(): String { return "updated_value"; }\n')
+
+      # Re-validate main.sp: cache should invalidate due to changed mtime/size and report type mismatch
+      self.ls.text_document_publish_diagnostics.reset_mock()
+      validate_source(self.ls, main_uri, main_code)
+      call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+      self.assertTrue(len(call_arg.diagnostics) > 0)
+      self.assertIn("Cannot assign expression of type 'String' to variable 'x' of type 'int'", call_arg.diagnostics[0].message)
+
 
 if __name__ == "__main__":
   unittest.main()

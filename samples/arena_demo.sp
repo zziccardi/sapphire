@@ -104,12 +104,12 @@ func demo_explicit_arenas(): int {
   ) in level_arena;
 
   // Implicit clone arena propagation: minion inherits level_arena from base
-  let minion = clone base_goblin {
+  var minion = clone base_goblin {
     self.hp = 30;
   };
 
   // Explicit clone arena override: combat_goblin is targeted to combat_arena
-  let combat_goblin = clone base_goblin {
+  var combat_goblin = clone base_goblin {
     self.hp = 75;
   } in combat_arena;
 
@@ -158,7 +158,7 @@ func demo_constructor_arena_allocation(): int {
                             pos = default_pos) in dungeon_arena;
 
   // Clones of default_enemy propagate into dungeon_arena automatically
-  let cloned_skeleton = clone default_enemy {
+  var cloned_skeleton = clone default_enemy {
     self.hp = 60;
   };
 

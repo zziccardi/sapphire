@@ -880,6 +880,76 @@ def _has_continue_node(node: ASTNode) -> bool:
   return False
 
 
+LUA_RUNTIME_MODULE_IMPORT = """-- Sapphire Lua 5.1 Runtime Module Import
+local function _sp_load_runtime()
+  local ok, rt = pcall(require, "_sapphire_runtime")
+  if ok and type(rt) == "table" then return rt end
+  local info = debug and debug.getinfo and debug.getinfo(2, "S")
+  if info and info.source and info.source:sub(1, 1) == "@" then
+    local curr_dir = info.source:sub(2):match("^(.*[/\\\\])") or "./"
+    local chunk = loadfile(curr_dir .. "_sapphire_runtime.lua")
+    if chunk then return chunk() end
+  end
+  error("Could not load _sapphire_runtime.lua")
+end
+local _SP_RT = _sp_load_runtime()
+local _Coroutine, Arena, _clone_helper, _create_cow_proxy, _create_proto_object = _SP_RT._Coroutine, _SP_RT.Arena, _SP_RT._clone_helper, _SP_RT._create_cow_proxy, _SP_RT._create_proto_object
+local _sapphire_string_strip, _sapphire_string_split, _sapphire_string_find, _sapphire_string_to_int, _sapphire_string_to_float, _sapphire_string_to_bool, _sapphire_cast_int, _sapphire_enum_from = _SP_RT._sapphire_string_strip, _SP_RT._sapphire_string_split, _SP_RT._sapphire_string_find, _SP_RT._sapphire_string_to_int, _SP_RT._sapphire_string_to_float, _SP_RT._sapphire_string_to_bool, _SP_RT._sapphire_cast_int, _SP_RT._sapphire_enum_from
+local _sapphire_array_map, _sapphire_array_filter, _sapphire_array_reduce, _sapphire_array_contains, _sapphire_array_reverse, _sapphire_array_sort, _sapphire_array_join, _sapphire_array_push, _sapphire_array_pop, _sapphire_array_insert, _sapphire_array_remove, _sapphire_array_clear, _sapphire_array_get = _SP_RT._sapphire_array_map, _SP_RT._sapphire_array_filter, _SP_RT._sapphire_array_reduce, _SP_RT._sapphire_array_contains, _SP_RT._sapphire_array_reverse, _SP_RT._sapphire_array_sort, _SP_RT._sapphire_array_join, _SP_RT._sapphire_array_push, _SP_RT._sapphire_array_pop, _SP_RT._sapphire_array_insert, _SP_RT._sapphire_array_remove, _SP_RT._sapphire_array_clear, _SP_RT._sapphire_array_get
+local _sapphire_map_size, _sapphire_map_empty, _sapphire_map_contains, _sapphire_map_get, _sapphire_map_keys, _sapphire_map_values, _sapphire_map_insert, _sapphire_map_remove, _sapphire_map_clear = _SP_RT._sapphire_map_size, _SP_RT._sapphire_map_empty, _SP_RT._sapphire_map_contains, _SP_RT._sapphire_map_get, _SP_RT._sapphire_map_keys, _SP_RT._sapphire_map_values, _SP_RT._sapphire_map_insert, _SP_RT._sapphire_map_remove, _SP_RT._sapphire_map_clear
+local _sapphire_iter_array, _sapphire_range, _sapphire_del, _Ref, Ref, _SharedRef, _WeakRef, SharedRef, WeakRef = _SP_RT._sapphire_iter_array, _SP_RT._sapphire_range, _SP_RT._sapphire_del, _SP_RT._Ref, _SP_RT.Ref, _SP_RT._SharedRef, _SP_RT._WeakRef, _SP_RT.SharedRef, _SP_RT.WeakRef
+"""
+
+LUA_RUNTIME_MODULE_EXPORTS = """
+return {
+  _Coroutine = _Coroutine,
+  Arena = Arena,
+  _clone_helper = _clone_helper,
+  _create_cow_proxy = _create_cow_proxy,
+  _create_proto_object = _create_proto_object,
+  _sapphire_string_strip = _sapphire_string_strip,
+  _sapphire_string_split = _sapphire_string_split,
+  _sapphire_string_find = _sapphire_string_find,
+  _sapphire_string_to_int = _sapphire_string_to_int,
+  _sapphire_string_to_float = _sapphire_string_to_float,
+  _sapphire_string_to_bool = _sapphire_string_to_bool,
+  _sapphire_cast_int = _sapphire_cast_int,
+  _sapphire_enum_from = _sapphire_enum_from,
+  _sapphire_array_map = _sapphire_array_map,
+  _sapphire_array_filter = _sapphire_array_filter,
+  _sapphire_array_reduce = _sapphire_array_reduce,
+  _sapphire_array_contains = _sapphire_array_contains,
+  _sapphire_array_reverse = _sapphire_array_reverse,
+  _sapphire_array_sort = _sapphire_array_sort,
+  _sapphire_array_join = _sapphire_array_join,
+  _sapphire_array_push = _sapphire_array_push,
+  _sapphire_array_pop = _sapphire_array_pop,
+  _sapphire_array_insert = _sapphire_array_insert,
+  _sapphire_array_remove = _sapphire_array_remove,
+  _sapphire_array_clear = _sapphire_array_clear,
+  _sapphire_array_get = _sapphire_array_get,
+  _sapphire_map_size = _sapphire_map_size,
+  _sapphire_map_empty = _sapphire_map_empty,
+  _sapphire_map_contains = _sapphire_map_contains,
+  _sapphire_map_get = _sapphire_map_get,
+  _sapphire_map_keys = _sapphire_map_keys,
+  _sapphire_map_values = _sapphire_map_values,
+  _sapphire_map_insert = _sapphire_map_insert,
+  _sapphire_map_remove = _sapphire_map_remove,
+  _sapphire_map_clear = _sapphire_map_clear,
+  _sapphire_iter_array = _sapphire_iter_array,
+  _sapphire_range = _sapphire_range,
+  _sapphire_del = _sapphire_del,
+  _Ref = _Ref,
+  Ref = Ref,
+  _SharedRef = _SharedRef,
+  _WeakRef = _WeakRef,
+  SharedRef = SharedRef,
+  WeakRef = WeakRef,
+}
+"""
+
+
 @TranspilerRegistry.register(aliases=["lua", "lua5.1", "love2d", "love"], display_name="Lua 5.1", default_extension=".lua")
 class LuaTranspiler(BaseTranspiler):
 
@@ -891,6 +961,7 @@ class LuaTranspiler(BaseTranspiler):
       source_map_builder: Optional[SourceMapBuilder] = None,
       test_mode: bool = False,
       dev_mode: bool = False,
+      use_runtime_module: bool = False,
   ):
     self.code: List[str] = []
     self.indent_level = 0
@@ -900,6 +971,7 @@ class LuaTranspiler(BaseTranspiler):
     self.source_map_builder = source_map_builder
     self.test_mode = test_mode
     self.dev_mode = dev_mode
+    self.use_runtime_module = use_runtime_module
     self.on_reload_callbacks: List[str] = []
     self.declared_symbols: List[str] = []
     # Map struct names to their collected method AST nodes from impl blocks
@@ -933,19 +1005,6 @@ class LuaTranspiler(BaseTranspiler):
     self.current_line += 1
     self.current_column = len(indent_str)
 
-  def indent(self) -> None:
-    """Increments the indentation level."""
-    self.indent_level += 1
-
-  def dedent(self) -> None:
-    """Decrements the indentation level."""
-    if self.indent_level > 0:
-      self.indent_level -= 1
-
-  def get_output(self) -> str:
-    """Returns the final generated Lua 5.1 source code string."""
-    return "".join(self.code)
-
   def transpile(
       self,
       program: ProgramNode,
@@ -958,8 +1017,9 @@ class LuaTranspiler(BaseTranspiler):
     if source_map_builder:
       self.source_map_builder = source_map_builder
 
-    # 1. Output runtime preamble
-    self.emit(LUA_RUNTIME_PREAMBLE)
+    # 1. Output runtime preamble or shared runtime module import
+    preamble = LUA_RUNTIME_MODULE_IMPORT if self.use_runtime_module else LUA_RUNTIME_PREAMBLE
+    self.emit(preamble)
     self.newline()
 
     if self.dev_mode:
@@ -970,58 +1030,8 @@ class LuaTranspiler(BaseTranspiler):
     for imp in getattr(program, "imports", []):
       self.visit(imp)
 
-    def _extract_type_name(t_node) -> Optional[str]:
-      if t_node is None:
-        return None
-      if hasattr(t_node, "base_type"):
-        return _extract_type_name(t_node.base_type)
-      if hasattr(t_node, "name"):
-        return t_node.name
-      return None
-
-    def _get_return_type_names(func_node) -> List[str]:
-      res = []
-      if hasattr(func_node, "return_types") and func_node.return_types:
-        for t in func_node.return_types:
-          name = _extract_type_name(t)
-          if name:
-            res.append(name)
-      elif hasattr(func_node, "return_type") and func_node.return_type:
-        name = _extract_type_name(func_node.return_type)
-        if name:
-          res.append(name)
-      return res
-
     # 2. Collect known struct names and impl block methods
-    for decl in program.declarations:
-      if getattr(decl, "type_params", None):
-        continue
-      if isinstance(decl, StructDeclNode):
-        self.known_structs.add(decl.name)
-      elif isinstance(decl, ImplBlockNode):
-        if decl.struct_name not in self.struct_methods:
-          self.struct_methods[decl.struct_name] = []
-        self.struct_methods[decl.struct_name].extend(decl.members)
-        for m in decl.members:
-          if getattr(m, "func_decl", None):
-            ret_names = _get_return_type_names(m.func_decl)
-            if ret_names:
-              self.method_return_types[m.func_decl.name] = ret_names
-      elif isinstance(decl, FuncDeclNode):
-        ret_names = _get_return_type_names(decl)
-        if ret_names:
-          self.func_return_types[decl.name] = ret_names
-
-    for s_name, members in self.struct_methods.items():
-      for m in members:
-        if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
-          self.structs_with_destructor.add(s_name)
-          break
-
-    for decl in program.declarations:
-      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
-        if any(p in self.structs_with_destructor for p in decl.parent_names):
-          self.structs_with_destructor.add(decl.name)
+    self._collect_struct_metadata(program, track_known_structs=True)
 
     struct_decls = []
     func_decls = []
@@ -1534,44 +1544,6 @@ class LuaTranspiler(BaseTranspiler):
   # ==========================================
   # Statements Visitor
   # ==========================================
-
-  def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
-    if expr is None:
-      return None
-    if isinstance(expr, StructInitializerNode):
-      if expr.struct_name in self.structs_with_destructor:
-        return expr.struct_name
-    elif isinstance(expr, CallNode):
-      if isinstance(expr.callee, IdentifierNode):
-        if expr.callee.name in self.structs_with_destructor:
-          return expr.callee.name
-        if expr.callee.name in self.func_return_types:
-          rets = self.func_return_types[expr.callee.name]
-          if isinstance(rets, list):
-            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-              return rets[return_index]
-          elif rets in self.structs_with_destructor:
-            return rets
-      elif isinstance(expr.callee, MemberAccessNode):
-        m_name = expr.callee.member
-        if m_name in self.method_return_types:
-          rets = self.method_return_types[m_name]
-          if isinstance(rets, list):
-            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-              return rets[return_index]
-          elif rets in self.structs_with_destructor:
-            return rets
-    elif isinstance(expr, IdentifierNode):
-      if expr.name in self.variable_types:
-        st = self.variable_types[expr.name]
-        if st in self.structs_with_destructor:
-          return st
-    inferred = getattr(expr, "inferred_type", None)
-    if hasattr(inferred, "base_type"):
-      inferred = inferred.base_type
-    if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
-      return inferred.name
-    return None
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.arena_stack.append([])
@@ -2143,16 +2115,7 @@ class LuaTranspiler(BaseTranspiler):
       self._loop_stack.pop()
 
   def visit_BreakNode(self, node: BreakNode) -> None:
-    if self.loop_destructor_depth:
-      loop_depth = self.loop_destructor_depth[-1]
-      for frame in reversed(self.destructor_stack[loop_depth:]):
-        for var_name in reversed(frame):
-          self.newline()
-          self.emit(f"_sapphire_del({var_name})")
-    elif self.destructor_stack:
-      for var_name in reversed(self.destructor_stack[-1]):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+    self._emit_loop_destructors()
     self.newline()
     if self._loop_stack and self._loop_stack[-1]:
       self.emit("_break_outer = true")
@@ -2160,16 +2123,7 @@ class LuaTranspiler(BaseTranspiler):
     self.emit("break")
 
   def visit_ContinueNode(self, node: ContinueNode) -> None:
-    if self.loop_destructor_depth:
-      loop_depth = self.loop_destructor_depth[-1]
-      for frame in reversed(self.destructor_stack[loop_depth:]):
-        for var_name in reversed(frame):
-          self.newline()
-          self.emit(f"_sapphire_del({var_name})")
-    elif self.destructor_stack:
-      for var_name in reversed(self.destructor_stack[-1]):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+    self._emit_loop_destructors()
     self.newline()
     self.emit("break")
 

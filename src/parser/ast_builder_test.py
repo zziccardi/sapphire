@@ -525,7 +525,13 @@ class TestASTBuilder(unittest.TestCase):
     ast5 = self._get_ast("impl Trait<int, MyCustomArg> for Struct {}")
     impl5 = ast5.declarations[0]
     self.assertIsInstance(impl5, ImplBlockNode)
-    self.assertIn("MyCustomArg", impl5.type_params)
+    self.assertEqual(len(impl5.trait_type_args), 2)
+    self.assertEqual(impl5.type_params, [])
+
+    ast6 = self._get_ast("impl<T> Trait<int, T> for Struct {}")
+    impl6 = ast6.declarations[0]
+    self.assertIsInstance(impl6, ImplBlockNode)
+    self.assertIn("T", impl6.type_params)
 
   def test_interpolated_string(self):
     """Verifies parsing of Python-style f-strings."""

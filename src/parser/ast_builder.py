@@ -220,13 +220,6 @@ class ASTBuilder(SapphireVisitor):
 
     members = [self.visit(m) for m in ctx.implMember()]
 
-    # Infer type parameters from type arguments if not explicitly set via impl<T>
-    KNOWN_PRIMITIVES = {"int", "float", "String", "bool", "none", "void"}
-    for arg in trait_type_args + struct_type_args:
-      if isinstance(arg, BasicTypeNode) and arg.name not in KNOWN_PRIMITIVES:
-        if arg.name not in type_params:
-          type_params.append(arg.name)
-
     node = ImplBlockNode(struct_name, trait_name, members, type_params=type_params, trait_type_args=trait_type_args, struct_type_args=struct_type_args)
     # Positioning for Language Server:
     struct_token = ctx.structName
@@ -286,7 +279,7 @@ class ASTBuilder(SapphireVisitor):
   def visitFunctionDeclaration(self, ctx: SapphireParser.FunctionDeclarationContext) -> FuncDeclNode:
     annotations = [self.visit(a) for a in ctx.annotation()] if ctx.annotation() else []
     name = ctx.functionName().getText()
-    tp_ctx = ctx.tp1 if ctx.tp1 else ctx.tp2
+    tp_ctx = ctx.typeParamList()
     type_params = self.visitTypeParamList(tp_ctx) if tp_ctx else []
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
@@ -434,7 +427,9 @@ class ASTBuilder(SapphireVisitor):
     return ExprStmtNode(self.visit(ctx.expression()))
 
   def visitMatchStatement(self, ctx: SapphireParser.MatchStatementContext) -> ExprStmtNode:
-    node = ExprStmtNode(self.visit(ctx.matchExpression()))
+    match_expr = self.visit(ctx.matchExpression())
+    match_expr.is_statement = True
+    node = ExprStmtNode(match_expr)
     node.line = ctx.start.line
     node.column = ctx.start.column
     return node

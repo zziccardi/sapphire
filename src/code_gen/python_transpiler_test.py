@@ -2251,6 +2251,59 @@ class TestSharedFixtures(unittest.TestCase):
     self.assertEqual(res["test_shared_ref"], 42)
     self.assertEqual(res["test_shared_from_move"], 99)
 
+  def test_coroutine_yield_in_match_statement(self):
+    """Verifies that a coroutine can yield directly inside a statement-level match block."""
+    code = """
+    enum Step { First, Second }
+
+    func gen(s: Step): Coroutine<int> {
+      match s {
+        Step.First -> {
+          yield 10;
+        },
+        Step.Second -> {
+          yield 20;
+        },
+      };
+      yield 30;
+    }
+
+    func test_coro_match(): int {
+      var c = gen(Step.First);
+      let a = c.step() ?? 0;
+      let b = c.step() ?? 0;
+      return a + b;
+    }
+    """
+    res = self._transpile_and_exec(code)
+    self.assertEqual(res["test_coro_match"], 40)
+
+  def test_transpile_file_with_shared_runtime_module(self):
+    """Verifies that transpile_file(use_runtime_module=True) emits _sapphire_runtime.py and executes cleanly."""
+    import subprocess
+    code = """
+    func main() {
+      var arr = [1, 2, 3];
+      arr.push(4);
+      let doubled = arr.map(x -> x * 2);
+      print(doubled.join(","));
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sp_path = os.path.join(tmpdir, "app.sp")
+      py_path = os.path.join(tmpdir, "app.py")
+      with open(sp_path, "w", encoding="utf-8") as f:
+        f.write(code)
+      transpile_file(sp_path, py_path, target="python", quiet=True, use_runtime_module=True)
+      rt_path = os.path.join(tmpdir, "_sapphire_runtime.py")
+      self.assertTrue(os.path.exists(rt_path))
+      with open(py_path, "r", encoding="utf-8") as f:
+        py_content = f.read()
+      self.assertIn("from _sapphire_runtime import *", py_content)
+      self.assertNotIn("class _LazyCoWProxy:", py_content)
+      proc = subprocess.run([sys.executable, py_path], capture_output=True, text=True, check=True)
+      self.assertEqual(proc.stdout.strip(), "2,4,6,8")
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

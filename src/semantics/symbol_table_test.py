@@ -247,25 +247,30 @@ class TestSymbolTable(unittest.TestCase):
     self.assertTrue(arr_none.is_compatible(arr_int))
 
   def test_struct_implements_trait(self):
-    """Verifies StructType.implements_trait nominal and structural trait checks."""
-    from src.semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType
-
+    """Verifies StructType.implements_trait explicit nominal and inherited trait checks."""
+    from src.semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType, SymbolTable
 
     st = StructType("MyStruct")
     tr = TraitType("MyTrait")
     tr.methods["foo"] = FunctionType([], PrimitiveType("none"))
 
-    # Initially missing method -> False
+    # Initially missing nominal impl -> False
     self.assertFalse(st.implements_trait(tr))
 
-    # Add method -> True
+    # Adding method without nominal impl -> still False (no structural fallback)
     st.methods["foo"] = FunctionType([], PrimitiveType("none"))
-    self.assertTrue(st.implements_trait(tr))
+    self.assertFalse(st.implements_trait(tr))
 
     # Nominal implementation -> True
     st2 = StructType("OtherStruct")
     st2.implemented_traits.add("MyTrait")
     self.assertTrue(st2.implements_trait(tr))
+
+    # Inherited nominal implementation via parent_names and symbol_table -> True
+    sym_tab = SymbolTable()
+    sym_tab.define_type("OtherStruct", st2)
+    child_st = StructType("ChildStruct", parent_names=["OtherStruct"])
+    self.assertTrue(child_st.implements_trait(tr, sym_tab))
 
     # Empty trait methods without nominal impl -> False
     tr_empty = TraitType("EmptyTrait")

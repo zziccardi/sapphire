@@ -170,7 +170,7 @@ impl Love2D for GameEngine {
         self.player.update(dt);
 
         // Safe optional unwrapping for active enemy
-        if let enemy ?= self.active_enemy {
+        if var enemy ?= self.active_enemy {
           enemy.update(dt);
 
           // Check collision distance between player and enemy

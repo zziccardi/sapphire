@@ -6,7 +6,7 @@ import time, making backend divergence impossible to miss.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Dict, List, Optional, Set, Union
 
 from src.parser.ast import (
     ASTNode,
@@ -25,8 +25,11 @@ from src.parser.ast import (
     ExprStmtNode,
     ForNode,
     FuncDeclNode,
+    GuardClauseNode,
+    GuardStmtNode,
     IdentifierNode,
     IfNode,
+    ImplBlockNode,
     ImplMemberNode,
     IndexExprNode,
     InterpolatedStringNode,
@@ -51,7 +54,6 @@ from src.parser.ast import (
     OptionalTypeNode,
     TypeNode,
 )
-
 
 
 def get_default_value_for_type_node(type_node: Optional[TypeNode]) -> Optional[ASTNode]:
@@ -85,6 +87,32 @@ def is_coroutine_func(node: Optional[ASTNode]) -> bool:
   return False
 
 
+def extract_type_name(t_node: Optional[ASTNode]) -> Optional[str]:
+  """Extracts the base type name from a TypeNode."""
+  if t_node is None:
+    return None
+  if hasattr(t_node, "base_type"):
+    return extract_type_name(t_node.base_type)
+  if hasattr(t_node, "name"):
+    return t_node.name
+  return None
+
+
+def get_return_type_names(func_node: ASTNode) -> List[str]:
+  """Extracts all return type names from a FuncDeclNode."""
+  res: List[str] = []
+  if hasattr(func_node, "return_types") and func_node.return_types:
+    for t in func_node.return_types:
+      name = extract_type_name(t)
+      if name:
+        res.append(name)
+  elif hasattr(func_node, "return_type") and func_node.return_type:
+    name = extract_type_name(func_node.return_type)
+    if name:
+      res.append(name)
+  return res
+
+
 class BaseTranspiler(ABC):
   """Abstract base for all Sapphire code-generation backends.
 
@@ -96,40 +124,131 @@ class BaseTranspiler(ABC):
   """
 
   # ------------------------------------------------------------------
-  # Core interface
+  # Core interface & shared helpers
   # ------------------------------------------------------------------
 
   @abstractmethod
   def transpile(self, program: ProgramNode) -> str:
     """Transpile a fully-typed `ProgramNode` into target source code."""
 
-  @abstractmethod
-  def visit(self, node: ASTNode) -> None:
+  def visit(self, node: ASTNode) -> Any:
     """Dispatch *node* to the appropriate `visit_*` method."""
+    method_name = f"visit_{node.__class__.__name__}"
+    visitor = getattr(self, method_name, self.generic_visit)
+    return visitor(node)
 
   @abstractmethod
   def generic_visit(self, node: ASTNode) -> None:
     """Called when no specific visitor exists; should raise `NotImplementedError`."""
 
-  @abstractmethod
   def emit(self, text: str) -> None:
     """Append *text* to the output buffer."""
+    self.code.append(text)
 
   @abstractmethod
   def newline(self) -> None:
     """Emit a newline followed by the current indentation."""
 
-  @abstractmethod
   def indent(self) -> None:
     """Increase the indentation level by one."""
+    self.indent_level += 1
 
-  @abstractmethod
   def dedent(self) -> None:
     """Decrease the indentation level by one."""
+    if self.indent_level > 0:
+      self.indent_level -= 1
 
-  @abstractmethod
   def get_output(self) -> str:
     """Return the accumulated output as a single string."""
+    return "".join(self.code)
+
+  def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
+    """Determines if *expr* evaluates to a struct type with a `__del__` destructor."""
+    if expr is None:
+      return None
+    if isinstance(expr, StructInitializerNode):
+      if expr.struct_name in self.structs_with_destructor:
+        return expr.struct_name
+    elif isinstance(expr, CallNode):
+      if isinstance(expr.callee, IdentifierNode):
+        if expr.callee.name in self.structs_with_destructor:
+          return expr.callee.name
+        if expr.callee.name in self.func_return_types:
+          rets = self.func_return_types[expr.callee.name]
+          if isinstance(rets, list):
+            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+              return rets[return_index]
+          elif rets in self.structs_with_destructor:
+            return rets
+      elif isinstance(expr.callee, MemberAccessNode):
+        m_name = expr.callee.member
+        if m_name in self.method_return_types:
+          rets = self.method_return_types[m_name]
+          if isinstance(rets, list):
+            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+              return rets[return_index]
+          elif rets in self.structs_with_destructor:
+            return rets
+    elif isinstance(expr, IdentifierNode):
+      if expr.name in self.variable_types:
+        st = self.variable_types[expr.name]
+        if st in self.structs_with_destructor:
+          return st
+    inferred = getattr(expr, "inferred_type", None)
+    if hasattr(inferred, "base_type"):
+      inferred = inferred.base_type
+    if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
+      return inferred.name
+    return None
+
+  def _emit_loop_destructors(self) -> None:
+    """Emits `_sapphire_del` calls for destructible variables in the active loop scopes."""
+    if self.loop_destructor_depth:
+      loop_depth = self.loop_destructor_depth[-1]
+      for frame in reversed(self.destructor_stack[loop_depth:]):
+        for var_name in reversed(frame):
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    elif self.destructor_stack:
+      for var_name in reversed(self.destructor_stack[-1]):
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
+
+  def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
+    """Collects struct methods, traits, return types, and destructors from program declarations."""
+    for decl in program.declarations:
+      if getattr(decl, "type_params", None):
+        continue
+      if track_known_structs and isinstance(decl, StructDeclNode):
+        self.known_structs.add(decl.name)
+      elif isinstance(decl, ImplBlockNode):
+        if decl.struct_name not in self.struct_methods:
+          self.struct_methods[decl.struct_name] = []
+        self.struct_methods[decl.struct_name].extend(decl.members)
+        if decl.trait_name and hasattr(self, "struct_traits"):
+          if decl.struct_name not in self.struct_traits:
+            self.struct_traits[decl.struct_name] = set()
+          self.struct_traits[decl.struct_name].add(decl.trait_name)
+        for m in decl.members:
+          if getattr(m, "func_decl", None):
+            ret_names = get_return_type_names(m.func_decl)
+            if ret_names:
+              self.method_return_types[m.func_decl.name] = ret_names
+      elif isinstance(decl, FuncDeclNode):
+        ret_names = get_return_type_names(decl)
+        if ret_names:
+          self.func_return_types[decl.name] = ret_names
+
+    for s_name, members in self.struct_methods.items():
+      for m in members:
+        if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
+          self.structs_with_destructor.add(s_name)
+          break
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
+        if any(p in self.structs_with_destructor for p in decl.parent_names):
+          self.structs_with_destructor.add(decl.name)
 
   # ------------------------------------------------------------------
   # Declaration visitors
