@@ -16,7 +16,6 @@ from src.semantics.symbol_table import (
     OptionalType,
     FunctionType,
     MultiReturnType,
-    StructField,
     StructMethod,
     StructType,
     TraitType,
@@ -31,8 +30,6 @@ from src.semantics.symbol_table import (
     GenericTypeParameter,
     VariableSymbol,
     FunctionSymbol,
-    StructSymbol,
-    TraitSymbol,
     EnumSymbol,
     ModuleSymbol,
     CoroutineType,
@@ -41,11 +38,9 @@ from src.semantics.symbol_table import (
     WeakRefType,
     COROUTINE_METHODS,
     STRING_METHODS,
-    ARRAY_METHODS,
-    MAP_METHODS,
 )
 from src.cli.diagnostics import format_diagnostic
-from src.common.errors import SapphireError, SapphireTypeError, SemanticError
+from src.common.errors import SemanticError
 from src.semantics.arena_checker import ArenaChecker
 from src.semantics.collection_checker import CollectionChecker
 from src.semantics.declaration_pass import DeclarationPass
@@ -80,7 +75,6 @@ class TypeChecker:
 
   def _is_descendant_scope(self, child: Optional[object], parent: Optional[object]) -> bool:
     return ArenaChecker.is_descendant_scope(child, parent)
-
 
   def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
     if isinstance(target, IdentifierNode):
@@ -137,7 +131,6 @@ class TypeChecker:
 
   def _mangle_type_name(self, type_obj: Type) -> str:
     return GenericsChecker.mangle_type_name(type_obj)
-
 
   def _monomorphize_struct(
       self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
