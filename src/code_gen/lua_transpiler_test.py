@@ -1968,6 +1968,33 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("coroutine.yield(20)", lua_code)
     self.assertIn("coroutine.yield(30)", lua_code)
 
+  def test_transpile_file_with_shared_runtime_module_lua(self):
+    """Verifies that transpile_file(use_runtime_module=True) emits _sapphire_runtime.lua and executes cleanly."""
+    code = """
+    func main() {
+      var arr = [1, 2, 3];
+      arr.push(4);
+      let doubled = arr.map(x -> x * 2);
+      print(doubled.join(","));
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sp_path = os.path.join(tmpdir, "app.sp")
+      lua_path = os.path.join(tmpdir, "app.lua")
+      with open(sp_path, "w", encoding="utf-8") as f:
+        f.write(code)
+      transpile_file(sp_path, lua_path, target="lua", quiet=True, use_runtime_module=True)
+      rt_path = os.path.join(tmpdir, "_sapphire_runtime.lua")
+      self.assertTrue(os.path.exists(rt_path))
+      with open(lua_path, "r", encoding="utf-8") as f:
+        lua_content = f.read()
+      self.assertIn("_sp_load_runtime()", lua_content)
+      self.assertNotIn("local function _create_proto_object", lua_content)
+      lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      if lua_bin:
+        proc = subprocess.run([lua_bin, lua_path], capture_output=True, text=True, check=True)
+        self.assertEqual(proc.stdout.strip(), "2,4,6,8")
+
 
 
 # ---------------------------------------------------------------------------
