@@ -107,7 +107,7 @@ func run_demo() {
   var target_player: Character? = none;
   target_player = player_two;
 
-  if let active_target ?= target_player {
+  if var active_target ?= target_player {
     // active_target is unwrapped and guaranteed to be non-optional here
     let damage_dealt = execute_attack(attacker = player_one,
                                       defender = active_target,

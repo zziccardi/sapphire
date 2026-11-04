@@ -309,6 +309,23 @@ class TypeChecker:
           if trait_type:
             pass
 
+    # Propagate nominal trait implementations to child structs
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and decl.parent_names:
+        child_type = self.symbol_table.lookup_type(decl.name)
+        if isinstance(child_type, StructType):
+          visited = set()
+          stack = list(decl.parent_names)
+          while stack:
+            p_name = stack.pop()
+            if p_name in visited:
+              continue
+            visited.add(p_name)
+            p_type = self.symbol_table.lookup_type(p_name)
+            if isinstance(p_type, StructType):
+              child_type.implemented_traits.update(p_type.implemented_traits)
+              stack.extend(p_type.parent_names)
+
   def _resolve_return_types(self, node: Any) -> List[Type]:
     if isinstance(node, FunctionTypeNode):
       return [self._resolve_type_node(t) for t in node.return_types]
@@ -853,7 +870,7 @@ class TypeChecker:
         curr = curr.receiver
       if isinstance(curr, IdentifierNode) and curr.name != "self":
         root_sym = self.symbol_table.lookup(curr.name)
-        if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable and not receiver_type.is_prototype:
+        if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
           self.error(f"Cannot mutate field '{node.member}' of constant struct variable '{curr.name}'.", node=node)
 
       return field.field_type
@@ -1440,19 +1457,34 @@ class TypeChecker:
             borrows.append((root, path, is_mutable))
             if is_mutable:
               root_sym = self.symbol_table.lookup(root)
-              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable and not receiver_type.is_prototype:
+              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
                 self.error(f"Cannot invoke mutating method '{node.callee.member}' on constant variable '{root}'.")
 
     # 2. Check explicit arguments
+    expected_param_types = signature.param_types
+    expected_param_names = signature.param_names or []
+    expected_mutabilities = signature.param_mutabilities
+    if not is_constructor and getattr(signature, "has_self", False) and isinstance(node.callee, MemberAccessNode):
+      expected_param_types = signature.param_types[1:]
+      expected_param_names = signature.param_names[1:] if signature.param_names else []
+      expected_mutabilities = signature.param_mutabilities[1:] if signature.param_mutabilities else []
+
     for idx, arg in enumerate(node.arguments):
-      if idx < len(signature.param_types):
-        param_type = signature.param_types[idx]
-        is_mutable = signature.param_mutabilities[idx]
+      param_idx = idx
+      if arg.name and expected_param_names and arg.name in expected_param_names:
+        param_idx = expected_param_names.index(arg.name)
+      if param_idx < len(expected_param_types):
+        param_type = expected_param_types[param_idx]
+        is_mutable = expected_mutabilities[param_idx] if param_idx < len(expected_mutabilities) else False
         if self._is_reference_type(param_type):
           res = self._get_lvalue_path(arg.expr)
           if res:
             root, path = res
             borrows.append((root, path, is_mutable))
+            if is_mutable:
+              root_sym = self.symbol_table.lookup(root)
+              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+                self.error(f"Cannot pass constant variable '{root}' to mutable 'var' parameter.")
 
     # 3. Check for conflicts among all borrows
     for i in range(len(borrows)):

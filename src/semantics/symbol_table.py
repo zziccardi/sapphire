@@ -301,14 +301,14 @@ class StructType(Type):
 
   def implements_trait(self, trait: "TraitType",
                        symbol_table: Optional[Any] = None) -> bool:
-    """Returns True if this struct implements the given trait (nominally or structurally)."""
+    """Returns True if this struct nominally implements the given trait (directly or via parent structs)."""
     if trait.name in self.implemented_traits:
       return True
-    if trait.methods:
-      for m_name in trait.methods:
-        if not self.get_method(m_name, symbol_table):
-          return False
-      return True
+    if self.parent_names and symbol_table:
+      for p_name in self.parent_names:
+        parent = symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType) and parent.implements_trait(trait, symbol_table):
+          return True
     return False
 
   def __eq__(self, other: object) -> bool:

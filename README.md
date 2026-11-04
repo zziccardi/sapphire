@@ -62,7 +62,7 @@ func attack(attacker: Entity, var target: Entity, bonus: int = 0) {
 
 // Swift-style guard: early exit with validated value promoted to outer scope
 func execute_turn(hero: Entity, target_opt: Entity?) {
-  guard let target ?= target_opt; target.health > 0 else {
+  guard var target ?= target_opt; target.health > 0 else {
     print("No valid target available!");
     return;
   }

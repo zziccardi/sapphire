@@ -139,7 +139,7 @@ func run_demo() {
   var target: Character? = none;
   target = goblin_1;
 
-  if let active_target ?= target {
+  if var active_target ?= target {
     // Unwrapped active_target is guaranteed non-optional inside this block
     let damage_dealt = execute_strike(attacker = hero,
                                       defender = active_target,
@@ -171,7 +171,7 @@ func run_demo() {
   let entities = [hero, goblin_1, goblin_2];
 
   // Iterate and update all entities
-  for entity in entities {
+  for var entity in entities {
     entity.update(dt = 0.1);
   }
 
