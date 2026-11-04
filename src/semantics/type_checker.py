@@ -47,6 +47,7 @@ from src.semantics.symbol_table import (
 from src.cli.diagnostics import format_diagnostic
 from src.common.errors import SapphireError, SapphireTypeError, SemanticError
 from src.semantics.arena_checker import ArenaChecker
+from src.semantics.collection_checker import CollectionChecker
 from src.semantics.declaration_pass import DeclarationPass
 from src.semantics.generics_checker import GenericsChecker
 from src.semantics.semantic_context import SemanticContext
@@ -748,13 +749,7 @@ class TypeChecker:
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       if isinstance(expr_type, RefType) and isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
         self.error(f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.", node=node)
-      arena_name = self._get_arena_dependency(expr_node)
-      if arena_name:
-        sym.arena_dependency = arena_name
-        arena_sym = self.symbol_table.lookup(arena_name)
-        if arena_sym and arena_sym.scope_defined and sym.scope_defined:
-          if self._is_descendant_scope(arena_sym.scope_defined, sym.scope_defined) and arena_sym.scope_defined != sym.scope_defined:
-            self.error(f"Variable '{name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.")
+      ArenaChecker.validate_arena_escape(self.symbol_table, sym, expr_node, lambda msg: self.error(msg))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     target_types = [self._check_lvalue(t) for t in node.targets]
@@ -780,15 +775,9 @@ class TypeChecker:
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       if isinstance(expr_type, RefType) and isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
         self.error(f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.", node=node)
-      arena_name = self._get_arena_dependency(expr_node)
-      if arena_name:
-        target_sym = self._get_target_symbol(target)
-        if target_sym:
-          target_sym.arena_dependency = arena_name
-          arena_sym = self.symbol_table.lookup(arena_name)
-          if arena_sym and arena_sym.scope_defined and target_sym.scope_defined:
-            if self._is_descendant_scope(arena_sym.scope_defined, target_sym.scope_defined) and arena_sym.scope_defined != target_sym.scope_defined:
-              self.error(f"Variable '{target_sym.name}' in outer scope cannot hold a reference to an object allocated in nested arena '{arena_name}'.", node=node)
+      target_sym = self._get_target_symbol(target)
+      if target_sym:
+        ArenaChecker.validate_arena_escape(self.symbol_table, target_sym, expr_node, lambda msg: self.error(msg, node=node))
 
       if self.is_in_init and isinstance(target, MemberAccessNode):
         if isinstance(target.receiver, IdentifierNode) and target.receiver.name == "self":
@@ -1409,98 +1398,15 @@ class TypeChecker:
 
   def _get_lvalue_path(self, node: ASTNode) -> Optional[tuple[str, List[str]]]:
     """Resolves an AST node to its root variable name and field path if it is an lvalue."""
-    if isinstance(node, IdentifierNode):
-      sym = self.symbol_table.lookup(node.name)
-      if isinstance(sym, VariableSymbol):
-        return (node.name, [])
-    elif isinstance(node, MemberAccessNode):
-      res = self._get_lvalue_path(node.receiver)
-      if res is not None:
-        root, path = res
-        return (root, path + [node.member])
-    elif isinstance(node, IndexExprNode):
-      res = self._get_lvalue_path(node.array)
-      if res is not None:
-        root, path = res
-        return (root, path + ["[]"])
-    return None
+    return ArenaChecker.get_lvalue_path(self.symbol_table, node)
 
   def _is_reference_type(self, type_obj: Type) -> bool:
     """Returns True if the type is passed by reference (non-primitive)."""
-    if isinstance(type_obj, OptionalType):
-      return self._is_reference_type(type_obj.base_type)
-    if isinstance(type_obj, PrimitiveType):
-      return False
-    if isinstance(type_obj, NoneType):
-      return False
-    return True
+    return ArenaChecker.is_reference_type(type_obj)
 
   def _check_aliasing(self, node: CallNode, signature: FunctionType, is_constructor: bool) -> None:
     """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
-    borrows = []  # List of (root, path, is_mutable)
-
-    # 1. Check implicit self receiver for non-static method calls
-    if not is_constructor and isinstance(node.callee, MemberAccessNode):
-      receiver_node = node.callee.receiver
-      receiver_type = self.visit(receiver_node)
-      if isinstance(receiver_type, OptionalType):
-        receiver_type = receiver_type.base_type
-      if isinstance(receiver_type, StructType):
-        method = receiver_type.get_method(node.callee.member, self.symbol_table)
-        if method and method.modifier != "static":
-          # Receiver is implicitly passed.
-          # It is mutably borrowed if method is declared with 'var func'.
-          is_mutable = (method.modifier == "var")
-          res = self._get_lvalue_path(receiver_node)
-          if res:
-            root, path = res
-            borrows.append((root, path, is_mutable))
-            if is_mutable:
-              root_sym = self.symbol_table.lookup(root)
-              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
-                self.error(f"Cannot invoke mutating method '{node.callee.member}' on constant variable '{root}'.")
-
-    # 2. Check explicit arguments
-    expected_param_types = signature.param_types
-    expected_param_names = signature.param_names or []
-    expected_mutabilities = signature.param_mutabilities
-    if not is_constructor and getattr(signature, "has_self", False) and isinstance(node.callee, MemberAccessNode):
-      expected_param_types = signature.param_types[1:]
-      expected_param_names = signature.param_names[1:] if signature.param_names else []
-      expected_mutabilities = signature.param_mutabilities[1:] if signature.param_mutabilities else []
-
-    for idx, arg in enumerate(node.arguments):
-      param_idx = idx
-      if arg.name and expected_param_names and arg.name in expected_param_names:
-        param_idx = expected_param_names.index(arg.name)
-      if param_idx < len(expected_param_types):
-        param_type = expected_param_types[param_idx]
-        is_mutable = expected_mutabilities[param_idx] if param_idx < len(expected_mutabilities) else False
-        if self._is_reference_type(param_type):
-          res = self._get_lvalue_path(arg.expr)
-          if res:
-            root, path = res
-            borrows.append((root, path, is_mutable))
-            if is_mutable:
-              root_sym = self.symbol_table.lookup(root)
-              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
-                self.error(f"Cannot pass constant variable '{root}' to mutable 'var' parameter.")
-
-    # 3. Check for conflicts among all borrows
-    for i in range(len(borrows)):
-      for j in range(i + 1, len(borrows)):
-        r1, p1, m1 = borrows[i]
-        r2, p2, m2 = borrows[j]
-        if r1 == r2:
-          # Check if paths overlap (one is prefix of another)
-          overlap = p1[:len(p2)] == p2 or p2[:len(p1)] == p1
-          if overlap:
-            # Conflict if at least one is mutable
-            if m1 or m2:
-              self.error(
-                  f"Aliasing conflict: variable '{r1}' (or a sub-field) "
-                  f"is mutably borrowed and cannot be borrowed again in the same call."
-              )
+    ArenaChecker.check_aliasing(self, node, signature, is_constructor)
 
   def visit_CallNode(self, node: CallNode) -> Type:
     # Generic function resolution & monomorphization
@@ -1582,400 +1488,14 @@ class TypeChecker:
       return OptionalType(enum_t)
 
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_array_method", False):
-      method = node.callee.array_method
-      receiver_type = node.callee.array_receiver_type
-      elem_type = receiver_type.element_type
-
-      if method == "size":
-        if node.arguments:
-          self.error(".size() takes no arguments.")
-        return PrimitiveType("int")
-
-      elif method == "empty":
-        if node.arguments:
-          self.error(".empty() takes no arguments.")
-        return PrimitiveType("bool")
-
-      elif method == "map":
-        fn_arg = None
-        in_place_arg = None
-        for idx, arg in enumerate(node.arguments):
-          if arg.name == "fn":
-            fn_arg = arg
-          elif arg.name == "in_place":
-            in_place_arg = arg
-          elif idx == 0 and not arg.name:
-            fn_arg = arg
-          elif idx == 1 and not arg.name:
-            in_place_arg = arg
-
-        if not fn_arg:
-          self.error(".map() requires at least 1 argument (fn).")
-          return ArrayType(elem_type, size=receiver_type.size)
-
-        old_expected = self.expected_type
-        self.expected_type = FunctionType([elem_type], InferredType())
-        fn_type = self.visit(fn_arg.expr)
-        self.expected_type = old_expected
-
-        ret_elem_type = PrimitiveType("none")
-        if isinstance(fn_type, FunctionType):
-          ret_elem_type = fn_type.return_type
-          if fn_type.param_types and not elem_type.is_compatible(fn_type.param_types[0]):
-            self.error(f"Closure parameter type mismatch in .map(). Expected '{elem_type}', got '{fn_type.param_types[0]}'.")
-
-        is_in_place = False
-        if in_place_arg:
-          in_p_type = self.visit(in_place_arg.expr)
-          if not in_p_type.is_compatible(PrimitiveType("bool")):
-            self.error(f"'in_place' parameter in .map() must be 'bool', got '{in_p_type}'.")
-          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
-            is_in_place = True
-
-        if is_in_place:
-          receiver = node.callee.receiver
-          if isinstance(receiver, IdentifierNode):
-            sym = self.symbol_table.lookup(receiver.name)
-            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-              self.error(f"Cannot invoke in-place transformation '.map()' on constant variable '{receiver.name}'.")
-          if isinstance(fn_type, FunctionType) and not ret_elem_type.is_compatible(elem_type):
-            self.error(f"In-place mapping requires closure return type to match element type '{elem_type}', got '{ret_elem_type}'.")
-          return ArrayType(elem_type, size=receiver_type.size)
-
-        if receiver_type.size is not None:
-          return ArrayType(ret_elem_type, size=receiver_type.size)
-        return ArrayType(ret_elem_type)
-
-      elif method == "filter":
-        fn_arg = None
-        in_place_arg = None
-        for idx, arg in enumerate(node.arguments):
-          if arg.name == "fn":
-            fn_arg = arg
-          elif arg.name == "in_place":
-            in_place_arg = arg
-          elif idx == 0 and not arg.name:
-            fn_arg = arg
-          elif idx == 1 and not arg.name:
-            in_place_arg = arg
-
-        if not fn_arg:
-          self.error(".filter() requires at least 1 argument (fn).")
-          return ArrayType(elem_type)
-
-        old_expected = self.expected_type
-        self.expected_type = FunctionType([elem_type], PrimitiveType("bool"))
-        fn_type = self.visit(fn_arg.expr)
-        self.expected_type = old_expected
-
-        if isinstance(fn_type, FunctionType):
-          if fn_type.param_types and not elem_type.is_compatible(fn_type.param_types[0]):
-            self.error(f"Closure parameter type mismatch in .filter(). Expected '{elem_type}', got '{fn_type.param_types[0]}'.")
-          if not fn_type.return_type.is_compatible(PrimitiveType("bool")):
-            self.error(f".filter() predicate closure must return 'bool', got '{fn_type.return_type}'.")
-
-        is_in_place = False
-        if in_place_arg:
-          in_p_type = self.visit(in_place_arg.expr)
-          if not in_p_type.is_compatible(PrimitiveType("bool")):
-            self.error(f"'in_place' parameter in .filter() must be 'bool', got '{in_p_type}'.")
-          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
-            is_in_place = True
-
-        if is_in_place:
-          if receiver_type.is_fixed_size:
-            self.error(f"Cannot invoke in-place '.filter()' on fixed-size array '{receiver_type}'.")
-          receiver = node.callee.receiver
-          if isinstance(receiver, IdentifierNode):
-            sym = self.symbol_table.lookup(receiver.name)
-            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-              self.error(f"Cannot invoke in-place transformation '.filter()' on constant variable '{receiver.name}'.")
-
-        return ArrayType(elem_type)
-
-      elif method == "reduce":
-        initial_arg = None
-        fn_arg = None
-        reverse_arg = None
-        for idx, arg in enumerate(node.arguments):
-          if arg.name == "initial":
-            initial_arg = arg
-          elif arg.name == "fn":
-            fn_arg = arg
-          elif arg.name == "reverse":
-            reverse_arg = arg
-          elif idx == 0 and not arg.name:
-            initial_arg = arg
-          elif idx == 1 and not arg.name:
-            fn_arg = arg
-          elif idx == 2 and not arg.name:
-            reverse_arg = arg
-
-        if not initial_arg or not fn_arg:
-          self.error(".reduce() requires mandatory 'initial' and 'fn' arguments.")
-          return elem_type
-
-        acc_type = self.visit(initial_arg.expr)
-
-        old_expected = self.expected_type
-        self.expected_type = FunctionType([acc_type, elem_type], acc_type)
-        fn_type = self.visit(fn_arg.expr)
-        self.expected_type = old_expected
-
-        if isinstance(fn_type, FunctionType):
-          if len(fn_type.param_types) >= 2:
-            if not acc_type.is_compatible(fn_type.param_types[0]):
-              self.error(f"Closure accumulator parameter mismatch in .reduce(). Expected '{acc_type}', got '{fn_type.param_types[0]}'.")
-            if not elem_type.is_compatible(fn_type.param_types[1]):
-              self.error(f"Closure item parameter mismatch in .reduce(). Expected '{elem_type}', got '{fn_type.param_types[1]}'.")
-          if not fn_type.return_type.is_compatible(acc_type):
-            self.error(f"Closure return type in .reduce() must match initial value type '{acc_type}', got '{fn_type.return_type}'.")
-
-        if reverse_arg:
-          rev_type = self.visit(reverse_arg.expr)
-          if not rev_type.is_compatible(PrimitiveType("bool")):
-            self.error(f"'reverse' parameter in .reduce() must be 'bool', got '{rev_type}'.")
-
-        return acc_type
-
-      elif method in ("push", "pop", "insert", "remove", "clear"):
-        if receiver_type.is_fixed_size:
-          self.error(f"Cannot invoke mutating method '{method}' on fixed-size array '{receiver_type}'.")
-        receiver = node.callee.receiver
-        if isinstance(receiver, IdentifierNode):
-          sym = self.symbol_table.lookup(receiver.name)
-          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-            self.error(f"Cannot invoke mutating method '{method}' on constant variable '{receiver.name}'.")
-
-        if method == "push":
-          if len(node.arguments) != 1:
-            self.error(".push() requires exactly 1 argument (element).")
-            return elem_type
-          arg_t = self.visit(node.arguments[0].expr)
-          if not arg_t.is_compatible(elem_type):
-            self.error(f"Argument type mismatch in .push(). Expected '{elem_type}', got '{arg_t}'.")
-          return elem_type
-
-        elif method == "pop":
-          if node.arguments:
-            self.error(".pop() takes no arguments.")
-          return OptionalType(elem_type)
-
-        elif method == "insert":
-          index_arg = None
-          element_arg = None
-          for idx, arg in enumerate(node.arguments):
-            if arg.name == "index":
-              index_arg = arg
-            elif arg.name == "element":
-              element_arg = arg
-            elif idx == 0 and not arg.name:
-              index_arg = arg
-            elif idx == 1 and not arg.name:
-              element_arg = arg
-
-          if not index_arg or not element_arg:
-            self.error(".insert() requires mandatory 'index' and 'element' arguments.")
-            return elem_type
-
-          idx_t = self.visit(index_arg.expr)
-          if not idx_t.is_compatible(PrimitiveType("int")):
-            self.error(f"Argument 'index' in .insert() must be 'int', got '{idx_t}'.")
-          elem_t = self.visit(element_arg.expr)
-          if not elem_t.is_compatible(elem_type):
-            self.error(f"Argument type mismatch in .insert(). Expected '{elem_type}', got '{elem_t}'.")
-          return elem_type
-
-        elif method == "remove":
-          if len(node.arguments) != 1:
-            self.error(".remove() requires exactly 1 argument (index).")
-            return OptionalType(elem_type)
-          idx_t = self.visit(node.arguments[0].expr)
-          if not idx_t.is_compatible(PrimitiveType("int")):
-            self.error(f"Argument 'index' in .remove() must be 'int', got '{idx_t}'.")
-          return OptionalType(elem_type)
-
-        elif method == "clear":
-          if node.arguments:
-            self.error(".clear() takes no arguments.")
-          return PrimitiveType("none")
-
-      elif method == "contains":
-        if len(node.arguments) != 1:
-          self.error(".contains() requires exactly 1 argument (element).")
-          return PrimitiveType("bool")
-        arg_t = self.visit(node.arguments[0].expr)
-        if not arg_t.is_compatible(elem_type):
-          self.error(f"Argument type mismatch in .contains(). Expected '{elem_type}', got '{arg_t}'.")
-        return PrimitiveType("bool")
-
-      elif method == "reverse":
-        in_place_arg = None
-        for idx, arg in enumerate(node.arguments):
-          if arg.name == "in_place":
-            in_place_arg = arg
-          elif idx == 0 and not arg.name:
-            in_place_arg = arg
-
-        if len(node.arguments) > 1:
-          self.error(".reverse() takes at most 1 argument (in_place).")
-
-        is_in_place = False
-        if in_place_arg:
-          in_p_type = self.visit(in_place_arg.expr)
-          if not in_p_type.is_compatible(PrimitiveType("bool")):
-            self.error(f"'in_place' parameter in .reverse() must be 'bool', got '{in_p_type}'.")
-          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
-            is_in_place = True
-
-        if is_in_place:
-          receiver = node.callee.receiver
-          if isinstance(receiver, IdentifierNode):
-            sym = self.symbol_table.lookup(receiver.name)
-            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-              self.error(f"Cannot invoke in-place transformation '.reverse()' on constant variable '{receiver.name}'.")
-
-        return ArrayType(elem_type, size=receiver_type.size)
-
-      elif method == "sort":
-        by_arg = None
-        reverse_arg = None
-        in_place_arg = None
-        for idx, arg in enumerate(node.arguments):
-          if arg.name == "by":
-            by_arg = arg
-          elif arg.name == "reverse":
-            reverse_arg = arg
-          elif arg.name == "in_place":
-            in_place_arg = arg
-          elif idx == 0 and not arg.name:
-            by_arg = arg
-          elif idx == 1 and not arg.name:
-            reverse_arg = arg
-          elif idx == 2 and not arg.name:
-            in_place_arg = arg
-
-        if by_arg:
-          old_expected = self.expected_type
-          self.expected_type = FunctionType([elem_type, elem_type], PrimitiveType("int"))
-          by_type = self.visit(by_arg.expr)
-          self.expected_type = old_expected
-          if isinstance(by_type, FunctionType):
-            if not by_type.return_type.is_compatible(PrimitiveType("int")):
-              self.error(f"Comparator closure in .sort() must return 'int', got '{by_type.return_type}'.")
-        if reverse_arg:
-          rev_t = self.visit(reverse_arg.expr)
-          if not rev_t.is_compatible(PrimitiveType("bool")):
-            self.error(f"'reverse' parameter in .sort() must be 'bool', got '{rev_t}'.")
-
-        is_in_place = False
-        if in_place_arg:
-          in_p_type = self.visit(in_place_arg.expr)
-          if not in_p_type.is_compatible(PrimitiveType("bool")):
-            self.error(f"'in_place' parameter in .sort() must be 'bool', got '{in_p_type}'.")
-          if isinstance(in_place_arg.expr, LiteralNode) and in_place_arg.expr.value is True:
-            is_in_place = True
-
-        if is_in_place:
-          receiver = node.callee.receiver
-          if isinstance(receiver, IdentifierNode):
-            sym = self.symbol_table.lookup(receiver.name)
-            if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-              self.error(f"Cannot invoke in-place transformation '.sort()' on constant variable '{receiver.name}'.")
-
-        return ArrayType(elem_type, size=receiver_type.size)
-
-      elif method == "join":
-        if len(node.arguments) > 1:
-          self.error(".join() takes at most 1 argument (sep).")
-        elif len(node.arguments) == 1:
-          sep_t = self.visit(node.arguments[0].expr)
-          if not sep_t.is_compatible(StringType()):
-            self.error(f"Delimiter 'sep' in .join() must be 'String', got '{sep_t}'.")
-        return StringType()
+      res = CollectionChecker.check_array_method_call(self, node)
+      if res is not None:
+        return res
 
     if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
-      method = node.callee.map_method
-      receiver_type = node.callee.map_receiver_type
-      k_type = receiver_type.key_type
-      v_type = receiver_type.value_type
-
-      if method in ("insert", "remove", "clear"):
-        receiver = node.callee.receiver
-        if isinstance(receiver, IdentifierNode):
-          sym = self.symbol_table.lookup(receiver.name)
-          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-            self.error(f"Cannot invoke mutating method '{method}' on constant variable '{receiver.name}'.")
-
-      if method == "size":
-        if node.arguments:
-          self.error(".size() takes no arguments.")
-        return PrimitiveType("int")
-
-      elif method == "empty":
-        if node.arguments:
-          self.error(".empty() takes no arguments.")
-        return PrimitiveType("bool")
-
-      elif method == "contains":
-        if len(node.arguments) != 1:
-          self.error(".contains() requires exactly 1 argument (key).")
-          return PrimitiveType("bool")
-        key_arg_type = self.visit(node.arguments[0].expr)
-        if not key_arg_type.is_compatible(k_type):
-          self.error(f"Argument type mismatch in .contains(). Expected '{k_type}', got '{key_arg_type}'.")
-        return PrimitiveType("bool")
-
-      elif method == "keys":
-        if node.arguments:
-          self.error(".keys() takes no arguments.")
-        return ArrayType(k_type)
-
-      elif method == "values":
-        if node.arguments:
-          self.error(".values() takes no arguments.")
-        return ArrayType(v_type)
-
-      elif method == "insert":
-        key_arg = None
-        val_arg = None
-        for idx, arg in enumerate(node.arguments):
-          if arg.name == "key":
-            key_arg = arg
-          elif arg.name == "value":
-            val_arg = arg
-          elif idx == 0 and not arg.name:
-            key_arg = arg
-          elif idx == 1 and not arg.name:
-            val_arg = arg
-
-        if not key_arg or not val_arg:
-          self.error(".insert() requires mandatory 'key' and 'value' arguments.")
-          return v_type
-
-        k_arg_type = self.visit(key_arg.expr)
-        if not k_arg_type.is_compatible(k_type):
-          self.error(f"Argument 'key' in .insert() must be '{k_type}', got '{k_arg_type}'.")
-
-        v_arg_type = self.visit(val_arg.expr)
-        if not v_arg_type.is_compatible(v_type):
-          self.error(f"Argument 'value' in .insert() must be '{v_type}', got '{v_arg_type}'.")
-
-        return v_type
-
-      elif method == "remove":
-        if len(node.arguments) != 1:
-          self.error(".remove() requires exactly 1 argument (key).")
-          return OptionalType(v_type)
-        k_arg_type = self.visit(node.arguments[0].expr)
-        if not k_arg_type.is_compatible(k_type):
-          self.error(f"Argument 'key' in .remove() must be '{k_type}', got '{k_arg_type}'.")
-        return OptionalType(v_type)
-
-      elif method == "clear":
-        if node.arguments:
-          self.error(".clear() takes no arguments.")
-        return PrimitiveType("none")
+      res = CollectionChecker.check_map_method_call(self, node)
+      if res is not None:
+        return res
 
     if isinstance(node.callee, IdentifierNode) and node.callee.name == "Ref":
       if node.arena_expr:
@@ -2165,71 +1685,10 @@ class TypeChecker:
       return PrimitiveType("none")
 
     if isinstance(receiver_type, ArrayType):
-      if node.member in ARRAY_METHODS:
-        node.is_array_method = True
-        node.array_method = node.member
-        node.array_receiver_type = receiver_type
-        elem_t = receiver_type.element_type
-        if node.member == "size":
-          return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
-        elif node.member == "empty":
-          return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
-        elif node.member == "get":
-          return FunctionType([receiver_type, PrimitiveType("int")], OptionalType(elem_t), param_names=["self", "index"], has_self=True)
-        elif node.member == "map":
-          return FunctionType([receiver_type, FunctionType([elem_t], InferredType()), PrimitiveType("bool")], ArrayType(InferredType(), size=receiver_type.size), param_names=["self", "fn", "in_place"], has_self=True, num_defaults=1)
-        elif node.member == "filter":
-          return FunctionType([receiver_type, FunctionType([elem_t], PrimitiveType("bool")), PrimitiveType("bool")], ArrayType(elem_t), param_names=["self", "fn", "in_place"], has_self=True, num_defaults=1)
-        elif node.member == "reduce":
-          return FunctionType([receiver_type, InferredType(), FunctionType([InferredType(), elem_t], InferredType()), PrimitiveType("bool")], InferredType(), param_names=["self", "initial", "fn", "reverse"], has_self=True, num_defaults=1)
-        elif node.member == "contains":
-          return FunctionType([receiver_type, elem_t], PrimitiveType("bool"), param_names=["self", "element"], has_self=True)
-        elif node.member == "reverse":
-          return FunctionType([receiver_type, PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "in_place"], has_self=True, num_defaults=1)
-        elif node.member == "sort":
-          return FunctionType([receiver_type, OptionalType(FunctionType([elem_t, elem_t], PrimitiveType("int"))), PrimitiveType("bool"), PrimitiveType("bool")], ArrayType(elem_t, size=receiver_type.size), param_names=["self", "by", "reverse", "in_place"], has_self=True, num_defaults=3)
-        elif node.member == "join":
-          return FunctionType([receiver_type, OptionalType(StringType())], StringType(), param_names=["self", "sep"], has_self=True, num_defaults=1)
-        elif node.member == "push":
-          return FunctionType([receiver_type, elem_t], elem_t, param_names=["self", "element"], has_self=True)
-        elif node.member == "pop":
-          return FunctionType([receiver_type], OptionalType(elem_t), param_names=["self"], has_self=True)
-        elif node.member == "insert":
-          return FunctionType([receiver_type, PrimitiveType("int"), elem_t], elem_t, param_names=["self", "index", "element"], has_self=True)
-        elif node.member == "remove":
-          return FunctionType([receiver_type, PrimitiveType("int")], OptionalType(elem_t), param_names=["self", "index"], has_self=True)
-        elif node.member == "clear":
-          return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
-      self.error(f"Array has no method '{node.member}'.")
-      return PrimitiveType("none")
+      return CollectionChecker.resolve_array_member(self, node, receiver_type)
 
     if isinstance(receiver_type, MapType):
-      if node.member in MAP_METHODS:
-        node.is_map_method = True
-        node.map_method = node.member
-        node.map_receiver_type = receiver_type
-        k_type = receiver_type.key_type
-        v_type = receiver_type.value_type
-        if node.member == "size":
-          return FunctionType([receiver_type], PrimitiveType("int"), param_names=["self"], has_self=True)
-        elif node.member == "empty":
-          return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
-        elif node.member == "contains":
-          return FunctionType([receiver_type, k_type], PrimitiveType("bool"), param_names=["self", "key"], has_self=True)
-        elif node.member == "get":
-          return FunctionType([receiver_type, k_type], OptionalType(v_type), param_names=["self", "key"], has_self=True)
-        elif node.member == "keys":
-          return FunctionType([receiver_type], ArrayType(k_type), param_names=["self"], has_self=True)
-        elif node.member == "values":
-          return FunctionType([receiver_type], ArrayType(v_type), param_names=["self"], has_self=True)
-        elif node.member == "insert":
-          return FunctionType([receiver_type, k_type, v_type], v_type, param_names=["self", "key", "value"], has_self=True)
-        elif node.member == "remove":
-          return FunctionType([receiver_type, k_type], OptionalType(v_type), param_names=["self", "key"], has_self=True)
-        elif node.member == "clear":
-          return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
-      self.error(f"Map has no method '{node.member}'.")
-      return PrimitiveType("none")
+      return CollectionChecker.resolve_map_member(self, node, receiver_type)
 
     if isinstance(receiver_type, CoroutineType):
       if node.member in COROUTINE_METHODS:
