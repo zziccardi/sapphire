@@ -17,6 +17,7 @@ pyright = "*"
 python_version = "3"
 
 [scripts]
+antlr = "antlr -Dlanguage=Python3 -visitor -o src/parser/gen -Xexact-output-dir grammar/Sapphire.g4"
 sapphire = "python -m src.cli.sapphire"
 build = "python -m src.cli.sapphire build"
 run = "python -m src.cli.sapphire run"
