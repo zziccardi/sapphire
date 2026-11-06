@@ -1872,6 +1872,65 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(a)", lua_code)
     self.assertIn("_sapphire_del(b)", lua_code)
 
+  def test_destructor_move_suppresses_source_destructor(self):
+    """Verifies moving a resource suppresses destructor on source in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = move a;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+    self.assertNotIn("_sapphire_del(a)", lua_code)
+
+  def test_destructor_move_into_function_suppresses_source_destructor(self):
+    """Verifies move into function suppresses caller destructor in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      let a = Resource { id = 1 };
+      consume(move a);
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertNotIn("_sapphire_del(a)", test_body)
+
+  def test_destructor_move_reinitialization(self):
+    """Verifies reinitializing a moved variable restores its destructor."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      var a = Resource { id = 1 };
+      consume(move a);
+      a = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertIn("_sapphire_del(a)", test_body)
+
   def test_destructor_inherited_from_parent(self):
     """Verifies that child structs inherit parent destructor tracking."""
     code = """
@@ -2053,6 +2112,48 @@ class TestSharedFixtures(unittest.TestCase):
     if checker.errors:
       raise AssertionError(f"Type errors in fixture:\n{source}\nErrors: {checker.errors}")
     return LuaTranspiler(test_mode=True).transpile(ast)
+
+  def test_lua_if_let_destructuring_and_optional_method_args(self):
+    """Verifies multi-binding if-let tuple destructuring, RAII if-let bindings, and optional method arguments."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      func add(a: int, b: int): int {
+        return self.id + a + b;
+      }
+    }
+
+    func maybe_pair(ok: bool): [int]? {
+      if ok {
+        return [2, 3];
+      }
+      return none;
+    }
+
+    func test_edges(): int {
+      var opt_res: Resource? = Resource { id = 10 };
+      let sum_opt = opt_res?.add(4, 5) ?? 0;
+
+      var acc = sum_opt;
+      if let a, b ?= maybe_pair(true); a > 0 {
+        acc = acc + a + b;
+      }
+      if let r = Resource { id = 1 }; r.id > 0 {
+        acc = acc + r.id;
+      }
+      if let x = 5; let p1, p2 ?= maybe_pair(true) {
+        acc = acc + x + p1 + p2;
+      }
+      return acc;
+    }
+    """
+    lua_code = self._transpile_fixture(code)
+    self.assertIn("_val_a", lua_code)
+    self.assertIn("_r:add(4, 5)", lua_code)
+    self.assertIn("_sapphire_del(r)", lua_code)
 
   def _make_fixture_test(fixture_name: str):  # noqa: N805
     """Factory producing a test method for *fixture_name*."""

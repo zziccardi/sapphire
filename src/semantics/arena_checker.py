@@ -87,6 +87,27 @@ class ArenaChecker:
         )
 
   @staticmethod
+  def validate_return_escape(
+      symbol_table: SymbolTable,
+      current_function_scope: Optional[Any],
+      expr_node: ASTNode,
+      error_fn: Callable[[str, ASTNode], None],
+  ) -> None:
+    """Validates return expression does not escape local arena reference."""
+    arena_name = ArenaChecker.get_arena_dependency(symbol_table, expr_node)
+    if arena_name:
+      arena_sym = symbol_table.lookup(arena_name)
+      if arena_sym and arena_sym.scope_defined and current_function_scope:
+        if ArenaChecker.is_descendant_scope(
+            arena_sym.scope_defined, current_function_scope
+        ):
+          error_fn(
+              f"Cannot return a reference to an object allocated in local "
+              f"arena '{arena_name}'.",
+              expr_node,
+          )
+
+  @staticmethod
   def get_lvalue_path(symbol_table: SymbolTable, node: ASTNode) -> Optional[Tuple[str, List[str]]]:
     """Resolves an AST node to its root variable name and field path if it is an lvalue."""
     if isinstance(node, IdentifierNode):

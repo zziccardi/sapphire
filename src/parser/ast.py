@@ -575,7 +575,6 @@ class WhileNode(StmtNode):
   def __init__(self, condition: ASTNode, block: BlockNode):
     self.condition = condition
     self.block = block
-    self.init_binding = None
 
 
 class ForNode(StmtNode):

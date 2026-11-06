@@ -15,12 +15,19 @@ To use ANTLR to generate Python parser files for the grammar, run the following
 from the project root:
 
 ```bash
+pipenv run antlr
+```
+
+Which executes:
+
+```bash
 antlr -Dlanguage=Python3 -visitor -o src/parser/gen -Xexact-output-dir \
     grammar/Sapphire.g4
 ```
 
 This will create `SapphireLexer.py`, `SapphireParser.py`, `SapphireListener.py`,
-and `SapphireVisitor.py` in the workspace.
+and `SapphireVisitor.py` in `src/parser/gen/`. These generated files are
+tracked in Git and verified to be in sync with `grammar/Sapphire.g4` by CI.
 
 ## Installing CLI as a package
 

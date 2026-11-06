@@ -601,6 +601,72 @@ func test_bare_fail() {
     tc.tear_down()
     tc.func_tear_down()
 
+  def test_artifact_cleanup_python(self):
+    """Verifies that transpiled python files are cleaned up after runs."""
+    sp_path = os.path.join(self.temp_dir, "cleanup_test.sp")
+    with open(sp_path, "w", encoding="utf-8") as f:
+      f.write("""import std.testing;
+@test
+func test_dummy() {
+  testing.assert_true(true);
+}
+""")
+    py_path = os.path.splitext(sp_path)[0] + ".py"
+    with suppress_output():
+      passed, failed, _ = run_tests_python(sp_path, ["test_dummy"], {})
+    self.assertEqual(passed, 1)
+    self.assertEqual(failed, 0)
+    self.assertFalse(os.path.exists(py_path))
+
+  def test_artifact_cleanup_lua(self):
+    """Verifies that transpiled lua files and runners are cleaned up."""
+    sp_path = os.path.join(self.temp_dir, "cleanup_lua_test.sp")
+    with open(sp_path, "w", encoding="utf-8") as f:
+      f.write("""import std.testing;
+@test
+func test_dummy() {
+  testing.assert_true(true);
+}
+""")
+    lua_path = os.path.splitext(sp_path)[0] + ".lua"
+    map_path = lua_path + ".map"
+    with suppress_output():
+      passed, failed, _ = run_tests_lua(sp_path, ["test_dummy"], {})
+    self.assertEqual(passed, 1)
+    self.assertEqual(failed, 0)
+    self.assertFalse(os.path.exists(lua_path))
+    self.assertFalse(os.path.exists(map_path))
+
+  def test_environment_restoration_python(self):
+    """Verifies that sys.path and sys.modules are restored."""
+    import sys
+    orig_path = list(sys.path)
+    sp_path = os.path.join(self.temp_dir, "env_test.sp")
+    with open(sp_path, "w", encoding="utf-8") as f:
+      f.write("""import std.testing;
+@test
+func test_env() {
+  testing.assert_true(true);
+}
+""")
+    with suppress_output():
+      run_tests_python(sp_path, ["test_env"], {})
+    self.assertEqual(sys.path, orig_path)
+    test_mods = [m for m in sys.modules if m.startswith("sapphire_test_")]
+    self.assertEqual(test_mods, [])
+
+  def test_escape_lua_string(self):
+    """Verifies _escape_lua_string normalizes backslashes and quotes."""
+    from src.cli.test_runner import _escape_lua_string
+    self.assertEqual(
+        _escape_lua_string(r"C:\Users\test\file.lua"),
+        "C:/Users/test/file.lua",
+    )
+    self.assertEqual(
+        _escape_lua_string('path"with"quotes'),
+        'path\\"with\\"quotes',
+    )
+
 
 if __name__ == "__main__":
   unittest.main()

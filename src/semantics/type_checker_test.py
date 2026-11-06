@@ -1823,6 +1823,21 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code_escape_return)
     self.assertIn("Cannot return a reference to an object allocated in local arena 'local_arena'", str(context.exception))
 
+    # 3b. Escape check: return multiple values where a non-first value is arena-allocated
+    code_escape_multi_return = """
+    proto Enemy {
+      var hp: int;
+    }
+    func escape_multi(): int, Enemy {
+      let local_arena = Arena();
+      let e = Enemy { hp = 100 } in local_arena;
+      return 42, e;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_escape_multi_return)
+    self.assertIn("Cannot return a reference to an object allocated in local arena 'local_arena'", str(context.exception))
+
     # 4. Escape check: assign local arena reference to outer variable
     code_escape_assign = """
     struct Point {
@@ -5546,6 +5561,168 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_smart_ref_constructor_errors_and_edge_cases(self):
+    """Verifies compile-time validation for Ref, SharedRef, and WeakRef constructors."""
+    # 1. Ref() in arena rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      func test() {
+        let a = Arena();
+        let r = Ref(Box { v = 1 }) in a;
+      }
+      """)
+    self.assertIn("Ref() allocations cannot specify an 'in <arena>' clause.", str(ctx.exception))
+
+    # 2. Ref() wrong arity
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let r = Ref();
+      }
+      """)
+    self.assertIn("Ref() constructor expects 1 argument, got 0.", str(ctx.exception))
+
+    # 3. Ref<T> type mismatch via explicit type_args on CallNode
+    checker = TypeChecker()
+    call_ref_mismatch = CallNode(
+        callee=IdentifierNode("Ref"),
+        arguments=[ArgumentNode(None, LiteralNode("hi", "string"))],
+        type_args=[BasicTypeNode("int")],
+    )
+    checker.visit_CallNode(call_ref_mismatch)
+    self.assertTrue(any("Ref<int> expected argument of type 'int', got 'String'." in e for e in checker.errors))
+
+    # 4. SharedRef() in arena rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      func test() {
+        let a = Arena();
+        let s = SharedRef(Box { v = 1 }) in a;
+      }
+      """)
+    self.assertIn("SharedRef() allocations cannot specify an 'in <arena>' clause.", str(ctx.exception))
+
+    # 5. SharedRef() wrong arity
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let s = SharedRef();
+      }
+      """)
+    self.assertIn("SharedRef() constructor expects 1 argument, got 0.", str(ctx.exception))
+
+    # 6. SharedRef(unmoved_ref) move-only copy error
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      func test() {
+        var r = Ref(Box { v = 1 });
+        let s = SharedRef(r);
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Ref<Box>'; use explicit 'move r'", str(ctx.exception))
+
+    # 7. SharedRef<T> type mismatch via explicit type_args on CallNode
+    checker2 = TypeChecker()
+    call_sref_mismatch = CallNode(
+        callee=IdentifierNode("SharedRef"),
+        arguments=[ArgumentNode(None, LiteralNode("hi", "string"))],
+        type_args=[BasicTypeNode("int")],
+    )
+    checker2.visit_CallNode(call_sref_mismatch)
+    self.assertTrue(any("SharedRef<int> expected argument of type 'int', got 'String'." in e for e in checker2.errors))
+
+    # 8. WeakRef direct construction rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      func test() {
+        let w = WeakRef(Box { v = 1 });
+      }
+      """)
+    self.assertIn("WeakRef cannot be constructed directly; use 'shared_ref.downgrade()'.", str(ctx.exception))
+
+    # 9. Reassigning unmoved Ref variable rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      func test() {
+        var r1 = Ref(Box { v = 1 });
+        var r2 = Ref(Box { v = 2 });
+        r2 = r1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Ref<Box>'; use explicit 'move r1'", str(ctx.exception))
+
+  def test_base_initializer_self_reference_expressions(self):
+    """Verifies _expr_references_self across call, binary, unary, and ternary expressions."""
+    for expr_str in ("self.helper()", "1 + self.x", "-self.x", "true ? self.x : 0"):
+      with self.assertRaises(SemanticError) as ctx:
+        self._check(f"""
+        struct Parent {{
+          var x: int;
+        }}
+        impl Parent {{
+          func __init__(x: int) {{
+            self.x = x;
+          }}
+        }}
+        struct Child: Parent {{
+          var y: int;
+        }}
+        impl Child {{
+          func helper(): int {{ return 1; }}
+          func __init__() : Parent({expr_str}) {{
+            self.y = 2;
+          }}
+        }}
+        """)
+      self.assertIn("References to 'self' are not allowed in base initializer arguments.", str(ctx.exception))
+
+  def test_substitute_type_params_and_bare_smart_ref_type_nodes(self):
+    """Verifies _substitute_type_params for composite types and bare Ref/SharedRef/WeakRef type resolution."""
+    from src.semantics.symbol_table import (
+        GenericTypeParameter,
+        OptionalType,
+        ArrayType,
+        MapType,
+        MultiReturnType,
+        FunctionType,
+        RefType,
+        SharedRefType,
+        WeakRefType,
+    )
+
+    checker = TypeChecker()
+    t_param = GenericTypeParameter("T")
+    t_map = {"T": PrimitiveType("int")}
+
+    self.assertEqual(
+        checker._substitute_type_params(OptionalType(t_param), t_map),
+        OptionalType(PrimitiveType("int")),
+    )
+    self.assertEqual(
+        checker._substitute_type_params(ArrayType(t_param, size=2), t_map),
+        ArrayType(PrimitiveType("int"), size=2),
+    )
+    self.assertEqual(
+        checker._substitute_type_params(MapType(t_param, t_param), t_map),
+        MapType(PrimitiveType("int"), PrimitiveType("int")),
+    )
+    self.assertEqual(
+        checker._substitute_type_params(MultiReturnType([t_param, t_param]), t_map),
+        MultiReturnType([PrimitiveType("int"), PrimitiveType("int")]),
+    )
+    fn_sub = checker._substitute_type_params(FunctionType([t_param], t_param), t_map)
+    self.assertEqual(fn_sub.param_types, [PrimitiveType("int")])
+    self.assertEqual(fn_sub.return_type, PrimitiveType("int"))
+
+    self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("Ref")), RefType)
+    self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("SharedRef")), SharedRefType)
+    self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("WeakRef")), WeakRefType)
+    self.assertFalse(checker._expr_references_self(None))
 
 
 if __name__ == "__main__":

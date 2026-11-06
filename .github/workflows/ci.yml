@@ -25,7 +25,7 @@ jobs:
       PIPENV_PYTHON: ${{ matrix.python-version }}
 
     steps:
-      - name: Checkout code
+      - name: Check out code
         uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -36,11 +36,22 @@ jobs:
       - name: Install system dependencies (Lua)
         run: sudo apt-get update && sudo apt-get install -y lua5.1
 
+      - name: Install ANTLR 4.13.2
+        run: |
+          sudo curl -fsSL https://www.antlr.org/download/antlr-4.13.2-complete.jar -o /usr/local/lib/antlr-4.13.2-complete.jar
+          printf '#!/bin/sh\nexec java -jar /usr/local/lib/antlr-4.13.2-complete.jar "$@"\n' | sudo tee /usr/local/bin/antlr > /dev/null
+          sudo chmod +x /usr/local/bin/antlr
+
       - name: Install Pipenv
         run: pip install --upgrade pip pipenv
 
       - name: Install dependencies
         run: pipenv --python ${{ matrix.python-version }} install --dev --deploy || pipenv --python ${{ matrix.python-version }} install --dev --skip-lock
+
+      - name: Verify ANTLR-generated parser files are up-to-date
+        run: |
+          pipenv run antlr
+          git diff --exit-code src/parser/gen
 
       - name: Run Python unit tests
         run: pipenv run test

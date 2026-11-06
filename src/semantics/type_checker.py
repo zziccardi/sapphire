@@ -70,12 +70,6 @@ class TypeChecker:
     self.loop_depth: int = 0
     self.moved_symbols: Set[VariableSymbol] = set()
 
-  def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
-    return ArenaChecker.get_arena_dependency(self.symbol_table, node)
-
-  def _is_descendant_scope(self, child: Optional[object], parent: Optional[object]) -> bool:
-    return ArenaChecker.is_descendant_scope(child, parent)
-
   def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
     if isinstance(target, IdentifierNode):
       sym = self.symbol_table.lookup(target.name)
@@ -517,7 +511,7 @@ class TypeChecker:
     if isinstance(expr, BinaryOpNode):
       return self._expr_references_self(expr.left) or self._expr_references_self(expr.right)
     if isinstance(expr, UnaryOpNode):
-      return self._expr_references_self(expr.operand)
+      return self._expr_references_self(expr.expr)
     if isinstance(expr, TernaryExprNode):
       return (self._expr_references_self(expr.condition) or
               self._expr_references_self(expr.true_expr) or
@@ -635,6 +629,8 @@ class TypeChecker:
     pass
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    if hasattr(node, "annotations") and node.annotations:
+      DeclarationPass.validate_annotations(self, node.annotations, node=node)
     if node.base_initializers:
       self.error("Base initializers are only permitted on constructor '__init__'.", node=node)
     if node.type_params:
@@ -678,6 +674,8 @@ class TypeChecker:
     self.symbol_table.exit_scope()
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
+    if hasattr(node, "annotations") and node.annotations:
+      DeclarationPass.validate_annotations(self, node.annotations, node=node)
     if any(a.name == "extern" for a in node.annotations):
       return
 
@@ -917,13 +915,13 @@ class TypeChecker:
         self.error(f"Cannot return value of type '{act}' for return value #{idx + 1} (expected '{exp}').")
 
     # Check return escaping arena reference
-    if node.expr:
-      arena_name = self._get_arena_dependency(node.expr)
-      if arena_name:
-        arena_sym = self.symbol_table.lookup(arena_name)
-        if arena_sym and arena_sym.scope_defined and self.current_function_scope:
-          if self._is_descendant_scope(arena_sym.scope_defined, self.current_function_scope):
-            self.error(f"Cannot return a reference to an object allocated in local arena '{arena_name}'.")
+    for ret_expr in node.expressions:
+      ArenaChecker.validate_return_escape(
+          self.symbol_table,
+          self.current_function_scope,
+          ret_expr,
+          lambda msg, n: self.error(msg, node=n),
+      )
 
   def visit_YieldNode(self, node: YieldNode) -> None:
     if self._match_stack:

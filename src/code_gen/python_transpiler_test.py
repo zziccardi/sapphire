@@ -2022,6 +2022,65 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(a)", py_code)
     self.assertIn("_sapphire_del(b)", py_code)
 
+  def test_destructor_move_suppresses_source_destructor(self):
+    """Verifies that moving a resource suppresses destructor on the source."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = move a;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", py_code)
+    self.assertNotIn("_sapphire_del(a)", py_code)
+
+  def test_destructor_move_into_function_suppresses_source_destructor(self):
+    """Verifies move into function suppresses caller destructor in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      let a = Resource { id = 1 };
+      consume(move a);
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertNotIn("_sapphire_del(a)", test_body)
+
+  def test_destructor_move_reinitialization(self):
+    """Verifies that reinitializing a moved variable restores its destructor."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      var a = Resource { id = 1 };
+      consume(move a);
+      a = Resource { id = 2 };
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertIn("_sapphire_del(a)", test_body)
+
   def test_destructor_inherited_from_parent(self):
     """Verifies that child structs inherit parent destructor tracking in Python."""
     code = """
@@ -2303,6 +2362,67 @@ class TestSharedFixtures(unittest.TestCase):
       self.assertNotIn("class _LazyCoWProxy:", py_content)
       proc = subprocess.run([sys.executable, py_path], capture_output=True, text=True, check=True)
       self.assertEqual(proc.stdout.strip(), "2,4,6,8")
+
+  def test_coroutines_and_methods_mutating_globals_and_if_multi_bindings(self):
+    """Verifies global emission in coroutines/methods, multi-binding if-let destructuring, and @extern +=."""
+    code = """
+    @extern var host_counter: int;
+    var g_count: int = 0;
+
+    struct Counter {
+      var step_val: int;
+    }
+
+    impl Counter {
+      func bump() {
+        g_count = g_count + self.step_val;
+      }
+      func gen_counts(): Coroutine<int> {
+        g_count = g_count + 1;
+        yield g_count;
+      }
+    }
+
+    func global_coro(): Coroutine<int> {
+      g_count = g_count + 10;
+      yield g_count;
+    }
+
+    func maybe_pair(ok: bool): [int]? {
+      if ok {
+        return [3, 4];
+      }
+      return none;
+    }
+
+    func test_run_checks(): int {
+      host_counter += 1;
+      let c = Counter { step_val = 5 };
+      c.bump();
+      var co1 = c.gen_counts();
+      let v1 = co1.step() ?? 0;
+      var co2 = global_coro();
+      let v2 = co2.step() ?? 0;
+
+      var total = v1 + v2;
+      if let a, b ?= maybe_pair(true); a > 0 {
+        total = total + a + b;
+      }
+      if let base = 10; let p1, p2 ?= maybe_pair(true) {
+        total = total + base + p1 + p2;
+      }
+      return total;
+    }
+    """
+    import builtins
+    builtins.host_counter = 0
+    try:
+      res = self._transpile_and_exec(code)
+      self.assertEqual(res["test_run_checks"], 6 + 16 + 7 + 17)
+      self.assertEqual(builtins.host_counter, 1)
+    finally:
+      if hasattr(builtins, "host_counter"):
+        delattr(builtins, "host_counter")
 
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""

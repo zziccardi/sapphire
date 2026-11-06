@@ -334,6 +334,67 @@ class TestSymbolTable(unittest.TestCase):
     self.assertTrue(coro_int.is_compatible(OptionalType(coro_int)))
     self.assertFalse(coro_int.is_compatible(PrimitiveType("int")))
 
+  def test_smart_ref_and_generic_types(self):
+    """Verifies RefType, SharedRefType, WeakRefType, GenericTypeParameter, and StructField methods."""
+    from src.semantics.symbol_table import (
+        RefType,
+        SharedRefType,
+        WeakRefType,
+        GenericTypeParameter,
+        StructField,
+    )
+
+    ref_int = RefType(self.int_type)
+    ref_float = RefType(self.float_type)
+    self.assertEqual(ref_int, RefType(self.int_type))
+    self.assertNotEqual(ref_int, ref_float)
+    self.assertFalse(ref_int == "not-a-ref")
+    self.assertEqual(repr(ref_int), "Ref<int>")
+    self.assertTrue(ref_int.is_compatible(OptionalType(ref_int)))
+    self.assertFalse(ref_int.is_compatible(self.int_type))
+
+    sref_int = SharedRefType(self.int_type)
+    sref_float = SharedRefType(self.float_type)
+    self.assertEqual(sref_int, SharedRefType(self.int_type))
+    self.assertNotEqual(sref_int, sref_float)
+    self.assertFalse(sref_int == "not-a-shared-ref")
+    self.assertEqual(repr(sref_int), "SharedRef<int>")
+    self.assertTrue(sref_int.is_compatible(sref_float))
+    self.assertTrue(sref_int.is_compatible(OptionalType(sref_int)))
+    self.assertFalse(sref_int.is_compatible(self.int_type))
+
+    wref_int = WeakRefType(self.int_type)
+    wref_float = WeakRefType(self.float_type)
+    self.assertEqual(wref_int, WeakRefType(self.int_type))
+    self.assertNotEqual(wref_int, wref_float)
+    self.assertFalse(wref_int == "not-a-weak-ref")
+    self.assertEqual(repr(wref_int), "WeakRef<int>")
+    self.assertTrue(wref_int.is_compatible(wref_float))
+    self.assertTrue(wref_int.is_compatible(OptionalType(wref_int)))
+    self.assertFalse(wref_int.is_compatible(self.int_type))
+
+    gtp = GenericTypeParameter("T")
+    self.assertEqual(gtp, GenericTypeParameter("T"))
+    self.assertFalse(gtp == "T")
+    self.assertEqual(repr(gtp), "T")
+
+    sf = StructField("hp", self.int_type, is_mutable=True)
+    self.assertEqual(sf.field_type, self.int_type)
+
+    # NoneType and PrimitiveType("none") equality and compatibility
+    self.assertTrue(PrimitiveType("none") == NoneType())
+    self.assertTrue(NoneType() == PrimitiveType("none"))
+    self.assertTrue(NoneType().is_compatible(NoneType()))
+    self.assertTrue(NoneType().is_compatible(PrimitiveType("none")))
+
+    # FunctionType compatibility mismatches
+    fn1 = FunctionType([self.int_type], self.int_type)
+    fn2 = FunctionType([self.int_type, self.int_type], self.int_type)
+    fn3 = FunctionType([self.string_type], self.int_type)
+    self.assertFalse(fn1.is_compatible(self.int_type))
+    self.assertFalse(fn1.is_compatible(fn2))
+    self.assertFalse(fn1.is_compatible(fn3))
+
 
 if __name__ == "__main__":
   unittest.main()

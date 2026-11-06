@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import List, Tuple, Dict, Any, Optional
 
@@ -147,239 +148,288 @@ def run_tests_python(
     filter_pattern: Optional[str] = None,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Python target backend."""
+  out_py = None
+  orig_sys_path = list(sys.path)
+  orig_modules = set(sys.modules.keys())
   try:
-    out_py = transpile_file(sp_file, target="python", test_mode=True, quiet=True, raise_on_error=True)
-  except BaseException as e:  # pragma: no cover
-    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
-    for line in str(e).splitlines():
-      print(f"  {line}")
-    return 0, 1, [f"Transpilation failed: {e}"]
-
-  # Ensure workspace root, lib directory, and test source directory are in sys.path
-  workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-  lib_dir = os.path.join(workspace_root, "lib")
-  sp_dir = os.path.dirname(os.path.abspath(sp_file))
-  cwd = os.getcwd()
-  for path_entry in (workspace_root, lib_dir, cwd, sp_dir):
-    if path_entry:
-      if path_entry in sys.path:
-        sys.path.remove(path_entry)
-      sys.path.insert(0, path_entry)
-
-  try:
-    import std.testing as testing
-  except ImportError:  # pragma: no cover
     try:
-      from lib.std import testing
+      out_py = transpile_file(
+          sp_file,
+          target="python",
+          test_mode=True,
+          quiet=True,
+          raise_on_error=True,
+      )
+    except BaseException as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
+      return 0, 1, [f"Transpilation failed: {e}"]
+
+    # Ensure workspace root, lib, and test source directory are in sys.path
+    workspace_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
+    lib_dir = os.path.join(workspace_root, "lib")
+    sp_dir = os.path.dirname(os.path.abspath(sp_file))
+    cwd = os.getcwd()
+    for path_entry in (workspace_root, lib_dir, cwd, sp_dir):
+      if path_entry:
+        if path_entry in sys.path:
+          sys.path.remove(path_entry)
+        sys.path.insert(0, path_entry)
+
+    try:
+      import std.testing as testing
     except ImportError:  # pragma: no cover
-      print(f"[ FAIL ] {os.path.basename(sp_file)} (could not import std.testing module)", file=sys.stderr)
-      return 0, 1, ["Failed to load std.testing module"]
+      try:
+        from lib.std import testing
+      except ImportError:  # pragma: no cover
+        print(
+            f"[ FAIL ] {os.path.basename(sp_file)} (could not import"
+            f" std.testing module)",
+            file=sys.stderr,
+        )
+        return 0, 1, ["Failed to load std.testing module"]
 
-  # If a 'lib' directory exists in sp_dir, clear stale repo 'lib' modules from sys.modules
-  sp_lib = os.path.join(sp_dir, "lib")
-  if os.path.isdir(sp_lib):
-    to_del = [k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")]
-    for k in to_del:
-      del sys.modules[k]
+    # If 'lib' exists in sp_dir, clear stale repo 'lib' modules from sys.modules
+    sp_lib = os.path.join(sp_dir, "lib")
+    if os.path.isdir(sp_lib):
+      to_del = [
+          k for k in list(sys.modules.keys())
+          if k == "lib" or k.startswith("lib.")
+      ]
+      for k in to_del:
+        del sys.modules[k]
 
-  # Invalidate cached modules in sys.modules that match files within sp_dir
-  for root, _, files in os.walk(sp_dir):
-    rel_root = os.path.relpath(root, sp_dir).replace(os.sep, ".")
-    for f in files:
-      if f.endswith(".py"):
-        base_f = os.path.splitext(f)[0]
-        mod_candidates = [base_f]
-        if rel_root != ".":
-          mod_candidates.append(f"{rel_root}.{base_f}")
-        for mc in mod_candidates:
-          if mc in sys.modules and mc != "std.testing":
-            del sys.modules[mc]
+    # Invalidate cached modules in sys.modules that match files within sp_dir
+    for root, _, files in os.walk(sp_dir):
+      rel_root = os.path.relpath(root, sp_dir).replace(os.sep, ".")
+      for f in files:
+        if f.endswith(".py"):
+          base_f = os.path.splitext(f)[0]
+          mod_candidates = [base_f]
+          if rel_root != ".":
+            mod_candidates.append(f"{rel_root}.{base_f}")
+          for mc in mod_candidates:
+            if mc in sys.modules and mc != "std.testing":
+              del sys.modules[mc]
 
-  # Dynamically import transpiled Python module
-  module_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
-  spec = importlib.util.spec_from_file_location(module_name, out_py)
-  mod = importlib.util.module_from_spec(spec)
-  sys.modules[module_name] = mod
-  try:
-    spec.loader.exec_module(mod)
-  except BaseException as e:  # pragma: no cover
-    print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
-    for line in str(e).splitlines():
-      print(f"  {line}")
-    return 0, 1, [f"Failed to execute transpiled test module: {e}"]
-
-  passed = 0
-  failed = 0
-  logs = []
-
-  # Load source line map from transpiled module (Python line -> Sapphire line)
-  sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
-
-  def sp_lineno(py_line: int) -> int:
-    """Translate a Python output line number to the nearest Sapphire source line."""
-    if py_line in sp_line_map:
-      return sp_line_map[py_line]
-    # Walk backwards to find the nearest mapped line
-    for offset in range(1, 50):
-      if (py_line - offset) in sp_line_map:  # pragma: no cover
-        return sp_line_map[py_line - offset]
-    return 0
-
-  def format_failure(f: dict, sp_file: str) -> str:
-    """Format a single failure dict into the documented output lines."""
-    lines_out = []
-    kind = f.get("kind", "generic")
-    expected = f.get("expected")
-    actual = f.get("actual")
-    user_msg = f.get("message", "")
-
-    if kind in ("eq", "ne", "almost_eq"):
-      lines_out.append(f"  Expected: {expected!r}")
-      lines_out.append(f"  Actual:   {actual!r}")
-      if user_msg:
-        # Strip the auto-generated prefix to show only the user message
-        import re
-        user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
-        if user_only != user_msg:
-          lines_out.append(f"  Message:  {user_only}")
-    elif kind in ("bool",):
-      lines_out.append(f"  Expected: {expected!r}")
-      lines_out.append(f"  Actual:   {actual!r}")
-      if user_msg:
-        import re
-        user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
-        if user_only != user_msg:
-          lines_out.append(f"  Message:  {user_only}")
-    elif kind in ("none", "not_none"):
-      lines_out.append(f"  Expected: {expected!r}")
-      lines_out.append(f"  Actual:   {actual!r}")
-    else:  # pragma: no cover
-      lines_out.append(f"  {user_msg}")
-
-    # Source line display
-    sp_line = sp_lineno(f.get("lineno", 0))
-    if sp_line > 0:
-      src = get_source_line(sp_file, sp_line)
-      if src:
-        stripped = src.strip()
-        indent_len = len(src) - len(src.lstrip())
-        lines_out.append(f"  Line {sp_line}:  {stripped}")
-        lines_out.append(f"  {' ' * (len(str(sp_line)) + 8)}{'^' * len(stripped)}")
-
-    return "\n".join(lines_out)
-
-  def first_sp_line(failures: list) -> int:
-    """Return the Sapphire source line of the first failure, for the header."""
-    for f in failures:
-      line = sp_lineno(f.get("lineno", 0))
-      if line > 0:
-        return line
-    return 0
-
-  # Run standalone @test functions
-  for fn_name in standalone_tests:
-    if filter_pattern and filter_pattern not in fn_name:
-      continue
-    if not hasattr(mod, fn_name):  # pragma: no cover
-      continue
-    test_func = getattr(mod, fn_name)
-    ctx = testing.TestContext(fn_name)
-    testing.set_active_context(ctx)
-
-    err = None
+    # Dynamically import transpiled Python module
+    module_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
+    spec = importlib.util.spec_from_file_location(module_name, out_py)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = mod
     try:
-      test_func()
-    except testing.TestFailure as tf:
-      err = str(tf)
-    except Exception as ex:  # pragma: no cover
-      err = f"Unhandled Exception: {ex}"
+      spec.loader.exec_module(mod)
+    except BaseException as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
+      return 0, 1, [f"Failed to execute transpiled test module: {e}"]
 
-    if not ctx.failures and err is None:
-      passed += 1
-      print(f"[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
-    else:
-      failed += 1
-      all_fails = ctx.failures.copy()
-      if err and not any(f["fatal"] for f in all_fails):  # pragma: no cover
-        all_fails.append({"message": err, "lineno": 0, "filename": sp_file, "kind": "generic"})
-      header_line = first_sp_line(all_fails)
-      if header_line > 0:
-        print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:{header_line})")
-      else:
-        print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
-      for f in all_fails:
-        print(format_failure(f, sp_file))
+    passed = 0
+    failed = 0
+    logs = []
 
-  # Run struct-based test suites
-  for struct_name, methods in suite_tests.items():
-    if not hasattr(mod, struct_name):  # pragma: no cover
-      continue
-    struct_cls = getattr(mod, struct_name)
+    # Load source line map from transpiled module (Python line -> Sapphire line)
+    sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
 
-    for m_name in methods:
-      full_name = f"{struct_name}.{m_name}"
-      if filter_pattern and filter_pattern not in full_name and filter_pattern not in m_name:
+    def sp_lineno(py_line: int) -> int:
+      """Translate a Python output line to the nearest Sapphire line."""
+      if py_line in sp_line_map:
+        return sp_line_map[py_line]
+      # Walk backwards to find the nearest mapped line
+      for offset in range(1, 50):
+        if (py_line - offset) in sp_line_map:  # pragma: no cover
+          return sp_line_map[py_line - offset]
+      return 0
+
+    def format_failure(f: dict, sp_file: str) -> str:
+      """Format a single failure dict into the documented output lines."""
+      lines_out = []
+      kind = f.get("kind", "generic")
+      expected = f.get("expected")
+      actual = f.get("actual")
+      user_msg = f.get("message", "")
+
+      if kind in ("eq", "ne", "almost_eq"):
+        lines_out.append(f"  Expected: {expected!r}")
+        lines_out.append(f"  Actual:   {actual!r}")
+        if user_msg:
+          # Strip the auto-generated prefix to show only the user message
+          import re
+          user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
+          if user_only != user_msg:
+            lines_out.append(f"  Message:  {user_only}")
+      elif kind in ("bool",):
+        lines_out.append(f"  Expected: {expected!r}")
+        lines_out.append(f"  Actual:   {actual!r}")
+        if user_msg:
+          import re
+          user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
+          if user_only != user_msg:
+            lines_out.append(f"  Message:  {user_only}")
+      elif kind in ("none", "not_none"):
+        lines_out.append(f"  Expected: {expected!r}")
+        lines_out.append(f"  Actual:   {actual!r}")
+      else:  # pragma: no cover
+        lines_out.append(f"  {user_msg}")
+
+      # Source line display
+      sp_line = sp_lineno(f.get("lineno", 0))
+      if sp_line > 0:
+        src = get_source_line(sp_file, sp_line)
+        if src:
+          stripped = src.strip()
+          indent_len = len(src) - len(src.lstrip())
+          lines_out.append(f"  Line {sp_line}:  {stripped}")
+          pad = " " * (len(str(sp_line)) + 8)
+          lines_out.append(f"  {pad}{'^' * len(stripped)}")
+
+      return "\n".join(lines_out)
+
+    def first_sp_line(failures: list) -> int:
+      """Return Sapphire line of first failure, for the header."""
+      for f in failures:
+        line = sp_lineno(f.get("lineno", 0))
+        if line > 0:
+          return line
+      return 0
+
+    # Run standalone @test functions
+    for fn_name in standalone_tests:
+      if filter_pattern and filter_pattern not in fn_name:
         continue
-
-      instance = struct_cls()
-      ctx = testing.TestContext(full_name)
+      if not hasattr(mod, fn_name):  # pragma: no cover
+        continue
+      test_func = getattr(mod, fn_name)
+      ctx = testing.TestContext(fn_name)
       testing.set_active_context(ctx)
 
-      # Run set_up
-      if hasattr(instance, "set_up"):
-        try:
-          instance.set_up()
-        except Exception as ex:
-          failed += 1
-          print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
-          continue
-      elif hasattr(instance, "func_set_up"):  # pragma: no cover
-        try:
-          instance.func_set_up()
-        except Exception as ex:
-          failed += 1
-          print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
-          continue
-
       err = None
-      if hasattr(instance, m_name):
-        test_m = getattr(instance, m_name)
-        try:
-          test_m()
-        except testing.TestFailure as tf:
-          err = str(tf)
-        except Exception as ex:  # pragma: no cover
-          err = f"Unhandled Exception: {ex}"
-
-      # Run tear_down
-      if hasattr(instance, "tear_down"):
-        try:
-          instance.tear_down()
-        except Exception:  # pragma: no cover
-          pass
-      elif hasattr(instance, "func_tear_down"):  # pragma: no cover
-        try:
-          instance.func_tear_down()
-        except Exception:
-          pass
+      try:
+        test_func()
+      except testing.TestFailure as tf:
+        err = str(tf)
+      except Exception as ex:  # pragma: no cover
+        err = f"Unhandled Exception: {ex}"
 
       if not ctx.failures and err is None:
         passed += 1
-        print(f"[ PASS ] {full_name} ({os.path.basename(sp_file)})")
+        print(f"[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
       else:
         failed += 1
         all_fails = ctx.failures.copy()
         if err and not any(f["fatal"] for f in all_fails):  # pragma: no cover
-          all_fails.append({"message": err, "lineno": 0, "filename": sp_file, "kind": "generic"})
+          all_fails.append({
+              "message": err,
+              "lineno": 0,
+              "filename": sp_file,
+              "kind": "generic",
+          })
         header_line = first_sp_line(all_fails)
         if header_line > 0:
-          print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)}:{header_line})")
+          base_name = os.path.basename(sp_file)
+          print(f"[ FAIL ] {fn_name} ({base_name}:{header_line})")
         else:
-          print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
+          print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
         for f in all_fails:
           print(format_failure(f, sp_file))
 
-  return passed, failed, logs
+    # Run struct-based test suites
+    for struct_name, methods in suite_tests.items():
+      if not hasattr(mod, struct_name):  # pragma: no cover
+        continue
+      struct_cls = getattr(mod, struct_name)
+
+      for m_name in methods:
+        full_name = f"{struct_name}.{m_name}"
+        if (filter_pattern
+            and filter_pattern not in full_name
+            and filter_pattern not in m_name):
+          continue
+
+        instance = struct_cls()
+        ctx = testing.TestContext(full_name)
+        testing.set_active_context(ctx)
+
+        # Run set_up
+        if hasattr(instance, "set_up"):
+          try:
+            instance.set_up()
+          except Exception as ex:
+            failed += 1
+            print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
+            continue
+        elif hasattr(instance, "func_set_up"):  # pragma: no cover
+          try:
+            instance.func_set_up()
+          except Exception as ex:
+            failed += 1
+            print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
+            continue
+
+        err = None
+        if hasattr(instance, m_name):
+          test_m = getattr(instance, m_name)
+          try:
+            test_m()
+          except testing.TestFailure as tf:
+            err = str(tf)
+          except Exception as ex:  # pragma: no cover
+            err = f"Unhandled Exception: {ex}"
+
+        # Run tear_down
+        if hasattr(instance, "tear_down"):
+          try:
+            instance.tear_down()
+          except Exception:  # pragma: no cover
+            pass
+        elif hasattr(instance, "func_tear_down"):  # pragma: no cover
+          try:
+            instance.func_tear_down()
+          except Exception:  # pragma: no cover
+            pass
+
+        if not ctx.failures and err is None:
+          passed += 1
+          print(f"[ PASS ] {full_name} ({os.path.basename(sp_file)})")
+        else:
+          failed += 1
+          all_fails = ctx.failures.copy()
+          if err and not any(f["fatal"] for f in all_fails):  # pragma: no cover
+            all_fails.append({
+                "message": err,
+                "lineno": 0,
+                "filename": sp_file,
+                "kind": "generic",
+            })
+          header_line = first_sp_line(all_fails)
+          if header_line > 0:
+            base_name = os.path.basename(sp_file)
+            print(f"[ FAIL ] {full_name} ({base_name}:{header_line})")
+          else:
+            print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
+          for f in all_fails:
+            print(format_failure(f, sp_file))
+
+    return passed, failed, logs
+  finally:
+    if out_py and os.path.exists(out_py):
+      try:
+        os.remove(out_py)
+      except OSError:
+        pass
+    for k in list(sys.modules.keys()):
+      if k not in orig_modules or k.startswith("sapphire_test_"):
+        del sys.modules[k]
+    sys.path[:] = orig_sys_path
+
+
+def _escape_lua_string(s: str) -> str:
+  """Normalizes backslashes to forward slashes and escapes quotes for Lua."""
+  return s.replace("\\", "/").replace('"', '\\"')
 
 
 def run_tests_lua(
@@ -390,26 +440,59 @@ def run_tests_lua(
     sourcemap: bool = True,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Lua 5.1 target backend."""
+  out_lua = None
+  runner_tmp = None
   try:
-    out_lua = transpile_file(sp_file, target="lua", test_mode=True, sourcemap=sourcemap, quiet=True, raise_on_error=True)
-  except BaseException as e:  # pragma: no cover
-    print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
-    for line in str(e).splitlines():
-      print(f"  {line}")
-    return 0, 1, [f"Transpilation failed: {e}"]
+    try:
+      out_lua = transpile_file(
+          sp_file,
+          target="lua",
+          test_mode=True,
+          sourcemap=sourcemap,
+          quiet=True,
+          raise_on_error=True,
+      )
+    except BaseException as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
+      return 0, 1, [f"Transpilation failed: {e}"]
 
-  lua_bin = find_lua_binary()
-  if not lua_bin:  # pragma: no cover
-    print("Error: Lua interpreter ('lua', 'luajit', or 'lua5.1') not found in PATH.", file=sys.stderr)
-    print(f"[ FAIL ] {os.path.basename(sp_file)} (Lua interpreter not found in PATH)")
-    return 0, 1, ["Lua interpreter not found"]
+    lua_bin = find_lua_binary()
+    if not lua_bin:  # pragma: no cover
+      print(
+          "Error: Lua interpreter ('lua', 'luajit', or 'lua5.1') not found in"
+          " PATH.",
+          file=sys.stderr,
+      )
+      print(
+          f"[ FAIL ] {os.path.basename(sp_file)} (Lua interpreter not found in"
+          f" PATH)"
+      )
+      return 0, 1, ["Lua interpreter not found"]
 
-  workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-  sp_dir = os.path.dirname(os.path.abspath(sp_file))
+    workspace_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
+    sp_dir = os.path.dirname(os.path.abspath(sp_file))
 
-  # Construct Lua runner script
-  lua_script_lines = [
-      f'package.path = "{workspace_root}/lib/?.lua;{workspace_root}/lib/?/init.lua;{sp_dir}/?.lua;{sp_dir}/?/init.lua;" .. package.path',
+    esc_workspace_root = _escape_lua_string(workspace_root)
+    esc_sp_dir = _escape_lua_string(sp_dir)
+    esc_out_lua = _escape_lua_string(out_lua)
+    esc_sp_basename = _escape_lua_string(os.path.basename(sp_file))
+
+    # Construct Lua runner script
+    pkg_path = (
+        f'package.path = "{esc_workspace_root}/lib/?.lua;'
+        f'{esc_workspace_root}/lib/?/init.lua;'
+        f'{esc_sp_dir}/?.lua;{esc_sp_dir}/?/init.lua;" .. package.path'
+    )
+    dofile_stmt = (
+        f'local target_mod_ok, target_mod = pcall(function() '
+        f'return dofile("{esc_out_lua}") end)'
+    )
+    lua_script_lines = [
+        pkg_path,
       '''
 local function _sp_install_loader()
   if _G._SP_RELATIVE_LOADER_INSTALLED then return end
@@ -469,9 +552,9 @@ end
 _sp_install_loader()
 ''',
       f'local testing = require("std.testing")',
-      f'local target_mod_ok, target_mod = pcall(function() return dofile("{out_lua}") end)',
+      dofile_stmt,
       'if not target_mod_ok then',
-      f'  print("[ FAIL ] {os.path.basename(sp_file)} (module load error)")',
+      f'  print("[ FAIL ] {esc_sp_basename} (module load error)")',
       '  print("  " .. tostring(target_mod))',
       '  os.exit(1)',
       'end',
@@ -534,146 +617,168 @@ end
 ''',
   ]
 
-  # Run standalone @test functions
-  for fn_name in standalone_tests:
-    if filter_pattern and filter_pattern not in fn_name:
-      continue
-    lua_script_lines.append(f'''
-do
-  local ctx = testing.TestContext.new("{fn_name}")
-  testing.set_active_context(ctx)
-  local fn = (target_mod and target_mod["{fn_name}"]) or _G["{fn_name}"]
-  if type(fn) ~= "function" then
-    total_failed = total_failed + 1
-    print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
-    print("  Test function '{fn_name}' not found or not callable")
-  else
-    local ok, err = pcall(fn)
-    if ok and #ctx.failures == 0 then
-      total_passed = total_passed + 1
-      print("[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
-    else
-      total_failed = total_failed + 1
-      local header_line = get_first_sp_line(ctx.failures)
-      if header_line > 0 then
-        print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
-      else
-        print("[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
-      end
-      for _, f in ipairs(ctx.failures) do
-        print_failure(f)
-      end
-      if not ok then
-        local has_fatal = false
-        for _, f in ipairs(ctx.failures) do
-          if f.fatal then has_fatal = true break end
-        end
-        if not has_fatal then
-          print("  Unhandled Error: " .. tostring(err))
-        end
-      end
-    end
-  end
-end
-''')
-
-  # Run struct test suites
-  for struct_name, methods in suite_tests.items():
-    for m_name in methods:
-      full_name = f"{struct_name}.{m_name}"
-      if filter_pattern and filter_pattern not in full_name and filter_pattern not in m_name:
+    # Run standalone @test functions
+    for fn_name in standalone_tests:
+      if filter_pattern and filter_pattern not in fn_name:
         continue
+      esc_fn = _escape_lua_string(fn_name)
       lua_script_lines.append(f'''
-do
-  local ctx = testing.TestContext.new("{full_name}")
-  testing.set_active_context(ctx)
-  local struct_cls = (target_mod and target_mod["{struct_name}"]) or _G["{struct_name}"]
-  local inst = nil
-  if struct_cls then
-    setmetatable(struct_cls, {{ __index = testing.TestCase }})
-    if struct_cls.init then
-      inst = struct_cls.init()
-    elseif struct_cls.new then
-      inst = struct_cls.new()
+  do
+    local ctx = testing.TestContext.new("{esc_fn}")
+    testing.set_active_context(ctx)
+    local fn = (target_mod and target_mod["{esc_fn}"]) or _G["{esc_fn}"]
+    if type(fn) ~= "function" then
+      total_failed = total_failed + 1
+      print("[ FAIL ] {esc_fn} ({esc_sp_basename})")
+      print("  Test function '{esc_fn}' not found or not callable")
     else
-      inst = setmetatable({{}}, struct_cls)
+      local ok, err = pcall(fn)
+      if ok and #ctx.failures == 0 then
+        total_passed = total_passed + 1
+        print("[ PASS ] {esc_fn} ({esc_sp_basename})")
+      else
+        total_failed = total_failed + 1
+        local header_line = get_first_sp_line(ctx.failures)
+        if header_line > 0 then
+          print("[ FAIL ] {esc_fn} ({esc_sp_basename}:" .. header_line .. ")")
+        else
+          print("[ FAIL ] {esc_fn} ({esc_sp_basename})")
+        end
+        for _, f in ipairs(ctx.failures) do
+          print_failure(f)
+        end
+        if not ok then
+          local has_fatal = false
+          for _, f in ipairs(ctx.failures) do
+            if f.fatal then has_fatal = true break end
+          end
+          if not has_fatal then
+            print("  Unhandled Error: " .. tostring(err))
+          end
+        end
+      end
     end
   end
+  ''')
 
-  if not inst then
-    total_failed = total_failed + 1
-    print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
-    print("  Test suite struct '{struct_name}' could not be instantiated")
-  else
-    local setup_ok, setup_err = true, nil
-    if inst.set_up then setup_ok, setup_err = pcall(function() inst:set_up() end) end
-    if not setup_ok then
-      total_failed = total_failed + 1
-      print("[ FAIL ] {full_name} (set_up failed: " .. tostring(setup_err) .. ")")
-    else
-      local test_fn = inst["{m_name}"]
-      if type(test_fn) ~= "function" then
-        total_failed = total_failed + 1
-        print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
-        print("  Test method '{m_name}' not found on struct '{struct_name}'")
+    # Run struct test suites
+    for struct_name, methods in suite_tests.items():
+      for m_name in methods:
+        full_name = f"{struct_name}.{m_name}"
+        if (filter_pattern
+            and filter_pattern not in full_name
+            and filter_pattern not in m_name):
+          continue
+        esc_struct = _escape_lua_string(struct_name)
+        esc_m = _escape_lua_string(m_name)
+        esc_full = _escape_lua_string(full_name)
+        lua_script_lines.append(f'''
+  do
+    local ctx = testing.TestContext.new("{esc_full}")
+    testing.set_active_context(ctx)
+    local struct_cls = (target_mod and target_mod["{esc_struct}"])
+        or _G["{esc_struct}"]
+    local inst = nil
+    if struct_cls then
+      setmetatable(struct_cls, {{ __index = testing.TestCase }})
+      if struct_cls.init then
+        inst = struct_cls.init()
+      elseif struct_cls.new then
+        inst = struct_cls.new()
       else
-        local ok, err = pcall(function() test_fn(inst) end)
-        if inst.tear_down then pcall(function() inst:tear_down() end) end
+        inst = setmetatable({{}}, struct_cls)
+      end
+    end
 
-        if ok and #ctx.failures == 0 then
-          total_passed = total_passed + 1
-          print("[ PASS ] {full_name} ({os.path.basename(sp_file)})")
-        else
+    if not inst then
+      total_failed = total_failed + 1
+      print("[ FAIL ] {esc_full} ({esc_sp_basename})")
+      print("  Test suite struct '{esc_struct}' could not be instantiated")
+    else
+      local setup_ok, setup_err = true, nil
+      if inst.set_up then
+        setup_ok, setup_err = pcall(function() inst:set_up() end)
+      end
+      if not setup_ok then
+        total_failed = total_failed + 1
+        print("[ FAIL ] {esc_full} (set_up failed: "
+            .. tostring(setup_err) .. ")")
+      else
+        local test_fn = inst["{esc_m}"]
+        if type(test_fn) ~= "function" then
           total_failed = total_failed + 1
-          local header_line = get_first_sp_line(ctx.failures)
-          if header_line > 0 then
-            print("[ FAIL ] {full_name} ({os.path.basename(sp_file)}:" .. header_line .. ")")
+          print("[ FAIL ] {esc_full} ({esc_sp_basename})")
+          print("  Test method '{esc_m}' not found on struct '{esc_struct}'")
+        else
+          local ok, err = pcall(function() test_fn(inst) end)
+          if inst.tear_down then pcall(function() inst:tear_down() end) end
+
+          if ok and #ctx.failures == 0 then
+            total_passed = total_passed + 1
+            print("[ PASS ] {esc_full} ({esc_sp_basename})")
           else
-            print("[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
-          end
-          for _, f in ipairs(ctx.failures) do
-            print_failure(f)
-          end
-          if not ok then
-            local has_fatal = false
-            for _, f in ipairs(ctx.failures) do
-              if f.fatal then has_fatal = true break end
+            total_failed = total_failed + 1
+            local header_line = get_first_sp_line(ctx.failures)
+            if header_line > 0 then
+              print("[ FAIL ] {esc_full} ({esc_sp_basename}:"
+                  .. header_line .. ")")
+            else
+              print("[ FAIL ] {esc_full} ({esc_sp_basename})")
             end
-            if not has_fatal then
-              print("  Unhandled Error: " .. tostring(err))
+            for _, f in ipairs(ctx.failures) do
+              print_failure(f)
+            end
+            if not ok then
+              local has_fatal = false
+              for _, f in ipairs(ctx.failures) do
+                if f.fatal then has_fatal = true break end
+              end
+              if not has_fatal then
+                print("  Unhandled Error: " .. tostring(err))
+              end
             end
           end
         end
       end
     end
   end
-end
-''')
+  ''')
 
-  lua_script_lines.append('os.exit((total_failed > 0) and 1 or 0)')
+    lua_script_lines.append('os.exit((total_failed > 0) and 1 or 0)')
 
-  runner_tmp = out_lua + ".runner.lua"
-  with open(runner_tmp, "w", encoding="utf-8") as f:
-    f.write("\n".join(lua_script_lines))
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".runner.lua", delete=False, encoding="utf-8"
+    ) as f:
+      f.write("\n".join(lua_script_lines))
+      runner_tmp = f.name
 
-  cmd = [lua_bin, runner_tmp]
-  res = subprocess.run(cmd, capture_output=True, text=True)
+    cmd = [lua_bin, runner_tmp]
+    res = subprocess.run(cmd, capture_output=True, text=True)
 
-  if os.path.exists(runner_tmp):
-    os.remove(runner_tmp)
+    if res.stdout:
+      print(res.stdout.strip())
+    if res.stderr:  # pragma: no cover
+      print(res.stderr.strip(), file=sys.stderr)
 
-  if res.stdout:
-    print(res.stdout.strip())
-  if res.stderr:  # pragma: no cover
-    print(res.stderr.strip(), file=sys.stderr)
+    stdout_lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+    passed = sum(1 for l in stdout_lines if l.startswith("[ PASS ]"))
+    failed = sum(1 for l in stdout_lines if l.startswith("[ FAIL ]"))
+    if res.returncode != 0 and passed == 0 and failed == 0:
+      failed = 1
 
-  stdout_lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
-  passed = sum(1 for l in stdout_lines if l.startswith("[ PASS ]"))
-  failed = sum(1 for l in stdout_lines if l.startswith("[ FAIL ]"))
-  if res.returncode != 0 and passed == 0 and failed == 0:
-    failed = 1
+    return passed, failed, []
+  finally:
+    for path_to_clean in (
+        runner_tmp,
+        out_lua,
+        (out_lua + ".map") if out_lua else None,
+    ):
+      if path_to_clean and os.path.exists(path_to_clean):
+        try:
+          os.remove(path_to_clean)
+        except OSError:
+          pass
 
-  return passed, failed, []
 
 
 def run_tests(

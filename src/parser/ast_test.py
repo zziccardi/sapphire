@@ -204,6 +204,40 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node3.parent_names, [])
     self.assertIsNone(node3.parent_name)
 
+  def test_tuple_serialization_and_guard_if_init_bindings(self):
+    """Verifies tuple serialization in to_dict and GuardStmtNode/IfNode init_binding helpers."""
+    from src.parser.ast import (
+        GuardClauseNode,
+        GuardStmtNode,
+        HeaderBindingNode,
+        IfNode,
+        BlockNode,
+    )
+
+    node = BasicTypeNode("int")
+    node.custom_tuple = (LiteralNode(1, "int"), "raw")
+    serialized = node.to_dict()
+    self.assertEqual(serialized["custom_tuple"][0]["value"], 1)
+    self.assertEqual(serialized["custom_tuple"][1], "raw")
+
+    hb = HeaderBindingNode(False, "x", None, LiteralNode(5, "int"), is_unwrap=True)
+    cond = LiteralNode(True, "bool")
+    clauses = [GuardClauseNode(binding=hb), GuardClauseNode(condition=cond)]
+    guard = GuardStmtNode(clauses=clauses, else_block=BlockNode([]))
+    self.assertEqual(guard.bindings, [hb])
+    self.assertEqual(guard.condition, cond)
+
+    if_node = IfNode(init_binding=hb, condition=cond, then_block=BlockNode([]))
+    self.assertEqual(if_node.init_binding, hb)
+    if_node.init_binding = None
+    self.assertIsNone(if_node.init_binding)
+    self.assertEqual(if_node.bindings, [])
+    if_node.init_binding = hb
+    self.assertEqual(if_node.bindings, [hb])
+
+    if_empty = IfNode(condition=cond, then_block=BlockNode([]))
+    self.assertEqual(if_empty.bindings, [])
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -73,6 +73,30 @@ class TestBaseTranspilerHelpers(unittest.TestCase):
 
     self.assertFalse(is_coroutine_func(MockReturnOther()))
 
+  def test_extract_type_name_and_return_type_names(self):
+    """Verifies extract_type_name and get_return_type_names helpers."""
+    from src.code_gen.base_transpiler import extract_type_name, get_return_type_names
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.parser.ast import LiteralNode
+    from src.semantics.symbol_table import StructType
+
+    self.assertIsNone(extract_type_name(None))
+
+    class SingleReturnFunc:
+      def __init__(self):
+        self.return_types = []
+        self.return_type = BasicTypeNode("Resource")
+
+    self.assertEqual(get_return_type_names(SingleReturnFunc()), ["Resource"])
+
+    transpiler = PythonTranspiler()
+    transpiler.structs_with_destructor.add("Resource")
+    self.assertIsNone(transpiler._expr_destructible_struct(None))
+
+    expr = LiteralNode(0, "int")
+    expr.inferred_type = StructType("Resource")
+    self.assertEqual(transpiler._expr_destructible_struct(expr), "Resource")
+
 
 if __name__ == "__main__":
   unittest.main()

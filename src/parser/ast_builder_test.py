@@ -621,7 +621,6 @@ class TestASTBuilder(unittest.TestCase):
     while_stmt = ast.declarations[0]
     self.assertIsInstance(while_stmt, WhileNode)
     self.assertIsNotNone(while_stmt.condition)
-    self.assertIsNone(while_stmt.init_binding)
 
     with self.assertRaises(SyntaxError):
       self._get_ast("while let x = 5; x > 0 { }")
