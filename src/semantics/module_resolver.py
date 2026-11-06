@@ -10,19 +10,15 @@ def resolve_module_path(import_path: str, source_file_path: Optional[str] = None
 
   search_dirs = []
 
-  # 1. Search directories starting from source_file_path directory up to filesystem root
+  # 1. Search directory of source_file_path (strictly bounded to source file's directory root)
   if source_file_path:
-    curr = os.path.abspath(os.path.dirname(source_file_path))
-    while curr and curr != os.path.dirname(curr):
-      search_dirs.append(curr)
-      curr = os.path.dirname(curr)
+    source_dir = os.path.abspath(os.path.dirname(source_file_path))
+    search_dirs.append(source_dir)
 
-  # 2. Search directories starting from current working directory up to filesystem root
-  curr = os.path.abspath(os.getcwd())
-  while curr and curr != os.path.dirname(curr):
-    if curr not in search_dirs:
-      search_dirs.append(curr)
-    curr = os.path.dirname(curr)
+  # 2. Search current working directory
+  cwd = os.path.abspath(os.getcwd())
+  if cwd not in search_dirs:
+    search_dirs.append(cwd)
 
   # 3. Built-in library directories (lib, lib/std, lib/love2d)
   root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

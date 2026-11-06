@@ -1823,6 +1823,21 @@ class TestTypeChecker(unittest.TestCase):
       self._check(code_escape_return)
     self.assertIn("Cannot return a reference to an object allocated in local arena 'local_arena'", str(context.exception))
 
+    # 3b. Escape check: return multiple values where a non-first value is arena-allocated
+    code_escape_multi_return = """
+    proto Enemy {
+      var hp: int;
+    }
+    func escape_multi(): int, Enemy {
+      let local_arena = Arena();
+      let e = Enemy { hp = 100 } in local_arena;
+      return 42, e;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code_escape_multi_return)
+    self.assertIn("Cannot return a reference to an object allocated in local arena 'local_arena'", str(context.exception))
+
     # 4. Escape check: assign local arena reference to outer variable
     code_escape_assign = """
     struct Point {

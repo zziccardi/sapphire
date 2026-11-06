@@ -5,7 +5,8 @@ for structs, enums, traits, externs, and functions).
 """
 
 import os
-from typing import Any, Dict, List, Union
+import re
+from typing import Any, Dict, List, Optional, Union
 from antlr4 import InputStream, CommonTokenStream
 from pygls.uris import from_fs_path
 
@@ -55,6 +56,19 @@ class DeclarationPass:
   def clear_cache(cls) -> None:
     """Clears the cached imported module declarations."""
     cls._module_cache.clear()
+
+  VALID_ANNOTATION_PATH_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
+
+  @staticmethod
+  def validate_annotations(checker: Any, annotations: List[Any], node: Optional[Any] = None) -> None:
+    """Validates that @extern and @export string arguments are well-formed identifier paths."""
+    for ann in annotations or []:
+      if ann.name in ("extern", "export") and ann.arg is not None:
+        if not DeclarationPass.VALID_ANNOTATION_PATH_RE.match(ann.arg):
+          checker.error(
+              f"Invalid identifier path in '@{ann.name}' annotation: '{ann.arg}'.",
+              node=node,
+          )
 
   @staticmethod
   def validate_parameter_defaults(checker: Any, parameters: List[ParameterNode]) -> None:
@@ -196,6 +210,19 @@ class DeclarationPass:
   def declare_globals(checker: Any, program: ProgramNode) -> None:
     """Pass 1: Collect struct, enum, and function declarations into global scope."""
     for decl in program.declarations:
+      if hasattr(decl, "annotations") and decl.annotations:
+        DeclarationPass.validate_annotations(checker, decl.annotations, node=decl)
+      if isinstance(decl, TraitDeclNode):
+        for member in decl.members:
+          if hasattr(member, "annotations") and member.annotations:
+            DeclarationPass.validate_annotations(checker, member.annotations, node=member)
+      elif hasattr(decl, "members") and isinstance(decl.members, list):
+        for member in decl.members:
+          if hasattr(member, "annotations") and member.annotations:
+            DeclarationPass.validate_annotations(checker, member.annotations, node=member)
+          if hasattr(member, "func_decl") and hasattr(member.func_decl, "annotations") and member.func_decl.annotations:
+            DeclarationPass.validate_annotations(checker, member.func_decl.annotations, node=member.func_decl)
+
       if isinstance(decl, StructDeclNode):
         if checker.symbol_table.lookup_current_scope(decl.name) or checker.symbol_table.lookup_type(decl.name):
           checker.error(f"Redefinition of identifier '{decl.name}'.")
