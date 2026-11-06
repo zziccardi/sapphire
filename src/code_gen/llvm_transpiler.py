@@ -389,6 +389,7 @@ class LLVMTranspiler(BaseTranspiler):
   def visit_CallNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_MemberAccessNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_CloneNode(self, node: Any) -> Any: return self.generic_visit(node)
+  def visit_MoveNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_LambdaNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_ArrayLiteralNode(self, node: Any) -> Any: return self.generic_visit(node)
   def visit_MapLiteralNode(self, node: Any) -> Any: return self.generic_visit(node)

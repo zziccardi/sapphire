@@ -989,6 +989,7 @@ class LuaTranspiler(BaseTranspiler):
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
     self.structs_with_destructor: Set[str] = set()
+    self.moved_vars: Set[str] = set()
     self.func_return_types: Dict[str, str] = {}
     self.method_return_types: Dict[str, str] = {}
     self.variable_types: Dict[str, str] = {}
@@ -1577,11 +1578,14 @@ class LuaTranspiler(BaseTranspiler):
     has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
     if not has_returned:
       for var_name in reversed(current_destructors):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+        if var_name not in self.moved_vars:
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
       for arena_name in reversed(current_arenas):
         self.newline()
         self.emit(f"{arena_name}:destroy()")
+    for var_name in current_destructors:
+      self.moved_vars.discard(var_name)
 
   def _lift_match_expressions(self, node: Any) -> None:
     """Finds all MatchExprNode in the AST subtree and emits their match statement blocks first."""
@@ -1677,6 +1681,8 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
     if node.op == "=":
       for idx, target in enumerate(node.targets):
+        if isinstance(target, IdentifierNode):
+          self.moved_vars.discard(self._mangle_name(target.name))
         if idx > 0:
           self.emit(", ")
         self.visit(target)
@@ -1686,6 +1692,8 @@ class LuaTranspiler(BaseTranspiler):
           self.emit(", ")
         self.visit(expr)
     else:
+      if isinstance(node.target, IdentifierNode):
+        self.moved_vars.discard(self._mangle_name(node.target.name))
       raw_op = node.op[:-1]
       self.visit(node.target)
       self.emit(" = ")
@@ -1711,8 +1719,15 @@ class LuaTranspiler(BaseTranspiler):
     self._lift_match_expressions(node.expressions)
 
     # RVO: Identifiers returned directly are transferred to caller, so elide local destructor
-    returned_ids = {expr.name for expr in node.expressions if isinstance(expr, IdentifierNode)}
-    destructors_to_run = [d for d in all_active_destructors if d not in returned_ids]
+    returned_ids = {
+        self._mangle_name(expr.name)
+        for expr in node.expressions
+        if isinstance(expr, (IdentifierNode, MoveNode))
+    }
+    destructors_to_run = [
+        d for d in all_active_destructors
+        if d not in returned_ids and d not in self.moved_vars
+    ]
 
     # If return expressions exist alongside destructors or active arenas, evaluate expressions first
     should_evaluate_first = bool(
@@ -1738,8 +1753,9 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(f"{arena_name}:destroy()")
 
       for var_name in destructors_to_run:
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+        if var_name not in self.moved_vars:
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
 
       self.newline()
       self.emit("return " + ", ".join(ret_tmps))
@@ -1750,8 +1766,9 @@ class LuaTranspiler(BaseTranspiler):
       self.emit(f"{arena_name}:destroy()")
 
     for var_name in destructors_to_run:
-      self.newline()
-      self.emit(f"_sapphire_del({var_name})")
+      if var_name not in self.moved_vars:
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
 
     self.newline()
     if node.expressions:
@@ -2379,7 +2396,9 @@ class LuaTranspiler(BaseTranspiler):
     self.emit(")")
 
   def visit_MoveNode(self, node: MoveNode) -> None:
-    name = self._identifier_map.get(node.name, node.name)
+    m_name = self._mangle_name(node.name)
+    name = self._identifier_map.get(m_name, m_name)
+    self.moved_vars.add(m_name)
     self.emit(name)
 
   def visit_LambdaNode(self, node: LambdaNode) -> None:

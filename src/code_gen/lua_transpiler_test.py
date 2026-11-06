@@ -1872,6 +1872,65 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(a)", lua_code)
     self.assertIn("_sapphire_del(b)", lua_code)
 
+  def test_destructor_move_suppresses_source_destructor(self):
+    """Verifies moving a resource suppresses destructor on source in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = move a;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+    self.assertNotIn("_sapphire_del(a)", lua_code)
+
+  def test_destructor_move_into_function_suppresses_source_destructor(self):
+    """Verifies move into function suppresses caller destructor in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      let a = Resource { id = 1 };
+      consume(move a);
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertNotIn("_sapphire_del(a)", test_body)
+
+  def test_destructor_move_reinitialization(self):
+    """Verifies reinitializing a moved variable restores its destructor."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      var a = Resource { id = 1 };
+      consume(move a);
+      a = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertIn("_sapphire_del(a)", test_body)
+
   def test_destructor_inherited_from_parent(self):
     """Verifies that child structs inherit parent destructor tracking."""
     code = """

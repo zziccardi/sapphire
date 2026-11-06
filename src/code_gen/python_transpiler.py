@@ -600,6 +600,7 @@ class PythonTranspiler(BaseTranspiler):
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
     self.structs_with_destructor: Set[str] = set()
+    self.moved_vars: Set[str] = set()
     self.func_return_types: Dict[str, str] = {}
     self.method_return_types: Dict[str, str] = {}
     self.variable_types: Dict[str, str] = {}
@@ -1086,8 +1087,11 @@ class PythonTranspiler(BaseTranspiler):
     has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
     if not has_returned:
       for var_name in reversed(current_destructors):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+        if var_name not in self.moved_vars:
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    for var_name in current_destructors:
+      self.moved_vars.discard(var_name)
 
   def _emit_lifted_lambda(self, node: LambdaNode) -> str:
     self._temp_lambda_count = getattr(self, "_temp_lambda_count", 0) + 1
@@ -1207,6 +1211,8 @@ class PythonTranspiler(BaseTranspiler):
     self.record_line(getattr(node, "start_line", None))
     if node.op == "=":
       for idx, target in enumerate(node.targets):
+        if isinstance(target, IdentifierNode):
+          self.moved_vars.discard(self._mangle_name(target.name))
         if idx > 0:
           self.emit(", ")
         # Assigning to an @extern variable inside a function must mutate Python's
@@ -1223,9 +1229,13 @@ class PythonTranspiler(BaseTranspiler):
           self.emit(", ")
         self.visit(expr)
     else:
-      if isinstance(node.target, IdentifierNode) and node.target.name in self.extern_vars:
-        ext_name = self.extern_vars[node.target.name]
-        self.emit(f"__import__('builtins').{ext_name}")
+      if isinstance(node.target, IdentifierNode):
+        self.moved_vars.discard(self._mangle_name(node.target.name))
+        if node.target.name in self.extern_vars:
+          ext_name = self.extern_vars[node.target.name]
+          self.emit(f"__import__('builtins').{ext_name}")
+        else:
+          self.visit(node.target)
       else:
         self.visit(node.target)
       self.emit(f" {node.op} ")
@@ -1245,8 +1255,15 @@ class PythonTranspiler(BaseTranspiler):
     all_active_destructors = [
         d for frame in reversed(self.destructor_stack) for d in reversed(frame)
     ]
-    returned_ids = {expr.name for expr in node.expressions if isinstance(expr, IdentifierNode)}
-    destructors_to_run = [d for d in all_active_destructors if d not in returned_ids]
+    returned_ids = {
+        self._mangle_name(expr.name)
+        for expr in node.expressions
+        if isinstance(expr, (IdentifierNode, MoveNode))
+    }
+    destructors_to_run = [
+        d for d in all_active_destructors
+        if d not in returned_ids and d not in self.moved_vars
+    ]
 
     if node.expressions and destructors_to_run and not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions):
       ret_tmps = []
@@ -1258,16 +1275,18 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(expr)
 
       for var_name in destructors_to_run:
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+        if var_name not in self.moved_vars:
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
 
       self.newline()
       self.emit("return " + ", ".join(ret_tmps))
       return
 
     for var_name in destructors_to_run:
-      self.newline()
-      self.emit(f"_sapphire_del({var_name})")
+      if var_name not in self.moved_vars:
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
 
     self.newline()
     if not node.expressions:
@@ -1799,7 +1818,9 @@ class PythonTranspiler(BaseTranspiler):
     self.emit(")")
 
   def visit_MoveNode(self, node: MoveNode) -> None:
-    name = self._identifier_map.get(node.name, node.name)
+    m_name = self._mangle_name(node.name)
+    name = self._identifier_map.get(m_name, m_name)
+    self.moved_vars.add(m_name)
     self.emit(name)
 
   def visit_LambdaNode(self, node: LambdaNode) -> None:

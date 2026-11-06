@@ -2022,6 +2022,65 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(a)", py_code)
     self.assertIn("_sapphire_del(b)", py_code)
 
+  def test_destructor_move_suppresses_source_destructor(self):
+    """Verifies that moving a resource suppresses destructor on the source."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = move a;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", py_code)
+    self.assertNotIn("_sapphire_del(a)", py_code)
+
+  def test_destructor_move_into_function_suppresses_source_destructor(self):
+    """Verifies move into function suppresses caller destructor in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      let a = Resource { id = 1 };
+      consume(move a);
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertNotIn("_sapphire_del(a)", test_body)
+
+  def test_destructor_move_reinitialization(self):
+    """Verifies that reinitializing a moved variable restores its destructor."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      var a = Resource { id = 1 };
+      consume(move a);
+      a = Resource { id = 2 };
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertIn("_sapphire_del(a)", test_body)
+
   def test_destructor_inherited_from_parent(self):
     """Verifies that child structs inherit parent destructor tracking in Python."""
     code = """

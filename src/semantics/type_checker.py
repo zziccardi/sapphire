@@ -70,12 +70,6 @@ class TypeChecker:
     self.loop_depth: int = 0
     self.moved_symbols: Set[VariableSymbol] = set()
 
-  def _get_arena_dependency(self, node: ASTNode) -> Optional[str]:
-    return ArenaChecker.get_arena_dependency(self.symbol_table, node)
-
-  def _is_descendant_scope(self, child: Optional[object], parent: Optional[object]) -> bool:
-    return ArenaChecker.is_descendant_scope(child, parent)
-
   def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
     if isinstance(target, IdentifierNode):
       sym = self.symbol_table.lookup(target.name)
@@ -922,12 +916,12 @@ class TypeChecker:
 
     # Check return escaping arena reference
     for ret_expr in node.expressions:
-      arena_name = self._get_arena_dependency(ret_expr)
-      if arena_name:
-        arena_sym = self.symbol_table.lookup(arena_name)
-        if arena_sym and arena_sym.scope_defined and self.current_function_scope:
-          if self._is_descendant_scope(arena_sym.scope_defined, self.current_function_scope):
-            self.error(f"Cannot return a reference to an object allocated in local arena '{arena_name}'.", node=ret_expr)
+      ArenaChecker.validate_return_escape(
+          self.symbol_table,
+          self.current_function_scope,
+          ret_expr,
+          lambda msg, n: self.error(msg, node=n),
+      )
 
   def visit_YieldNode(self, node: YieldNode) -> None:
     if self._match_stack:

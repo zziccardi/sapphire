@@ -38,6 +38,7 @@ from src.parser.ast import (
     MapLiteralNode,
     MatchExprNode,
     MemberAccessNode,
+    MoveNode,
     ProgramNode,
     ReturnNode,
     StructDeclNode,
@@ -183,7 +184,16 @@ class BaseTranspiler(ABC):
           rets = self.method_return_types[m_name]
           if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
             return rets[return_index]
-    elif isinstance(expr, IdentifierNode):
+    elif isinstance(expr, (IdentifierNode, MoveNode)):
+      m_name = (
+          self._mangle_name(expr.name)
+          if hasattr(self, "_mangle_name")
+          else expr.name
+      )
+      if m_name in self.variable_types:
+        st = self.variable_types[m_name]
+        if st in self.structs_with_destructor:
+          return st
       if expr.name in self.variable_types:
         st = self.variable_types[expr.name]
         if st in self.structs_with_destructor:
@@ -201,8 +211,9 @@ class BaseTranspiler(ABC):
       loop_depth = self.loop_destructor_depth[-1]
       for frame in reversed(self.destructor_stack[loop_depth:]):
         for var_name in reversed(frame):
-          self.newline()
-          self.emit(f"_sapphire_del({var_name})")
+          if not hasattr(self, "moved_vars") or var_name not in self.moved_vars:
+            self.newline()
+            self.emit(f"_sapphire_del({var_name})")
 
   def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
     """Collects struct methods, traits, return types, and destructors from program declarations."""
@@ -344,6 +355,9 @@ class BaseTranspiler(ABC):
 
   @abstractmethod
   def visit_CloneNode(self, node: CloneNode) -> None: ...
+
+  @abstractmethod
+  def visit_MoveNode(self, node: MoveNode) -> None: ...
 
   @abstractmethod
   def visit_LambdaNode(self, node: LambdaNode) -> None: ...
