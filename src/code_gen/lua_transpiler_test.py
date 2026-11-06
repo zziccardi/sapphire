@@ -2054,6 +2054,48 @@ class TestSharedFixtures(unittest.TestCase):
       raise AssertionError(f"Type errors in fixture:\n{source}\nErrors: {checker.errors}")
     return LuaTranspiler(test_mode=True).transpile(ast)
 
+  def test_lua_if_let_destructuring_and_optional_method_args(self):
+    """Verifies multi-binding if-let tuple destructuring, RAII if-let bindings, and optional method arguments."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      func add(a: int, b: int): int {
+        return self.id + a + b;
+      }
+    }
+
+    func maybe_pair(ok: bool): [int]? {
+      if ok {
+        return [2, 3];
+      }
+      return none;
+    }
+
+    func test_edges(): int {
+      var opt_res: Resource? = Resource { id = 10 };
+      let sum_opt = opt_res?.add(4, 5) ?? 0;
+
+      var acc = sum_opt;
+      if let a, b ?= maybe_pair(true); a > 0 {
+        acc = acc + a + b;
+      }
+      if let r = Resource { id = 1 }; r.id > 0 {
+        acc = acc + r.id;
+      }
+      if let x = 5; let p1, p2 ?= maybe_pair(true) {
+        acc = acc + x + p1 + p2;
+      }
+      return acc;
+    }
+    """
+    lua_code = self._transpile_fixture(code)
+    self.assertIn("_val_a", lua_code)
+    self.assertIn("_r:add(4, 5)", lua_code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

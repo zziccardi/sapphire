@@ -37,6 +37,65 @@ class TestIntrinsicRegistry(unittest.TestCase):
     self.assertTrue(handled_lua)
     mock_transpiler.emit.assert_any_call("(#")
 
+  def test_range_python_named_and_positional_variants(self):
+    from src.parser.ast import ArgumentNode, LiteralNode
+    from src.code_gen.python_transpiler import PythonTranspiler
+
+    def emit_range(args):
+      t = PythonTranspiler()
+      call = CallNode(callee=IdentifierNode("range"), arguments=args)
+      self.assertTrue(IntrinsicRegistry.try_emit("python", t, call))
+      return t.get_output()
+
+    # 1 positional arg: range(10)
+    self.assertEqual(
+        emit_range([ArgumentNode(None, LiteralNode(10, "int"))]),
+        "range(10)",
+    )
+    # 1 positional + named stop: range(1, stop=10)
+    self.assertEqual(
+        emit_range([
+            ArgumentNode(None, LiteralNode(1, "int")),
+            ArgumentNode("stop", LiteralNode(10, "int")),
+        ]),
+        "range(1, 10)",
+    )
+    # Named start and stop: range(start=2, stop=8)
+    self.assertEqual(
+        emit_range([
+            ArgumentNode("start", LiteralNode(2, "int")),
+            ArgumentNode("stop", LiteralNode(8, "int")),
+        ]),
+        "range(2, 8)",
+    )
+    # Named stop and step without start (defaults start to 0): range(stop=10, step=2)
+    self.assertEqual(
+        emit_range([
+            ArgumentNode("stop", LiteralNode(10, "int")),
+            ArgumentNode("step", LiteralNode(2, "int")),
+        ]),
+        "range(0, 10, 2)",
+    )
+    # 2 positional args + named step: range(1, 10, step=3)
+    self.assertEqual(
+        emit_range([
+            ArgumentNode(None, LiteralNode(1, "int")),
+            ArgumentNode(None, LiteralNode(10, "int")),
+            ArgumentNode("step", LiteralNode(3, "int")),
+        ]),
+        "range(1, 10, 3)",
+    )
+    # 3 positional args + 1 named arg so len(node.arguments) == 4 and len(pos_args) == 3
+    self.assertEqual(
+        emit_range([
+            ArgumentNode(None, LiteralNode(0, "int")),
+            ArgumentNode(None, LiteralNode(10, "int")),
+            ArgumentNode(None, LiteralNode(2, "int")),
+            ArgumentNode("start", LiteralNode(0, "int")),
+        ]),
+        "range(0, 10, 2)",
+    )
+
 
 if __name__ == "__main__":
   unittest.main()

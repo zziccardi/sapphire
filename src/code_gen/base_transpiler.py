@@ -175,20 +175,14 @@ class BaseTranspiler(ABC):
           return expr.callee.name
         if expr.callee.name in self.func_return_types:
           rets = self.func_return_types[expr.callee.name]
-          if isinstance(rets, list):
-            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-              return rets[return_index]
-          elif rets in self.structs_with_destructor:
-            return rets
+          if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+            return rets[return_index]
       elif isinstance(expr.callee, MemberAccessNode):
         m_name = expr.callee.member
         if m_name in self.method_return_types:
           rets = self.method_return_types[m_name]
-          if isinstance(rets, list):
-            if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-              return rets[return_index]
-          elif rets in self.structs_with_destructor:
-            return rets
+          if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+            return rets[return_index]
     elif isinstance(expr, IdentifierNode):
       if expr.name in self.variable_types:
         st = self.variable_types[expr.name]
@@ -209,10 +203,6 @@ class BaseTranspiler(ABC):
         for var_name in reversed(frame):
           self.newline()
           self.emit(f"_sapphire_del({var_name})")
-    elif self.destructor_stack:
-      for var_name in reversed(self.destructor_stack[-1]):
-        self.newline()
-        self.emit(f"_sapphire_del({var_name})")
 
   def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
     """Collects struct methods, traits, return types, and destructors from program declarations."""

@@ -517,7 +517,7 @@ class TypeChecker:
     if isinstance(expr, BinaryOpNode):
       return self._expr_references_self(expr.left) or self._expr_references_self(expr.right)
     if isinstance(expr, UnaryOpNode):
-      return self._expr_references_self(expr.operand)
+      return self._expr_references_self(expr.expr)
     if isinstance(expr, TernaryExprNode):
       return (self._expr_references_self(expr.condition) or
               self._expr_references_self(expr.true_expr) or

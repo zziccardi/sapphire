@@ -2304,6 +2304,67 @@ class TestSharedFixtures(unittest.TestCase):
       proc = subprocess.run([sys.executable, py_path], capture_output=True, text=True, check=True)
       self.assertEqual(proc.stdout.strip(), "2,4,6,8")
 
+  def test_coroutines_and_methods_mutating_globals_and_if_multi_bindings(self):
+    """Verifies global emission in coroutines/methods, multi-binding if-let destructuring, and @extern +=."""
+    code = """
+    @extern var host_counter: int;
+    var g_count: int = 0;
+
+    struct Counter {
+      var step_val: int;
+    }
+
+    impl Counter {
+      func bump() {
+        g_count = g_count + self.step_val;
+      }
+      func gen_counts(): Coroutine<int> {
+        g_count = g_count + 1;
+        yield g_count;
+      }
+    }
+
+    func global_coro(): Coroutine<int> {
+      g_count = g_count + 10;
+      yield g_count;
+    }
+
+    func maybe_pair(ok: bool): [int]? {
+      if ok {
+        return [3, 4];
+      }
+      return none;
+    }
+
+    func test_run_checks(): int {
+      host_counter += 1;
+      let c = Counter { step_val = 5 };
+      c.bump();
+      var co1 = c.gen_counts();
+      let v1 = co1.step() ?? 0;
+      var co2 = global_coro();
+      let v2 = co2.step() ?? 0;
+
+      var total = v1 + v2;
+      if let a, b ?= maybe_pair(true); a > 0 {
+        total = total + a + b;
+      }
+      if let base = 10; let p1, p2 ?= maybe_pair(true) {
+        total = total + base + p1 + p2;
+      }
+      return total;
+    }
+    """
+    import builtins
+    builtins.host_counter = 0
+    try:
+      res = self._transpile_and_exec(code)
+      self.assertEqual(res["test_run_checks"], 6 + 16 + 7 + 17)
+      self.assertEqual(builtins.host_counter, 1)
+    finally:
+      if hasattr(builtins, "host_counter"):
+        delattr(builtins, "host_counter")
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

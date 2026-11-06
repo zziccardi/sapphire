@@ -101,6 +101,21 @@ class TestMathModule(unittest.TestCase):
     res = namespace["calc"]()
     self.assertEqual(res, 10 + 5 + 15 + 3 + 2)
 
+  def test_math_boundary_values_python(self):
+    """Verifies boundary and float/int branch behavior in std.math."""
+    import lib.std.math as std_math
+
+    self.assertIsNone(std_math.sqrt(-4.0))
+    self.assertEqual(std_math.sqrt(9.0), 3.0)
+    self.assertEqual(std_math.safe_div(5.0, 2.0), 2.5)
+    self.assertIsNone(std_math.safe_div(5.0, 0.0))
+    self.assertIsNone(std_math.log(0.0))
+    self.assertIsNone(std_math.log(10.0, 1.0))
+    self.assertIsNone(std_math.log(10.0, -2.0))
+    self.assertAlmostEqual(std_math.log(100.0, 10.0), 2.0)
+    self.assertEqual(std_math.pow(2, 8), 256)
+    self.assertEqual(std_math.pow(2.0, -1.0), 0.5)
+
 
 if __name__ == "__main__":
   unittest.main()

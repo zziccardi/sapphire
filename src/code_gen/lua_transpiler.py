@@ -5,24 +5,14 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation and Arena memory management.
 """
 
-import os
-import sys
 from typing import Any, Dict, List, Optional, Set
 
-from antlr4 import FileStream, CommonTokenStream
-from antlr4.error.ErrorListener import ErrorListener
-
 from src.parser.ast import *
-from src.parser.gen.SapphireLexer import SapphireLexer
-from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.semantics.type_checker import TypeChecker, SemanticError
 from src.semantics.symbol_table import MapType, RangeType
 from src.code_gen.source_map import SourceMapBuilder
 from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.transpiler_registry import TranspilerRegistry
 from src.code_gen.intrinsics import IntrinsicRegistry
-
 
 
 # ==========================================
@@ -1889,6 +1879,9 @@ class LuaTranspiler(BaseTranspiler):
         old_map = self._identifier_map.copy()
         if len(let_names) == 1:
           self._identifier_map[let_name] = val_var
+        else:
+          for idx, name in enumerate(let_names):
+            self._identifier_map[name] = f"{val_var}[{idx + 1}]"
 
         self.emit(f"if {val_var} ~= nil")
         if node.condition:

@@ -5,17 +5,12 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation.
 """
 
-import os
-import sys
 from typing import Any, Dict, List, Optional
 
 from src.parser.ast import *
 from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.intrinsics import IntrinsicRegistry
 from src.code_gen.transpiler_registry import TranspilerRegistry
-
-
-
 
 
 # ==========================================
@@ -1384,6 +1379,9 @@ class PythonTranspiler(BaseTranspiler):
         old_map = self._identifier_map.copy()
         if len(let_names) == 1:
           self._identifier_map[let_name] = val_var
+        else:
+          for idx, name in enumerate(let_names):
+            self._identifier_map[name] = f"{val_var}[{idx}]"
 
         self.emit(f"if {val_var} is not None")
         if node.condition:

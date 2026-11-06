@@ -796,6 +796,8 @@ class TestLSPServer(unittest.TestCase):
       mock_if_node.init_binding.let_name_column = 1
       mock_if_node.init_binding.let_name_length = 5
       mock_if_node.init_binding.expr = MagicMock()
+      mock_if_node.init_binding.expr.start_line = None
+      mock_if_node.bindings = [mock_if_node.init_binding]
       from src.lsp.semantic_tokens import SemanticTokensTypeChecker
 
       checker = SemanticTokensTypeChecker()
