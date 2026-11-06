@@ -565,10 +565,29 @@ from _sapphire_runtime import *
 """
 
 
+PYTHON_RESERVED_WORDS = {
+    "False", "None", "True", "and", "as", "assert", "async", "await",
+    "break", "class", "continue", "def", "del", "elif", "else", "except",
+    "finally", "for", "from", "global", "if", "import", "in", "is",
+    "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+    "while", "with", "yield",
+}
+
+
 @TranspilerRegistry.register(aliases=["python", "py"], display_name="Python", default_extension=".py")
 class PythonTranspiler(BaseTranspiler):
 
   """AST visitor to transpile Sapphire code to Python."""
+
+  def _mangle_name(self, name: str) -> str:
+    """Mangles Sapphire identifiers that collide with Python reserved keywords."""
+    if not name:
+      return name
+    if name in ("self", "__init__", "__del__", "main"):
+      return name
+    if name in PYTHON_RESERVED_WORDS:
+      return f"{name}_"
+    return name
 
   def __init__(self, test_mode: bool = False, use_runtime_module: bool = False):
     self.code: List[str] = []
@@ -603,11 +622,12 @@ class PythonTranspiler(BaseTranspiler):
       self._line_map[self._py_lineno] = sp_line
 
   def _format_param(self, p) -> str:
+    pname = self._mangle_name(p.name)
     if p.default_expr:
       temp = PythonTranspiler()
       temp.visit(p.default_expr)
-      return f"{p.name}={temp.get_output()}"
-    return p.name
+      return f"{pname}={temp.get_output()}"
+    return pname
 
   def transpile(self, program: ProgramNode) -> str:
     """Entry point to transpile a ProgramNode AST into Python source code string."""
@@ -642,7 +662,7 @@ class PythonTranspiler(BaseTranspiler):
     for decl in program.declarations:
       if isinstance(decl, VarDeclNode):
         for name in decl.names:
-          self.global_vars.add(name)
+          self.global_vars.add(self._mangle_name(name))
 
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
@@ -732,15 +752,16 @@ class PythonTranspiler(BaseTranspiler):
     self.newline()
 
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
-    alias = node.alias if node.alias else node.path.split(".")[-1]
-    if node.alias or "." in node.path:
+    raw_alias = node.alias if node.alias else node.path.split(".")[-1]
+    alias = self._mangle_name(raw_alias)
+    if node.alias or "." in node.path or alias != raw_alias:
       self.emit(f"import {node.path} as {alias}")
     else:
       self.emit(f"import {node.path}")
     self.newline()
 
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
-    exported_names = [f'"{spec.exported_name}"' for spec in node.specifiers]
+    exported_names = [f'"{self._mangle_name(spec.exported_name)}"' for spec in node.specifiers]
     self.newline()
     self.emit(f"__all__ = [{', '.join(exported_names)}]")
     self.newline()
@@ -787,7 +808,7 @@ class PythonTranspiler(BaseTranspiler):
           self.newline()
           temp = PythonTranspiler()
           temp.visit(default_expr)
-          self.emit(f"self.{f.name} = {temp.get_output()}")
+          self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
       self.newline()
       self.emit("for k, v in kwargs.items():")
       self.indent()
@@ -812,7 +833,7 @@ class PythonTranspiler(BaseTranspiler):
           self.newline()
           temp = PythonTranspiler()
           temp.visit(default_expr)
-          self.emit(f"self.{f.name} = {temp.get_output()}")
+          self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
       self.newline()
       self.emit("for k, v in kwargs.items():")
       self.indent()
@@ -848,7 +869,7 @@ class PythonTranspiler(BaseTranspiler):
       self.newline()
 
     # Rename __init__ constructor to _init_sapphire to separate from boilerplate __init__
-    func_name = "_init_sapphire" if func.name == "__init__" else func.name
+    func_name = "_init_sapphire" if func.name == "__init__" else self._mangle_name(func.name)
 
     # Python parameter formatting
     params = []
@@ -859,7 +880,7 @@ class PythonTranspiler(BaseTranspiler):
     for p in func.parameters:
       if p.name != "self":
         params.append(self._format_param(p))
-        raw_params.append(p.name)
+        raw_params.append(self._mangle_name(p.name))
 
     if is_coroutine_func(func):
       self.emit(f"def {func_name}({', '.join(params)}):")
@@ -945,8 +966,9 @@ class PythonTranspiler(BaseTranspiler):
           targets = [n.target]
         for t in targets:
           if isinstance(t, IdentifierNode):
-            if t.name in self.global_vars and t.name not in current_locals:
-              assigned.add(t.name)
+            m_name = self._mangle_name(t.name)
+            if m_name in self.global_vars and m_name not in current_locals and t.name not in current_locals:
+              assigned.add(m_name)
 
       if isinstance(n, ASTNode):
         for k, v in n.__dict__.items():
@@ -971,13 +993,14 @@ class PythonTranspiler(BaseTranspiler):
       return
 
     self.newline()
+    fn_name = self._mangle_name(node.name)
     params = [self._format_param(p) for p in node.parameters]
-    raw_params = [p.name for p in node.parameters]
+    raw_params = [self._mangle_name(p.name) for p in node.parameters]
     if is_coroutine_func(node):
-      self.emit(f"def {node.name}({', '.join(params)}):")
+      self.emit(f"def {fn_name}({', '.join(params)}):")
       self.indent()
       self.newline()
-      self.emit(f"def _gen_{node.name}({', '.join(raw_params)}):")
+      self.emit(f"def _gen_{fn_name}({', '.join(raw_params)}):")
       self.indent()
       assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
       if assigned_globals:
@@ -987,12 +1010,12 @@ class PythonTranspiler(BaseTranspiler):
       self.dedent()
       self.newline()
       if raw_params:
-        self.emit(f"return _SapphireCoroutine(_gen_{node.name}, {', '.join(raw_params)})")
+        self.emit(f"return _SapphireCoroutine(_gen_{fn_name}, {', '.join(raw_params)})")
       else:
-        self.emit(f"return _SapphireCoroutine(_gen_{node.name})")
+        self.emit(f"return _SapphireCoroutine(_gen_{fn_name})")
       self.dedent()
     else:
-      self.emit(f"def {node.name}({', '.join(params)}):")
+      self.emit(f"def {fn_name}({', '.join(params)}):")
       self.indent()
       assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
       if assigned_globals:
@@ -1003,13 +1026,13 @@ class PythonTranspiler(BaseTranspiler):
 
     export_ann = next((a for a in getattr(node, "annotations", []) if a.name == "export"), None)
     if export_ann:
-      target_path = export_ann.arg if export_ann.arg else node.name
+      target_path = export_ann.arg if export_ann.arg else fn_name
       if "." in target_path:
         self.newline()
         self.emit("try:")
         self.indent()
         self.newline()
-        self.emit(f"{target_path} = {node.name}")
+        self.emit(f"{target_path} = {fn_name}")
         self.dedent()
         self.newline()
         self.emit("except (NameError, AttributeError):")
@@ -1017,9 +1040,9 @@ class PythonTranspiler(BaseTranspiler):
         self.newline()
         self.emit("pass")
         self.dedent()
-      elif target_path != node.name:
+      elif target_path != fn_name:
         self.newline()
-        self.emit(f"{target_path} = {node.name}")
+        self.emit(f"{target_path} = {fn_name}")
 
   def _visit_statements(self, statements: List[StmtNode]) -> None:
     if not statements:
@@ -1069,7 +1092,7 @@ class PythonTranspiler(BaseTranspiler):
   def _emit_lifted_lambda(self, node: LambdaNode) -> str:
     self._temp_lambda_count = getattr(self, "_temp_lambda_count", 0) + 1
     fn_name = f"_lambda_{self._temp_lambda_count}"
-    params = [p.name for p in node.parameters]
+    params = [self._mangle_name(p.name) for p in node.parameters]
     self.newline()
     self.emit(f"def {fn_name}({', '.join(params)}):")
     self.indent()
@@ -1146,15 +1169,16 @@ class PythonTranspiler(BaseTranspiler):
         st_name = self._expr_destructible_struct(node.expr, return_index=idx)
 
       if st_name:
-        self.variable_types[name] = st_name
+        m_name = self._mangle_name(name)
+        self.variable_types[m_name] = st_name
         if self.destructor_stack:
-          self.destructor_stack[-1].append(name)
+          self.destructor_stack[-1].append(m_name)
 
     self._lift_match_expressions(node.exprs)
 
     self.newline()
     self.record_line(getattr(node, "start_line", None))
-    names_str = ", ".join(node.names)
+    names_str = ", ".join([self._mangle_name(n) for n in node.names])
     self.emit(f"{names_str}")
     if node.exprs:
       self.emit(" = ")
@@ -1396,11 +1420,11 @@ class PythonTranspiler(BaseTranspiler):
         self.newline()
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
-            self.emit(f"{name} = {val_var}[{idx}]")
+            self.emit(f"{self._mangle_name(name)} = {val_var}[{idx}]")
             if idx < len(let_names) - 1:
               self.newline()
         else:
-          self.emit(f"{let_name} = {val_var}")
+          self.emit(f"{self._mangle_name(let_name)} = {val_var}")
 
         st_name = self._expr_destructible_struct(binding.expr)
         if st_name:
@@ -1557,11 +1581,11 @@ class PythonTranspiler(BaseTranspiler):
       self._lift_match_expressions(node.iterable)
       self.newline()
       if node.key_var is not None:
-        self.emit(f"for {node.key_var}, {node.val_var} in ")
+        self.emit(f"for {self._mangle_name(node.key_var)}, {self._mangle_name(node.val_var)} in ")
         self.visit(node.iterable)
         self.emit(".items():")
       else:
-        self.emit(f"for {node.val_var} in ")
+        self.emit(f"for {self._mangle_name(node.val_var)} in ")
         self.visit(node.iterable)
         self.emit(":")
       self.indent()
@@ -1590,7 +1614,8 @@ class PythonTranspiler(BaseTranspiler):
     elif node.lit_type == "none":
       self.emit("None")
     elif node.lit_type == "string":
-      self.emit(f'"{node.value}"')
+      val = str(node.value).replace("\r", "\\r").replace("\n", "\\n")
+      self.emit(f'"{val}"')
     else:
       self.emit(str(node.value))
 
@@ -1620,7 +1645,7 @@ class PythonTranspiler(BaseTranspiler):
     self.emit(")")
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
-    name = self._identifier_map.get(node.name, node.name)
+    name = self._identifier_map.get(node.name, self._mangle_name(node.name))
     self.emit(name)
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> None:
@@ -1690,7 +1715,7 @@ class PythonTranspiler(BaseTranspiler):
       return
 
     if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
-      member_name = getattr(node.callee, "target_name", None) or node.callee.member
+      member_name = getattr(node.callee, "target_name", None) or self._mangle_name(node.callee.member)
       self.emit("((lambda _r: _r.")
       self.emit(member_name)
       self.emit("(")
@@ -1698,7 +1723,7 @@ class PythonTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         if arg.name:
-          self.emit(f"{arg.name}=")
+          self.emit(f"{self._mangle_name(arg.name)}=")
         self.visit(arg.expr)
       self.emit(") if _r is not None else None)(")
       self.visit(node.callee.receiver)
@@ -1713,7 +1738,7 @@ class PythonTranspiler(BaseTranspiler):
     args = []
     for arg in node.arguments:
       if arg.name:
-        args.append(f"{arg.name}=")
+        args.append(f"{self._mangle_name(arg.name)}=")
       else:
         args.append("")
 
@@ -1728,7 +1753,7 @@ class PythonTranspiler(BaseTranspiler):
       self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
-    member_name = getattr(node, "target_name", None) or node.member
+    member_name = getattr(node, "target_name", None) or self._mangle_name(node.member)
     if node.is_optional:
       self.emit("((lambda _r: _r.")
       self.emit(member_name)
@@ -1784,7 +1809,7 @@ class PythonTranspiler(BaseTranspiler):
         node._lifted_name = self._emit_lifted_lambda(node)
       self.emit(node._lifted_name)
     else:
-      params = [p.name for p in node.parameters]
+      params = [self._mangle_name(p.name) for p in node.parameters]
       self.emit(f"(lambda {', '.join(params)}: ")
       self.visit(node.body)
       self.emit(")")
@@ -1842,11 +1867,11 @@ class PythonTranspiler(BaseTranspiler):
 
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
-            self.emit(f"{name} = {tmp_var}[{idx}]")
+            self.emit(f"{self._mangle_name(name)} = {tmp_var}[{idx}]")
             if idx < len(let_names) - 1:
               self.newline()
         else:
-          self.emit(f"{binding.let_name} = {tmp_var}")
+          self.emit(f"{self._mangle_name(binding.let_name)} = {tmp_var}")
       elif clause.condition:
         self._lift_match_expressions(clause.condition)
         self.emit("if not (")
@@ -1864,7 +1889,7 @@ class PythonTranspiler(BaseTranspiler):
     for idx, arg in enumerate(node.fields):
       if idx > 0:
         self.emit(", ")
-      self.emit(f"{arg.name}=")
+      self.emit(f"{self._mangle_name(arg.name)}=")
       self.visit(arg.expr)
     self.emit(")")
     if node.arena_expr:

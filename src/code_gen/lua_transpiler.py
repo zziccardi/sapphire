@@ -940,10 +940,27 @@ return {
 """
 
 
+LUA_RESERVED_WORDS = {
+    "and", "break", "do", "else", "elseif", "end", "false", "for",
+    "function", "goto", "if", "in", "local", "nil", "not", "or",
+    "repeat", "return", "then", "true", "until", "while",
+}
+
+
 @TranspilerRegistry.register(aliases=["lua", "lua5.1", "love2d", "love"], display_name="Lua 5.1", default_extension=".lua")
 class LuaTranspiler(BaseTranspiler):
 
   """AST visitor to transpile Sapphire code to Lua 5.1."""
+
+  def _mangle_name(self, name: str) -> str:
+    """Mangles Sapphire identifiers that collide with Lua reserved keywords."""
+    if not name:
+      return name
+    if name in ("self", "__init__", "__del__", "_init_sapphire"):
+      return name
+    if name in LUA_RESERVED_WORDS:
+      return f"{name}_"
+    return name
 
   def __init__(
       self,
@@ -1151,7 +1168,8 @@ class LuaTranspiler(BaseTranspiler):
     self.newline()
 
   def visit_ImportStmtNode(self, node: ImportStmtNode) -> None:
-    alias_name = node.alias if node.alias else node.path.split(".")[-1]
+    raw_alias = node.alias if node.alias else node.path.split(".")[-1]
+    alias_name = self._mangle_name(raw_alias)
     self.imported_modules.add(alias_name)
     self.emit(f"local {alias_name} = require(\"{node.path}\")")
     if self.dev_mode:
@@ -1185,12 +1203,14 @@ class LuaTranspiler(BaseTranspiler):
         if spec is default_spec and (spec.alias == "default" or spec.exported_name == "default"):
           continue
         exp_name = spec.exported_name
+        sym = self._mangle_name(spec.symbol)
         if exp_name == primary_sym and not spec.module_prefix:
           continue
+        prop_access = f'["{exp_name}"]' if exp_name in LUA_RESERVED_WORDS else f".{exp_name}"
         if spec.module_prefix:
-          self.emit(f"{primary_sym}.{exp_name} = {spec.module_prefix}.{spec.symbol}")
+          self.emit(f"{primary_sym}{prop_access} = {spec.module_prefix}.{sym}")
         else:
-          self.emit(f"{primary_sym}.{exp_name} = {spec.symbol}")
+          self.emit(f"{primary_sym}{prop_access} = {sym}")
         self.newline()
       self.emit(f"return {primary_sym}")
       self.newline()
@@ -1199,10 +1219,12 @@ class LuaTranspiler(BaseTranspiler):
       self.newline()
       for spec in node.specifiers:
         exp_name = spec.exported_name
+        sym = self._mangle_name(spec.symbol)
+        prop_access = f'["{exp_name}"]' if exp_name in LUA_RESERVED_WORDS else f".{exp_name}"
         if spec.module_prefix:
-          self.emit(f"_M.{exp_name} = {spec.module_prefix}.{spec.symbol}")
+          self.emit(f"_M{prop_access} = {spec.module_prefix}.{sym}")
         else:
-          self.emit(f"_M.{exp_name} = {spec.symbol}")
+          self.emit(f"_M{prop_access} = {sym}")
         self.newline()
       self.emit("return _M")
       self.newline()
@@ -1246,7 +1268,7 @@ class LuaTranspiler(BaseTranspiler):
         temp = LuaTranspiler()
         temp.known_structs = self.known_structs
         temp.visit(default_expr)
-        self.emit(f"self.{f.name} = {temp.get_output()}")
+        self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
     self.dedent()
     self.newline()
     self.emit("end")
@@ -1337,7 +1359,7 @@ class LuaTranspiler(BaseTranspiler):
       self.emit("local _args = { ... }")
       for idx, f in enumerate(node.fields):
         self.newline()
-        self.emit(f"if _args[{idx + 1}] ~= nil then self.{f.name} = _args[{idx + 1}] end")
+        self.emit(f"if _args[{idx + 1}] ~= nil then self.{self._mangle_name(f.name)} = _args[{idx + 1}] end")
       self.dedent()
       self.newline()
       self.emit("elseif _n_args == 1 then")
@@ -1357,14 +1379,14 @@ class LuaTranspiler(BaseTranspiler):
       self.emit("end")
       for idx, f in enumerate(node.fields):
         self.newline()
-        self.emit(f"if _arg1[{idx + 1}] ~= nil and self.{f.name} == nil then self.{f.name} = _arg1[{idx + 1}] end")
+        self.emit(f"if _arg1[{idx + 1}] ~= nil and self.{self._mangle_name(f.name)} == nil then self.{self._mangle_name(f.name)} = _arg1[{idx + 1}] end")
       self.dedent()
       self.newline()
       self.emit("else")
       self.indent()
       if node.fields:
         self.newline()
-        self.emit(f"self.{node.fields[0].name} = _arg1")
+        self.emit(f"self.{self._mangle_name(node.fields[0].name)} = _arg1")
       self.dedent()
       self.newline()
       self.emit("end")
@@ -1404,14 +1426,14 @@ class LuaTranspiler(BaseTranspiler):
   def _visit_ImplMemberNode_for_struct(self, node: ImplMemberNode,
                                        struct_name: str) -> None:
     func = node.func_decl
-    func_name = "_init_sapphire" if func.name == "__init__" else func.name
+    func_name = "_init_sapphire" if func.name == "__init__" else self._mangle_name(func.name)
     self.newline()
 
     if node.modifier == "static":
-      params = [p.name for p in func.parameters if p.name != "self"]
+      params = [self._mangle_name(p.name) for p in func.parameters if p.name != "self"]
       self.emit(f"function {struct_name}.{func_name}({', '.join(params)})")
     else:
-      other_params = [p.name for p in func.parameters if p.name != "self"]
+      other_params = [self._mangle_name(p.name) for p in func.parameters if p.name != "self"]
       self.emit(f"function {struct_name}:{func_name}({', '.join(other_params)})")
 
     self.indent()
@@ -1421,7 +1443,8 @@ class LuaTranspiler(BaseTranspiler):
         temp = LuaTranspiler()
         temp.known_structs = self.known_structs
         temp.visit(p.default_expr)
-        self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
+        pname = self._mangle_name(p.name)
+        self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")
     if is_coroutine_func(func):
       self.newline()
       all_params = (["self"] if node.modifier != "static" else []) + [p.name for p in func.parameters if p.name != "self"]
@@ -1488,14 +1511,15 @@ class LuaTranspiler(BaseTranspiler):
       self.on_reload_callbacks.append(node.name)
 
     export_ann = next((a for a in node.annotations if a.name == "export"), None)
-    params = [p.name for p in node.parameters]
+    fn_name = self._mangle_name(node.name)
+    params = [self._mangle_name(p.name) for p in node.parameters]
 
     self.newline()
     if export_ann:
-      target_path = export_ann.arg if export_ann.arg else node.name
+      target_path = export_ann.arg if export_ann.arg else fn_name
       self.emit(f"function {target_path}({', '.join(params)})")
     else:
-      self.emit(f"function {node.name}({', '.join(params)})")
+      self.emit(f"function {fn_name}({', '.join(params)})")
 
     self.indent()
     if self.dev_mode and export_ann and export_ann.arg == "love.update":
@@ -1509,7 +1533,8 @@ class LuaTranspiler(BaseTranspiler):
         temp = LuaTranspiler()
         temp.known_structs = self.known_structs
         temp.visit(p.default_expr)
-        self.emit(f"if {p.name} == nil then {p.name} = {temp.get_output()} end")
+        pname = self._mangle_name(p.name)
+        self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")
     if is_coroutine_func(node):
       self.newline()
       if params:
@@ -1605,16 +1630,17 @@ class LuaTranspiler(BaseTranspiler):
         st_name = self._expr_destructible_struct(node.expr, return_index=idx)
 
       if st_name:
-        self.variable_types[name] = st_name
+        m_name = self._mangle_name(name)
+        self.variable_types[m_name] = st_name
         if self.destructor_stack:
-          self.destructor_stack[-1].append(name)
+          self.destructor_stack[-1].append(m_name)
 
     self._lift_match_expressions(node.exprs)
 
     self.newline()
-    names_str = ", ".join(node.names)
+    names_str = ", ".join([self._mangle_name(n) for n in node.names])
     if self.dev_mode and self.indent_level == 0 and len(node.names) == 1 and node.exprs:
-      name = node.names[0]
+      name = self._mangle_name(node.names[0])
       self.emit(f"{name} = {name} ~= nil and {name} or ")
       self.visit(node.exprs[0])
       return
@@ -1895,11 +1921,11 @@ class LuaTranspiler(BaseTranspiler):
         self.newline()
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
-            self.emit(f"local {name} = {val_var}[{idx + 1}]")
+            self.emit(f"local {self._mangle_name(name)} = {val_var}[{idx + 1}]")
             if idx < len(let_names) - 1:
               self.newline()
         else:
-          self.emit(f"local {let_name} = {val_var}")
+          self.emit(f"local {self._mangle_name(let_name)} = {val_var}")
 
         st_name = self._expr_destructible_struct(binding.expr)
         if st_name:
@@ -2083,19 +2109,21 @@ class LuaTranspiler(BaseTranspiler):
     try:
       self._lift_match_expressions(node.iterable)
       self.newline()
+      val_var = self._mangle_name(node.val_var)
+      key_var = self._mangle_name(node.key_var) if node.key_var is not None else None
       if node.key_var is not None:
-        self.emit(f"for {node.key_var}, {node.val_var} in pairs(")
+        self.emit(f"for {key_var}, {val_var} in pairs(")
         self.visit(node.iterable)
         self.emit(") do")
       elif (
           isinstance(getattr(node.iterable, "inferred_type", None), RangeType)
           or (isinstance(node.iterable, CallNode) and isinstance(node.iterable.callee, IdentifierNode) and node.iterable.callee.name == "range")
       ):
-        self.emit(f"for {node.val_var} in ")
+        self.emit(f"for {val_var} in ")
         self.visit(node.iterable)
         self.emit(" do")
       else:
-        self.emit(f"for _, {node.val_var} in _sapphire_iter_array(")
+        self.emit(f"for _, {val_var} in _sapphire_iter_array(")
         self.visit(node.iterable)
         self.emit(") do")
       self.indent()
@@ -2130,7 +2158,8 @@ class LuaTranspiler(BaseTranspiler):
     elif node.lit_type == "none":
       self.emit("nil")
     elif node.lit_type == "string":
-      self.emit(f'"{node.value}"')
+      val = str(node.value).replace("\r", "\\r").replace("\n", "\\n")
+      self.emit(f'"{val}"')
     else:
       self.emit(str(node.value))
 
@@ -2167,7 +2196,7 @@ class LuaTranspiler(BaseTranspiler):
     if node.name == "Arena":
       self.emit("Arena.init")
     else:
-      name = self._identifier_map.get(node.name, node.name)
+      name = self._identifier_map.get(node.name, self._mangle_name(node.name))
       self.emit(name)
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> None:
@@ -2263,7 +2292,7 @@ class LuaTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         if arg.name:
-          self.emit(f"{arg.name} = ")
+          self.emit(f"{self._mangle_name(arg.name)} = ")
         else:
           self.emit(f"[{idx + 1}] = ")
         self.visit(arg.expr)
@@ -2277,7 +2306,7 @@ class LuaTranspiler(BaseTranspiler):
       self.emit(":register(")
 
     if isinstance(node.callee, MemberAccessNode):
-      member_name = getattr(node.callee, "target_name", None) or node.callee.member
+      member_name = getattr(node.callee, "target_name", None) or self._mangle_name(node.callee.member)
       receiver_name = getattr(node.callee.receiver, "name", None)
       if node.callee.is_optional:
         sep = ":" if getattr(node.callee, "is_instance_method", False) else "."
@@ -2316,15 +2345,16 @@ class LuaTranspiler(BaseTranspiler):
       self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
+    member_name = getattr(node, "target_name", None) or self._mangle_name(node.member)
     if node.is_optional:
       self.emit("((function(_r) if _r ~= nil then return _r.")
-      self.emit(node.member)
+      self.emit(member_name)
       self.emit(" else return nil end end)(")
       self.visit(node.receiver)
       self.emit("))")
     else:
       self.visit(node.receiver)
-      self.emit(f".{node.member}")
+      self.emit(f".{member_name}")
 
   def visit_CloneNode(self, node: CloneNode) -> None:
     self.emit("_clone_helper(")
@@ -2353,7 +2383,7 @@ class LuaTranspiler(BaseTranspiler):
     self.emit(name)
 
   def visit_LambdaNode(self, node: LambdaNode) -> None:
-    params = [p.name for p in node.parameters]
+    params = [self._mangle_name(p.name) for p in node.parameters]
     self.emit(f"(function({', '.join(params)})")
     self.indent()
     if isinstance(node.body, BlockNode):
@@ -2423,11 +2453,11 @@ class LuaTranspiler(BaseTranspiler):
 
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
-            self.emit(f"local {name} = {tmp_var}[{idx + 1}]")
+            self.emit(f"local {self._mangle_name(name)} = {tmp_var}[{idx + 1}]")
             if idx < len(let_names) - 1:
               self.newline()
         else:
-          self.emit(f"local {binding.let_name} = {tmp_var}")
+          self.emit(f"local {self._mangle_name(binding.let_name)} = {tmp_var}")
       elif clause.condition:
         self.emit("if not (")
         self.visit(clause.condition)
@@ -2453,7 +2483,7 @@ class LuaTranspiler(BaseTranspiler):
       if idx > 0:
         self.emit(", ")
       if arg.name:
-        self.emit(f"{arg.name} = ")
+        self.emit(f"{self._mangle_name(arg.name)} = ")
       else:
         self.emit(f"[{idx + 1}] = ")
       self.visit(arg.expr)
