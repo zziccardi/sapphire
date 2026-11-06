@@ -234,12 +234,15 @@ class ASTBuilder(SapphireVisitor):
     return node
 
   def visitImplMember(self, ctx: SapphireParser.ImplMemberContext) -> ImplMemberNode:
+    leading_annotations = [self.visit(a) for a in ctx.annotation()] if hasattr(ctx, "annotation") and ctx.annotation() else []
     modifier = None
     if ctx.STATIC():
       modifier = "static"
     elif ctx.VAR():
       modifier = "var"
     func_decl = self.visit(ctx.functionDeclaration())
+    if leading_annotations:
+      func_decl.annotations = leading_annotations + func_decl.annotations
     return ImplMemberNode(modifier, func_decl)
 
   def visitTraitDeclaration(self, ctx: SapphireParser.TraitDeclarationContext) -> TraitDeclNode:

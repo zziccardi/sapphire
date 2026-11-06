@@ -262,6 +262,8 @@ class SemanticTokensTypeChecker(TypeChecker):
           trait_type.comments = comments
 
   def visit_TraitMemberNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
     # Trait method declaration
     self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "method", 1)
     if self.current_trait and node.name in self.current_trait.methods:
@@ -342,6 +344,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       mods |= 2  # static
     func_decl = getattr(node, "func_decl", None)
     if func_decl:
+      for ann in getattr(func_decl, "annotations", []):
+        self.visit(ann)
       self.add_token(getattr(func_decl, "name_line", None), getattr(func_decl, "name_column", None), getattr(func_decl, "name_length", None), "method", mods)
       for p in func_decl.parameters:
         self.visit(p)
@@ -352,7 +356,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       from src.semantics.symbol_table import FunctionType
 
       if isinstance(method_type, FunctionType) and self.doc_text:
-        comments = extract_comments_above(self.doc_text, getattr(func_decl, "start_line", None))
+        comment_line = getattr(node, "start_line", None) or getattr(func_decl, "start_line", None)
+        comments = extract_comments_above(self.doc_text, comment_line)
         if comments:
           method_type.comments = comments
       self.node_types[func_decl] = method_type
