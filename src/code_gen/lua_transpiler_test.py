@@ -435,6 +435,49 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_clone_helper(base", lua_code)
     self.assertIn("_clone_helper(base, nil, arena)", lua_code)
 
+  def test_multi_hop_nested_struct_cow_lua(self):
+    """Verifies multi-hop nested struct Copy-on-Write materializes ancestors in Lua without corrupting prototype."""
+    code = """
+    struct Stats {
+      var hp: int;
+    }
+    impl Stats {
+      var func take_damage(dmg: int) {
+        self.hp -= dmg;
+      }
+    }
+    struct Unit {
+      var stats: Stats;
+    }
+    proto Monster {
+      var unit: Unit;
+    }
+    func main() {
+      let a = Arena();
+      let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
+      var c1 = clone base in a;
+      var c2 = clone c1 in a;
+      c1.unit.stats.hp = 100;
+      c1.unit.stats.take_damage(15);
+      c2.unit.stats.hp = 50;
+      let res = c1.unit.stats.hp * 10000 + c2.unit.stats.hp * 100 + base.unit.stats.hp;
+      print(String.from(res));
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("__ensure_cow", lua_code)
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+    if lua_bin:
+      with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False, encoding="utf-8") as f:
+        f.write(lua_code)
+        tmp_lua = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_lua], capture_output=True, text=True, check=True)
+        self.assertEqual(proc.stdout.strip(), "855020")
+      finally:
+        if os.path.exists(tmp_lua):
+          os.remove(tmp_lua)
+
   def test_lambdas_and_struct_initializer_with_arena(self):
     """Verifies single-expression and block lambdas, and struct initializers with arenas."""
     code = """

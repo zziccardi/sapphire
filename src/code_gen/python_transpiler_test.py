@@ -1574,6 +1574,37 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_proxy_ops()")
     self.assertEqual(res, 15 + 10)
 
+  def test_multi_hop_nested_struct_cow_python(self):
+    """Verifies multi-hop nested struct Copy-on-Write materializes ancestors without corrupting prototype."""
+    code = """
+    struct Stats {
+      var hp: int;
+    }
+    impl Stats {
+      var func take_damage(dmg: int) {
+        self.hp -= dmg;
+      }
+    }
+    struct Unit {
+      var stats: Stats;
+    }
+    proto Monster {
+      var unit: Unit;
+    }
+    func test_multi_hop(): int {
+      let a = Arena();
+      let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
+      var c1 = clone base in a;
+      var c2 = clone c1 in a;
+      c1.unit.stats.hp = 100;
+      c1.unit.stats.take_damage(15);
+      c2.unit.stats.hp = 50;
+      return c1.unit.stats.hp * 10000 + c2.unit.stats.hp * 100 + base.unit.stats.hp;
+    }
+    """
+    res = self._transpile_and_run(code, "test_multi_hop()")
+    self.assertEqual(res, 855020)
+
   def test_lift_match_expressions_none(self):
     """Verifies _lift_match_expressions handles None gracefully."""
     pt = PythonTranspiler()
