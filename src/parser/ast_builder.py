@@ -710,8 +710,13 @@ class ASTBuilder(SapphireVisitor):
       val = ctx.STRING_LIT().getText()[1:-1]
       return LiteralNode(val, "string")
     elif ctx.INTERPOLATED_STRING_LIT():
-      raw_text = ctx.INTERPOLATED_STRING_LIT().getText()[2:-1]
-      return self._parse_interpolated_string(raw_text)
+      token = ctx.INTERPOLATED_STRING_LIT().getSymbol()
+      raw_text = token.text[2:-1]
+      return self._parse_interpolated_string(
+          raw_text,
+          base_line=token.line,
+          base_column=token.column + 2,
+      )
     elif ctx.TRUE():
       return LiteralNode(True, "bool")
     elif ctx.FALSE():
@@ -719,7 +724,27 @@ class ASTBuilder(SapphireVisitor):
     else:
       return LiteralNode(None, "none")
 
-  def _parse_interpolated_string(self, raw_text: str) -> InterpolatedStringNode:
+  def _offset_ast_positions(
+      self, node: ASTNode, line_offset: int, col_offset: int
+  ) -> None:
+    """Shifts 1-based line and 0-based column attributes on an AST subtree."""
+    for attr, val in list(node.__dict__.items()):
+      if (attr == "line" or attr.endswith("_line")) and isinstance(val, int):
+        col_attr = "column" if attr == "line" else f"{attr[:-5]}_column"
+        col_val = getattr(node, col_attr, None)
+        if val == 1 and isinstance(col_val, int):
+          setattr(node, col_attr, col_val + col_offset)
+        setattr(node, attr, val + line_offset)
+      elif isinstance(val, ASTNode):
+        self._offset_ast_positions(val, line_offset, col_offset)
+      elif isinstance(val, list):
+        for item in val:
+          if isinstance(item, ASTNode):
+            self._offset_ast_positions(item, line_offset, col_offset)
+
+  def _parse_interpolated_string(
+      self, raw_text: str, base_line: int = 1, base_column: int = 0
+  ) -> InterpolatedStringNode:
     from antlr4 import InputStream, CommonTokenStream
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
@@ -774,6 +799,9 @@ class ASTBuilder(SapphireVisitor):
         parser = SapphireParser(tokens)
         expr_tree = parser.expression()
         expr_ast = self.visit(expr_tree)
+        self._offset_ast_positions(
+            expr_ast, base_line - 1, base_column + start_expr
+        )
         parts.append(expr_ast)
 
       elif ch == '}':

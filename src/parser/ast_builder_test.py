@@ -572,6 +572,8 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(parts[0].value, "Hello ")
     self.assertIsInstance(parts[1], IdentifierNode)
     self.assertEqual(parts[1].name, "name")
+    self.assertEqual(parts[1].name_line, 1)
+    self.assertEqual(parts[1].name_column, 17)
     self.assertIsInstance(parts[2], LiteralNode)
     self.assertEqual(parts[2].value, "!")
 
