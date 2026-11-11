@@ -10,10 +10,21 @@ def resolve_module_path(import_path: str, source_file_path: Optional[str] = None
 
   search_dirs = []
 
-  # 1. Search directory of source_file_path (strictly bounded to source file's directory root)
+  # 1. Search directory of source_file_path (strictly bounded to source file's directory root
+  #    or the enclosing package root when import_path starts with an ancestor directory name)
   if source_file_path:
     source_dir = os.path.abspath(os.path.dirname(source_file_path))
     search_dirs.append(source_dir)
+    if "." in import_path:
+      top_pkg = import_path.split(".")[0]
+      curr = source_dir
+      while curr and curr != os.path.dirname(curr):
+        if os.path.basename(curr) == top_pkg:
+          pkg_root = os.path.dirname(curr)
+          if pkg_root not in search_dirs:
+            search_dirs.append(pkg_root)
+          break
+        curr = os.path.dirname(curr)
 
   # 2. Search current working directory
   cwd = os.path.abspath(os.getcwd())

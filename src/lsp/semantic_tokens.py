@@ -110,10 +110,14 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.lsp_errors: List[dict] = []
     self.node_types: dict = self.context.node_types
     self.current_trait: Optional[Any] = None
+    self._in_monomorphization: bool = False
 
   def visit(self, node: ASTNode) -> Any:
     old_node = self.current_node
+    old_mono = self._in_monomorphization
     self.current_node = node
+    if getattr(node, "is_monomorphized", False):
+      self._in_monomorphization = True
     try:
       res = super().visit(node)
       if res is not None:
@@ -121,6 +125,7 @@ class SemanticTokensTypeChecker(TypeChecker):
       return res
     finally:
       self.current_node = old_node
+      self._in_monomorphization = old_mono
 
   def generic_visit(self, node: ASTNode) -> Any:
     # Safely traverse sub-nodes for semantic token generation without raising NotImplementedError
@@ -169,6 +174,8 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def add_token(self, line: Optional[int], col: Optional[int], length: Optional[int], token_type: str, modifiers: int = 0) -> None:
     """Adds a raw semantic token if the positioning info is valid."""
+    if self._in_monomorphization:
+      return
     if line is not None and col is not None and length is not None and length > 0:
       self.raw_tokens.append((line, col, length, token_type, modifiers))
 
@@ -262,6 +269,8 @@ class SemanticTokensTypeChecker(TypeChecker):
           trait_type.comments = comments
 
   def visit_TraitMemberNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
     # Trait method declaration
     self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "method", 1)
     if self.current_trait and node.name in self.current_trait.methods:
@@ -342,6 +351,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       mods |= 2  # static
     func_decl = getattr(node, "func_decl", None)
     if func_decl:
+      for ann in getattr(func_decl, "annotations", []):
+        self.visit(ann)
       self.add_token(getattr(func_decl, "name_line", None), getattr(func_decl, "name_column", None), getattr(func_decl, "name_length", None), "method", mods)
       for p in func_decl.parameters:
         self.visit(p)
@@ -352,7 +363,8 @@ class SemanticTokensTypeChecker(TypeChecker):
       from src.semantics.symbol_table import FunctionType
 
       if isinstance(method_type, FunctionType) and self.doc_text:
-        comments = extract_comments_above(self.doc_text, getattr(func_decl, "start_line", None))
+        comment_line = getattr(node, "start_line", None) or getattr(func_decl, "start_line", None)
+        comments = extract_comments_above(self.doc_text, comment_line)
         if comments:
           method_type.comments = comments
       self.node_types[func_decl] = method_type

@@ -376,6 +376,34 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(trait_decl.members[0].annotations[0].name, "export")
     self.assertEqual(trait_decl.members[0].annotations[0].arg, "setColor")
 
+  def test_impl_member_leading_annotation_parsing(self):
+    """Verifies AST construction for impl methods with annotations preceding static or var."""
+    ast = self._get_ast("""
+    impl Graphics for MockGraphics {
+      @export("setColor")
+      static func setColorRgba(r: float, g: float, b: float, a: float = 1.0) {}
+
+      @export("mutate")
+      var func mutateState() {}
+    }
+    """)
+    impl_decl = ast.declarations[0]
+    self.assertEqual(len(impl_decl.members), 2)
+
+    m0 = impl_decl.members[0]
+    self.assertEqual(m0.modifier, "static")
+    self.assertEqual(m0.func_decl.name, "setColorRgba")
+    self.assertEqual(len(m0.func_decl.annotations), 1)
+    self.assertEqual(m0.func_decl.annotations[0].name, "export")
+    self.assertEqual(m0.func_decl.annotations[0].arg, "setColor")
+
+    m1 = impl_decl.members[1]
+    self.assertEqual(m1.modifier, "var")
+    self.assertEqual(m1.func_decl.name, "mutateState")
+    self.assertEqual(len(m1.func_decl.annotations), 1)
+    self.assertEqual(m1.func_decl.annotations[0].name, "export")
+    self.assertEqual(m1.func_decl.annotations[0].arg, "mutate")
+
 
   def test_import_and_export_parsing(self):
     """Verifies AST construction for module imports and explicit export manifest."""
@@ -544,6 +572,8 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(parts[0].value, "Hello ")
     self.assertIsInstance(parts[1], IdentifierNode)
     self.assertEqual(parts[1].name, "name")
+    self.assertEqual(parts[1].name_line, 1)
+    self.assertEqual(parts[1].name_column, 17)
     self.assertIsInstance(parts[2], LiteralNode)
     self.assertEqual(parts[2].value, "!")
 

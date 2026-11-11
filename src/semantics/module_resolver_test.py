@@ -55,6 +55,18 @@ class ModuleResolverTest(unittest.TestCase):
     self.assertIsNotNone(resolved)
     self.assertTrue(resolved.endswith("testing.sp"))
 
+  def test_resolves_package_qualified_import_from_subdirectory(self):
+    """Verifies that package-qualified imports (e.g. 'child.child_mod') resolve from nested subdirectories."""
+    sub_dir = os.path.join(self.child_dir, "systems")
+    os.makedirs(sub_dir, exist_ok=True)
+    nested_file = os.path.join(sub_dir, "combat.sp")
+    with open(nested_file, "w", encoding="utf-8") as f:
+      f.write("import child.child_mod;\n")
+
+    resolved = resolve_module_path("child.child_mod", source_file_path=nested_file)
+    self.assertIsNotNone(resolved)
+    self.assertEqual(os.path.abspath(resolved), os.path.abspath(self.child_mod))
+
 
 if __name__ == "__main__":
   unittest.main()

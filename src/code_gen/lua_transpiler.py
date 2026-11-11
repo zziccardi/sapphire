@@ -178,27 +178,80 @@ end
 local _clone_helper
 
 local _create_cow_proxy
-_create_cow_proxy = function(parent_shadow, parent_proto, key)
-  local proxy_meta = {}
-  proxy_meta.__index = function(tbl, sub_key)
-    if parent_shadow[key] ~= nil then
-      return parent_shadow[key][sub_key]
+_create_cow_proxy = function(parent_obj, key, target_tbl)
+  if type(target_tbl) == "table" then
+    local t_meta = getmetatable(target_tbl)
+    if t_meta and t_meta.__get_active then
+      target_tbl = t_meta.__get_active()
     end
-    if parent_proto and parent_proto[key] ~= nil then
-      local val = parent_proto[key][sub_key]
+  end
+  local proxy_meta = {}
+
+  local function get_active()
+    local p_meta = type(parent_obj) == "table" and getmetatable(parent_obj) or nil
+    local parent_active
+    if p_meta and p_meta.__get_active then
+      parent_active = p_meta.__get_active()
+    else
+      parent_active = parent_obj
+    end
+    if type(parent_active) == "table" then
+      local pa_meta = getmetatable(parent_active)
+      if pa_meta and pa_meta.__shadow then
+        if pa_meta.__shadow[key] ~= nil then
+          return pa_meta.__shadow[key]
+        end
+      else
+        local v = rawget(parent_active, key)
+        if v ~= nil then
+          return v
+        end
+      end
+    end
+    return target_tbl
+  end
+
+  local function ensure_cow()
+    local p_meta = type(parent_obj) == "table" and getmetatable(parent_obj) or nil
+    local parent_mat
+    if p_meta and p_meta.__ensure_cow then
+      parent_mat = p_meta.__ensure_cow()
+    else
+      parent_mat = parent_obj
+    end
+    local pm_meta = type(parent_mat) == "table" and getmetatable(parent_mat) or nil
+    if pm_meta and pm_meta.__shadow then
+      if pm_meta.__shadow[key] == nil then
+        pm_meta.__shadow[key] = _clone_helper(target_tbl, nil, nil)
+      end
+      return pm_meta.__shadow[key]
+    else
+      local curr = rawget(parent_mat, key)
+      if curr == nil or curr == target_tbl then
+        local cloned = _clone_helper(target_tbl, nil, nil)
+        rawset(parent_mat, key, cloned)
+        return cloned
+      end
+      return curr
+    end
+  end
+
+  proxy_meta.__get_active = get_active
+  proxy_meta.__ensure_cow = ensure_cow
+  proxy_meta.__index = function(tbl, sub_key)
+    local active = get_active()
+    if active ~= nil then
+      local val = active[sub_key]
       if type(val) == "table" then
-        return _create_cow_proxy(parent_shadow, parent_proto[key], sub_key)
+        return _create_cow_proxy(tbl, sub_key, val)
       end
       return val
     end
     return nil
   end
   proxy_meta.__newindex = function(tbl, sub_key, value)
-    if parent_shadow[key] == nil then
-      local target = parent_proto[key]
-      parent_shadow[key] = _clone_helper(target, nil, nil)
-    end
-    parent_shadow[key][sub_key] = value
+    local mat = ensure_cow()
+    mat[sub_key] = value
   end
   return setmetatable({}, proxy_meta)
 end
@@ -206,6 +259,7 @@ end
 local function _create_proto_object(proto, class_tbl)
   local shadow = {}
   local meta = {}
+  local obj = {}
   meta.__shadow = shadow
   meta.__proto = proto
   meta.__class = class_tbl
@@ -217,7 +271,7 @@ local function _create_proto_object(proto, class_tbl)
       local val = proto[key]
       if val ~= nil then
         if type(val) == "table" then
-          return _create_cow_proxy(shadow, proto, key)
+          return _create_cow_proxy(obj, key, val)
         end
         return val
       end
@@ -235,8 +289,38 @@ local function _create_proto_object(proto, class_tbl)
       rawset(tbl, key, val)
     end
   end
-  local obj = setmetatable({}, meta)
-  return obj
+  return setmetatable(obj, meta)
+end
+
+local function _copy_plain_table(obj, seen)
+  if type(obj) ~= "table" then return obj end
+  local meta = getmetatable(obj)
+  if meta and meta.__get_active then
+    obj = meta.__get_active()
+    meta = getmetatable(obj)
+  end
+  if seen and seen[obj] then return seen[obj] end
+  if obj.clone and type(obj.clone) == "function" then
+    return obj:clone()
+  elseif meta and meta.__class then
+    return _create_proto_object(obj, meta.__class)
+  elseif meta and meta.__proto ~= nil then
+    return _create_proto_object(obj, nil)
+  end
+  seen = seen or {}
+  local copy = {}
+  seen[obj] = copy
+  for k, v in pairs(obj) do
+    if type(v) == "table" then
+      copy[k] = _copy_plain_table(v, seen)
+    else
+      copy[k] = v
+    end
+  end
+  if meta then
+    setmetatable(copy, meta)
+  end
+  return copy
 end
 
 _clone_helper = function(obj, init_fn, arena)
@@ -244,12 +328,18 @@ _clone_helper = function(obj, init_fn, arena)
   local clone_obj
   if type(obj) == "table" then
     local meta = getmetatable(obj)
+    if meta and meta.__get_active then
+      obj = meta.__get_active()
+      meta = getmetatable(obj)
+    end
     if obj.clone and type(obj.clone) == "function" then
       clone_obj = obj:clone()
     elseif meta and meta.__class then
       clone_obj = _create_proto_object(obj, meta.__class)
-    else
+    elseif meta and meta.__proto ~= nil then
       clone_obj = _create_proto_object(obj, nil)
+    else
+      clone_obj = _copy_plain_table(obj, nil)
     end
   else
     clone_obj = obj

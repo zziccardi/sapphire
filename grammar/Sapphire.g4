@@ -73,7 +73,7 @@ implBlock
     ;
 
 implMember
-    : (STATIC | VAR)? functionDeclaration
+    : annotation* (STATIC | VAR)? functionDeclaration
     ;
 
 traitDeclaration

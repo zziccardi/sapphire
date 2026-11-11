@@ -45,6 +45,16 @@ class AnnotationSecurityTest(unittest.TestCase):
       func set_color(r: float, g: float, b: float) {}
     }
 
+    trait StaticGraphics {
+      @export("setColor")
+      static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
+    }
+
+    impl StaticGraphics for Game {
+      @export("setColor")
+      static func setColorRgba(r: float, g: float, b: float, a: float = 1.0) {}
+    }
+
     @export("my_game.update")
     func game_update(dt: float) {}
     """

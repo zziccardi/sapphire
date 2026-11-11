@@ -93,8 +93,43 @@ def _sapphire_del(obj):
   if obj is not None and hasattr(obj, '__del__') and callable(obj.__del__):
     obj.__del__()
 
+def _sapphire_cow_copy(target, _seen=None):
+  if isinstance(target, _LazyCoWProxy):
+    target = target._get_active()
+  if isinstance(target, (int, float, bool, str, type(None), Enum)):
+    return target
+  if hasattr(target, 'clone') and callable(target.clone):
+    return target.clone()
+  if _seen is None:
+    _seen = {}
+  obj_id = id(target)
+  if obj_id in _seen:
+    return _seen[obj_id]
+  if isinstance(target, list):
+    res = []
+    _seen[obj_id] = res
+    for item in target:
+      res.append(_sapphire_cow_copy(item, _seen))
+    return res
+  if isinstance(target, dict):
+    res = {}
+    _seen[obj_id] = res
+    for k, v in target.items():
+      res[k] = _sapphire_cow_copy(v, _seen)
+    return res
+  if hasattr(target, '__dict__'):
+    res = copy.copy(target)
+    _seen[obj_id] = res
+    for k, v in list(res.__dict__.items()):
+      if not k.startswith('__'):
+        setattr(res, k, _sapphire_cow_copy(v, _seen))
+    return res
+  return copy.copy(target)
+
 class _LazyCoWProxy:
   def __init__(self, parent, name, target):
+    if isinstance(target, _LazyCoWProxy):
+      target = target._get_active()
     super().__setattr__('_parent', parent)
     super().__setattr__('_name', name)
     super().__setattr__('_target', target)
@@ -110,36 +145,65 @@ class _LazyCoWProxy:
     name = super().__getattribute__('_name')
     if isinstance(parent, dict):
       return parent[name] if name in parent else super().__getattribute__('_target')
-    if hasattr(parent, '__shadow__') and name in parent.__shadow__:
-      return parent.__shadow__[name]
+    if isinstance(parent, list):
+      return parent[name] if 0 <= name < len(parent) else super().__getattribute__('_target')
+    if hasattr(parent, '__shadow__'):
+      if name in parent.__shadow__:
+        return parent.__shadow__[name]
+      return super().__getattribute__('_target')
+    if isinstance(name, str) and hasattr(parent, name):
+      val = getattr(parent, name)
+      if val is not None:
+        return val
     return super().__getattribute__('_target')
 
   def _ensure_cow(self):
     p = super().__getattribute__('_parent')
     attr_name = super().__getattribute__('_name')
+    target = super().__getattribute__('_target')
+    if isinstance(target, _LazyCoWProxy):
+      target = target._get_active()
+
     if isinstance(p, _LazyCoWProxy):
       parent_obj = p._ensure_cow()
     else:
       parent_obj = p
 
     if isinstance(parent_obj, dict):
-      return parent_obj
+      if attr_name not in parent_obj or parent_obj[attr_name] is target:
+        cow_val = _sapphire_cow_copy(target)
+        parent_obj[attr_name] = cow_val
+        return cow_val
+      return parent_obj[attr_name]
+
+    if isinstance(parent_obj, list):
+      if parent_obj[attr_name] is target:
+        cow_val = _sapphire_cow_copy(target)
+        parent_obj[attr_name] = cow_val
+        return cow_val
+      return parent_obj[attr_name]
+
     if hasattr(parent_obj, '__shadow__'):
       if attr_name not in parent_obj.__shadow__:
-        target = super().__getattribute__('_target')
-        if hasattr(target, 'clone'):
-          cow_val = target.clone()
-        else:
-          cow_val = copy.copy(target)
+        cow_val = _sapphire_cow_copy(target)
         parent_obj.__shadow__[attr_name] = cow_val
         return cow_val
       return parent_obj.__shadow__[attr_name]
-    return parent_obj
+
+    curr = getattr(parent_obj, attr_name, None)
+    if curr is None or curr is target:
+      cow_val = _sapphire_cow_copy(target)
+      setattr(parent_obj, attr_name, cow_val)
+      return cow_val
+    return curr
 
   def __getattr__(self, name):
     if name.startswith('_'):
       return super().__getattribute__(name)
-    val = getattr(self._get_active(), name)
+    active = self._get_active()
+    val = getattr(active, name)
+    if hasattr(val, '__self__') and hasattr(val, '__func__') and val.__self__ is active:
+      return lambda *args, **kwargs: val.__func__(self, *args, **kwargs)
     if not isinstance(val, (int, float, bool, str, type(None))):
       return _LazyCoWProxy(self, name, val)
     return val

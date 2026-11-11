@@ -103,6 +103,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_proto_delegation": 100,
         "test_proto_shadowing": 250,
         "test_live_proto_mutation": 30,
+        "test_nested_struct_cow_isolation": 409920,
     },
     "structs_and_methods_test.sp": {
         "test_default_fields": 0,
