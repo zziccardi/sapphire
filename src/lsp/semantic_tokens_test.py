@@ -400,3 +400,30 @@ class TestSemanticTokens(unittest.TestCase):
     self.assertIn((4, 15, 5, "parameter", 4), line_4_tokens)
     self.assertIn((4, 21, 2, "property", 0), line_4_tokens)
 
+  def test_imported_generic_monomorphization_does_not_leak_tokens(self):
+    """Verifies monomorphizing imported generic functions (e.g. std.math) does not emit tokens at imported lines."""
+    comment_lines = "\n".join(f"// Comment line {i}" for i in range(1, 35))
+    code = (
+        f"{comment_lines}\n"
+        "import lib.std.math;\n"
+        "func calc(a: int, b: int): int {\n"
+        "  return math.max(a, b) + math.floor(1.5) + math.ceil(1.5);\n"
+        "}\n"
+    )
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+
+    # Lines 1..34 are all comments and must have zero semantic tokens (even though math.max is on lines 27-32 of math.sp)
+    comment_tokens = [t for t in checker.raw_tokens if t[0] <= 34]
+    self.assertEqual(comment_tokens, [])
+
+
+

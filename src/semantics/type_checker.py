@@ -368,7 +368,7 @@ class TypeChecker:
       if isinstance(resolved, GenericTypeParameter):
         return resolved
       if not resolved:
-        self.error(f"Undefined type '{node.name}'.")
+        self.error(f"Undefined type '{node.name}'.", node=node)
         return PrimitiveType("none")
       if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
         resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]

@@ -110,10 +110,14 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.lsp_errors: List[dict] = []
     self.node_types: dict = self.context.node_types
     self.current_trait: Optional[Any] = None
+    self._in_monomorphization: bool = False
 
   def visit(self, node: ASTNode) -> Any:
     old_node = self.current_node
+    old_mono = self._in_monomorphization
     self.current_node = node
+    if getattr(node, "is_monomorphized", False):
+      self._in_monomorphization = True
     try:
       res = super().visit(node)
       if res is not None:
@@ -121,6 +125,7 @@ class SemanticTokensTypeChecker(TypeChecker):
       return res
     finally:
       self.current_node = old_node
+      self._in_monomorphization = old_mono
 
   def generic_visit(self, node: ASTNode) -> Any:
     # Safely traverse sub-nodes for semantic token generation without raising NotImplementedError
@@ -169,6 +174,8 @@ class SemanticTokensTypeChecker(TypeChecker):
 
   def add_token(self, line: Optional[int], col: Optional[int], length: Optional[int], token_type: str, modifiers: int = 0) -> None:
     """Adds a raw semantic token if the positioning info is valid."""
+    if self._in_monomorphization:
+      return
     if line is not None and col is not None and length is not None and length > 0:
       self.raw_tokens.append((line, col, length, token_type, modifiers))
 

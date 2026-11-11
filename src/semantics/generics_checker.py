@@ -90,6 +90,7 @@ class GenericsChecker:
     cloned_decl = GenericsChecker.substitute_ast(generic_struct_type.ast_decl, param_map)
     cloned_decl.name = mangled_name
     cloned_decl.type_params = []
+    cloned_decl.is_monomorphized = True
 
     mono_struct_type = StructType(mangled_name, parent_names=cloned_decl.parent_names, is_prototype=cloned_decl.is_prototype)
     root_scope = checker.symbol_table.current_scope
@@ -98,33 +99,39 @@ class GenericsChecker:
     root_scope.define_type(mangled_name, mono_struct_type)
     root_scope.define(mangled_name, StructSymbol(mangled_name, mono_struct_type))
 
-    # Resolve fields for monomorphized struct
-    for f in cloned_decl.fields:
-      ftype = checker._resolve_field_type(f, mono_struct_type.name)
-      has_default = f.default_expr is not None or checker._has_implicit_default_value(ftype)
-      mono_struct_type.fields[f.name] = StructField(
-          f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
-      )
+    old_mono = getattr(checker, "_in_monomorphization", False)
+    checker._in_monomorphization = True
+    try:
+      # Resolve fields for monomorphized struct
+      for f in cloned_decl.fields:
+        ftype = checker._resolve_field_type(f, mono_struct_type.name)
+        has_default = f.default_expr is not None or checker._has_implicit_default_value(ftype)
+        mono_struct_type.fields[f.name] = StructField(
+            f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
+        )
 
-    # Instantiate generic impl blocks matching generic_struct_type.name
-    if hasattr(checker, "program") and checker.program:
-      for decl in checker.program.declarations:
-        if isinstance(decl, ImplBlockNode) and decl.struct_name == generic_struct_type.name:
-          cloned_impl = GenericsChecker.substitute_ast(decl, param_map)
-          cloned_impl.struct_name = mangled_name
-          cloned_impl.type_params = []
-          cloned_impl.struct_type_args = []
-          cloned_impl.trait_type_args = []
-          for member in cloned_impl.members:
-            func_decl = member.func_decl
-            p_types = [checker._resolve_type_node(p.param_type) for p in func_decl.parameters]
-            ret_t = checker._resolve_return_types(func_decl)
-            num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
-            sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters], num_defaults=num_defaults)
-            mono_struct_type.methods[func_decl.name] = StructMethod(func_decl.name, sig, member.modifier)
-          checker.program.declarations.append(cloned_impl)
+      # Instantiate generic impl blocks matching generic_struct_type.name
+      if hasattr(checker, "program") and checker.program:
+        for decl in list(checker.program.declarations):
+          if isinstance(decl, ImplBlockNode) and decl.struct_name == generic_struct_type.name:
+            cloned_impl = GenericsChecker.substitute_ast(decl, param_map)
+            cloned_impl.struct_name = mangled_name
+            cloned_impl.type_params = []
+            cloned_impl.struct_type_args = []
+            cloned_impl.trait_type_args = []
+            cloned_impl.is_monomorphized = True
+            for member in cloned_impl.members:
+              func_decl = member.func_decl
+              p_types = [checker._resolve_type_node(p.param_type) for p in func_decl.parameters]
+              ret_t = checker._resolve_return_types(func_decl)
+              num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
+              sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters], num_defaults=num_defaults)
+              mono_struct_type.methods[func_decl.name] = StructMethod(func_decl.name, sig, member.modifier)
+            checker.program.declarations.append(cloned_impl)
 
-      checker.program.declarations.append(cloned_decl)
+        checker.program.declarations.append(cloned_decl)
+    finally:
+      checker._in_monomorphization = old_mono
 
     return mono_struct_type
 
@@ -149,28 +156,34 @@ class GenericsChecker:
     cloned_func = GenericsChecker.substitute_ast(func_sym.ast_decl, param_map)
     cloned_func.name = mangled_name
     cloned_func.type_params = []
+    cloned_func.is_monomorphized = True
 
-    p_types = [checker._resolve_type_node(p.param_type) for p in cloned_func.parameters]
-    ret_t = checker._resolve_return_types(cloned_func)
-    num_defaults = sum(1 for p in cloned_func.parameters if getattr(p, "default_expr", None) is not None)
-    mono_func_type = FunctionType(
-        p_types,
-        ret_t,
-        [p.is_mutable for p in cloned_func.parameters],
-        [p.name for p in cloned_func.parameters],
-        num_defaults=num_defaults,
-    )
-    mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
-    root_scope = checker.symbol_table.current_scope
-    while root_scope.parent:
-      root_scope = root_scope.parent
-    root_scope.define(mangled_name, mono_func_sym)
+    old_mono = getattr(checker, "_in_monomorphization", False)
+    checker._in_monomorphization = True
+    try:
+      p_types = [checker._resolve_type_node(p.param_type) for p in cloned_func.parameters]
+      ret_t = checker._resolve_return_types(cloned_func)
+      num_defaults = sum(1 for p in cloned_func.parameters if getattr(p, "default_expr", None) is not None)
+      mono_func_type = FunctionType(
+          p_types,
+          ret_t,
+          [p.is_mutable for p in cloned_func.parameters],
+          [p.name for p in cloned_func.parameters],
+          num_defaults=num_defaults,
+      )
+      mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
+      root_scope = checker.symbol_table.current_scope
+      while root_scope.parent:
+        root_scope = root_scope.parent
+      root_scope.define(mangled_name, mono_func_sym)
 
-    if hasattr(checker, "program") and checker.program:
-      checker.program.declarations.append(cloned_func)
+      if hasattr(checker, "program") and checker.program:
+        checker.program.declarations.append(cloned_func)
 
-    saved_func = checker.current_function
-    # Type check the body of the monomorphized function
-    checker.visit_FuncDeclNode(cloned_func)
-    checker.current_function = saved_func
+      saved_func = checker.current_function
+      # Type check the body of the monomorphized function
+      checker.visit_FuncDeclNode(cloned_func)
+      checker.current_function = saved_func
+    finally:
+      checker._in_monomorphization = old_mono
     return mangled_name
