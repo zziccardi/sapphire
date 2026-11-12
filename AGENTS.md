@@ -322,7 +322,20 @@ pipenv run sapphire run samples/overview.sp --dev
    * Always enforce semicolon statement termination in `.sp` code.
 3. **Preserve Documentation & Comments**:
    * Do not delete or mangle docstrings, inline architectural comments, or existing specs.
-   * When modifying language semantics or adding built-ins, update `docs/SPEC.md`, `docs/compiler.md`, or `docs/builtins.md` accordingly.
+   * When modifying language semantics or adding built-ins, update
+     `docs/SPEC.md`, `docs/compiler.md`, or `docs/builtins.md` accordingly.
+   * For cross-cutting compiler or specification initiatives spanning multiple
+     subsystems, structure plans into small, independently testable phases and
+     pause after each phase for review unless asked to run continuously.
+   * Preserve existing semantic/codegen helpers when adding orthogonal checks
+     rather than rewriting unrelated passes, and verify exact `ASTNode`/`Type`
+     attribute names (`RefType.inner_type`, `OptionalType.base_type`) in
+     `src/parser/ast.py` and `src/semantics/symbol_table.py`.
+   * In Python and Lua runtime preambles, `SapphireObject` clones delegate
+     missing lookups to `__proto__`; per-instance lifecycle flags (e.g.
+     `_sapphire_disposed_`) must inspect own storage (`__dict__` /
+     `object.__setattr__` in Python; `rawget`/`rawset` in Lua), and implicit
+     `clone` must inherit the source object's `__arena`.
 4. **Code Quality Standards**:
    * Python codebase: Follow the Google Python Style Guide rather than PEP 8,
      maintain 2-space or 4-space consistency with surrounding files, include
