@@ -63,7 +63,7 @@ trait Drawable {
 proto GameObject {
   var id: int;
   var position: Vector2D;
-  var active: bool = true;
+  var is_active = true;
 }
 
 proto Entity: GameObject {
@@ -87,7 +87,7 @@ impl Entity {
 impl Updatable for Entity {
   var func update(dt: float) {
     if self.health <= 0 {
-      self.active = false;
+      self.is_active = false;
       return;
     }
 
@@ -98,7 +98,7 @@ impl Updatable for Entity {
 
 impl Drawable for Entity {
   func draw() {
-    if self.active {
+    if self.is_active {
       // Frame rendering step for active entity
     }
   }
@@ -201,7 +201,7 @@ impl Love2D for GameEngine {
           self.load();
         }
       },
-    };
+    }
   }
 
   // Perform rendering calls for graphics and HUD UI.
@@ -218,12 +218,12 @@ impl Love2D for GameEngine {
       },
       // In practice we'd render the main-menu and game-over screens here.
       ... -> {},
-    };
+    }
   }
 }
 
 // 6. Engine driver (simulating love2d's main `love.run` loop)
-func run_game_loop() {
+func main() {
   var engine = GameEngine();
 
   // 1. Initialize game engine state and spawn entities.
@@ -240,6 +240,3 @@ func run_game_loop() {
     engine.draw();
   }
 }
-
-// Top-level script execution entry point
-run_game_loop();

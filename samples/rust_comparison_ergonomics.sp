@@ -74,7 +74,7 @@ struct Obstacle {
 
 impl Renderable for Obstacle {
   func render(): String {
-    return f"Obstacle [{self.label}])";
+    return f"Obstacle [{self.label}]";
   }
 }
 
@@ -88,13 +88,13 @@ impl Renderable for Obstacle {
 
 struct UserAccount {
   var username: String;
-  var active: bool;
+  var is_active: bool;
   var email: String?;
 }
 
 func get_verified_email(account: UserAccount?): String {
   // `user` is automatically promoted to non-optional UserAccount in this scope
-  guard let user ?= account; user.active else {
+  guard let user ?= account; user.is_active else {
     return "inactive_or_missing";
   }
 
@@ -130,13 +130,13 @@ func demo_guard_and_optionals() {
   print("=== 2. Guard Statements & Swift-Style Optionals ===");
   let active_user = UserAccount {
     username = "sapphire_dev",
-    active = true,
+    is_active = true,
     email = "dev@sapphire-lang.org",
   };
 
   let unverified_user = UserAccount {
     username = "guest",
-    active = false,
+    is_active = false,
     email = none,
   };
 

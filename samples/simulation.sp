@@ -42,7 +42,7 @@ trait Combatant {
 proto GameObject {
   var id: int;
   var position: Vector2D;
-  var active: bool;
+  var is_active: bool;
 }
 
 // 4. Dynamically inherited proto: reuse GameObject layout via delegation
@@ -58,7 +58,7 @@ impl Character {
                 hp: int = 50, spd: float = 2.0) {
     self.id = id;
     self.position = Vector2D(x = x, y = y);
-    self.active = true;
+    self.is_active = true;
     self.health = hp;
     self.max_health = hp;
     self.speed = spd;
@@ -70,7 +70,7 @@ impl Character {
 impl Updatable for Character {
   var func update(dt: float) {
     if self.health <= 0 {
-      self.active = false;
+      self.is_active = false;
       return;
     }
     // Update position: move rightwards based on speed and delta time
@@ -83,7 +83,7 @@ impl Combatant for Character {
     self.health -= amount;
     if self.health <= 0 {
       self.health = 0;
-      self.active = false;
+      self.is_active = false;
     }
   }
 
@@ -107,7 +107,7 @@ func execute_strike(attacker: Character, var defender: Character,
 }
 
 // 6. Main simulation entry point
-func run_demo() {
+func main() {
   var sim_arena = Arena();
 
   // A. Create a prototype archetype (Template)
@@ -136,7 +136,7 @@ func run_demo() {
   base_goblin.speed = 3.5;  // Global haste buff on all Goblins!
 
   // D. Optionals and Swift-style optional unwrapping (`if let`)
-  var target: Character? = none;
+  var target: Character?;
   target = goblin_1;
 
   if var active_target ?= target {

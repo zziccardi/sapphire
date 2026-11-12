@@ -1,8 +1,8 @@
 /*
  * Sample Sapphire program illustrating compile-time generics (parametric
-   polymorphism).
- * Shows generic structs, generic impl blocks, generic functions, and contextual
-   type inference.
+ * polymorphism).
+ * Shows generic structs, generic impl blocks, generic functions, and
+ * contextual type inference.
  */
 
 // 1. Generic struct definition

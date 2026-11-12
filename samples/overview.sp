@@ -94,17 +94,18 @@ func execute_attack(attacker: Character, var defender: Character,
 }
 
 // 5. Main entry demonstration function
-func run_demo() {
+func main() {
   var game_arena = Arena();
 
   // Variable declarations and type inference
   // Constant binding
   let player_one = Character(id = 1, name = "Galahad") in game_arena;
   // Mutable binding
-  var player_two = Character(id = 2, name = "Lancelot", max_hp = 120) in game_arena;
+  var player_two = Character(id = 2, name = "Lancelot",
+                             max_hp = 120) in game_arena;
 
   // Optionals and swift-style optional unwrapping
-  var target_player: Character? = none;
+  var target_player: Character?;
   target_player = player_two;
 
   if var active_target ?= target_player {
@@ -144,8 +145,8 @@ func run_demo() {
   var coord_x: float = 10;
   let mixed_result = coord_x + positive_adjustment;
 
-  // Array literals with optional trailing commas & collection functions
-  let scores = [10, 20, 30,];
+  // Array literals & collection indexing
+  let scores = [10, 20, 30];
   let first_score = scores[0];  // Array indexing
 
   // Loops: while loop (no parentheses around condition)
@@ -164,6 +165,3 @@ func run_demo() {
     score += 5;
   }
 }
-
-// Top-level script execution entry point
-run_demo();

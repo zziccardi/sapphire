@@ -8,11 +8,11 @@ import lib.love2d.enums;
 import lib.love2d.graphics;
 import lib.love2d.love2d;
 
+let SPEED = 250.0;
 let love = love2d.love;
 
-var hero_x: float = 200.0;
-var hero_y: float = 200.0;
-let speed: float = 250.0;
+var hero_x = 200.0;
+var hero_y = 200.0;
 
 @export("love.load")
 func load() {
@@ -23,19 +23,19 @@ func load() {
 func update(dt: float) {
   if love.keyboard.isDown(enums.KeyCode.Left) ||
      love.keyboard.isDown(enums.KeyCode.A) {
-    hero_x -= speed * dt;
+    hero_x -= SPEED * dt;
   }
   if love.keyboard.isDown(enums.KeyCode.Right) ||
      love.keyboard.isDown(enums.KeyCode.D) {
-    hero_x += speed * dt;
+    hero_x += SPEED * dt;
   }
   if love.keyboard.isDown(enums.KeyCode.Up) ||
      love.keyboard.isDown(enums.KeyCode.W) {
-    hero_y -= speed * dt;
+    hero_y -= SPEED * dt;
   }
   if love.keyboard.isDown(enums.KeyCode.Down) ||
      love.keyboard.isDown(enums.KeyCode.S) {
-    hero_y += speed * dt;
+    hero_y += SPEED * dt;
   }
 }
 
@@ -60,7 +60,7 @@ func draw() {
 
   // Draw HUD information & Controls
   love.graphics.setColorRgba(1.0, 1.0, 1.0);
-  let fps_str = "FPS: " + love.timer.getFPS();
+  let fps_str = f"FPS: {love.timer.getFPS()}";
   love.graphics.print(text = fps_str, x = 10.0, y = 10.0);
   love.graphics.print(text = "Move with WASD or Arrow Keys",
                       x = 10.0, y = 30.0);

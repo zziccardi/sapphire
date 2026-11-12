@@ -1,47 +1,49 @@
 // Demonstration of break and continue loop control statements in Sapphire
 
-// 1. While loop demonstration
-print("--- While Loop Demo ---");
-var i = 0;
-while i < 10 {
-  i += 1;
-  if i % 2 != 0 {
-    continue;  // Skip odd numbers
+func main() {
+  // 1. While loop demonstration
+  print("--- While Loop Demo ---");
+  var i = 0;
+  while i < 10 {
+    i += 1;
+    if i % 2 != 0 {
+      continue;  // Skip odd numbers
+    }
+    if i > 8 {
+      break;  // Exit loop when i exceeds 8
+    }
+    print(f"Even number: {i}");
   }
-  if i > 8 {
-    break;  // Exit loop when i exceeds 8
-  }
-  print(f"Even number: {i}");
-}
 
-// 2. For-in array iteration demonstration
-print("--- Array Iteration Demo ---");
-let numbers = [10, 15, 20, 25, 30, 35, 40];
-for num in numbers {
-  if num == 15 {
-    continue;  // Skip 15
+  // 2. For-in array iteration demonstration
+  print("--- Array Iteration Demo ---");
+  let numbers = [10, 15, 20, 25, 30, 35, 40];
+  for num in numbers {
+    if num == 15 {
+      continue;  // Skip 15
+    }
+    if num == 35 {
+      break;  // Stop at 35
+    }
+    print(f"Number: {num}");
   }
-  if num == 35 {
-    break;  // Stop at 35
-  }
-  print(f"Number: {num}");
-}
 
-// 3. For-in map iteration demonstration
-print("--- Map Iteration Demo ---");
-let items = {"apple": 1, "banana": 2, "cherry": 3, "durian": 4};
-for key, val in items {
-  if val % 2 == 0 {
-    continue;  // Skip even quantities
+  // 3. For-in map iteration demonstration
+  print("--- Map Iteration Demo ---");
+  let items = {"apple": 1, "banana": 2, "cherry": 3, "durian": 4};
+  for key, val in items {
+    if val % 2 == 0 {
+      continue;  // Skip even quantities
+    }
+    print(f"Item: {key} -> {val}");
   }
-  print(f"Item: {key} -> {val}");
-}
 
-// 4. For-in range iteration demonstration
-print("--- Range Iteration Demo ---");
-for i in range(0, 10, 2) {
-  if i == 4 {
-    continue;  // Skip 4
+  // 4. For-in range iteration demonstration
+  print("--- Range Iteration Demo ---");
+  for i in range(0, 10, step = 2) {
+    if i == 4 {
+      continue;  // Skip 4
+    }
+    print(f"Range step: {i}");
   }
-  print("Range step: " + String.from(i));
 }

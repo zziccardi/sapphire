@@ -83,13 +83,14 @@ impl TreeNode {
   func path_to_root(): String {
     var path = self.name;
     var curr = self.parent;
-    while curr != none {
-      if let p ?= curr {
-        path = p.name + "/" + path;
-        curr = p.parent;
+    while true {
+      guard let p ?= curr else {
+        break;
       }
+      path = f"{p.name}/{path}";
+      curr = p.parent;
     }
-    return "/" + path;
+    return f"/{path}";
   }
 }
 
@@ -135,11 +136,11 @@ func demo_cyclic_graph() {
 
   var visited1: [String: bool] = {};
   let path_a_to_d = a.has_path_to("NodeD", visited1);
-  print(f"Path NodeA -> NodeD exists: {String.from(path_a_to_d)}");
+  print(f"Path NodeA -> NodeD exists: {path_a_to_d}");
 
   var visited2: [String: bool] = {};
   let path_d_to_a = d.has_path_to("NodeA", visited2);
-  print(f"Path NodeD -> NodeA exists: {String.from(path_d_to_a)}");
+  print(f"Path NodeD -> NodeA exists: {path_d_to_a}");
 }
 
 func demo_doubly_linked_and_tree() {
@@ -163,11 +164,12 @@ func demo_doubly_linked_and_tree() {
   // Backward traversal from tail node
   print("Backward traversal from tail:");
   var curr: DoublyLinkedNode? = n3;
-  while curr != none {
-    if let node ?= curr {
-      print("  Node value: " + String.from(node.value));
-      curr = node.prev;
+  while true {
+    guard let node ?= curr else {
+      break;
     }
+    print(f"  Node value: {node.value}");
+    curr = node.prev;
   }
 
   // Hierarchical tree with upward parent pointers
@@ -184,7 +186,7 @@ func demo_doubly_linked_and_tree() {
   root.add_child(src);
   src.add_child(main_file);
 
-  print("Path from main.sp to root: " + main_file.path_to_root());
+  print(f"Path from main.sp to root: {main_file.path_to_root()}");
 }
 
 func demo_prototypal_arenas() {
@@ -205,16 +207,16 @@ func demo_prototypal_arenas() {
     self.parent = base_goblin;
   };
 
-  print("Elite initial hp (delegated): " + String.from(elite_goblin.hp));
+  print(f"Elite initial hp (delegated): {elite_goblin.hp}");
 
   // Live mutation: buffing base_goblin immediately updates elite_goblin
   base_goblin.hp = 65;
-  print("Elite hp after base buff: " + String.from(elite_goblin.hp));
+  print(f"Elite hp after base buff: {elite_goblin.hp}");
 
   // Copy-on-Write: mutating nested transform isolates elite's state
   elite_goblin.transform.x = 100.0;
-  print("Elite pos x: " + String.from(elite_goblin.transform.x));
-  print("Base goblin pos x: " + String.from(base_goblin.transform.x));
+  print(f"Elite pos x: {elite_goblin.transform.x}");
+  print(f"Base goblin pos x: {base_goblin.transform.x}");
 
   // When scene_arena goes out of scope here, all allocated entities
   // are deallocated deterministically in bulk without reference-cycle leaks.
@@ -235,7 +237,7 @@ func demo_shared_dag() {
   });
   let shared_alias = leaf.share();
   if let p ?= shared_alias.parent; let up ?= p.upgrade() {
-    print("Leaf '" + shared_alias.label + "' upgraded parent: " + up.label);
+    print(f"Leaf '{shared_alias.label}' upgraded parent: {up.label}");
   }
 }
 

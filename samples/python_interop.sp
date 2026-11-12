@@ -25,7 +25,7 @@ trait WsgiModule {
   func make_server(
       self, host: String, port: int,
       app: ([String: String],
-            (String, [[String]]) -> ()) -> [BytesHandle]): WsgiServer;
+            (String, [[String]]) -> void) -> [BytesHandle]): WsgiServer;
 }
 
 // 4. Host variable bindings
@@ -39,10 +39,10 @@ var wsgiref: WsgiModule;
 @export("app")
 func wsgi_handler(
     environ: [String: String],
-    start_response: (String, [[String]]) -> ()): [BytesHandle] {
+    start_response: (String, [[String]]) -> void): [BytesHandle] {
   let method = environ.get("REQUEST_METHOD") ?? "GET";
   let path = environ.get("PATH_INFO") ?? "/";
-  print("Processing " + method + " request for " + path);
+  print(f"Processing {method} request for {path}");
 
   var headers: [[String]] = [];
   headers.push(["Content-Type", "text/plain; charset=utf-8"]);
@@ -63,18 +63,17 @@ func main() {
   print("Exported WSGI entrypoint 'app' is ready for requests.");
 
   // Simulate handling a request via the exported WSGI callback
-  var mock_env: [String: String] = {
+  var mock_env = {
     "REQUEST_METHOD": "GET",
     "PATH_INFO": "/api/status",
   };
 
   let mock_start_response = (status: String, headers: [[String]]) -> {
-    print("HTTP Response Status: " + status);
+    print(f"HTTP Response Status: {status}");
   };
 
   let response_chunks = wsgi_handler(mock_env, mock_start_response);
-  print("Generated " + String.from(response_chunks.size()) +
-        " response chunk.");
+  print(f"Generated {response_chunks.size()} response chunk.");
 
   server.server_close();
   print("Server closed cleanly.");
