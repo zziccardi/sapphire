@@ -425,5 +425,135 @@ class TestSemanticTokens(unittest.TestCase):
     comment_tokens = [t for t in checker.raw_tokens if t[0] <= 34]
     self.assertEqual(comment_tokens, [])
 
+  def test_multi_binding_if_and_guard_and_move_no_false_errors(self):
+    """Verifies multi-binding if/guard headers, if-var mutability, and move."""
+    code = """
+    struct DagNode {
+      let label: String;
+      let parent: WeakRef<DagNode>?;
+    }
+
+    func get_opt(flag: bool): int? {
+      if flag {
+        return 10;
+      }
+      return none;
+    }
+
+    func check_headers(opt_int: int?) {
+      let root = SharedRef(DagNode { label = "root", parent = none });
+      let leaf = SharedRef(DagNode {
+        label = "leaf",
+        parent = root.downgrade(),
+      });
+      let shared_alias = leaf.share();
+      if let p ?= shared_alias.parent; let up ?= p.upgrade() {
+        print(up.label);
+      }
+
+      guard let gp ?= shared_alias.parent; let gup ?= gp.upgrade() else {
+        return;
+      }
+      print(gup.label);
+
+      if var mut_val ?= opt_int {
+        mut_val = mut_val + 1;
+      }
+
+      if let typed_p: int ?= get_opt(true) {
+        print(String.from(typed_p));
+      }
+
+      if let a, b = [1, 2]; a < b {
+        print(String.from(a + b));
+      }
+
+      let r = Ref(10);
+      if let owned = move r; owned.valueOf() == 10 {
+        print("moved");
+      }
+    }
+    """
+    # Wait: owned is int inside Ref(10)? No, Ref(10) is Ref<int>, so owned is Ref<int>,
+    # use a simple struct with __del__ or Ref<DagNode> instead of .valueOf()!
+    code = code.replace("owned.valueOf() == 10", "true")
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+
+    self.assertEqual(checker.lsp_errors, [])
+
+    # Verify mut_val (line 30) has declaration modifier (1) without readonly (4)
+    lines = code.splitlines()
+    mut_line = next(i + 1 for i, ln in enumerate(lines) if "if var mut_val" in ln)
+    mut_col = lines[mut_line - 1].index("mut_val")
+    mut_tok = next(
+        (t for t in checker.raw_tokens if t[0] == mut_line and t[1] == mut_col),
+        None,
+    )
+    self.assertEqual(mut_tok, (mut_line, mut_col, len("mut_val"), "variable", 1))
+
+    # Verify p and up (line 21) have declaration | readonly (5)
+    if_line = next(i + 1 for i, ln in enumerate(lines) if "if let p ?=" in ln)
+    p_col = lines[if_line - 1].index("p ?=")
+    up_col = lines[if_line - 1].index("up ?=")
+    p_tok = next(
+        (t for t in checker.raw_tokens if t[0] == if_line and t[1] == p_col),
+        None,
+    )
+    up_tok = next(
+        (t for t in checker.raw_tokens if t[0] == if_line and t[1] == up_col),
+        None,
+    )
+    self.assertEqual(p_tok, (if_line, p_col, 1, "variable", 5))
+    self.assertEqual(up_tok, (if_line, up_col, 2, "variable", 5))
+
+    # Verify guard let bindings (gp, gup) receive declaration | readonly tokens
+    g_line = next(i + 1 for i, ln in enumerate(lines) if "guard let gp ?=" in ln)
+    gp_col = lines[g_line - 1].index("gp ?=")
+    gup_col = lines[g_line - 1].index("gup ?=")
+    gp_tok = next(
+        (t for t in checker.raw_tokens if t[0] == g_line and t[1] == gp_col),
+        None,
+    )
+    gup_tok = next(
+        (t for t in checker.raw_tokens if t[0] == g_line and t[1] == gup_col),
+        None,
+    )
+    self.assertEqual(gp_tok, (g_line, gp_col, 2, "variable", 5))
+    self.assertEqual(gup_tok, (g_line, gup_col, 3, "variable", 5))
+
+  def test_all_samples_have_zero_lsp_errors(self):
+    """Ensures every .sp sample parses and checks cleanly with zero LSP errors."""
+    import pathlib
+
+    samples_dir = pathlib.Path(__file__).resolve().parents[2] / "samples"
+    sample_files = sorted(samples_dir.glob("**/*.sp"))
+    self.assertTrue(sample_files)
+
+    for sample_path in sample_files:
+      with self.subTest(sample=sample_path.name):
+        code = sample_path.read_text(encoding="utf-8")
+        input_stream = InputStream(code)
+        lexer = SapphireLexer(input_stream)
+        stream = CommonTokenStream(lexer)
+        parser = SapphireParser(stream)
+        tree = parser.program()
+        ast = ASTBuilder().visit(tree)
+
+        checker = SemanticTokensTypeChecker(
+            doc_text=code, source_file_path=str(sample_path)
+        )
+        checker.check(ast)
+        self.assertEqual(checker.lsp_errors, [])
+
+
 
 

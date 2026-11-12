@@ -400,22 +400,43 @@ class SemanticTokensTypeChecker(TypeChecker):
     for target in targets:
       self.visit(target)
 
+  def _record_header_binding_tokens(self, binding) -> None:
+    is_mut = getattr(binding, "is_mutable", False)
+    mods = 1 if (isinstance(is_mut, bool) and is_mut) else (1 | 4)
+    bindings_info = getattr(binding, "bindings_info", None)
+    if isinstance(bindings_info, list):
+      for info in bindings_info:
+        self.add_token(
+            info.get("line"),
+            info.get("column"),
+            info.get("length"),
+            "variable",
+            mods,
+        )
+        val_type = info.get("val_type")
+        if isinstance(val_type, ASTNode):
+          self.visit(val_type)
+    else:
+      self.add_token(
+          getattr(binding, "let_name_line", None),
+          getattr(binding, "let_name_column", None),
+          getattr(binding, "let_name_length", None),
+          "variable",
+          mods,
+      )
+      type_node = getattr(binding, "type_node", None)
+      if isinstance(type_node, ASTNode):
+        self.visit(type_node)
+
   def visit_IfNode(self, node) -> None:
     for binding in getattr(node, "bindings", []):
-      # Add semantic token for let_name
-      mods = 1 | 4  # declaration | readonly
-      self.add_token(getattr(binding, "let_name_line", None), getattr(binding, "let_name_column", None), getattr(binding, "let_name_length", None), "variable", mods)
-      # Calculate unwrapped type for hover info
-      expr_type = self.visit(binding.expr)
-      from src.semantics.symbol_table import OptionalType
-
-      if binding.is_unwrap and isinstance(expr_type, OptionalType):
-        unwrapped_type = expr_type.base_type
-      else:
-        unwrapped_type = expr_type
-      self.node_types[binding] = unwrapped_type
-
+      self._record_header_binding_tokens(binding)
     super().visit_IfNode(node)
+
+  def visit_GuardStmtNode(self, node):
+    for binding in getattr(node, "bindings", []):
+      self._record_header_binding_tokens(binding)
+    return super().visit_GuardStmtNode(node)
 
   def visit_ForNode(self, node) -> None:
     mods = 1  # declaration
@@ -425,25 +446,12 @@ class SemanticTokensTypeChecker(TypeChecker):
     key_var = getattr(node, "key_var", None)
     if isinstance(key_var, str):
       self.add_token(getattr(node, "key_var_line", None), getattr(node, "key_var_column", None), getattr(node, "key_var_length", None), "variable", mods)
-    val_var = getattr(node, "val_var", None)
     line = getattr(node, "val_var_line", getattr(node, "loop_var_line", None))
     if line is not None and not isinstance(line, type(node)):
       col = getattr(node, "val_var_column", getattr(node, "loop_var_column", None))
       length = getattr(node, "val_var_length", getattr(node, "loop_var_length", None))
       if isinstance(line, int) and isinstance(col, int) and isinstance(length, int):
         self.add_token(line, col, length, "variable", mods)
-
-    # Calculate loop var element type for hover info
-    iter_type = self.visit(node.iterable)
-    from src.semantics.symbol_table import ArrayType, MapType, PrimitiveType
-
-    if isinstance(iter_type, ArrayType):
-      elem_type = iter_type.element_type
-    elif isinstance(iter_type, MapType):
-      elem_type = iter_type.value_type
-    else:
-      elem_type = PrimitiveType("none")
-    self.node_types[node] = elem_type
 
     super().visit_ForNode(node)
 
@@ -466,20 +474,41 @@ class SemanticTokensTypeChecker(TypeChecker):
     return super().visit_IdentifierNode(node)
 
   def visit_MemberAccessNode(self, node):
-    # Member lookup
-    receiver_type = self.visit(node.receiver)
+    from src.semantics.symbol_table import (
+        FunctionType,
+        OptionalType,
+        RefType,
+        SharedRefType,
+    )
+
+    res = super().visit_MemberAccessNode(node)
+    receiver_type = self.node_types.get(node.receiver)
+    unwrapped_recv = receiver_type
+    if isinstance(unwrapped_recv, OptionalType):
+      unwrapped_recv = unwrapped_recv.base_type
+    if isinstance(unwrapped_recv, (SharedRefType, RefType)):
+      unwrapped_recv = unwrapped_recv.inner_type
+
     token_type = "property"
     mods = 0
-    if receiver_type:
-      if hasattr(receiver_type, "methods") and node.member in receiver_type.methods:
+    if unwrapped_recv:
+      if hasattr(unwrapped_recv, "methods") and node.member in unwrapped_recv.methods:
         token_type = "method"
-      elif hasattr(receiver_type, "fields") and node.member in receiver_type.fields:
+      elif hasattr(unwrapped_recv, "fields") and node.member in unwrapped_recv.fields:
         token_type = "property"
-        field = receiver_type.fields[node.member]
+        field = unwrapped_recv.fields[node.member]
         if not getattr(field, "is_mutable", True):
           mods |= 4
-    self.add_token(getattr(node, "member_line", None), getattr(node, "member_column", None), getattr(node, "member_length", None), token_type, mods)
-    return super().visit_MemberAccessNode(node)
+      elif isinstance(res, FunctionType) and not isinstance(unwrapped_recv, ModuleType):
+        token_type = "method"
+    self.add_token(
+        getattr(node, "member_line", None),
+        getattr(node, "member_column", None),
+        getattr(node, "member_length", None),
+        token_type,
+        mods,
+    )
+    return res
 
   def visit_CallNode(self, node):
     for arg in getattr(node, "type_args", []):
@@ -510,11 +539,6 @@ class SemanticTokensTypeChecker(TypeChecker):
         self.add_token(name_line, name_column, name_length, "struct")
     else:
       self.add_token(name_line, name_column, name_length, "type")
-
-    for arg in getattr(node, "type_args", []):  # pragma: no cover
-      self.visit(arg)
-    return None
-
 
     for arg in getattr(node, "type_args", []):  # pragma: no cover
       self.visit(arg)

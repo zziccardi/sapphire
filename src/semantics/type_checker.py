@@ -1312,11 +1312,13 @@ class TypeChecker:
           self._check_value_ownership_transfer(binding.expr, expr_type, node=binding.expr)
 
         let_names = getattr(binding, "let_names", [binding.let_name])
+        self.node_types[binding] = unwrapped_type
         if len(let_names) > 1:
           elem_t = unwrapped_type.element_type if isinstance(unwrapped_type, ArrayType) else unwrapped_type
           for name in let_names:
             sym = VariableSymbol(name, elem_t, is_mutable=binding.is_mutable)
             sym.is_borrowed_unwrap = is_borrowed_unwrap
+            sym.ast_decl = binding
             self.symbol_table.define(name, sym)
             ArenaChecker.validate_arena_escape(
                 self.symbol_table,
@@ -1328,6 +1330,7 @@ class TypeChecker:
         else:
           sym = VariableSymbol(binding.let_name, unwrapped_type, is_mutable=binding.is_mutable)
           sym.is_borrowed_unwrap = is_borrowed_unwrap
+          sym.ast_decl = binding
           self.symbol_table.define(binding.let_name, sym)
           ArenaChecker.validate_arena_escape(
               self.symbol_table,
@@ -1416,6 +1419,7 @@ class TypeChecker:
         if node.key_var is not None:
           self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
         elem_type = iter_type.element_type
+        self.node_types[node] = elem_type
         val_sym = VariableSymbol(node.val_var, elem_type, node.is_mutable)
         self.symbol_table.define(node.val_var, val_sym)
         ArenaChecker.validate_arena_escape(
@@ -1428,8 +1432,10 @@ class TypeChecker:
       elif isinstance(iter_type, RangeType):
         if node.key_var is not None:
           self.error("Cannot iterate over a range with key-value syntax; use a single loop variable.")
+        self.node_types[node] = PrimitiveType("int")
         self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("int"), node.is_mutable))
       elif isinstance(iter_type, MapType):
+        self.node_types[node] = iter_type.value_type
         if node.key_var is None:
           self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
           val_sym = VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable)
@@ -1462,6 +1468,7 @@ class TypeChecker:
           )
       else:
         self.error("For-in loop source must be an array, map, or range type.")
+        self.node_types[node] = PrimitiveType("none")
         if node.key_var is not None:
           self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, PrimitiveType("none"), node.is_mutable))
         self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, PrimitiveType("none"), node.is_mutable))
@@ -2498,11 +2505,13 @@ class TypeChecker:
           self._check_value_ownership_transfer(binding.expr, expr_t, node=binding.expr)
 
         let_names = getattr(binding, "let_names", [binding.let_name])
+        self.node_types[binding] = base_t
         if len(let_names) > 1:
           elem_t = base_t.element_type if isinstance(base_t, ArrayType) else base_t
           for name in let_names:
             sym = VariableSymbol(name, elem_t, is_mutable=binding.is_mutable)
             sym.is_borrowed_unwrap = is_borrowed_unwrap
+            sym.ast_decl = binding
             self.symbol_table.define(name, sym)
             ArenaChecker.validate_arena_escape(
                 self.symbol_table,
@@ -2515,6 +2524,7 @@ class TypeChecker:
           name = binding.let_name
           sym = VariableSymbol(name, base_t, is_mutable=binding.is_mutable)
           sym.is_borrowed_unwrap = is_borrowed_unwrap
+          sym.ast_decl = binding
           self.symbol_table.define(name, sym)
           ArenaChecker.validate_arena_escape(
               self.symbol_table,

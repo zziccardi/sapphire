@@ -475,6 +475,13 @@ def signature_help(ls: SapphireLanguageServer, params: SignatureHelpParams) -> O
         receiver_type = node_types.get(decl_node)
 
     if receiver_type:
+      if type(receiver_type).__name__ == "OptionalType":
+        receiver_type = getattr(receiver_type, "base_type", receiver_type)
+      if type(receiver_type).__name__ in ("SharedRefType", "RefType") and not (
+          type(receiver_type).__name__ == "SharedRefType"
+          and method_name in ("share", "downgrade")
+      ):
+        receiver_type = getattr(receiver_type, "inner_type", receiver_type)
       if hasattr(receiver_type, "get_method"):
         method_obj = receiver_type.get_method(method_name, sym_table)
         if method_obj:
@@ -591,7 +598,7 @@ def _get_scope_completion_items(ast, line: int, col: int, uri: str, ls: Sapphire
               vtype = node_types.get(stmt)
               type_str = f": {vtype}" if vtype else ""
               add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
-          elif type(stmt).__name__ == "IfNode":
+          elif type(stmt).__name__ in ("IfNode", "GuardStmtNode"):
             if st_start is None or st_start <= line:
               for b in getattr(stmt, "bindings", [stmt.init_binding] if getattr(stmt, "init_binding", None) else []):
                 for b_name in getattr(b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []):
@@ -770,6 +777,8 @@ def completion(ls: SapphireLanguageServer,
 
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(receiver_type, "base_type", receiver_type)  # pragma: no cover
+    if type(receiver_type).__name__ in ("SharedRefType", "RefType"):
+      receiver_type = getattr(receiver_type, "inner_type", receiver_type)  # pragma: no cover
 
     if type(receiver_type).__name__ in ("StringType", "PrimitiveType") and getattr(receiver_type, "name", "") == "String":
       from src.semantics.symbol_table import STRING_METHODS

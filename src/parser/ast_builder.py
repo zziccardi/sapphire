@@ -492,13 +492,25 @@ class ASTBuilder(SapphireVisitor):
     bindings = ctx.varBindingList().varBinding()
     let_names = [b.IDENTIFIER().getText() for b in bindings]
     let_name = let_names[0]
-    type_node = self.visit(bindings[0].type_()) if bindings[0].type_() else None
+    bindings_info = []
+    for b in bindings:
+      tok = b.IDENTIFIER().getSymbol()
+      b_type = self.visit(b.type_()) if b.type_() else None
+      bindings_info.append({
+          "name": tok.text,
+          "line": tok.line,
+          "column": tok.column,
+          "length": len(tok.text),
+          "val_type": b_type,
+      })
+    type_node = bindings_info[0]["val_type"]
     first_token = bindings[0].IDENTIFIER().getSymbol()
 
     node = HeaderBindingNode(is_mutable, let_name, type_node, expr, is_unwrap, let_names=let_names)
     node.let_name_line = first_token.line
     node.let_name_column = first_token.column
     node.let_name_length = len(first_token.text)
+    node.bindings_info = bindings_info
     return node
 
   def visitForStatement(self, ctx: SapphireParser.ForStatementContext) -> ForNode:

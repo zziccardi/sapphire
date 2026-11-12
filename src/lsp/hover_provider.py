@@ -302,6 +302,15 @@ class HoverProvider:
     elif isinstance(node, HeaderBindingNode):
       category = "variable"
       node_name = node.let_name
+      bindings_info = getattr(node, "bindings_info", None)
+      if isinstance(bindings_info, list):
+        for info in bindings_info:
+          b_line = info.get("line")
+          b_col = info.get("column")
+          b_len = info.get("length", 0)
+          if b_line == line and b_col is not None and b_col <= col < b_col + b_len:
+            node_name = info.get("name", node_name)
+            break
     elif isinstance(node, ForNode):
       category = "variable"
       node_name = node.loop_var
@@ -434,7 +443,17 @@ class HoverProvider:
             field = st.fields[node.name]
             field_comments = getattr(field, "comments", "")
       elif isinstance(node, MemberAccessNode) and uri in ls.symbol_table_cache:
+        from src.semantics.symbol_table import (
+            OptionalType,
+            RefType,
+            SharedRefType,
+        )
+
         receiver_type = node_types.get(node.receiver)
+        if isinstance(receiver_type, OptionalType):
+          receiver_type = receiver_type.base_type
+        if isinstance(receiver_type, (SharedRefType, RefType)):
+          receiver_type = receiver_type.inner_type
         if receiver_type:
           if (
               isinstance(receiver_type, StructType)
