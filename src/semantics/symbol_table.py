@@ -40,6 +40,45 @@ class Type:
       return False
     return type(self) is type(other)
 
+  def is_move_only_type(
+      self,
+      symbol_table: Optional[Any] = None,
+      _seen: Optional[Set[str]] = None,
+  ) -> bool:
+    """Returns True if values of this type have Move-Only ownership."""
+    if isinstance(self, (RefType, ArenaType, CoroutineType)):
+      return True
+    if isinstance(self, OptionalType):
+      return self.base_type.is_move_only_type(symbol_table, _seen)
+    if isinstance(self, ArrayType):
+      return self.element_type.is_move_only_type(symbol_table, _seen)
+    if isinstance(self, MapType):
+      return (
+          self.key_type.is_move_only_type(symbol_table, _seen)
+          or self.value_type.is_move_only_type(symbol_table, _seen)
+      )
+    if isinstance(self, StructType):
+      if self.is_prototype:
+        return False
+      seen = set() if _seen is None else set(_seen)
+      if self.name in seen:
+        return False
+      seen.add(self.name)
+      if self.has_any_destructor(symbol_table):
+        return True
+      for field in self.fields.values():
+        if field.field_type.is_move_only_type(symbol_table, seen):
+          return True
+    return False
+
+  def is_shared_ref_lvalue_type(self) -> bool:
+    """Returns True if this type is SharedRef<T> or Optional<SharedRef<T>>."""
+    if isinstance(self, SharedRefType):
+      return True
+    if isinstance(self, OptionalType):
+      return self.base_type.is_shared_ref_lvalue_type()
+    return False
+
 
 class StringType(Type):
   """Represents the built-in String reference type."""
@@ -276,6 +315,25 @@ class StructType(Type):
   @property
   def has_destructor(self) -> bool:
     return "__del__" in self.methods
+
+  def has_any_destructor(
+      self,
+      symbol_table: Optional[Any] = None,
+      _seen: Optional[Set[str]] = None,
+  ) -> bool:
+    """Returns True if this struct or any ancestor struct defines '__del__'."""
+    if "__del__" in self.methods:
+      return True
+    if self.parent_names and symbol_table:
+      seen = set() if _seen is None else set(_seen)
+      if self.name in seen:
+        return False
+      seen.add(self.name)
+      for p_name in self.parent_names:
+        parent = symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
+          return True
+    return False
 
   @parent_name.setter
   def parent_name(self, value: Optional[str]) -> None:

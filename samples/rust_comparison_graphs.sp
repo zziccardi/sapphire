@@ -10,15 +10,15 @@
  */
 
 // ============================================================================
-// 1. Cyclic Directed Graph
+// 1. Cyclic Directed Graph (Scoped Arena)
 // In safe Rust, nodes pointing to other nodes in cyclic relationships
 // cannot be represented with normal references (&T) due to the borrow checker.
 // Rust requires Rc<RefCell<Node>>, generational arena indices, or unsafe.
-// In Sapphire, reference types are passed by constant reference by default,
-// and nodes can naturally hold arrays of neighbor nodes with direct mutation.
+// In Sapphire, `proto` nodes in a lexical `Arena` hold direct cyclic handles
+// with natural mutation and deterministic bulk teardown upon scope exit.
 // ============================================================================
 
-struct GraphNode {
+proto GraphNode {
   var id: String;
   var neighbors: [GraphNode];
 }
@@ -51,10 +51,10 @@ impl GraphNode {
 // Doubly linked lists and parent pointers in Rust require Option<Weak<...>>
 // to avoid memory leaks caused by reference counting cycles. Every access
 // requires .upgrade() and runtime borrow checks (.borrow() / .borrow_mut()).
-// In Sapphire, parent and neighbor pointers are natural optional references.
+// In Sapphire, arena-backed `proto` nodes use natural optional handles.
 // ============================================================================
 
-struct DoublyLinkedNode {
+proto DoublyLinkedNode {
   var value: int;
   var prev: DoublyLinkedNode?;
   var next: DoublyLinkedNode?;
@@ -67,7 +67,7 @@ impl DoublyLinkedNode {
   }
 }
 
-struct TreeNode {
+proto TreeNode {
   var name: String;
   var parent: TreeNode?;
   var children: [TreeNode];
@@ -121,10 +121,11 @@ proto EntityNode {
 
 func demo_cyclic_graph() {
   print("=== 1. Cyclic Graph Traversal ===");
-  var a = GraphNode { id = "NodeA", neighbors = [] };
-  var b = GraphNode { id = "NodeB", neighbors = [] };
-  var c = GraphNode { id = "NodeC", neighbors = [] };
-  var d = GraphNode { id = "NodeD", neighbors = [] };
+  var graph_arena = Arena();
+  var a = GraphNode { id = "NodeA", neighbors = [] } in graph_arena;
+  var b = GraphNode { id = "NodeB", neighbors = [] } in graph_arena;
+  var c = GraphNode { id = "NodeC", neighbors = [] } in graph_arena;
+  var d = GraphNode { id = "NodeD", neighbors = [] } in graph_arena;
 
   // Create cycle: A -> B -> C -> A, plus a branch C -> D
   a.add_edge(b);
@@ -143,11 +144,18 @@ func demo_cyclic_graph() {
 
 func demo_doubly_linked_and_tree() {
   print("=== 2. Doubly Linked List & Tree Parent Pointers ===");
+  var list_arena = Arena();
 
   // Doubly linked list setup
-  var n1 = DoublyLinkedNode { value = 10, prev = none, next = none };
-  var n2 = DoublyLinkedNode { value = 20, prev = none, next = none };
-  var n3 = DoublyLinkedNode { value = 30, prev = none, next = none };
+  var n1 = DoublyLinkedNode {
+    value = 10, prev = none, next = none,
+  } in list_arena;
+  var n2 = DoublyLinkedNode {
+    value = 20, prev = none, next = none,
+  } in list_arena;
+  var n3 = DoublyLinkedNode {
+    value = 30, prev = none, next = none,
+  } in list_arena;
 
   n1.link_next(n2);
   n2.link_next(n3);
@@ -163,9 +171,15 @@ func demo_doubly_linked_and_tree() {
   }
 
   // Hierarchical tree with upward parent pointers
-  var root = TreeNode { name = "root", parent = none, children = [] };
-  var src = TreeNode { name = "src", parent = none, children = [] };
-  var main_file = TreeNode { name = "main.sp", parent = none, children = [] };
+  var root = TreeNode {
+    name = "root", parent = none, children = [],
+  } in list_arena;
+  var src = TreeNode {
+    name = "src", parent = none, children = [],
+  } in list_arena;
+  var main_file = TreeNode {
+    name = "main.sp", parent = none, children = [],
+  } in list_arena;
 
   root.add_child(src);
   src.add_child(main_file);
@@ -175,7 +189,7 @@ func demo_doubly_linked_and_tree() {
 
 func demo_prototypal_arenas() {
   print("=== 3. Prototypal State Delegation & Lexical Arenas ===");
-  let scene_arena = Arena();
+  var scene_arena = Arena();
 
   // Base archetype allocated in explicit arena
   var base_goblin = EntityNode {
@@ -206,8 +220,28 @@ func demo_prototypal_arenas() {
   // are deallocated deterministically in bulk without reference-cycle leaks.
 }
 
+// Node in a directed acyclic graph (DAG).
+struct SharedDagNode {
+  let label: String;
+  let parent: WeakRef<SharedDagNode>?;
+}
+
+func demo_shared_dag() {
+  print("=== 4. Read-Only SharedRef / WeakRef DAG ===");
+  let root = SharedRef(SharedDagNode { label = "DagRoot", parent = none });
+  let leaf = SharedRef(SharedDagNode {
+    label = "DagLeaf",
+    parent = root.downgrade(),
+  });
+  let shared_alias = leaf.share();
+  if let p ?= shared_alias.parent; let up ?= p.upgrade() {
+    print("Leaf '" + shared_alias.label + "' upgraded parent: " + up.label);
+  }
+}
+
 func main() {
   demo_cyclic_graph();
   demo_doubly_linked_and_tree();
   demo_prototypal_arenas();
+  demo_shared_dag();
 }

@@ -268,6 +268,7 @@ class CollectionChecker:
           checker.error(".push() requires exactly 1 argument (element).")
           return elem_type
         arg_t = checker.visit(node.arguments[0].expr)
+        checker._check_value_ownership_transfer(node.arguments[0].expr, arg_t, node=node)
         if not arg_t.is_compatible(elem_type):
           checker.error(f"Argument type mismatch in .push(). Expected '{elem_type}', got '{arg_t}'.")
         return elem_type
@@ -298,6 +299,7 @@ class CollectionChecker:
         if not idx_t.is_compatible(PrimitiveType("int")):
           checker.error(f"Argument 'index' in .insert() must be 'int', got '{idx_t}'.")
         elem_t = checker.visit(element_arg.expr)
+        checker._check_value_ownership_transfer(element_arg.expr, elem_t, node=node)
         if not elem_t.is_compatible(elem_type):
           checker.error(f"Argument type mismatch in .insert(). Expected '{elem_type}', got '{elem_t}'.")
         return elem_type
@@ -474,10 +476,12 @@ class CollectionChecker:
         return v_type
 
       k_arg_type = checker.visit(key_arg.expr)
+      checker._check_value_ownership_transfer(key_arg.expr, k_arg_type, node=node)
       if not k_arg_type.is_compatible(k_type):
         checker.error(f"Argument 'key' in .insert() must be '{k_type}', got '{k_arg_type}'.")
 
       v_arg_type = checker.visit(val_arg.expr)
+      checker._check_value_ownership_transfer(val_arg.expr, v_arg_type, node=node)
       if not v_arg_type.is_compatible(v_type):
         checker.error(f"Argument 'value' in .insert() must be '{v_type}', got '{v_arg_type}'.")
 

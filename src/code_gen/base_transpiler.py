@@ -198,12 +198,79 @@ class BaseTranspiler(ABC):
         st = self.variable_types[expr.name]
         if st in self.structs_with_destructor:
           return st
+    elif isinstance(expr, TernaryExprNode):
+      return (
+          self._expr_destructible_struct(expr.true_expr, return_index=return_index)
+          or self._expr_destructible_struct(expr.false_expr, return_index=return_index)
+      )
+    elif isinstance(expr, MatchExprNode):
+      for case in expr.cases:
+        if isinstance(case.body, BlockNode):
+          for stmt in case.body.statements:
+            if isinstance(stmt, YieldNode):
+              y_exprs = getattr(stmt, "expressions", None) or ([stmt.expr] if getattr(stmt, "expr", None) else [])
+              if return_index < len(y_exprs):
+                st = self._expr_destructible_struct(y_exprs[return_index])
+                if st:
+                  return st
+        else:
+          st = self._expr_destructible_struct(case.body, return_index=return_index)
+          if st:
+            return st
     inferred = getattr(expr, "inferred_type", None)
     if hasattr(inferred, "base_type"):
       inferred = inferred.base_type
     if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
       return inferred.name
     return None
+
+  @staticmethod
+  def _is_owned_unwrap_expr(expr: Any) -> bool:
+    """Returns True if an optional unwrap expression owns the unwrapped value."""
+    if isinstance(expr, MoveNode):
+      return True
+    if isinstance(expr, (IdentifierNode, MemberAccessNode, IndexExprNode)):
+      return False
+    return True
+
+  def _is_active_destructible_var(self, m_name: str) -> bool:
+    """Returns True if *m_name* is tracked in an active destructor stack frame."""
+    return any(m_name in frame for frame in self.destructor_stack)
+
+  def _record_move(self, m_name: str) -> None:
+    """Tracks unconditional vs conditional move of *m_name* for RAII drop flags."""
+    branch_depth = getattr(self, "_branch_depth", 0)
+    var_depths = getattr(self, "_var_branch_depth", None)
+    decl_depth = var_depths.get(m_name, branch_depth) if var_depths is not None else branch_depth
+    if decl_depth < branch_depth:
+      pending = getattr(self, "_pending_null_vars", None)
+      if pending is not None and m_name not in pending:
+        pending.append(m_name)
+    else:
+      self.moved_vars.add(m_name)
+
+  def _drain_pending_null_vars(
+      self,
+      null_literal: str,
+      exclude: Optional[Set[str]] = None,
+  ) -> None:
+    """Emits post-statement drop-flag clearing (`v = None` / `v = nil`) for conditional moves."""
+    pending = getattr(self, "_pending_null_vars", None)
+    if not pending:
+      return
+    for var_name in list(pending):
+      if not exclude or var_name not in exclude:
+        self.newline()
+        self.emit(f"{var_name} = {null_literal}")
+    pending.clear()
+
+  def _visit_in_branch(self, node: ASTNode) -> None:
+    """Visits *node* inside a conditional branch depth for move drop-flag tracking."""
+    self._branch_depth = getattr(self, "_branch_depth", 0) + 1
+    try:
+      self.visit(node)
+    finally:
+      self._branch_depth -= 1
 
   def _emit_loop_destructors(self) -> None:
     """Emits `_sapphire_del` calls for destructible variables in the active loop scopes."""
@@ -246,10 +313,18 @@ class BaseTranspiler(ABC):
           self.structs_with_destructor.add(s_name)
           break
 
-    for decl in program.declarations:
-      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
-        if any(p in self.structs_with_destructor for p in decl.parent_names):
-          self.structs_with_destructor.add(decl.name)
+    changed = True
+    while changed:
+      changed = False
+      for decl in program.declarations:
+        if (
+            isinstance(decl, StructDeclNode)
+            and getattr(decl, "parent_names", None)
+            and decl.name not in self.structs_with_destructor
+        ):
+          if any(p in self.structs_with_destructor for p in decl.parent_names):
+            self.structs_with_destructor.add(decl.name)
+            changed = True
 
   # ------------------------------------------------------------------
   # Declaration visitors

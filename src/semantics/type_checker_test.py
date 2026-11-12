@@ -13,7 +13,8 @@ from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
 from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode, YieldNode, BasicTypeNode
 from src.semantics.type_checker import TypeChecker, SemanticError
-from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
+from src.semantics.struct_layout_pass import StructLayoutPass
+from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType, StructType, StructField
 
 
 
@@ -5723,6 +5724,307 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("SharedRef")), SharedRefType)
     self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("WeakRef")), WeakRefType)
     self.assertFalse(checker._expr_references_self(None))
+
+  # ==========================================
+  # Phase 2 Memory Safety Tests
+  # ==========================================
+
+  def test_unboxed_direct_and_mutual_struct_recursion_rejected(self):
+    """Verifies direct, fixed-array, mutual, and generic unboxed struct recursion are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct BadNode {
+        var val: int;
+        var next: BadNode?;
+      }
+      """)
+    self.assertIn("Recursive struct 'BadNode' has infinite inline size via field 'next'", str(ctx.exception))
+
+    checker = TypeChecker()
+    fixed_st = StructType("FixedRec", {})
+    fixed_st.fields["children"] = StructField(
+        "children", ArrayType(fixed_st, size=2, is_fixed_size=True), is_mutable=True
+    )
+    StructLayoutPass.check_unboxed_recursion(checker, [fixed_st])
+    self.assertTrue(
+        any(
+            "Recursive struct 'FixedRec' has infinite inline size via field 'children'" in e
+            for e in checker.errors
+        )
+    )
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      struct LeftNode {
+        var right: RightNode;
+      }
+      struct RightNode {
+        var left: LeftNode?;
+      }
+      """)
+    self.assertIn("has infinite inline size", str(ctx3.exception))
+
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check("""
+      struct GenRec<T> {
+        var val: T;
+        var next: GenRec<T>?;
+      }
+      func test() {
+        let g: GenRec<int>? = none;
+      }
+      """)
+    self.assertIn("Recursive struct 'GenRec__int' has infinite inline size via field 'next'", str(ctx4.exception))
+
+  def test_boxed_dynamic_and_proto_recursive_types_allowed(self):
+    """Verifies Ref, SharedRef, WeakRef, dynamic arrays/maps, and proto break layout recursion."""
+    self._check("""
+    struct HeapTree {
+      var val: int;
+      var left: Ref<HeapTree>?;
+      var shared_parent: SharedRef<HeapTree>?;
+      var weak_parent: WeakRef<HeapTree>?;
+      var children: [HeapTree] = [];
+      var named: [String: HeapTree] = {};
+    }
+    proto ArenaNode {
+      var id: int;
+      var next: ArenaNode?;
+    }
+    func test() {
+      var a = Arena();
+      let n = ArenaNode { id = 1, next = none } in a;
+      let t = HeapTree {
+        val = 1,
+        left = none,
+        shared_parent = none,
+        weak_parent = none,
+      };
+    }
+    """)
+
+  def test_move_only_types_require_explicit_move(self):
+    """Verifies __del__ structs, wrapper structs, Arena, and Coroutine require explicit move."""
+    # 1. __del__ struct copy rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Handle {
+        var fd: int;
+      }
+      impl Handle {
+        func __del__() {}
+      }
+      func test() {
+        let h1 = Handle { fd = 1 };
+        let h2 = h1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Handle'; use explicit 'move h1'", str(ctx.exception))
+
+    # 2. Struct containing move-only field is transitively move-only
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Handle {
+        var fd: int;
+      }
+      impl Handle {
+        func __del__() {}
+      }
+      struct Envelope {
+        var h: Handle;
+      }
+      func test() {
+        let e1 = Envelope { h = Handle { fd = 1 } };
+        let e2 = e1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Envelope'; use explicit 'move e1'", str(ctx2.exception))
+
+    # 3. Arena copy rejected
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func test() {
+        var a1 = Arena();
+        var a2 = a1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Arena'; use explicit 'move a1'", str(ctx3.exception))
+
+    # 4. Coroutine copy rejected, explicit move allowed
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check("""
+      func gen(): Coroutine<int> {
+        yield 1;
+      }
+      func test() {
+        var c1 = gen();
+        var c2 = c1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Coroutine<int>'; use explicit 'move c1'", str(ctx4.exception))
+
+    self._check("""
+    func gen(): Coroutine<int> {
+      yield 1;
+    }
+    func test() {
+      var c1 = gen();
+      var c2 = move c1;
+    }
+    """)
+
+  def test_partial_moves_and_borrowed_unwraps_rejected(self):
+    """Verifies partial moves out of fields/indices and moves out of borrowed unwraps are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      struct Holder { var h: Handle; }
+      func test() {
+        let holder = Holder { h = Handle { fd = 1 } };
+        let stolen = holder.h;
+      }
+      """)
+    self.assertIn("Cannot copy or partially move move-only type 'Handle' out of a field or collection index.", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      func test() {
+        var arr: [Handle] = [Handle { fd = 1 }];
+        let stolen = move arr[0];
+      }
+      """)
+    self.assertIn("Cannot index into moved variable 'arr'.", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      func test() {
+        let opt: Handle? = Handle { fd = 1 };
+        if let inner ?= opt {
+          let moved_out = move inner;
+        }
+      }
+      """)
+    self.assertIn("Cannot move out of borrowed unwrap binding 'inner'.", str(ctx3.exception))
+
+  def test_shared_ref_requires_explicit_share_or_move(self):
+    """Verifies SharedRef lvalues cannot be copied implicitly without .share() or move."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Node { var v: int; }
+      func test() {
+        let s1 = SharedRef(Node { v = 1 });
+        let s2 = s1;
+      }
+      """)
+    self.assertIn("Cannot implicitly copy 'SharedRef' variable 's1'; call 's1.share()' or use 'move s1'.", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Node { var v: int; }
+      func test() {
+        let s1 = SharedRef(Node { v = 1 });
+        var arr: [SharedRef<Node>] = [];
+        arr.push(s1);
+      }
+      """)
+    self.assertIn("Cannot implicitly copy 'SharedRef' variable 's1'", str(ctx2.exception))
+
+    self._check("""
+    struct Node { var v: int; }
+    func test() {
+      let s1 = SharedRef(Node { v = 1 });
+      var arr: [SharedRef<Node>] = [s1.share()];
+      arr.push(move s1);
+    }
+    """)
+
+  def test_destructor_self_escape_rejected_while_helper_methods_allowed(self):
+    """Verifies self cannot escape __del__() via globals, args, or closures, while self.close() works."""
+    self._check("""
+    struct FileHandle {
+      var is_open: bool;
+    }
+    impl FileHandle {
+      var func close() {
+        self.is_open = false;
+      }
+      func __del__() {
+        if self.is_open {
+          self.close();
+        }
+      }
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Zombie { var id: int; }
+      func inspect(z: Zombie) {}
+      impl Zombie {
+        func __del__() {
+          inspect(self);
+        }
+      }
+      """)
+    self.assertIn("Cannot pass 'self' as an argument from destructor '__del__'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Zombie { var id: int; }
+      var ESCAPED: Zombie? = none;
+      impl Zombie {
+        func __del__() {
+          ESCAPED = self;
+        }
+      }
+      """)
+    self.assertIn("Cannot allow 'self' to escape from destructor '__del__'.", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      struct Zombie { var id: int; }
+      impl Zombie {
+        func __del__() {
+          let fn = () -> self.id;
+        }
+      }
+      """)
+    self.assertIn("Cannot capture 'self' in a closure inside destructor '__del__'.", str(ctx3.exception))
+
+  def test_match_arms_move_union_tracking(self):
+    """Verifies mutually exclusive match arms can move the same variable and union-invalidate it."""
+    self._check("""
+    struct Handle { var id: int; }
+    impl Handle { func __del__() {} }
+    func pick(code: int): Handle {
+      let h = Handle { id = 10 };
+      let chosen = match code {
+        1 -> move h,
+        ... -> move h,
+      };
+      return move chosen;
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Handle { var id: int; }
+      impl Handle { func __del__() {} }
+      func bad_pick(code: int): int {
+        let h = Handle { id = 10 };
+        let chosen = match code {
+          1 -> move h,
+          ... -> Handle { id = 20 },
+        };
+        return h.id + chosen.id;
+      }
+      """)
+    self.assertIn("Use of moved variable 'h'.", str(ctx.exception))
 
 
 if __name__ == "__main__":

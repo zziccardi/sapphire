@@ -62,6 +62,7 @@ class TypeChecker:
     self.current_function: Optional[FunctionType] = None
     self.current_struct: Optional[StructType] = None
     self.is_in_init: bool = False
+    self.is_in_del: bool = False
     self.is_in_clone_init: bool = False
     self.initialized_fields: set = set()
     self.expected_type: Optional[Type] = None
@@ -78,6 +79,115 @@ class TypeChecker:
     elif isinstance(target, MemberAccessNode):
       return self._get_target_symbol(target.receiver)
     return None
+
+  def _ast_references_self(self, ast_node: Any) -> bool:
+    """Returns True if *ast_node* contains an IdentifierNode('self')."""
+    if ast_node is None:
+      return False
+    if isinstance(ast_node, IdentifierNode) and ast_node.name == "self":
+      return True
+    if isinstance(ast_node, list):
+      return any(self._ast_references_self(item) for item in ast_node)
+    if isinstance(ast_node, ASTNode):
+      for val in ast_node.__dict__.values():
+        if isinstance(val, (ASTNode, list)) and self._ast_references_self(val):
+          return True
+    return False
+
+  def _check_value_ownership_transfer(
+      self,
+      expr_node: Optional[ASTNode],
+      expr_type: Type,
+      node: Optional[ASTNode] = None,
+  ) -> None:
+    """Enforces explicit 'move' on move-only lvalues and '.share()'/'move' on SharedRef lvalues."""
+    if expr_node is None:
+      return
+    diag_node = node or expr_node
+
+    if self.is_in_del and isinstance(expr_node, IdentifierNode) and expr_node.name == "self":
+      self.error("Cannot allow 'self' to escape from destructor '__del__'.", node=diag_node)
+      return
+
+    if isinstance(expr_node, TernaryExprNode):
+      self._check_value_ownership_transfer(expr_node.true_expr, expr_type, node=diag_node)
+      self._check_value_ownership_transfer(expr_node.false_expr, expr_type, node=diag_node)
+      return
+
+    if isinstance(expr_node, BinaryOpNode) and expr_node.op == "??":
+      self._check_value_ownership_transfer(expr_node.left, expr_type, node=diag_node)
+      self._check_value_ownership_transfer(expr_node.right, expr_type, node=diag_node)
+      return
+
+    if expr_type.is_move_only_type(self.symbol_table):
+      if isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
+        self.error(
+            f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.",
+            node=diag_node,
+        )
+      elif isinstance(expr_node, (MemberAccessNode, IndexExprNode)):
+        self.error(
+            f"Cannot copy or partially move move-only type '{expr_type}' out of a field or collection index.",
+            node=diag_node,
+        )
+    elif expr_type.is_shared_ref_lvalue_type():
+      if isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
+        self.error(
+            f"Cannot implicitly copy 'SharedRef' variable '{expr_node.name}'; "
+            f"call '{expr_node.name}.share()' or use 'move {expr_node.name}'.",
+            node=diag_node,
+        )
+      elif isinstance(expr_node, (MemberAccessNode, IndexExprNode)):
+        self.error(
+            "Cannot implicitly copy 'SharedRef' from a field or collection index; call '.share()' explicitly.",
+            node=diag_node,
+        )
+
+  def _check_return_ownership_transfer(
+      self,
+      ret_expr: Optional[ASTNode],
+      ret_type: Type,
+      node: Optional[ASTNode] = None,
+  ) -> None:
+    """Validates ownership transfer on return expressions (allowing local RVO)."""
+    if ret_expr is None:
+      return
+    diag_node = node or ret_expr
+    if isinstance(ret_expr, TernaryExprNode):
+      self._check_return_ownership_transfer(ret_expr.true_expr, ret_type, node=diag_node)
+      self._check_return_ownership_transfer(ret_expr.false_expr, ret_type, node=diag_node)
+      return
+    if isinstance(ret_expr, BinaryOpNode) and ret_expr.op == "??":
+      self._check_return_ownership_transfer(ret_expr.left, ret_type, node=diag_node)
+      self._check_return_ownership_transfer(ret_expr.right, ret_type, node=diag_node)
+      return
+    if isinstance(ret_expr, IdentifierNode) and not isinstance(ret_expr, MoveNode):
+      sym = self.symbol_table.lookup(ret_expr.name)
+      is_non_owned = (
+          ret_expr.name == "self"
+          or getattr(sym, "is_parameter", False)
+          or getattr(sym, "is_borrowed_unwrap", False)
+          or (
+              isinstance(sym, VariableSymbol)
+              and sym.scope_defined is not None
+              and sym.scope_defined.parent is None
+          )
+      )
+      if not is_non_owned:
+        return
+      if ret_type.is_move_only_type(self.symbol_table):
+        self.error(
+            f"Cannot return borrowed or global move-only value '{ret_expr.name}' of type '{ret_type}'.",
+            node=diag_node,
+        )
+      elif ret_type.is_shared_ref_lvalue_type():
+        self.error(
+            f"Cannot implicitly copy 'SharedRef' variable '{ret_expr.name}' on return; "
+            f"call '{ret_expr.name}.share()'.",
+            node=diag_node,
+        )
+      return
+    self._check_value_ownership_transfer(ret_expr, ret_type, node=diag_node)
 
   def error(self, message: str, node: Optional[ASTNode] = None) -> None:
     """Logs a semantic error."""
@@ -538,10 +648,14 @@ class TypeChecker:
     if func_decl.base_initializers and func_decl.name != "__init__":
       self.error("Base initializers are only permitted on constructor '__init__'.", node=func_decl)
 
-    # Setup constructor checking
+    # Setup constructor / destructor checking
     old_in_init = self.is_in_init
+    old_in_del = self.is_in_del
     old_fields = self.initialized_fields
     parents_initialized = set()
+
+    if func_decl.name == "__del__":
+      self.is_in_del = True
 
     if func_decl.name == "__init__":
       self.is_in_init = True
@@ -617,8 +731,9 @@ class TypeChecker:
             and not f_obj.has_explicit_default):
           self.error(f"Constructor '__init__' failed to initialize non-optional field '{f_name}'.")
 
-    # Restore constructor contexts
+    # Restore constructor / destructor contexts
     self.is_in_init = old_in_init
+    self.is_in_del = old_in_del
     self.initialized_fields = old_fields
     self.current_function = None
     self.moved_symbols = old_moved_symbols
@@ -738,8 +853,7 @@ class TypeChecker:
       self.symbol_table.define(name, sym)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
-      if isinstance(expr_type, RefType) and isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
-        self.error(f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.", node=node)
+      self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       ArenaChecker.validate_arena_escape(self.symbol_table, sym, expr_node, lambda msg: self.error(msg))
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
@@ -764,8 +878,7 @@ class TypeChecker:
         self.error(f"Cannot assign type '{expr_type}' to target of type '{target_type}'.", node=node)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
-      if isinstance(expr_type, RefType) and isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
-        self.error(f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.", node=node)
+      self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       target_sym = self._get_target_symbol(target)
       if target_sym:
         ArenaChecker.validate_arena_escape(self.symbol_table, target_sym, expr_node, lambda msg: self.error(msg, node=node))
@@ -913,6 +1026,10 @@ class TypeChecker:
     for idx, (act, exp) in enumerate(zip(actual_ret_types, expected_ret_types)):
       if not act.is_compatible(exp):
         self.error(f"Cannot return value of type '{act}' for return value #{idx + 1} (expected '{exp}').")
+      ret_expr_node = (
+          node.expressions[0] if len(node.expressions) == 1 else node.expressions[idx]
+      )
+      self._check_return_ownership_transfer(ret_expr_node, act, node=node)
 
     # Check return escaping arena reference
     for ret_expr in node.expressions:
@@ -925,12 +1042,12 @@ class TypeChecker:
 
   def visit_YieldNode(self, node: YieldNode) -> None:
     if self._match_stack:
-      if getattr(node, "expressions", None):
-        actual_types = [self.visit(e) for e in node.expressions]
-      elif getattr(node, "expr", None):  # pragma: no cover
-        actual_types = [self.visit(node.expr)]  # pragma: no cover
-      else:
-        actual_types = []
+      expr_nodes = getattr(node, "expressions", None) or (
+          [node.expr] if getattr(node, "expr", None) else []
+      )
+      actual_types = [self.visit(e) for e in expr_nodes]
+      for e_node, a_type in zip(expr_nodes, actual_types):
+        self._check_value_ownership_transfer(e_node, a_type, node=node)
 
       if len(actual_types) == 1:
         self._match_stack[-1].append(actual_types[0])
@@ -954,12 +1071,12 @@ class TypeChecker:
     node.is_coroutine_yield = True
     expected_yield = coro_type.yield_type
 
-    if getattr(node, "expressions", None):
-      actual_types = [self.visit(e) for e in node.expressions]
-    elif getattr(node, "expr", None):
-      actual_types = [self.visit(node.expr)]
-    else:
-      actual_types = []
+    expr_nodes = getattr(node, "expressions", None) or (
+        [node.expr] if getattr(node, "expr", None) else []
+    )
+    actual_types = [self.visit(e) for e in expr_nodes]
+    for e_node, a_type in zip(expr_nodes, actual_types):
+      self._check_value_ownership_transfer(e_node, a_type, node=node)
 
     if isinstance(expected_yield, NoneType):
       if len(actual_types) > 1:
@@ -991,8 +1108,11 @@ class TypeChecker:
     has_unyielded_block = False
 
     case_types: List[Type] = []
+    pre_match_moved = set(self.moved_symbols)
+    union_moved: Set[VariableSymbol] = set(pre_match_moved)
 
     for case in node.cases:
+      self.moved_symbols = set(pre_match_moved)
       if isinstance(case.pattern, EllipsisPatternNode):
         has_ellipsis = True
       elif isinstance(subject_type, EnumType):
@@ -1058,7 +1178,12 @@ class TypeChecker:
         else:
           self._match_stack.pop()
           expr_type = self.visit(case.body)
+          self._check_value_ownership_transfer(case.body, expr_type, node=case.body)
           case_types.append(expr_type)
+      union_moved |= self.moved_symbols
+
+    if node.cases:
+      self.moved_symbols = union_moved
 
     if not has_ellipsis:
       if isinstance(subject_type, EnumType):
@@ -1105,6 +1230,7 @@ class TypeChecker:
       has_unwrap = False
       for binding in node.bindings:
         expr_type = self.visit(binding.expr)
+        is_borrowed_unwrap = False
         if binding.is_unwrap:
           has_unwrap = True
           if not isinstance(expr_type, OptionalType):
@@ -1112,19 +1238,23 @@ class TypeChecker:
             unwrapped_type = expr_type
           else:
             unwrapped_type = expr_type.base_type
+          if isinstance(binding.expr, (IdentifierNode, MemberAccessNode, IndexExprNode)) and not isinstance(binding.expr, MoveNode):
+            is_borrowed_unwrap = True
         else:
           unwrapped_type = expr_type
+          self._check_value_ownership_transfer(binding.expr, expr_type, node=binding.expr)
 
         let_names = getattr(binding, "let_names", [binding.let_name])
         if len(let_names) > 1:
           elem_t = unwrapped_type.element_type if isinstance(unwrapped_type, ArrayType) else unwrapped_type
           for name in let_names:
-            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+            sym = VariableSymbol(name, elem_t, is_mutable=binding.is_mutable)
+            sym.is_borrowed_unwrap = is_borrowed_unwrap
+            self.symbol_table.define(name, sym)
         else:
-          self.symbol_table.define(
-              binding.let_name,
-              VariableSymbol(binding.let_name, unwrapped_type, is_mutable=binding.is_mutable)
-          )
+          sym = VariableSymbol(binding.let_name, unwrapped_type, is_mutable=binding.is_mutable)
+          sym.is_borrowed_unwrap = is_borrowed_unwrap
+          self.symbol_table.define(binding.let_name, sym)
 
       if node.condition:
         cond_type = self.visit(node.condition)
@@ -1496,6 +1626,7 @@ class TypeChecker:
         return RefType(PrimitiveType("none"))
       arg_expr = node.arguments[0].expr
       arg_type = self.visit(arg_expr)
+      self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
       node.is_ref_constructor = True
       if node.type_args:
         expected_inner = self._resolve_type_node(node.type_args[0])
@@ -1512,10 +1643,9 @@ class TypeChecker:
         return SharedRefType(PrimitiveType("none"))
       arg_expr = node.arguments[0].expr
       arg_type = self.visit(arg_expr)
+      self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
       node.is_shared_ref_constructor = True
       if isinstance(arg_type, RefType):
-        if isinstance(arg_expr, IdentifierNode) and not isinstance(arg_expr, MoveNode):
-          self.error(f"Cannot copy move-only type '{arg_type}'; use explicit 'move {arg_expr.name}' to transfer ownership.", node=node)
         inner_t = arg_type.inner_type
       else:
         inner_t = arg_type
@@ -1611,6 +1741,12 @@ class TypeChecker:
       arg_type = self.visit(arg.expr)
       self.expected_type = old_expected
 
+      if self.is_in_del and isinstance(arg.expr, IdentifierNode) and arg.expr.name == "self":
+        self.error(
+            "Cannot pass 'self' as an argument from destructor '__del__'; 'self' cannot escape destruction.",
+            node=arg.expr,
+        )
+
       is_test_assert = getattr(signature, "is_testing_assertion", False)
       if param_idx < len(expected_param_types):
         param_type = expected_param_types[param_idx]
@@ -1639,6 +1775,8 @@ class TypeChecker:
         if isinstance(param_type, RefType):
           if isinstance(arg.expr, IdentifierNode) and not isinstance(arg.expr, MoveNode):
             self.error(f"Cannot pass move-only type '{arg_type}' by value; use explicit 'move {arg.expr.name}' to transfer ownership.")
+          elif isinstance(arg.expr, (MemberAccessNode, IndexExprNode)):
+            self.error(f"Cannot copy or partially move move-only type '{arg_type}' out of a field or collection index.")
 
         if not is_test_assert and not effective_arg_type.is_compatible(param_type):
           self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
@@ -1856,6 +1994,12 @@ class TypeChecker:
     if getattr(sym, "is_parameter", False):
       self.error(f"Cannot move out of borrowed parameter '{node.name}'.", node=node)
       return sym.symbol_type
+    if getattr(sym, "is_borrowed_unwrap", False):
+      self.error(f"Cannot move out of borrowed unwrap binding '{node.name}'.", node=node)
+      return sym.symbol_type
+    if self.current_function is not None and sym.scope_defined is not None and sym.scope_defined.parent is None:
+      self.error(f"Cannot move out of module-level global variable '{node.name}'.", node=node)
+      return sym.symbol_type
     if sym in self.moved_symbols:
       self.error(f"Use of moved variable '{node.name}'.", node=node)
       return sym.symbol_type
@@ -1952,6 +2096,8 @@ class TypeChecker:
     return scan(body)
 
   def visit_LambdaNode(self, node: LambdaNode) -> Type:
+    if self.is_in_del and self._ast_references_self(node.body):
+      self.error("Cannot capture 'self' in a closure inside destructor '__del__'.", node=node)
     self.symbol_table.enter_scope()
     old_moved_symbols = set(self.moved_symbols)
     self.moved_symbols = set()
@@ -2020,6 +2166,8 @@ class TypeChecker:
       return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
+    for elem_node, etype in zip(node.elements, elem_types):
+      self._check_value_ownership_transfer(elem_node, etype, node=elem_node)
     if isinstance(self.expected_type, ArrayType):
       target_elem = self.expected_type.element_type
       for etype in elem_types:
@@ -2043,6 +2191,8 @@ class TypeChecker:
 
     first_key_type = self.visit(node.entries[0].key)
     first_val_type = self.visit(node.entries[0].value)
+    self._check_value_ownership_transfer(node.entries[0].key, first_key_type, node=node.entries[0].key)
+    self._check_value_ownership_transfer(node.entries[0].value, first_val_type, node=node.entries[0].value)
 
     def is_valid_key_type(ktype: Type) -> bool:
       return (
@@ -2057,6 +2207,8 @@ class TypeChecker:
     for entry in node.entries[1:]:
       ktype = self.visit(entry.key)
       vtype = self.visit(entry.value)
+      self._check_value_ownership_transfer(entry.key, ktype, node=entry.key)
+      self._check_value_ownership_transfer(entry.value, vtype, node=entry.value)
 
       if not is_valid_key_type(ktype):
         self.error("Map key must be a string, int, or enum.")
@@ -2099,6 +2251,9 @@ class TypeChecker:
       self.error(f"Key '{key_val}' not found in map literal.")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> Type:
+    if isinstance(node.array, MoveNode):
+      self.error(f"Cannot index into moved variable '{node.array.name}'.", node=node)
+      return PrimitiveType("none")
     container_type = self.visit(node.array)
     index_type = self.visit(node.index)
 
@@ -2142,23 +2297,31 @@ class TypeChecker:
       if clause.binding:
         binding = clause.binding
         expr_t = self.visit(binding.expr)
+        is_borrowed_unwrap = False
         if binding.is_unwrap:
           if not isinstance(expr_t, OptionalType):
             self.error(f"Cannot unwrap non-optional type '{expr_t}' in guard clause.")
             base_t = expr_t
           else:
             base_t = expr_t.base_type
+          if isinstance(binding.expr, (IdentifierNode, MemberAccessNode, IndexExprNode)) and not isinstance(binding.expr, MoveNode):
+            is_borrowed_unwrap = True
         else:
           base_t = expr_t
+          self._check_value_ownership_transfer(binding.expr, expr_t, node=binding.expr)
 
         let_names = getattr(binding, "let_names", [binding.let_name])
         if len(let_names) > 1:
           elem_t = base_t.element_type if isinstance(base_t, ArrayType) else base_t
           for name in let_names:
-            self.symbol_table.define(name, VariableSymbol(name, elem_t, is_mutable=binding.is_mutable))
+            sym = VariableSymbol(name, elem_t, is_mutable=binding.is_mutable)
+            sym.is_borrowed_unwrap = is_borrowed_unwrap
+            self.symbol_table.define(name, sym)
         else:
           name = binding.let_name
-          self.symbol_table.define(name, VariableSymbol(name, base_t, is_mutable=binding.is_mutable))
+          sym = VariableSymbol(name, base_t, is_mutable=binding.is_mutable)
+          sym.is_borrowed_unwrap = is_borrowed_unwrap
+          self.symbol_table.define(name, sym)
       elif clause.condition:
         cond_t = self.visit(clause.condition)
         if cond_t != PrimitiveType("bool"):
@@ -2236,6 +2399,7 @@ class TypeChecker:
         expr_type = self.visit(field_arg.expr)
       finally:
         self.expected_type = old_expected
+      self._check_value_ownership_transfer(field_arg.expr, expr_type, node=field_arg.expr)
 
       if not expr_type.is_compatible(expected_type):
         self.error(

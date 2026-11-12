@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set
 from src.parser.ast import *
 from src.semantics.symbol_table import MapType, RangeType
 from src.code_gen.source_map import SourceMapBuilder
-from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
+from src.code_gen.base_transpiler import BaseTranspiler, extract_type_name, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.transpiler_registry import TranspilerRegistry
 from src.code_gen.intrinsics import IntrinsicRegistry
 
@@ -718,6 +718,8 @@ end
 local _sapphire_del = function(obj)
   if obj == nil then return end
   if type(obj) == "table" and type(obj.__del__) == "function" then
+    if rawget(obj, "_sapphire_disposed_") then return end
+    rawset(obj, "_sapphire_disposed_", true)
     obj:__del__()
   elseif type(obj) == "userdata" then
     local meta = getmetatable(obj)
@@ -1080,6 +1082,9 @@ class LuaTranspiler(BaseTranspiler):
     self.loop_destructor_depth: List[int] = []
     self.structs_with_destructor: Set[str] = set()
     self.moved_vars: Set[str] = set()
+    self._branch_depth: int = 0
+    self._var_branch_depth: Dict[str, int] = {}
+    self._pending_null_vars: List[str] = []
     self.func_return_types: Dict[str, str] = {}
     self.method_return_types: Dict[str, str] = {}
     self.variable_types: Dict[str, str] = {}
@@ -1655,13 +1660,17 @@ class LuaTranspiler(BaseTranspiler):
     self.arena_stack.append([])
     self.destructor_stack.append([])
     if getattr(node, "_block_destructibles", None):
-      self.destructor_stack[-1].extend(node._block_destructibles)
+      for d_var in node._block_destructibles:
+        self.destructor_stack[-1].append(d_var)
+        self._var_branch_depth[d_var] = self._branch_depth
     if not node.statements:
       self.newline()
       self.emit("-- pass")
     else:
       for stmt in node.statements:
         self.visit(stmt)
+        if not isinstance(stmt, ReturnNode):
+          self._drain_pending_null_vars("nil")
 
     current_arenas = self.arena_stack.pop()
     current_destructors = self.destructor_stack.pop()
@@ -1676,6 +1685,7 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(f"{arena_name}:destroy()")
     for var_name in current_destructors:
       self.moved_vars.discard(var_name)
+      self._var_branch_depth.pop(var_name, None)
 
   def _lift_match_expressions(self, node: Any) -> None:
     """Finds all MatchExprNode in the AST subtree and emits their match statement blocks first."""
@@ -1712,7 +1722,7 @@ class LuaTranspiler(BaseTranspiler):
 
     for idx, name in enumerate(node.names):
       val_type = node.val_types[idx] if idx < len(node.val_types) else None
-      type_name = getattr(val_type, "name", None) if val_type else None
+      type_name = extract_type_name(val_type) if val_type else None
       st_name = None
       if type_name and type_name in self.structs_with_destructor:
         st_name = type_name
@@ -1728,6 +1738,7 @@ class LuaTranspiler(BaseTranspiler):
         self.variable_types[m_name] = st_name
         if self.destructor_stack:
           self.destructor_stack[-1].append(m_name)
+          self._var_branch_depth[m_name] = self._branch_depth
 
     self._lift_match_expressions(node.exprs)
 
@@ -1767,6 +1778,46 @@ class LuaTranspiler(BaseTranspiler):
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)
     self._lift_match_expressions(node.exprs)
+
+    if node.op == "=":
+      live_destructible_targets = [
+          self._mangle_name(t.name)
+          for t in node.targets
+          if isinstance(t, IdentifierNode)
+          and self._is_active_destructible_var(self._mangle_name(t.name))
+          and self._mangle_name(t.name) not in self.moved_vars
+      ]
+      if live_destructible_targets:
+        self._temp_reassign_count = getattr(self, "_temp_reassign_count", 0) + 1
+        tmp_names = [
+            f"_reassign_{self._temp_reassign_count}_{i + 1}"
+            for i in range(len(node.targets))
+        ]
+        self.newline()
+        self.emit("local " + ", ".join(tmp_names) + " = ")
+        for idx, expr in enumerate(node.exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        for m_t in live_destructible_targets:
+          if m_t not in self.moved_vars and m_t not in self._pending_null_vars:
+            self.newline()
+            self.emit(f"_sapphire_del({m_t})")
+        assigned_id_names = {
+            self._mangle_name(t.name)
+            for t in node.targets
+            if isinstance(t, IdentifierNode)
+        }
+        self._drain_pending_null_vars("nil", exclude=assigned_id_names)
+        self.newline()
+        for idx, target in enumerate(node.targets):
+          if isinstance(target, IdentifierNode):
+            self.moved_vars.discard(self._mangle_name(target.name))
+          if idx > 0:
+            self.emit(", ")
+          self.visit(target)
+        self.emit(" = " + ", ".join(tmp_names))
+        return
 
     self.newline()
     if node.op == "=":
@@ -1849,6 +1900,7 @@ class LuaTranspiler(BaseTranspiler):
 
       self.newline()
       self.emit("return " + ", ".join(ret_tmps))
+      self._pending_null_vars.clear()
       return
 
     for arena_name in all_active_arenas:
@@ -1869,6 +1921,7 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(expr)
     else:
       self.emit("return")
+    self._pending_null_vars.clear()
 
   def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
     if target_var == "":
@@ -1906,15 +1959,20 @@ class LuaTranspiler(BaseTranspiler):
           self.emit(" then")
 
       self.indent()
-      if isinstance(case.body, BlockNode):
-        self.visit(case.body)
-      else:
-        self.newline()
-        if target_var:
-          self.emit(f"{target_var} = ")
+      self._branch_depth += 1
+      try:
+        if isinstance(case.body, BlockNode):
           self.visit(case.body)
         else:
-          self.visit(case.body)  # pragma: no cover
+          self.newline()
+          if target_var:
+            self.emit(f"{target_var} = ")
+            self.visit(case.body)
+          else:
+            self.visit(case.body)  # pragma: no cover
+        self._drain_pending_null_vars("nil")
+      finally:
+        self._branch_depth -= 1
       self.dedent()
 
     self.newline()
@@ -1982,13 +2040,13 @@ class LuaTranspiler(BaseTranspiler):
       self.visit(node.condition)
       self.emit(" then")
       self.indent()
-      self.visit(node.then_block)
+      self._visit_in_branch(node.then_block)
       self.dedent()
       if node.else_block:
         self.newline()
         self.emit("else")
         self.indent()
-        self.visit(node.else_block)
+        self._visit_in_branch(node.else_block)
         self.dedent()
       self.newline()
       self.emit("end")
@@ -2035,13 +2093,13 @@ class LuaTranspiler(BaseTranspiler):
           self.emit(f"local {self._mangle_name(let_name)} = {val_var}")
 
         st_name = self._expr_destructible_struct(binding.expr)
-        if st_name:
+        if st_name and self._is_owned_unwrap_expr(binding.expr):
           for name in let_names:
             self.variable_types[name] = st_name
             if not hasattr(node.then_block, "_block_destructibles"):
               node.then_block._block_destructibles = []
             node.then_block._block_destructibles.append(name)
-        self.visit(node.then_block)
+        self._visit_in_branch(node.then_block)
         self.dedent()
       else:
         # Standard bind + condition
@@ -2059,14 +2117,14 @@ class LuaTranspiler(BaseTranspiler):
         self.visit(node.condition)
         self.emit(" then")
         self.indent()
-        self.visit(node.then_block)
+        self._visit_in_branch(node.then_block)
         self.dedent()
 
       if node.else_block:
         self.newline()
         self.emit("else")
         self.indent()
-        self.visit(node.else_block)
+        self._visit_in_branch(node.else_block)
         self.dedent()
 
       self.newline()
@@ -2092,7 +2150,7 @@ class LuaTranspiler(BaseTranspiler):
         let_name = b.let_name
         st_name = self._expr_destructible_struct(b.expr)
         current_destructibles = list(prior_destructibles)
-        if st_name:
+        if st_name and (not b.is_unwrap or self._is_owned_unwrap_expr(b.expr)):
           for name in let_names:
             self.variable_types[name] = st_name
             if not hasattr(node.then_block, "_block_destructibles"):
@@ -2144,7 +2202,7 @@ class LuaTranspiler(BaseTranspiler):
           self.indent()
           self.newline()
           self.emit(f"{cond_flag} = true")
-          self.visit(node.then_block)
+          self._visit_in_branch(node.then_block)
           self.dedent()
           if prior_destructibles:
             self.newline()
@@ -2159,7 +2217,7 @@ class LuaTranspiler(BaseTranspiler):
         else:
           self.newline()
           self.emit(f"{cond_flag} = true")
-          self.visit(node.then_block)
+          self._visit_in_branch(node.then_block)
 
     emit_binding_level(0, [])
 
@@ -2167,7 +2225,7 @@ class LuaTranspiler(BaseTranspiler):
       self.newline()
       self.emit(f"if not {cond_flag} then")
       self.indent()
-      self.visit(node.else_block)
+      self._visit_in_branch(node.else_block)
       self.dedent()
       self.newline()
       self.emit("end")
@@ -2488,7 +2546,7 @@ class LuaTranspiler(BaseTranspiler):
   def visit_MoveNode(self, node: MoveNode) -> None:
     m_name = self._mangle_name(node.name)
     name = self._identifier_map.get(m_name, m_name)
-    self.moved_vars.add(m_name)
+    self._record_move(m_name)
     self.emit(name)
 
   def visit_LambdaNode(self, node: LambdaNode) -> None:

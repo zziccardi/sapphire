@@ -34,3 +34,11 @@ func test_move_reinitialization(): int {
   let second = move p;
   return first.x + second.x;
 }
+
+@test
+func test_shared_ref_explicit_share_and_move(): int {
+  let s1 = SharedRef(Point { x = 12, y = 8 });
+  let s2 = s1.share();
+  let s3 = move s1;
+  return s2.x + s3.y;
+}

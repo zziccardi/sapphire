@@ -2036,7 +2036,29 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(r2)", py_code)
 
   def test_destructor_from_variable_assignment(self):
-    """Verifies that variables assigned from other destructible variables are tracked in Python."""
+    """Verifies that variables moved from destructible variables are tracked and conditional moves emit drop-flag resets in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test(cond: bool) {
+      let a = Resource { id = 1 };
+      if cond {
+        let b = move a;
+        consume(move b);
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("a = None", py_code)
+    self.assertIn("_sapphire_del(a)", py_code)
+
+  def test_destructor_live_var_reassignment(self):
+    """Verifies reassigning a live destructible var destroys the prior value first in Python."""
     code = """
     struct Resource {
       var id: int;
@@ -2045,13 +2067,14 @@ class TestPythonTranspiler(unittest.TestCase):
       func __del__() {}
     }
     func test() {
-      let a = Resource { id = 1 };
-      let b = a;
+      var a = Resource { id = 1 };
+      a = Resource { id = 2 };
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("_sapphire_del(a)", py_code)
-    self.assertIn("_sapphire_del(b)", py_code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertGreaterEqual(test_body.count("_sapphire_del(a)"), 2)
 
   def test_destructor_move_suppresses_source_destructor(self):
     """Verifies that moving a resource suppresses destructor on the source."""

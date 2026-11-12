@@ -1898,7 +1898,29 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(r2)", lua_code)
 
   def test_destructor_from_variable_assignment(self):
-    """Verifies that variables assigned from other destructible variables are tracked."""
+    """Verifies that variables moved from destructible variables are tracked and conditional moves emit drop-flag resets in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test(cond: bool) {
+      let a = Resource { id = 1 };
+      if cond {
+        let b = move a;
+        consume(move b);
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("a = nil", lua_code)
+    self.assertIn("_sapphire_del(a)", lua_code)
+
+  def test_destructor_live_var_reassignment(self):
+    """Verifies reassigning a live destructible var destroys the prior value first in Lua."""
     code = """
     struct Resource {
       var id: int;
@@ -1907,13 +1929,14 @@ class TestLuaTranspiler(unittest.TestCase):
       func __del__() {}
     }
     func test() {
-      let a = Resource { id = 1 };
-      let b = a;
+      var a = Resource { id = 1 };
+      a = Resource { id = 2 };
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("_sapphire_del(a)", lua_code)
-    self.assertIn("_sapphire_del(b)", lua_code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertGreaterEqual(test_body.count("_sapphire_del(a)"), 2)
 
   def test_destructor_move_suppresses_source_destructor(self):
     """Verifies moving a resource suppresses destructor on source in Lua."""

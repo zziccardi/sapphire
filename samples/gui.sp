@@ -28,7 +28,7 @@ struct Button {
   var label: String;
   var state: WidgetState = WidgetState.Default;
   var theme: ComponentTheme;
-  var parent: Button?;              // Optional parent widget reference
+  var parent: SharedRef<Button>?;   // Optional shared parent widget handle
   var on_click: ((String) -> ())?;  // Optional click listener callback
 }
 
@@ -75,7 +75,7 @@ impl Widget for Button {
 // Usage Demonstration
 // --------------------------------------------------
 
-let theme_arena = Arena();
+var theme_arena = Arena();
 
 // Base Light Theme
 var light_theme = ComponentTheme {
