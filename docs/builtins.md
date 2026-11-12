@@ -651,31 +651,51 @@ for role, title in user_roles {
 
 ### Arena
 
-`Arena` is Sapphire's built-in memory-management structure. It provides scope-bound allocation and deterministic RAII (Resource Acquisition Is Initialization) deallocation for prototype objects (`proto`) and standard structures (`struct`).
+`Arena` is Sapphire's built-in memory-management structure. It provides
+scope-bound allocation and deterministic RAII (Resource Acquisition Is
+Initialization) deallocation for prototype objects (`proto`) and standard
+structures (`struct`).
 
 #### Type syntax and constructor
 
 ```sapphire
-let my_arena = Arena();
+var my_arena = Arena();
 ```
 
-* **Constructor**: `Arena()` instantiates an explicit arena object bound to the current lexical scope.
+* **Constructor**: `Arena()` instantiates an explicit, move-only arena object
+  bound to the current lexical scope.
+* **Mutable `var` requirement**: Because allocating into an arena mutates its
+  internal bump pointer and destructor list, bindings, parameters, and struct
+  fields targeted with `in <arena>` must be declared with `var` (`var my_arena
+  = Arena();`, `var a: Arena`).
 
 #### Operations and capabilities
 
 | Mechanism / syntax | Description |
 | :--- | :--- |
-| **Targeted allocation (`in`)** | `let p = Point { x = 1.0, y = 2.0 } in my_arena;`<br>`let e = Enemy { hp = 100 } in my_arena;`<br>`let c = clone base_goblin in my_arena;`<br>Directs object memory allocation into an explicit `Arena` instance. Protos strictly require targeting an explicit `Arena`. |
-| **Scope-bound RAII teardown** | Explicit arenas have lexical lifecycles. When an `Arena` variable exits its enclosing block, the runtime automatically tears down the arena and deallocates all registered objects. |
-| **Clone arena propagation** | When cloning a prototype object (`clone base`), the cloned instance automatically inherits the arena of the original prototype unless explicitly overridden with `in`. |
+| **Targeted allocation (`in`)** | `let p = Point { x = 1.0, y = 2.0 } in my_arena;`<br>`let e = Enemy { hp = 100 } in my_arena;`<br>`let c = clone base_goblin in my_arena;`<br>Directs object memory allocation into an explicit mutable `Arena` instance. Protos strictly require targeting an explicit `Arena`. |
+| **Scope-bound RAII teardown** | Explicit arenas have lexical lifecycles. When an `Arena` variable exits its enclosing block (or is replaced), the runtime invokes `__del__()` in reverse allocation (LIFO) order on registered destructible objects and frees all arena memory. |
+| **Clone arena propagation** | When cloning a prototype object (`clone base`), the cloned instance automatically inherits the arena of the original prototype unless explicitly overridden with `in` (where `base`'s arena must outlive the target arena). |
 
 #### Static-escape rules
 
-To prevent dangling pointers and reference corruption following arena teardown, the Sapphire compiler statically enforces scope-bound escape rules:
+To prevent dangling pointers and reference corruption following arena teardown,
+the Sapphire compiler statically enforces scope-bound and LIFO escape rules:
 
-1. **Outer-scope variable escape**: A reference to an object allocated in an inner arena cannot be assigned to a variable (`let` or `var`) declared in an outer scope.
-2. **Function-return escape**: A function cannot return a reference to an object allocated in a local arena created within that function's scope.
-3. **Prohibited stack allocations**: `proto` instances cannot be allocated directly on the call stack without an arena.
+1. **Scope & LIFO outlives**: A reference to an object allocated in an arena
+   (or a struct/collection storing one) can only be assigned into a variable,
+   field, or collection whose owning `Arena` outlives the target—declared in an
+   ancestor scope or earlier in the same lexical scope.
+2. **Reassignment & move invalidation**: Reassigning (`a = Arena();`) or moving
+   (`move a`) a local `var` arena invalidates all local variables backed by the
+   prior arena generation. Struct `Arena` fields cannot be reassigned after
+   `__init__` and must precede dependent `proto` fields.
+3. **Function-return & sink escape**: A function cannot return a reference or
+   container backed by a local arena, nor store inner-arena objects into an
+   outer-scope `var` sink parameter.
+4. **Prohibited stack & heap escapes**: `proto` instances cannot be allocated
+   directly on the stack without an arena, and arena-backed values cannot be
+   wrapped inside `Ref(...)` or `SharedRef(...)`.
 
 #### Code example
 
@@ -691,8 +711,8 @@ proto Enemy {
 }
 
 func demo_arena() {
-  // Create an explicit arena
-  let level_arena = Arena();
+  // Create an explicit mutable arena
+  var level_arena = Arena();
 
   // Allocate a struct inside level_arena
   let spawn_pos = Point { x = 10.0, y = 20.0 } in level_arena;
@@ -710,7 +730,7 @@ func demo_arena() {
 
   {
     // Local temporary arena
-    let temp_arena = Arena();
+    var temp_arena = Arena();
     let temp_point = Point { x = 0.0, y = 0.0 } in temp_arena;
 
     // Leaving this block automatically tears down temp_arena and frees
@@ -724,15 +744,31 @@ func demo_arena() {
 
 ### Ref
 
-`Ref<T>` represents unique heap ownership of an underlying value or structure. It provides zero-overhead, move-only smart pointer semantics analogous to `Box<T>` in Rust or `std::unique_ptr<T>` in C++.
+`Ref<T>` represents unique heap ownership of an underlying value or structure.
+It provides zero-overhead, move-only smart pointer semantics analogous to
+`Box<T>` in Rust or `std::unique_ptr<T>` in C++.
 
 #### Key properties and semantics
 
-* **Move-only**: `Ref<T>` cannot be copied implicitly. Assignment to another variable or passing to a value parameter requires an explicit `move` operation (`let b = move a;`). Bare identifier assignment raises a compile-time `SemanticError`.
-* **Compile-time use-after-move enforcement**: Moving a `Ref<T>` variable transfers ownership and invalidates the source identifier in the enclosing scope.
-* **Auto-dereferencing**: Member accesses (`ref.field`) and method calls (`ref.method()`) automatically forward to the inner value without manual dereferencing operators.
-* **Transparent borrowing**: Passing `Ref<T>` into a function expecting the underlying type `T` (or `var T`) automatically borrows by reference without moving the variable.
-* **No arena escape check**: Unlike allocations within an `Arena`, `Ref<T>` can be returned freely from functions and stored across dynamic scopes.
+* **Move-only**: `Ref<T>` cannot be copied implicitly. Assignment to another
+  variable or passing by ownership requires an explicit `move` operation
+  (`let b = move a;`). Bare identifier assignment raises a compile-time
+  `SemanticError`.
+* **Compile-time use-after-move enforcement**: Moving a `Ref<T>` variable
+  transfers ownership and invalidates the source identifier in the enclosing
+  scope.
+* **Binding mutability**: Mutating fields or invoking `var func` methods
+  through `Ref<T>` requires the handle to be declared with `var` (`var r =
+  Ref(val)`); `let r = Ref(val)` exposes constant read-only access.
+* **Auto-dereferencing**: Member accesses (`ref.field`) and method calls
+  (`ref.method()`) automatically forward to the inner value without manual
+  dereferencing operators.
+* **Transparent borrowing**: Passing `Ref<T>` into a function expecting the
+  underlying type `T` (or `var T`) automatically borrows by reference without
+  moving the variable.
+* **Heap self-containment**: Unlike allocations within an `Arena`, `Ref<T>` can
+  be returned freely from functions and stored across dynamic scopes;
+  accordingly, `Ref(...)` rejects values holding lexical `Arena` dependencies.
 
 #### Syntax & usage
 
@@ -754,14 +790,31 @@ print(f"Value: {moved_head.value}");
 
 ### SharedRef & WeakRef
 
-`SharedRef<T>` and `WeakRef<T>` provide reference-counted heap allocation and non-owning observation for shared ownership topologies, cyclic graphs, and caches.
+`SharedRef<T>` and `WeakRef<T>` provide reference-counted, deeply read-only
+heap allocation and non-owning observation for shared DAGs, parent/observer
+links, and caches within an isolate.
 
 #### Key properties and semantics
 
-* **Co-allocated control block**: `SharedRef(expr)` allocates the reference-count control block (tracking strong and weak counts) and the payload contiguously in a single heap allocation.
-* **Promotion from `Ref<T>`**: `SharedRef(move unique_ref)` adopts an existing unique reference into a shared handle.
-* **Explicit duplication (`.share()`)**: Calling `.share()` increments the strong reference count and returns an additional shared handle. Moving a `SharedRef` (`move s`) transfers the handle without touching reference counts.
-* **Cycle breaking (`WeakRef<T>`)**: Calling `.downgrade()` on a `SharedRef<T>` returns a non-owning `WeakRef<T>`. Weak references do not keep the object alive. Calling `.upgrade()` on a `WeakRef<T>` returns an optional `SharedRef<T>?`, safely evaluating to `none` if all strong references have been destroyed.
+* **Co-allocated control block**: `SharedRef(expr)` allocates a thread-local
+  reference-count control block (tracking strong and weak counts) and the
+  payload contiguously in a single heap allocation.
+* **Deeply immutable**: `SharedRef<T>` grants strictly read-only access across
+  all dereference chains. Mutating fields, nested fields, or collections,
+  calling `var func` methods, or passing `SharedRef<T>` to `var` parameters is
+  rejected at compile time. Mutable cyclic graphs use `proto` or `struct`
+  instances inside a lexical `Arena`.
+* **Promotion from `Ref<T>`**: `SharedRef(move unique_ref)` freezes an existing
+  unique heap allocation into a shared read-only handle without copying.
+* **Explicit duplication (`.share()`)**: Calling `.share()` increments the
+  strong reference count and returns an additional shared handle. Assigning a
+  `SharedRef<T>` identifier without `.share()` or `move` is rejected at compile
+  time.
+* **Cycle breaking (`WeakRef<T>`)**: Calling `.downgrade()` on a `SharedRef<T>`
+  returns a non-owning `WeakRef<T>`. Weak references do not keep the object
+  alive. Calling `.upgrade()` on a `WeakRef<T>` returns an optional
+  `SharedRef<T>?`, safely evaluating to `none` if all strong references have
+  been destroyed.
 
 #### Available methods
 
@@ -914,17 +967,33 @@ func demo_math() {
 
 ### Coroutine
 
-The `Coroutine<T>` type represents a first-class, frame-steppable coroutine or generator sequence.
+The `Coroutine<T>` type represents a first-class, frame-steppable coroutine or
+generator sequence.
 
 #### Key properties and semantics
-* **Type parameters**: `Coroutine<T>` yields values of type `T`. For execution sequencing where no values are produced, use `Coroutine<void>` (or `Coroutine`).
+* **Type parameters**: `Coroutine<T>` yields values of type `T`. For execution
+  sequencing where no values are produced, use `Coroutine<void>` (or
+  `Coroutine`).
+* **Move-only & borrow-escape safety**: `Coroutine<T>` handles are move-only
+  (`var next = move co;`). Coroutines borrowing local stack arguments or
+  receivers can be stepped within those bindings' scope, but cannot return or
+  escape to outer/earlier LIFO scopes.
+* **Suspension RAII safety**: Move-only RAII bindings (`struct`s with
+  `__del__()`, `Arena`, `Ref<T>`) cannot remain live across a `yield` statement
+  (scoped `{ ... }` RAII blocks that complete between yields are permitted).
 * **Yield statements**:
-  * In `Coroutine<void>`, use bare `yield;` to pause execution until the next tick.
+  * In `Coroutine<void>`, use bare `yield;` to pause execution until the next
+    tick.
   * In `Coroutine<T>`, use `yield <expr>;` to yield a value of type `T`.
-* **Completion**: When a coroutine hits `return;` or reaches the end of its function body, it transitions to `is_done() == true`. Returning a value (e.g. `return 5;`) from a coroutine is prohibited at compile time.
+* **Completion**: When a coroutine hits `return;` or reaches the end of its
+  function body, it transitions to `is_done() == true`. Returning a value (e.g.
+  `return 5;`) from a coroutine is prohibited at compile time.
 * **Transpilation**:
-  * **Lua 5.1 / Love2D target**: Transpiles to native Lua asymmetric coroutines (`coroutine.create`, `coroutine.resume`, `coroutine.yield`) with zero allocation overhead.
-  * **Python target**: Transpiles to generator functions wrapped in a runtime `_SapphireCoroutine` class.
+  * **Lua 5.1 / Love2D target**: Transpiles to native Lua asymmetric coroutines
+    (`coroutine.create`, `coroutine.resume`, `coroutine.yield`) with zero
+    allocation overhead.
+  * **Python target**: Transpiles to generator functions wrapped in a runtime
+    `_SapphireCoroutine` class.
 
 #### Built-in methods
 

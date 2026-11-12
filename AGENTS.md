@@ -48,15 +48,33 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 ### 3.2 Memory Semantics & Variables
 * `let`: Immutable binding (constant).
 * `var`: Mutable binding.
+* **Storage & Ownership**:
+  * Plain data `struct`s, primitives, `enum`s, `String`, `Range`, `proto`
+    handles, and collections of Copy types copy (or CoW-share) on assignment.
+  * `Ref<T>`, `Arena`, `Coroutine<T>`, and any `struct` defining `__del__()`
+    (or holding move-only fields) are **move-only** and require explicit
+    `move <ident>`. `SharedRef<T>` lvalues require `.share()` or `move` and are
+    **deeply immutable**.
 * **Types & Passing**:
-  * Primitive scalar types (`int`, `float`, `bool`, `none`) are passed by **value**.
-  * Reference types (`String`, `Array`, `Map`, `Arena`, `Range`, and all `struct` and `proto` types) are passed by **constant reference** by default.
-  * Mutable parameters must be explicitly declared with `var` in signatures: `func update(var target: Entity)`. Callers cannot pass `let` constants to `var` parameters.
-* **Call-site reference exclusivity**: A reference cannot be passed mutably (`var`) if it is also passed (mutably or immutably) elsewhere in the same function call.
+  * Primitive scalar types (`int`, `float`, `bool`, `none`) are passed by
+    **value**.
+  * Reference types (`String`, `Array`, `Map`, `Arena`, `Range`, and all
+    `struct` and `proto` types) are passed by **constant reference** by
+    default.
+  * Mutable parameters must be explicitly declared with `var` in signatures:
+    `func update(var target: Entity)`. Callers cannot pass `let` constants or
+    `SharedRef<T>` handles to `var` parameters.
+* **Call-site exclusivity & iteration freeze**: A reference path (including
+  member chains and subscript projections `arr[i]`) cannot be passed mutably
+  (`var`) if any overlapping path is also referenced in the same call.
+  Collections are frozen against mutation during `for-in` loops and
+  `.map`/`.filter`/`.reduce`/`.sort` callbacks.
 
 ### 3.3 Optionals & Unwrapping
 * Optionals are denoted by `?` (e.g. `int?`, `Player?`). Null is represented as `none`.
-* **Safe Unwrapping**: `if let target ?= optional_val { ... }`.
+* **Safe Unwrapping**: `if let target ?= optional_val { ... }` (and in-place
+  mutable `if var target ?= optional_val { ... }`, which freezes `optional_val`
+  against reassignment inside the block).
 * **Init & Multi-Binding Statements**: Semicolon-delimited bindings in `if` and `guard`: `if let x ?= get_val(); let y ?= get_other(); x + y > 10 { ... }`. Conditions must use boolean operators (`&&`, `||`).
 * **Nil-coalescing**: `let val = opt ?? default_val;`.
 * **Optional chaining**: `let name = target?.get_name();`.
@@ -77,14 +95,22 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
     dst.write(src.read());
   }  // dst and src destroyed in LIFO order upon block exit
   ```
-* Struct destructors: Defined as `func __del__()` inside `impl` blocks. Automatically executed LIFO on scope exit or early return, elided upon RVO value returns.
+* Struct destructors: Defined as `func __del__()` inside `impl` blocks. Makes
+  the struct move-only; automatically executed LIFO on scope exit, early
+  return, or live `var` reassignment, elided upon RVO value returns, and
+  guarded by drop flags on conditional moves. `self` cannot escape `__del__()`.
 
 ### 3.5 Functions, Closures & Coroutines
 * Named parameters: `attack(bonus = 10, target = enemy)`.
 * Default parameters: `func attack(target: Entity, bonus: int = 0)`.
 * Multiple returns: `func pos(): float, float { return x, y; }` with destructuring `let x, y = pos();`.
-* Lambdas: Single parameter shorthand `numbers.map(x -> x * 2)` or multi-param `(a: int, b: int) -> int { return a + b; }`.
-* Coroutines: Declared with `Coroutine<T>` or `Coroutine<void>`. Use `yield;` or `yield <expr>;`. Stepped via `.step()`, `.is_done()`, `.reset()`.
+* Lambdas: Single parameter shorthand `numbers.map(x -> x * 2)` or multi-param
+  `(a: int, b: int) -> int { return a + b; }`. Escaping closures cannot capture
+  local stack borrows.
+* Coroutines: Declared with `Coroutine<T>` or `Coroutine<void>` (move-only;
+  cannot escape local stack borrows or hold live move-only RAII bindings across
+  `yield`). Use `yield;` or `yield <expr>;`. Stepped via `.step()`,
+  `.is_done()`, `.reset()`.
 
 ### 3.6 Structs & Implementation Blocks
 * Data definition (`struct`) and method implementation (`impl`) must be strictly separated:
@@ -105,13 +131,16 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
   }
   ```
 * `self` is implicit in non-static methods. Methods default to immutable `self`; mutating methods must be explicitly declared with `var func`.
+* Standard `struct`s must have finite inline size: direct or mutual unboxed
+  struct recursion (`struct Node { var next: Node?; }`) is prohibited; break
+  cycles with `Ref<T>`, `SharedRef<T>`, dynamic `[T]`, or `proto` in `Arena`.
 
 ### 3.7 Inheritance & Prototypal State Delegation
 * **Static Structural Inheritance**: `struct Child: Parent1, Parent2 { ... }`. Under the hood, this compiles to composition and forwarding. **No up-casting** is permitted.
 * **Traits**: `trait Actor { func update(); }` and `impl Actor for Cat { ... }`. Polymorphism is achieved via implicit trait subtyping and heterogeneous trait collections `[Actor]`.
 * **Prototypal Inheritance (`proto`)**:
   ```sapphire
-  let arena = Arena();
+  var arena = Arena();
   proto Goblin {
     var health: int;
     var damage: int;
@@ -121,7 +150,9 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
     self.health = 200; // Local shadowing
   };
   ```
-  * Requires allocation within an `Arena` via `in <arena>`.
+  * Requires allocation within a mutable `var` `Arena` via `in <arena>`.
+    Reassigning or moving a local `Arena` invalidates prior local dependents,
+    and scope + LIFO escape rules prevent dangling arena references.
   * Clones delegate state live to their prototype.
   * Mutating nested reference fields triggers **Copy-on-Write (CoW)** to protect the prototype.
   * Prototypal delegation is **data-only**. Methods remain statically dispatched.
