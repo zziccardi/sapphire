@@ -110,3 +110,63 @@ func test_borrowed_unwrap_single_drop(): int {
   }
   return DROP_SUM;
 }
+
+proto ArenaNode {
+  var id: int;
+}
+
+impl ArenaNode {
+  func __del__() {
+    DROP_SUM = DROP_SUM * 10 + self.id;
+  }
+}
+
+struct ArenaHolder {
+  var arena: Arena;
+  var node: ArenaNode?;
+  var res: Tracer;
+}
+
+impl ArenaHolder {
+  func __init__() {
+    self.arena = Arena();
+    self.node = ArenaNode { id = 8 } in self.arena;
+    self.res = Tracer { id = 6, slot = 0 };
+  }
+}
+
+@test
+func test_arena_lifo_proto_destructors(): int {
+  DROP_SUM = 0;
+  {
+    var a = Arena();
+    let n1 = ArenaNode { id = 2 } in a;
+    let n2 = clone n1 {
+      self.id = 5;
+    };
+    let n3 = ArenaNode { id = 7 } in a;
+  }
+  return DROP_SUM;
+}
+
+@test
+func test_arena_reassignment_destroys_old(): int {
+  DROP_SUM = 0;
+  {
+    var a = Arena();
+    let n1 = ArenaNode { id = 3 } in a;
+    a = Arena();
+    DROP_SUM = DROP_SUM * 10 + 9;
+    let n2 = ArenaNode { id = 4 } in a;
+  }
+  return DROP_SUM;
+}
+
+@test
+func test_struct_owned_arena_and_field_teardown(): int {
+  DROP_SUM = 0;
+  {
+    let holder = ArenaHolder();
+  }
+  return DROP_SUM;
+}

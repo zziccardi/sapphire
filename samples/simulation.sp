@@ -108,7 +108,7 @@ func execute_strike(attacker: Character, var defender: Character,
 
 // 6. Main simulation entry point
 func run_demo() {
-  let sim_arena = Arena();
+  var sim_arena = Arena();
 
   // A. Create a prototype archetype (Template)
   // This base_goblin represents a general archetype blueprint.

@@ -95,7 +95,7 @@ func execute_attack(attacker: Character, var defender: Character,
 
 // 5. Main entry demonstration function
 func run_demo() {
-  let game_arena = Arena();
+  var game_arena = Arena();
 
   // Variable declarations and type inference
   // Constant binding

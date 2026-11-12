@@ -5,7 +5,7 @@ and the symbol table used to resolve and validate identifiers during
 type-checking.
 """
 
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 # ==========================================
@@ -779,6 +779,7 @@ class Symbol:
     self.name = name
     self.symbol_type = symbol_type
     self.scope_defined: Optional["Scope"] = None
+    self.decl_order: int = 0
 
 
 class VariableSymbol(Symbol):
@@ -791,6 +792,8 @@ class VariableSymbol(Symbol):
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
     self.arena_dependency: Optional[str] = None
+    self.arena_generation: int = 0
+    self.arena_dep_records: List[Tuple[str, int]] = []
     self.is_moved: bool = False
 
 
@@ -859,9 +862,16 @@ class Scope:
     self.symbols: Dict[str, Symbol] = {}
     self.types: Dict[str, Type] = {}
     self.parent = parent
+    self._next_decl_order: int = 1
 
   def define(self, name: str, symbol: Symbol) -> None:
     """Defines a symbol in the current scope."""
+    existing = self.symbols.get(name)
+    if existing is not None and getattr(existing, "decl_order", 0) > 0:
+      symbol.decl_order = existing.decl_order
+    else:
+      symbol.decl_order = self._next_decl_order
+      self._next_decl_order += 1
     symbol.scope_defined = self
     self.symbols[name] = symbol
 

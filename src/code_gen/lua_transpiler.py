@@ -131,6 +131,7 @@ function _Coroutine:reset()
   self._done = false
 end
 
+local _sapphire_del
 local Arena = {}
 Arena.__index = Arena
 
@@ -160,7 +161,13 @@ function Arena:register(obj)
 end
 
 function Arena:destroy()
-  for _, obj in ipairs(self.objects) do
+  if rawget(self, "_sapphire_disposed_") then
+    return
+  end
+  rawset(self, "_sapphire_disposed_", true)
+  for i = #self.objects, 1, -1 do
+    local obj = self.objects[i]
+    _sapphire_del(obj)
     local meta = getmetatable(obj)
     if meta and meta.__shadow then
       for k in pairs(meta.__shadow) do
@@ -343,6 +350,12 @@ _clone_helper = function(obj, init_fn, arena)
     end
   else
     clone_obj = obj
+  end
+  if arena == nil and type(obj) == "table" then
+    local obj_meta = getmetatable(obj)
+    if obj_meta and obj_meta.__arena ~= nil then
+      arena = obj_meta.__arena
+    end
   end
   if arena ~= nil and type(clone_obj) == "table" then
     arena:register(clone_obj)
@@ -715,12 +728,16 @@ local _sapphire_range = function(a, b, c)
 end
 
 
-local _sapphire_del = function(obj)
+_sapphire_del = function(obj)
   if obj == nil then return end
-  if type(obj) == "table" and type(obj.__del__) == "function" then
-    if rawget(obj, "_sapphire_disposed_") then return end
-    rawset(obj, "_sapphire_disposed_", true)
-    obj:__del__()
+  if type(obj) == "table" then
+    if getmetatable(obj) == Arena then
+      obj:destroy()
+    elseif type(obj.__del__) == "function" then
+      if rawget(obj, "_sapphire_disposed_") then return end
+      rawset(obj, "_sapphire_disposed_", true)
+      obj:__del__()
+    end
   elseif type(obj) == "userdata" then
     local meta = getmetatable(obj)
     if meta and type(meta.__del__) == "function" then
@@ -1077,10 +1094,12 @@ class LuaTranspiler(BaseTranspiler):
     self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
     self.imported_modules: Set[str] = set()
-    self.arena_stack: List[List[str]] = []
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = set()
+    self.structs_with_destructor: Set[str] = {"Arena"}
+    self.proto_structs: Set[str] = set()
+    self.struct_destructible_fields: Dict[str, List[str]] = {}
+    self.struct_parent_names: Dict[str, List[str]] = {}
     self.moved_vars: Set[str] = set()
     self._branch_depth: int = 0
     self._var_branch_depth: Dict[str, int] = {}
@@ -1497,9 +1516,56 @@ class LuaTranspiler(BaseTranspiler):
     self.emit("end")
     self.newline()
 
+    has_explicit_del = any(
+        getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
+        for m in methods
+    )
+    destructible_parents = [
+        p for p in (node.parent_names or []) if p in self.structs_with_destructor
+    ]
+    needs_synth_del = (
+        not is_proto
+        and not has_explicit_del
+        and struct_name in self.structs_with_destructor
+        and bool(
+            self.struct_destructible_fields.get(struct_name)
+            or len(destructible_parents) > 1
+        )
+    )
+
     # Emit methods from impl block
     for m in methods:
       self._visit_ImplMemberNode_for_struct(m, struct_name)
+
+    if needs_synth_del:
+      self.newline()
+      self.emit(f"function {struct_name}:__del__()")
+      self.indent()
+      self._emit_struct_auto_teardown(struct_name, call_parents=True)
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      self.newline()
+
+  def _emit_destructor_call(self, var_name: str) -> None:
+    """Emits Lua destructor teardown (`destroy()` for Arena, `_sapphire_del` otherwise)."""
+    if self.variable_types.get(var_name) == "Arena":
+      self.emit(f"if {var_name} ~= nil then {var_name}:destroy() end")
+    else:
+      self.emit(f"_sapphire_del({var_name})")
+
+  def _emit_struct_auto_teardown(
+      self, struct_name: str, call_parents: bool = True
+  ) -> None:
+    """Emits LIFO `_sapphire_del` calls for destructible fields and parents in Lua."""
+    for f_name in reversed(self.struct_destructible_fields.get(struct_name, [])):
+      self.newline()
+      self.emit(f"_sapphire_del(self.{self._mangle_name(f_name)})")
+    if call_parents:
+      for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
+        if p_name in self.structs_with_destructor:
+          self.newline()
+          self.emit(f"if {p_name}.__del__ then {p_name}.__del__(self) end")
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
     pass
@@ -1586,7 +1652,28 @@ class LuaTranspiler(BaseTranspiler):
 
           self.newline()
           self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
-      self.visit(func.body)
+      has_auto_teardown = (
+          func.name == "__del__"
+          and struct_name not in self.proto_structs
+          and bool(
+              self.struct_destructible_fields.get(struct_name)
+              or any(
+                  p in self.structs_with_destructor
+                  for p in self.struct_parent_names.get(struct_name, [])
+              )
+          )
+      )
+      if has_auto_teardown:
+        self.newline()
+        self.emit("(function()")
+        self.indent()
+        self.visit(func.body)
+        self.dedent()
+        self.newline()
+        self.emit("end)()")
+        self._emit_struct_auto_teardown(struct_name, call_parents=True)
+      else:
+        self.visit(func.body)
     self.dedent()
     self.newline()
     self.emit("end")
@@ -1657,7 +1744,6 @@ class LuaTranspiler(BaseTranspiler):
   # ==========================================
 
   def visit_BlockNode(self, node: BlockNode) -> None:
-    self.arena_stack.append([])
     self.destructor_stack.append([])
     if getattr(node, "_block_destructibles", None):
       for d_var in node._block_destructibles:
@@ -1672,17 +1758,13 @@ class LuaTranspiler(BaseTranspiler):
         if not isinstance(stmt, ReturnNode):
           self._drain_pending_null_vars("nil")
 
-    current_arenas = self.arena_stack.pop()
     current_destructors = self.destructor_stack.pop()
     has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
     if not has_returned:
       for var_name in reversed(current_destructors):
         if var_name not in self.moved_vars:
           self.newline()
-          self.emit(f"_sapphire_del({var_name})")
-      for arena_name in reversed(current_arenas):
-        self.newline()
-        self.emit(f"{arena_name}:destroy()")
+          self._emit_destructor_call(var_name)
     for var_name in current_destructors:
       self.moved_vars.discard(var_name)
       self._var_branch_depth.pop(var_name, None)
@@ -1710,15 +1792,6 @@ class LuaTranspiler(BaseTranspiler):
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
     if any(a.name == "extern" for a in node.annotations):
       return
-
-    if len(node.names) == 1 and node.expr:
-      is_arena = (
-          isinstance(node.expr, CallNode)
-          and isinstance(node.expr.callee, IdentifierNode)
-          and node.expr.callee.name == "Arena"
-      )
-      if is_arena and self.arena_stack:
-        self.arena_stack[-1].append(node.names[0])
 
     for idx, name in enumerate(node.names):
       val_type = node.val_types[idx] if idx < len(node.val_types) else None
@@ -1802,7 +1875,7 @@ class LuaTranspiler(BaseTranspiler):
         for m_t in live_destructible_targets:
           if m_t not in self.moved_vars and m_t not in self._pending_null_vars:
             self.newline()
-            self.emit(f"_sapphire_del({m_t})")
+            self._emit_destructor_call(m_t)
         assigned_id_names = {
             self._mangle_name(t.name)
             for t in node.targets
@@ -1851,9 +1924,6 @@ class LuaTranspiler(BaseTranspiler):
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
-    all_active_arenas = [
-        a for frame in reversed(self.arena_stack) for a in reversed(frame)
-    ]
     all_active_destructors = [
         d for frame in reversed(self.destructor_stack) for d in reversed(frame)
     ]
@@ -1870,14 +1940,11 @@ class LuaTranspiler(BaseTranspiler):
         if d not in returned_ids and d not in self.moved_vars
     ]
 
-    # If return expressions exist alongside destructors or active arenas, evaluate expressions first
+    # If return expressions exist alongside destructors, evaluate expressions first
     should_evaluate_first = bool(
         node.expressions
-        and (destructors_to_run or all_active_arenas)
-        and (
-            all_active_arenas
-            or not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions)
-        )
+        and destructors_to_run
+        and not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions)
     )
 
     if should_evaluate_first:
@@ -1889,28 +1956,20 @@ class LuaTranspiler(BaseTranspiler):
         self.emit(f"local {tmp_name} = ")
         self.visit(expr)
 
-      for arena_name in all_active_arenas:
-        self.newline()
-        self.emit(f"{arena_name}:destroy()")
-
       for var_name in destructors_to_run:
         if var_name not in self.moved_vars:
           self.newline()
-          self.emit(f"_sapphire_del({var_name})")
+          self._emit_destructor_call(var_name)
 
       self.newline()
       self.emit("return " + ", ".join(ret_tmps))
       self._pending_null_vars.clear()
       return
 
-    for arena_name in all_active_arenas:
-      self.newline()
-      self.emit(f"{arena_name}:destroy()")
-
     for var_name in destructors_to_run:
       if var_name not in self.moved_vars:
         self.newline()
-        self.emit(f"_sapphire_del({var_name})")
+        self._emit_destructor_call(var_name)
 
     self.newline()
     if node.expressions:

@@ -174,7 +174,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_delegation(): [int] {
-      let a = Arena();
+      var a = Arena();
       var base = Item(p = 100) in a;
       var promo_item = clone base {
         self.price = 80;
@@ -227,7 +227,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func run_proto_test(): int {
-      let a = Arena();
+      var a = Arena();
       let e1 = Entity(hp = 75) in a;
       let e2 = clone e1 {
         self.hp = 120;
@@ -373,7 +373,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_features(): int {
-      let a = Arena();
+      var a = Arena();
       let b1 = Base() in a;
       let b2 = clone b1 {
         self.x = 10;
@@ -482,7 +482,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_inherited_cloning(): [int] {
-      let a = Arena();
+      var a = Arena();
       var base = Character(id_val = 1, hp = 100) in a;
       var derived_clone = clone base {
         self.health = 80;
@@ -515,7 +515,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func run_cow_test(): [int] {
-      let a = Arena();
+      var a = Arena();
       var original_weapon = Weapon { damage = 10 } in a;
       var base_player = Player(w = original_weapon) in a;
       var clone_player = clone base_player in a;
@@ -555,7 +555,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var stock: int = 5;
     }
     func test_defaults(): [int] {
-      let a = Arena();
+      var a = Arena();
       let it = Item { price = 50, stock = 2 } in a;
       return [it.price, it.stock];
     }
@@ -574,8 +574,8 @@ class TestPythonTranspiler(unittest.TestCase):
       var x: int;
     }
 
-    let my_arena = Arena();
-    let other_arena = Arena();
+    var my_arena = Arena();
+    var other_arena = Arena();
     var leaked_enemy: Enemy? = none;
     var leaked_point: Point? = none;
 
@@ -1313,7 +1313,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var pos: Vector;
     }
     func test_cow(): int {
-      let a = Arena();
+      var a = Arena();
       var base = Entity { pos = Vector { x = 10 } } in a;
       var cloned = clone base in a;
       let initial_read = cloned.pos.x;
@@ -1564,7 +1564,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var count: int;
     }
     func test_proxy_ops(): int {
-      let a = Arena();
+      var a = Arena();
       let base = Container { count = 10 } in a;
       var c = clone base in a;
       c.count += 5;
@@ -1592,7 +1592,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var unit: Unit;
     }
     func test_multi_hop(): int {
-      let a = Arena();
+      var a = Arena();
       let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
       var c1 = clone base in a;
       var c2 = clone c1 in a;

@@ -846,7 +846,7 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     func test() {
-      let arena = Arena();
+      var arena = Arena();
       var e1 = Entity(s = 10) in arena;
       var e2 = clone e1 {
         self.score = 20;
@@ -1321,7 +1321,7 @@ class TestTypeChecker(unittest.TestCase):
 
     # Prototype struct allowing __proto__
     self._check("""
-    let a = Arena();
+    var a = Arena();
     proto Goblin {
       var hp: int;
     }
@@ -1774,7 +1774,7 @@ class TestTypeChecker(unittest.TestCase):
       var x: int;
     }
     func test() {
-      let my_arena = Arena();
+      var my_arena = Arena();
       let p = Point { x = 10 } in my_arena;
     }
     """
@@ -1812,7 +1812,7 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func escape(): Enemy {
-      let local_arena = Arena();
+      var local_arena = Arena();
       let e = Enemy { hp = 100 } in local_arena;
       let c = clone e in local_arena;
       var arr = [c];
@@ -1830,7 +1830,7 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func escape_multi(): int, Enemy {
-      let local_arena = Arena();
+      var local_arena = Arena();
       let e = Enemy { hp = 100 } in local_arena;
       return 42, e;
     }
@@ -1847,7 +1847,7 @@ class TestTypeChecker(unittest.TestCase):
     func escape() {
       var outer: Point? = none;
       {
-        let local_arena = Arena();
+        var local_arena = Arena();
         let p = Point { x = 10 } in local_arena;
         outer = p; // Error: local_arena has nested scope compared to outer
       }
@@ -1874,7 +1874,7 @@ class TestTypeChecker(unittest.TestCase):
       var x: int;
     }
     func test() {
-      let my_arena = Arena();
+      var my_arena = Arena();
       {
         let p = Point { x = 10 } in my_arena; // Safe!
       }
@@ -1892,7 +1892,7 @@ class TestTypeChecker(unittest.TestCase):
     }
     func escape(out: Outer) {
       {
-        let local_arena = Arena();
+        var local_arena = Arena();
         let p = Point { x = 10 } in local_arena;
         out.pt = p; // Error: local_arena is nested compared to out
       }
@@ -2749,7 +2749,7 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       struct Item {}
       func test_arena_escape(): Item {
-        let a = Arena();
+        var a = Arena();
         return Item {} in a;
       }
       """)
@@ -3237,7 +3237,7 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func test() {
-      let arena = Arena();
+      var arena = Arena();
       let base = Hero { id = 1, hp = 100 } in arena;
       let cloned = clone base {
         self.id = 2;
@@ -4912,7 +4912,7 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     func test() {
-      let a = Arena();
+      var a = Arena();
       let g1 = Goblin(hp = 50) in a;
       let g2 = clone g1 {
         self.hp = 100;
@@ -4928,7 +4928,7 @@ class TestTypeChecker(unittest.TestCase):
         return x * 2;
       }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let r = compute(5) in a;
       }
       """)
@@ -5469,7 +5469,7 @@ class TestTypeChecker(unittest.TestCase):
         var hp: int;
       }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let g = Goblin { hp = 50 } in a;
         g.hp = 40;
       }
@@ -5488,7 +5488,7 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let g = Goblin { hp = 50 } in a;
         g.hurt();
       }
@@ -5569,7 +5569,7 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       struct Box { var v: int; }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let r = Ref(Box { v = 1 }) in a;
       }
       """)
@@ -5599,7 +5599,7 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       struct Box { var v: int; }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let s = SharedRef(Box { v = 1 }) in a;
       }
       """)
@@ -6025,6 +6025,224 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Use of moved variable 'h'.", str(ctx.exception))
+
+
+  def test_phase3_immutable_and_temp_arena_rejected(self):
+    """Rejects `let` arena and temporary/moved arena in `in <arena>`."""
+    immut_code = """
+    proto Goblin { var hp: int; }
+    func main() {
+      let a = Arena();
+      let g = Goblin { hp = 10 } in a;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(immut_code)
+    self.assertIn("immutable Arena 'a'", str(ctx.exception))
+
+    temp_code = """
+    proto Goblin { var hp: int; }
+    func main() {
+      let g = Goblin { hp = 10 } in Arena();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(temp_code)
+    self.assertIn("mutable 'var' Arena variable", str(ctx2.exception))
+
+  def test_phase3_arena_reassignment_and_move_invalidation(self):
+    """Rejects using proto refs after arena reset or move; allows overwrite or prior block exit."""
+    use_after_reset = """
+    proto Goblin { var hp: int; }
+    func main(): int {
+      var a = Arena();
+      var g = Goblin { hp = 10 } in a;
+      a = Arena();
+      return g.hp;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(use_after_reset)
+    self.assertIn("was reassigned or reset", str(ctx.exception))
+
+    use_after_move = """
+    proto Goblin { var hp: int; }
+    func main(): int {
+      var a = Arena();
+      let g = Goblin { hp = 10 } in a;
+      let b = move a;
+      return g.hp;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(use_after_move)
+    self.assertIn("has been moved", str(ctx2.exception))
+
+    valid_reuse = """
+    proto Goblin { var hp: int; }
+    func main(): int {
+      var a = Arena();
+      {
+        let inner = Goblin { hp = 5 } in a;
+      }
+      var g = Goblin { hp = 10 } in a;
+      a = Arena();
+      g = Goblin { hp = 20 } in a;
+      return g.hp;
+    }
+    """
+    self._check(valid_reuse)
+
+  def test_phase3_self_arena_reassignment_and_field_order(self):
+    """Enforces Arena field order before proto fields and init-only self.arena assignment."""
+    bad_order = """
+    proto Goblin { var hp: int; }
+    struct BadEngine {
+      var g: Goblin?;
+      var arena: Arena;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(bad_order)
+    self.assertIn("must be declared before prototype-referencing field", str(ctx.exception))
+
+    reassign_in_method = """
+    proto Goblin { var hp: int; }
+    struct Engine {
+      var arena: Arena;
+      var g: Goblin?;
+    }
+    impl Engine {
+      func __init__() {
+        self.arena = Arena();
+        self.g = Goblin { hp = 10 } in self.arena;
+      }
+      var func reset() {
+        self.arena = Arena();
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(reassign_in_method)
+    self.assertIn("Cannot reassign Arena field 'arena'", str(ctx2.exception))
+
+    dup_init = """
+    proto Goblin { var hp: int; }
+    struct Engine {
+      var arena: Arena;
+      var g: Goblin?;
+    }
+    impl Engine {
+      func __init__() {
+        self.arena = Arena();
+        self.arena = Arena();
+        self.g = none;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(dup_init)
+    self.assertIn("after initial assignment", str(ctx3.exception))
+
+  def test_phase3_same_scope_lifo_and_transitive_escapes(self):
+    """Rejects same-scope LIFO escapes, container/wrapper/closure/sink escapes, and Ref boxing."""
+    lifo_same_scope = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var g: Goblin? = none;
+      var a = Arena();
+      g = Goblin { hp = 1 } in a;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(lifo_same_scope)
+    self.assertIn("later-declared arena", str(ctx.exception))
+
+    push_escape = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var items: [Goblin] = [];
+      {
+        var a = Arena();
+        items.push(Goblin { hp = 1 } in a);
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(push_escape)
+    self.assertIn("nested arena", str(ctx2.exception))
+
+    for_escape = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var saved: Goblin? = none;
+      {
+        var a = Arena();
+        let list = [Goblin { hp = 1 } in a];
+        for g in list {
+          saved = g;
+        }
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(for_escape)
+    self.assertIn("nested arena", str(ctx3.exception))
+
+    var_sink_escape = """
+    proto Goblin { var hp: int; }
+    func store(var dst: [Goblin], src: Goblin) {
+      dst.push(src);
+    }
+    func main() {
+      var out_list: [Goblin] = [];
+      {
+        var a = Arena();
+        let g = Goblin { hp = 1 } in a;
+        store(out_list, g);
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(var_sink_escape)
+    self.assertIn("nested arena", str(ctx4.exception))
+
+    cross_arena_clone = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var outer_a = Arena();
+      {
+        var inner_a = Arena();
+        let base = Goblin { hp = 1 } in inner_a;
+        let bad = clone base {} in outer_a;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx5:
+      self._check(cross_arena_clone)
+    self.assertIn("shorter-lived Arena", str(ctx5.exception))
+
+    ref_box = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var a = Arena();
+      let g = Goblin { hp = 1 } in a;
+      let r = Ref(g);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx6:
+      self._check(ref_box)
+    self.assertIn("inside 'Ref'", str(ctx6.exception))
+
+    shared_box_none = """
+    proto Goblin { var hp: int; }
+    func main() {
+      let s = SharedRef<Goblin?>(none);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx7:
+      self._check(shared_box_none)
+    self.assertIn("inside 'SharedRef'", str(ctx7.exception))
 
 
 if __name__ == "__main__":

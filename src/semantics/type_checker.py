@@ -70,6 +70,9 @@ class TypeChecker:
     self._match_stack: List[List[Type]] = []
     self.loop_depth: int = 0
     self.moved_symbols: Set[VariableSymbol] = set()
+    self._branch_depth: int = 0
+    self._init_assigned_arena_fields: Set[str] = set()
+    self._init_used_arena_fields: Set[str] = set()
 
   def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
     if isinstance(target, IdentifierNode):
@@ -652,6 +655,10 @@ class TypeChecker:
     old_in_init = self.is_in_init
     old_in_del = self.is_in_del
     old_fields = self.initialized_fields
+    old_init_assigned_arenas = self._init_assigned_arena_fields
+    old_init_used_arenas = self._init_used_arena_fields
+    self._init_assigned_arena_fields = set()
+    self._init_used_arena_fields = set()
     parents_initialized = set()
 
     if func_decl.name == "__del__":
@@ -735,6 +742,8 @@ class TypeChecker:
     self.is_in_init = old_in_init
     self.is_in_del = old_in_del
     self.initialized_fields = old_fields
+    self._init_assigned_arena_fields = old_init_assigned_arenas
+    self._init_used_arena_fields = old_init_used_arenas
     self.current_function = None
     self.moved_symbols = old_moved_symbols
 
@@ -854,7 +863,13 @@ class TypeChecker:
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
-      ArenaChecker.validate_arena_escape(self.symbol_table, sym, expr_node, lambda msg: self.error(msg))
+      ArenaChecker.validate_arena_escape(
+          self.symbol_table,
+          sym,
+          expr_node,
+          lambda msg: self.error(msg, node=node),
+          checker=self,
+      )
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     target_types = [self._check_lvalue(t) for t in node.targets]
@@ -879,9 +894,59 @@ class TypeChecker:
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
-      target_sym = self._get_target_symbol(target)
-      if target_sym:
-        ArenaChecker.validate_arena_escape(self.symbol_table, target_sym, expr_node, lambda msg: self.error(msg, node=node))
+      if isinstance(target, IdentifierNode):
+        target_sym = self._get_target_symbol(target)
+        if target_sym:
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              target_sym,
+              expr_node,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
+          if isinstance(target_sym.symbol_type, ArenaType):
+            target_sym.arena_generation += 1
+            target_sym.is_moved = False
+      elif isinstance(target, MemberAccessNode):
+        if isinstance(target_type, ArenaType):
+          is_self_target = (
+              isinstance(target.receiver, IdentifierNode)
+              and target.receiver.name == "self"
+          )
+          recv_struct = self.node_types.get(target.receiver)
+          field_obj = (
+              recv_struct.fields.get(target.member)
+              if isinstance(recv_struct, StructType)
+              else None
+          )
+          has_default = bool(field_obj and field_obj.has_explicit_default)
+          if not (self.is_in_init and is_self_target) or has_default:
+            self.error(
+                f"Cannot reassign Arena field '{target.member}' outside "
+                f"initial '__init__' assignment.",
+                node=node,
+            )
+          elif target.member in self._init_assigned_arena_fields:
+            self.error(
+                f"Cannot reassign Arena field 'self.{target.member}' inside "
+                f"'__init__' after initial assignment.",
+                node=node,
+            )
+          elif target.member in self._init_used_arena_fields:
+            self.error(
+                f"Cannot assign Arena field 'self.{target.member}' after "
+                f"allocating into it.",
+                node=node,
+            )
+          else:
+            self._init_assigned_arena_fields.add(target.member)
+        ArenaChecker.validate_container_mutation(
+            self, target.receiver, [expr_node], error_node=node
+        )
+      elif isinstance(target, IndexExprNode):
+        ArenaChecker.validate_container_mutation(
+            self, target.array, [expr_node], error_node=node
+        )
 
       if self.is_in_init and isinstance(target, MemberAccessNode):
         if isinstance(target.receiver, IdentifierNode) and target.receiver.name == "self":
@@ -889,7 +954,8 @@ class TypeChecker:
 
       if isinstance(target, IdentifierNode):
         target_sym = self.symbol_table.lookup(target.name)
-        if isinstance(target_sym, VariableSymbol) and target_sym in self.moved_symbols:
+        if isinstance(target_sym, VariableSymbol):
+          target_sym.is_moved = False
           self.moved_symbols.discard(target_sym)
 
   def _check_lvalue(self, node: ASTNode) -> Type:
@@ -1038,6 +1104,7 @@ class TypeChecker:
           self.current_function_scope,
           ret_expr,
           lambda msg, n: self.error(msg, node=n),
+          checker=self,
       )
 
   def visit_YieldNode(self, node: YieldNode) -> None:
@@ -1251,10 +1318,24 @@ class TypeChecker:
             sym = VariableSymbol(name, elem_t, is_mutable=binding.is_mutable)
             sym.is_borrowed_unwrap = is_borrowed_unwrap
             self.symbol_table.define(name, sym)
+            ArenaChecker.validate_arena_escape(
+                self.symbol_table,
+                sym,
+                binding.expr,
+                lambda msg: self.error(msg, node=node),
+                checker=self,
+            )
         else:
           sym = VariableSymbol(binding.let_name, unwrapped_type, is_mutable=binding.is_mutable)
           sym.is_borrowed_unwrap = is_borrowed_unwrap
           self.symbol_table.define(binding.let_name, sym)
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              sym,
+              binding.expr,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
 
       if node.condition:
         cond_type = self.visit(node.condition)
@@ -1266,16 +1347,20 @@ class TypeChecker:
           self.error("Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='.")
 
       pre_branch_moved = set(self.moved_symbols)
-      self.visit(node.then_block)
-      then_moved = set(self.moved_symbols)
+      self._branch_depth += 1
+      try:
+        self.visit(node.then_block)
+        then_moved = set(self.moved_symbols)
 
-      if node.else_block:
-        self.moved_symbols = set(pre_branch_moved)
-        self.visit(node.else_block)
-        else_moved = set(self.moved_symbols)
-        self.moved_symbols = then_moved | else_moved
-      else:
-        self.moved_symbols = then_moved
+        if node.else_block:
+          self.moved_symbols = set(pre_branch_moved)
+          self.visit(node.else_block)
+          else_moved = set(self.moved_symbols)
+          self.moved_symbols = then_moved | else_moved
+        else:
+          self.moved_symbols = then_moved
+      finally:
+        self._branch_depth -= 1
 
       self.symbol_table.exit_scope()
     else:
@@ -1285,19 +1370,24 @@ class TypeChecker:
         self.error("If condition must resolve to 'bool'.", node=c_node)
 
       pre_branch_moved = set(self.moved_symbols)
-      self.visit(node.then_block)
-      then_moved = set(self.moved_symbols)
+      self._branch_depth += 1
+      try:
+        self.visit(node.then_block)
+        then_moved = set(self.moved_symbols)
 
-      if node.else_block:
-        self.moved_symbols = set(pre_branch_moved)
-        self.visit(node.else_block)
-        else_moved = set(self.moved_symbols)
-        self.moved_symbols = then_moved | else_moved
-      else:
-        self.moved_symbols = then_moved
+        if node.else_block:
+          self.moved_symbols = set(pre_branch_moved)
+          self.visit(node.else_block)
+          else_moved = set(self.moved_symbols)
+          self.moved_symbols = then_moved | else_moved
+        else:
+          self.moved_symbols = then_moved
+      finally:
+        self._branch_depth -= 1
 
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.loop_depth += 1
+    self._branch_depth += 1
     pre_loop_moved = set(self.moved_symbols)
     try:
       cond_type = self.visit(node.condition)
@@ -1311,10 +1401,12 @@ class TypeChecker:
             node=node,
         )
     finally:
+      self._branch_depth -= 1
       self.loop_depth -= 1
 
   def visit_ForNode(self, node: ForNode) -> None:
     self.loop_depth += 1
+    self._branch_depth += 1
     pre_loop_moved = set(self.moved_symbols)
     try:
       iter_type = self.visit(node.iterable)
@@ -1324,7 +1416,15 @@ class TypeChecker:
         if node.key_var is not None:
           self.error("Cannot iterate over an array with key-value syntax; use a single loop variable.")
         elem_type = iter_type.element_type
-        self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, elem_type, node.is_mutable))
+        val_sym = VariableSymbol(node.val_var, elem_type, node.is_mutable)
+        self.symbol_table.define(node.val_var, val_sym)
+        ArenaChecker.validate_arena_escape(
+            self.symbol_table,
+            val_sym,
+            node.iterable,
+            lambda msg: self.error(msg, node=node),
+            checker=self,
+        )
       elif isinstance(iter_type, RangeType):
         if node.key_var is not None:
           self.error("Cannot iterate over a range with key-value syntax; use a single loop variable.")
@@ -1332,10 +1432,34 @@ class TypeChecker:
       elif isinstance(iter_type, MapType):
         if node.key_var is None:
           self.error("Map iteration requires key and value loop variables: 'for key, val in map'.")
-          self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
+          val_sym = VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable)
+          self.symbol_table.define(node.val_var, val_sym)
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              val_sym,
+              node.iterable,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
         else:
-          self.symbol_table.define(node.key_var, VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable))
-          self.symbol_table.define(node.val_var, VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable))
+          key_sym = VariableSymbol(node.key_var, iter_type.key_type, node.is_mutable)
+          val_sym = VariableSymbol(node.val_var, iter_type.value_type, node.is_mutable)
+          self.symbol_table.define(node.key_var, key_sym)
+          self.symbol_table.define(node.val_var, val_sym)
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              key_sym,
+              node.iterable,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              val_sym,
+              node.iterable,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
       else:
         self.error("For-in loop source must be an array, map, or range type.")
         if node.key_var is not None:
@@ -1351,6 +1475,7 @@ class TypeChecker:
             node=node,
         )
     finally:
+      self._branch_depth -= 1
       self.loop_depth -= 1
 
   def visit_BreakNode(self, node: BreakNode) -> None:
@@ -1394,8 +1519,12 @@ class TypeChecker:
         return type_sym
       self.error(f"Undefined identifier '{node.name}'.", node=node)
       return PrimitiveType("none")
-    if isinstance(sym, VariableSymbol) and sym in self.moved_symbols:
-      self.error(f"Use of moved variable '{node.name}'.", node=node)
+    if isinstance(sym, VariableSymbol):
+      if sym in self.moved_symbols:
+        self.error(f"Use of moved variable '{node.name}'.", node=node)
+      ArenaChecker.check_use_validity(
+          self.symbol_table, sym, lambda msg: self.error(msg, node=node)
+      )
     return sym.symbol_type
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
@@ -1627,9 +1756,18 @@ class TypeChecker:
       arg_expr = node.arguments[0].expr
       arg_type = self.visit(arg_expr)
       self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
+      ArenaChecker.validate_heap_box_escape(
+          self.symbol_table, "Ref", arg_expr,
+          lambda msg: self.error(msg, node=node), checker=self
+      )
       node.is_ref_constructor = True
       if node.type_args:
         expected_inner = self._resolve_type_node(node.type_args[0])
+        if ArenaChecker.type_can_hold_arena_ref(expected_inner, is_box_check=True):
+          self.error(
+              f"Cannot store arena-referencing type '{expected_inner}' inside 'Ref'.",
+              node=node,
+          )
         if not arg_type.is_compatible(expected_inner):
           self.error(f"Ref<{expected_inner}> expected argument of type '{expected_inner}', got '{arg_type}'.", node=node)
         return RefType(expected_inner)
@@ -1644,6 +1782,10 @@ class TypeChecker:
       arg_expr = node.arguments[0].expr
       arg_type = self.visit(arg_expr)
       self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
+      ArenaChecker.validate_heap_box_escape(
+          self.symbol_table, "SharedRef", arg_expr,
+          lambda msg: self.error(msg, node=node), checker=self
+      )
       node.is_shared_ref_constructor = True
       if isinstance(arg_type, RefType):
         inner_t = arg_type.inner_type
@@ -1651,6 +1793,11 @@ class TypeChecker:
         inner_t = arg_type
       if node.type_args:
         expected_inner = self._resolve_type_node(node.type_args[0])
+        if ArenaChecker.type_can_hold_arena_ref(expected_inner, is_box_check=True):
+          self.error(
+              f"Cannot store arena-referencing type '{expected_inner}' inside 'SharedRef'.",
+              node=node,
+          )
         if not inner_t.is_compatible(expected_inner):
           self.error(f"SharedRef<{expected_inner}> expected argument of type '{expected_inner}', got '{inner_t}'.", node=node)
         return SharedRefType(expected_inner)
@@ -1690,6 +1837,20 @@ class TypeChecker:
         arena_type = self.visit(node.arena_expr)
         if not isinstance(arena_type, ArenaType):
           self.error("Explicit arena target must be an instance of Arena.")
+        else:
+          ArenaChecker.validate_arena_mutability(
+              self.symbol_table,
+              node.arena_expr,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
+          if (
+              self.is_in_init
+              and isinstance(node.arena_expr, MemberAccessNode)
+              and isinstance(node.arena_expr.receiver, IdentifierNode)
+              and node.arena_expr.receiver.name == "self"
+          ):
+            self._init_used_arena_fields.add(node.arena_expr.member)
     else:
       # Standard function/method resolution
       if not isinstance(callee_type, FunctionType):
@@ -1703,6 +1864,7 @@ class TypeChecker:
     # Perform borrow checking / aliasing rules
     if signature:
       self._check_aliasing(node, signature, is_constructor)
+      ArenaChecker.check_call_var_sink_escape(self, node, signature, is_constructor)
 
     if is_constructor:
       return callee_type
@@ -1965,6 +2127,20 @@ class TypeChecker:
       arena_type = self.visit(node.arena_expr)
       if not isinstance(arena_type, ArenaType):
         self.error("Explicit arena target must be an instance of Arena.")
+      else:
+        ArenaChecker.validate_cross_arena_clone(
+            self.symbol_table,
+            node,
+            lambda msg: self.error(msg, node=node),
+            checker=self,
+        )
+        if (
+            self.is_in_init
+            and isinstance(node.arena_expr, MemberAccessNode)
+            and isinstance(node.arena_expr.receiver, IdentifierNode)
+            and node.arena_expr.receiver.name == "self"
+        ):
+          self._init_used_arena_fields.add(node.arena_expr.member)
 
     # Mark the struct type as cloned
     expr_type.is_cloned = True
@@ -1975,7 +2151,15 @@ class TypeChecker:
       old_clone_init = self.is_in_clone_init
       self.is_in_clone_init = True
       # Define self inside block as mutable
-      self.symbol_table.define("self", VariableSymbol("self", expr_type, is_mutable=True))
+      clone_self_sym = VariableSymbol("self", expr_type, is_mutable=True)
+      clone_self_deps = ArenaChecker.collect_arena_deps(
+          self.symbol_table, node.expr, self
+      )
+      clone_self_sym.arena_dep_records = list(clone_self_deps)
+      clone_self_sym.arena_dependency = (
+          clone_self_deps[0][0] if clone_self_deps else None
+      )
+      self.symbol_table.define("self", clone_self_sym)
       for stmt in node.initializer_block:
         self.visit(stmt)
       self.is_in_clone_init = old_clone_init
@@ -2004,6 +2188,9 @@ class TypeChecker:
       self.error(f"Use of moved variable '{node.name}'.", node=node)
       return sym.symbol_type
 
+    sym.is_moved = True
+    if isinstance(sym.symbol_type, ArenaType):
+      sym.arena_generation += 1
     self.moved_symbols.add(sym)
     return sym.symbol_type
 
@@ -2317,11 +2504,25 @@ class TypeChecker:
             sym = VariableSymbol(name, elem_t, is_mutable=binding.is_mutable)
             sym.is_borrowed_unwrap = is_borrowed_unwrap
             self.symbol_table.define(name, sym)
+            ArenaChecker.validate_arena_escape(
+                self.symbol_table,
+                sym,
+                binding.expr,
+                lambda msg: self.error(msg, node=node),
+                checker=self,
+            )
         else:
           name = binding.let_name
           sym = VariableSymbol(name, base_t, is_mutable=binding.is_mutable)
           sym.is_borrowed_unwrap = is_borrowed_unwrap
           self.symbol_table.define(name, sym)
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              sym,
+              binding.expr,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
       elif clause.condition:
         cond_t = self.visit(clause.condition)
         if cond_t != PrimitiveType("bool"):
@@ -2376,6 +2577,20 @@ class TypeChecker:
       arena_type = self.visit(node.arena_expr)
       if not isinstance(arena_type, ArenaType):
         self.error("Explicit arena target must be an instance of Arena.")
+      else:
+        ArenaChecker.validate_arena_mutability(
+            self.symbol_table,
+            node.arena_expr,
+            lambda msg: self.error(msg, node=node),
+            checker=self,
+        )
+        if (
+            self.is_in_init
+            and isinstance(node.arena_expr, MemberAccessNode)
+            and isinstance(node.arena_expr.receiver, IdentifierNode)
+            and node.arena_expr.receiver.name == "self"
+        ):
+          self._init_used_arena_fields.add(node.arena_expr.member)
 
     initialized = set()
     for field_arg in node.fields:

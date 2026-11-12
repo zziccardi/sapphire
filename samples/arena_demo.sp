@@ -89,8 +89,8 @@ impl Boss {
 // Demonstration 1: Explicit Arenas, Struct Allocation, & Clone Propagation
 func demo_explicit_arenas(): int {
   // Instantiate explicit arenas with lexical lifecycles
-  let level_arena = Arena();
-  let combat_arena = Arena();
+  var level_arena = Arena();
+  var combat_arena = Arena();
 
   // Allocate a standard struct in level_arena using 'in'
   let spawn_point = Point(x = 100.0, y = 200.0) in level_arena;
@@ -126,7 +126,7 @@ func demo_scoped_raii_cleanup(): float {
 
   {
     // Local arena created within a nested block
-    let temp_arena = Arena();
+    var temp_arena = Arena();
 
     let origin = Point(x = 5.0, y = 10.0) in temp_arena;
     let p1 = Particle(pos = origin, lifetime = 1.5) in temp_arena;
@@ -150,7 +150,7 @@ func demo_scoped_raii_cleanup(): float {
 
 // Demonstration 3: Constructor Proto Allocation with Explicit Arena
 func demo_constructor_arena_allocation(): int {
-  let dungeon_arena = Arena();
+  var dungeon_arena = Arena();
   let default_pos = Point(x = 0.0, y = 0.0);
 
   // Protos instantiated via constructor require explicit arena via 'in'

@@ -112,6 +112,7 @@ class GenericsChecker:
 
       from src.semantics.struct_layout_pass import StructLayoutPass
       StructLayoutPass.check_unboxed_recursion(checker, [mono_struct_type])
+      StructLayoutPass.check_arena_field_ordering(checker, [mono_struct_type])
 
       # Instantiate generic impl blocks matching generic_struct_type.name
       if hasattr(checker, "program") and checker.program:

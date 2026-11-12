@@ -453,7 +453,7 @@ class TestLuaTranspiler(unittest.TestCase):
       var unit: Unit;
     }
     func main() {
-      let a = Arena();
+      var a = Arena();
       let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
       var c1 = clone base in a;
       var c2 = clone c1 in a;
@@ -1047,12 +1047,12 @@ class TestLuaTranspiler(unittest.TestCase):
     # Arena destruction inside match return
     arena_ret = """
     struct Item {}
-    func test_arena(): Item {
-      let a = Arena();
-      let item = Item {} in a;
+    func test_arena(): int {
+      var a = Arena();
+      let _item = Item {} in a;
       return match 1 {
-        1 -> item,
-        ... -> item,
+        1 -> 10,
+        ... -> 20,
       };
     }
     """

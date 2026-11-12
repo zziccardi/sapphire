@@ -2,7 +2,14 @@
 
 import unittest
 from src.parser.ast import IdentifierNode, StructInitializerNode, CloneNode, LiteralNode, CallNode
-from src.semantics.symbol_table import SymbolTable, VariableSymbol, PrimitiveType
+from src.semantics.symbol_table import (
+    ArenaType,
+    OptionalType,
+    PrimitiveType,
+    StructType,
+    SymbolTable,
+    VariableSymbol,
+)
 from src.semantics.arena_checker import ArenaChecker
 
 
@@ -59,16 +66,18 @@ class TestArenaChecker(unittest.TestCase):
   def test_validate_arena_escape(self):
     st = SymbolTable()
     parent_scope = st.current_scope
-    arena_sym = VariableSymbol("arena_sub", PrimitiveType("Arena"), is_mutable=False)
+    arena_sym = VariableSymbol("arena_sub", ArenaType(), is_mutable=True)
     st.enter_scope()
     child_scope = st.current_scope
     st.define("arena_sub", arena_sym)
 
-    val_sym = VariableSymbol("val", PrimitiveType("int"), is_mutable=False)
+    proto_t = StructType("Goblin", is_prototype=True)
+    val_sym = VariableSymbol("val", proto_t, is_mutable=False)
+    val_sym.arena_dep_records = [("arena_sub", 0)]
     val_sym.arena_dependency = "arena_sub"
     st.define("val", val_sym)
 
-    target_sym = VariableSymbol("out", PrimitiveType("int"), is_mutable=False)
+    target_sym = VariableSymbol("out", proto_t, is_mutable=False)
     target_sym.scope_defined = parent_scope
 
     errors = []
@@ -78,21 +87,56 @@ class TestArenaChecker(unittest.TestCase):
 
   def test_validate_arena_escape_no_dep_and_missing_sym(self):
     st = SymbolTable()
-    target_sym = VariableSymbol("out", PrimitiveType("int"), is_mutable=False)
+    proto_t = StructType("Goblin", is_prototype=True)
+    target_sym = VariableSymbol("out", proto_t, is_mutable=False)
     errors = []
 
-    # 1. No arena dependency on expression node (line 52)
-    sym_nodep = VariableSymbol("nodep", PrimitiveType("int"), is_mutable=False)
+    # 1. No arena dependency on expression node
+    sym_nodep = VariableSymbol("nodep", proto_t, is_mutable=False)
     st.define("nodep", sym_nodep)
     ArenaChecker.validate_arena_escape(st, target_sym, IdentifierNode("nodep"), errors.append)
     self.assertEqual(len(errors), 0)
 
-    # 2. Arena dependency references missing symbol in symbol table (line 56)
-    val_sym = VariableSymbol("val", PrimitiveType("int"), is_mutable=False)
+    # 2. Arena dependency references missing symbol in symbol table
+    val_sym = VariableSymbol("val", proto_t, is_mutable=False)
+    val_sym.arena_dep_records = [("nonexistent_arena", 0)]
     val_sym.arena_dependency = "nonexistent_arena"
     st.define("val", val_sym)
 
     ArenaChecker.validate_arena_escape(st, target_sym, IdentifierNode("val"), errors.append)
     self.assertEqual(len(errors), 0)
+
+  def test_same_scope_lifo_and_mutability_checks(self):
+    st = SymbolTable()
+    proto_t = StructType("Goblin", is_prototype=True)
+    out_sym = VariableSymbol("out", OptionalType(proto_t), is_mutable=True)
+    st.define("out", out_sym)
+    late_arena = VariableSymbol("late_arena", ArenaType(), is_mutable=True)
+    st.define("late_arena", late_arena)
+
+    val_sym = VariableSymbol("val", proto_t, is_mutable=False)
+    val_sym.arena_dep_records = [("late_arena", 0)]
+    st.define("val", val_sym)
+
+    errors = []
+    ArenaChecker.validate_arena_escape(st, out_sym, IdentifierNode("val"), errors.append)
+    self.assertEqual(len(errors), 1)
+    self.assertIn("later-declared arena", errors[0])
+
+    # Immutable arena fails mutability validation
+    immut_arena = VariableSymbol("immut_a", ArenaType(), is_mutable=False)
+    st.define("immut_a", immut_arena)
+    mut_errors = []
+    ArenaChecker.validate_arena_mutability(st, IdentifierNode("immut_a"), mut_errors.append)
+    self.assertEqual(len(mut_errors), 1)
+    self.assertIn("immutable Arena 'immut_a'", mut_errors[0])
+
+    # Primitive field cannot retain arena deps
+    int_sym = VariableSymbol("count", PrimitiveType("int"), is_mutable=False)
+    st.define("count", int_sym)
+    int_errors = []
+    ArenaChecker.validate_arena_escape(st, int_sym, IdentifierNode("val"), int_errors.append)
+    self.assertEqual(len(int_errors), 0)
+    self.assertEqual(int_sym.arena_dep_records, [])
 
 

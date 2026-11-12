@@ -104,7 +104,7 @@ func demo_transaction_rollback() {
 func demo_arena_lifetime() {
   print("\n--- 5. Arena Lifetime Management via Scoped Block ---");
   {
-    let arena = Arena();
+    var arena = Arena();
     print("  Allocated temporary arena for scoped memory management.");
   }
   print("  Arena destroyed and reclaimed upon scope exit.");

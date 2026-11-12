@@ -272,15 +272,19 @@ class BaseTranspiler(ABC):
     finally:
       self._branch_depth -= 1
 
+  def _emit_destructor_call(self, var_name: str) -> None:
+    """Emits the teardown statement for a single destructible variable."""
+    self.emit(f"_sapphire_del({var_name})")
+
   def _emit_loop_destructors(self) -> None:
-    """Emits `_sapphire_del` calls for destructible variables in the active loop scopes."""
+    """Emits destructors for variables in the active loop scopes."""
     if self.loop_destructor_depth:
       loop_depth = self.loop_destructor_depth[-1]
       for frame in reversed(self.destructor_stack[loop_depth:]):
         for var_name in reversed(frame):
           if not hasattr(self, "moved_vars") or var_name not in self.moved_vars:
             self.newline()
-            self.emit(f"_sapphire_del({var_name})")
+            self._emit_destructor_call(var_name)
 
   def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
     """Collects struct methods, traits, return types, and destructors from program declarations."""
@@ -307,7 +311,20 @@ class BaseTranspiler(ABC):
         if ret_names:
           self.func_return_types[decl.name] = ret_names
 
+    self.proto_structs: Set[str] = set()
+    self.struct_destructible_fields: Dict[str, List[str]] = {}
+    self.struct_parent_names: Dict[str, List[str]] = {}
+    self.structs_with_destructor = {"Arena"}
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode):
+        if decl.is_prototype:
+          self.proto_structs.add(decl.name)
+        self.struct_parent_names[decl.name] = list(decl.parent_names or [])
+
     for s_name, members in self.struct_methods.items():
+      if s_name in self.proto_structs:
+        continue
       for m in members:
         if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
           self.structs_with_destructor.add(s_name)
@@ -317,12 +334,20 @@ class BaseTranspiler(ABC):
     while changed:
       changed = False
       for decl in program.declarations:
-        if (
-            isinstance(decl, StructDeclNode)
-            and getattr(decl, "parent_names", None)
-            and decl.name not in self.structs_with_destructor
-        ):
-          if any(p in self.structs_with_destructor for p in decl.parent_names):
+        if isinstance(decl, StructDeclNode) and not decl.is_prototype:
+          destructible_fields = [
+              f.name
+              for f in decl.fields
+              if extract_type_name(f.field_type) in self.structs_with_destructor
+          ]
+          self.struct_destructible_fields[decl.name] = destructible_fields
+          if decl.name not in self.structs_with_destructor and (
+              destructible_fields
+              or any(
+                  p in self.structs_with_destructor
+                  for p in (decl.parent_names or [])
+              )
+          ):
             self.structs_with_destructor.add(decl.name)
             changed = True
 

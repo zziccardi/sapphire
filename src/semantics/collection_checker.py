@@ -6,6 +6,7 @@ the core TypeChecker.
 
 from typing import Any
 from src.parser.ast import CallNode, IdentifierNode, LiteralNode, MemberAccessNode
+from src.semantics.arena_checker import ArenaChecker
 from src.semantics.symbol_table import (
     ARRAY_METHODS,
     MAP_METHODS,
@@ -271,6 +272,9 @@ class CollectionChecker:
         checker._check_value_ownership_transfer(node.arguments[0].expr, arg_t, node=node)
         if not arg_t.is_compatible(elem_type):
           checker.error(f"Argument type mismatch in .push(). Expected '{elem_type}', got '{arg_t}'.")
+        ArenaChecker.validate_container_mutation(
+            checker, node.callee.receiver, [node.arguments[0].expr], error_node=node
+        )
         return elem_type
 
       elif method == "pop":
@@ -302,6 +306,9 @@ class CollectionChecker:
         checker._check_value_ownership_transfer(element_arg.expr, elem_t, node=node)
         if not elem_t.is_compatible(elem_type):
           checker.error(f"Argument type mismatch in .insert(). Expected '{elem_type}', got '{elem_t}'.")
+        ArenaChecker.validate_container_mutation(
+            checker, node.callee.receiver, [element_arg.expr], error_node=node
+        )
         return elem_type
 
       elif method == "remove":
@@ -484,6 +491,9 @@ class CollectionChecker:
       checker._check_value_ownership_transfer(val_arg.expr, v_arg_type, node=node)
       if not v_arg_type.is_compatible(v_type):
         checker.error(f"Argument 'value' in .insert() must be '{v_type}', got '{v_arg_type}'.")
+      ArenaChecker.validate_container_mutation(
+          checker, node.callee.receiver, [key_arg.expr, val_arg.expr], error_node=node
+      )
 
       return v_type
 

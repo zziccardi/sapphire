@@ -78,10 +78,14 @@ class Arena:
         pass
     return obj
   def destroy(self):
-    for obj in self.objects:
+    if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):
+      return
+    for obj in reversed(self.objects):
+      _sapphire_del(obj)
       if hasattr(obj, '__shadow__'):
         obj.__shadow__.clear()
     self.objects.clear()
+    object.__setattr__(self, '_sapphire_disposed_', True)
   def __del__(self):
     self.destroy()
   def __enter__(self):
@@ -90,7 +94,7 @@ class Arena:
     self.destroy()
 
 def _sapphire_del(obj):
-  if obj is not None and not getattr(obj, '_sapphire_disposed_', False):
+  if obj is not None and not getattr(obj, '__dict__', {}).get('_sapphire_disposed_', False):
     if hasattr(obj, '__del__') and callable(obj.__del__):
       obj.__del__()
 
@@ -664,7 +668,11 @@ class PythonTranspiler(BaseTranspiler):
     self.struct_traits: Dict[str, Set[str]] = {}
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = set()
+    self.structs_with_destructor: Set[str] = {"Arena"}
+    self.proto_structs: Set[str] = set()
+    self.struct_destructible_fields: Dict[str, List[str]] = {}
+    self.struct_parent_names: Dict[str, List[str]] = {}
+    self._current_struct_name: Optional[str] = None
     self.moved_vars: Set[str] = set()
     self._branch_depth: int = 0
     self._var_branch_depth: Dict[str, int] = {}
@@ -914,16 +922,69 @@ class PythonTranspiler(BaseTranspiler):
         self.emit("self._init_sapphire(*args, **kwargs)")
       self.dedent()
 
-    # Output impl methods
-    if not methods:
-      self.newline()
-      self.emit("pass")
-    else:
-      for m in methods:
-        self.visit(m)
+    has_explicit_del = any(
+        getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
+        for m in methods
+    )
+    destructible_parents = [
+        p for p in (node.parent_names or []) if p in self.structs_with_destructor
+    ]
+    needs_synth_del = (
+        not is_proto
+        and not has_explicit_del
+        and node.name in self.structs_with_destructor
+        and bool(
+            self.struct_destructible_fields.get(node.name)
+            or len(destructible_parents) > 1
+        )
+    )
+
+    old_struct_name = getattr(self, "_current_struct_name", None)
+    self._current_struct_name = node.name
+    try:
+      # Output impl methods
+      if not methods and not needs_synth_del:
+        self.newline()
+        self.emit("pass")
+      else:
+        for m in methods:
+          self.visit(m)
+        if needs_synth_del:
+          self.newline()
+          self.emit("def __del__(self):")
+          self.indent()
+          self.newline()
+          self.emit("if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):")
+          self.indent()
+          self.newline()
+          self.emit("return")
+          self.dedent()
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+          self._emit_struct_auto_teardown(node.name, call_parents=True)
+          self.dedent()
+    finally:
+      self._current_struct_name = old_struct_name
 
     self.dedent()
     self.newline()
+
+  def _emit_struct_auto_teardown(
+      self, struct_name: str, call_parents: bool = True
+  ) -> None:
+    """Emits LIFO `_sapphire_del` calls for destructible fields and parents."""
+    for f_name in reversed(self.struct_destructible_fields.get(struct_name, [])):
+      self.newline()
+      self.emit(f"_sapphire_del(getattr(self, '{self._mangle_name(f_name)}', None))")
+    if call_parents:
+      for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
+        if p_name in self.structs_with_destructor:
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', False)")
+          self.newline()
+          self.emit(f"{p_name}.__del__(self)")
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
     # Fields are dynamically initialized in __init__, so we do not declare them at class level.
@@ -974,7 +1035,7 @@ class PythonTranspiler(BaseTranspiler):
       self.indent()
       if func.name == "__del__":
         self.newline()
-        self.emit("if getattr(self, '_sapphire_disposed_', False):")
+        self.emit("if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):")
         self.indent()
         self.newline()
         self.emit("return")
@@ -998,7 +1059,32 @@ class PythonTranspiler(BaseTranspiler):
             else:
               args_list.append(val)
           self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
-      self.visit(func.body)
+      cur_struct = getattr(self, "_current_struct_name", None)
+      has_auto_teardown = (
+          func.name == "__del__"
+          and cur_struct
+          and cur_struct not in self.proto_structs
+          and bool(
+              self.struct_destructible_fields.get(cur_struct)
+              or any(
+                  p in self.structs_with_destructor
+                  for p in self.struct_parent_names.get(cur_struct, [])
+              )
+          )
+      )
+      if has_auto_teardown:
+        self.newline()
+        self.emit("try:")
+        self.indent()
+        self.visit(func.body)
+        self.dedent()
+        self.newline()
+        self.emit("finally:")
+        self.indent()
+        self._emit_struct_auto_teardown(cur_struct, call_parents=True)
+        self.dedent()
+      else:
+        self.visit(func.body)
       self.dedent()
 
   def _find_assigned_globals(
@@ -1123,36 +1209,10 @@ class PythonTranspiler(BaseTranspiler):
         self.emit(f"{target_path} = {fn_name}")
 
   def _visit_statements(self, statements: List[StmtNode]) -> None:
-    if not statements:
-      return
-
-    stmt = statements[0]
-    is_arena = (
-        isinstance(stmt, VarDeclNode)
-        and isinstance(stmt.expr, CallNode)
-        and isinstance(stmt.expr.callee, IdentifierNode)
-        and stmt.expr.callee.name == "Arena"
-    )
-
-    if is_arena:
-      self.visit(stmt)
-      self._drain_pending_null_vars("None")
-      self.newline()
-      self.emit("try:")
-      self.indent()
-      self._visit_statements(statements[1:])
-      self.dedent()
-      self.newline()
-      self.emit("finally:")
-      self.indent()
-      self.newline()
-      self.emit(f"{stmt.name}.destroy()")
-      self.dedent()
-    else:
+    for stmt in statements:
       self.visit(stmt)
       if not isinstance(stmt, ReturnNode):
         self._drain_pending_null_vars("None")
-      self._visit_statements(statements[1:])
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.destructor_stack.append([])

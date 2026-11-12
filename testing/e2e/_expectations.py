@@ -123,6 +123,9 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_match_move_drop_flag": 33993,
         "test_live_var_reassignment_destroys_old": 458,
         "test_borrowed_unwrap_single_drop": 616,
+        "test_arena_lifo_proto_destructors": 752,
+        "test_arena_reassignment_destroys_old": 394,
+        "test_struct_owned_arena_and_field_teardown": 68,
     },
     "generics_test.sp": {
         "test_generic_struct_int": 42,
