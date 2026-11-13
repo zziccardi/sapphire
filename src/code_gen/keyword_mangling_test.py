@@ -48,8 +48,12 @@ class KeywordManglingTest(unittest.TestCase):
       return pass;
     }
 
-    let item = Config { class = 42 };
-    let result = compute(def = item.class);
+    var result: int = 0;
+
+    func main() {
+      let item = Config { class = 42 };
+      result = compute(def = item.class);
+    }
     """
     py_code = self._compile_python(source)
 
@@ -62,7 +66,7 @@ class KeywordManglingTest(unittest.TestCase):
 
     # Verify that the generated Python code is syntactically valid by compiling it
     compiled_py = compile(py_code, "<string>", "exec")
-    env = {}
+    env = {"__name__": "__main__"}
     exec(compiled_py, env)
     self.assertEqual(env.get("result"), 43)
 
@@ -78,8 +82,10 @@ class KeywordManglingTest(unittest.TestCase):
       return repeat;
     }
 
-    let w = Worker { end = 10 };
-    let total = process(local = w.end);
+    func test() {
+      let w = Worker { end = 10 };
+      let total = process(local = w.end);
+    }
     """
     lua_code = self._compile_lua(source)
 

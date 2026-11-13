@@ -48,6 +48,12 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 ### 3.2 Memory Semantics & Variables
 * `let`: Immutable binding (constant).
 * `var`: Mutable binding.
+* **Module-level declarations**: Executable procedural statements are
+  prohibited at module scope; all execution logic must reside in functions
+  (`func main()`, `@test`, or host callbacks). Module-level variables (`let`
+  and `var`) must be initialized with compile-time constant expressions.
+  Module-level `var` variables are file-private and cannot be exported across
+  modules.
 * **Storage & Ownership**:
   * Plain data `struct`s, primitives, `enum`s, `String`, `Range`, `proto`
     handles, and collections of Copy types copy (or CoW-share) on assignment.
@@ -172,6 +178,7 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 
 ### 3.8 Modules & Encapsulation
 * All top-level declarations are **module-private by default**.
+* Module-level `var` variables (except `@extern var`) cannot be exported.
 * Exactly one `export { ... }` manifest block per file defines public API:
   ```sapphire
   export {
@@ -332,6 +339,8 @@ pipenv run sapphire run samples/overview.sp --dev
    * Do **not** generate code or semantics relying on vtables or dynamic method overriding (vtables are strictly confined to explicit `Dynamic<Trait>` for open ABI boundaries).
    * Do **not** allow struct up-casting.
    * Do **not** introduce exceptions or stack-unwinding constructs into Sapphire syntax.
+   * Do **not** place executable procedural statements at module scope
+     (wrap execution in `func main()`, `@test`, or host callbacks).
    * Always enforce semicolon statement termination in `.sp` code.
 3. **Preserve Documentation & Comments**:
    * Do not delete or mangle docstrings, inline architectural comments, or existing specs.

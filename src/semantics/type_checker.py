@@ -763,7 +763,24 @@ class TypeChecker:
     for imp in getattr(node, "imports", []):
       self.visit(imp)
     for decl in node.declarations:
-      self.visit(decl)
+      if not isinstance(
+          decl,
+          (
+              StructDeclNode,
+              EnumDeclNode,
+              TraitDeclNode,
+              VarDeclNode,
+              FuncDeclNode,
+              ImplBlockNode,
+          ),
+      ):
+        self.error(
+            "Executable statements are not permitted at module scope. All "
+            "executable logic must reside inside 'func main()' or a function.",
+            node=decl,
+        )
+      else:
+        self.visit(decl)
     if getattr(node, "export_block", None):
       self.visit(node.export_block)
 
@@ -783,6 +800,12 @@ class TypeChecker:
         type_sym = self.symbol_table.lookup_type(spec.symbol)
         if not sym and not type_sym:
           self.error(f"Exported symbol '{spec.symbol}' is not defined in module.", node=spec)
+        elif isinstance(sym, VariableSymbol) and sym.is_mutable and not getattr(sym, "is_extern", False):
+          self.error(
+              f"Cannot export mutable module-level variable '{spec.symbol}'. "
+              "Module-level mutable state cannot be exported.",
+              node=spec,
+          )
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Fields already verified in pre-pass
@@ -1058,6 +1081,19 @@ class TypeChecker:
         self.symbol_table.define(name, sym)
       return
 
+    # Check compile-time constant expressions for module-level variables
+    if self.current_function is None:
+      from src.semantics.const_eval import is_constant_expression
+      for i, name in enumerate(node.names):
+        expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+        is_const, err_reason = is_constant_expression(expr_node, self.symbol_table)
+        if not is_const:
+          self.error(
+              f"Module-level variable '{name}' must be initialized with a "
+              f"compile-time constant expression. {err_reason}",
+              node=node,
+          )
+
     # Set expected_type for type inference (e.g. lambdas)
     old_expected = self.expected_type
     if len(node.names) == 1 and node.val_types[0]:
@@ -1095,6 +1131,8 @@ class TypeChecker:
           var_type = expr_type
 
       sym = VariableSymbol(name, var_type, node.is_mutable)
+      if self.current_function is None and not node.is_mutable:
+        sym.is_constant_expr = True
       self.symbol_table.define(name, sym)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]

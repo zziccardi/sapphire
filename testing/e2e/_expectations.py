@@ -168,4 +168,14 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_guard_unwrapping_rejection": 42,
         "test_nil_coalescing_fallback": 99,
     },
+    "module_constants_test.sp": {
+        "test_integer_constant_expr": True,
+        "test_float_constant_expr": True,
+        "test_string_constant_expr": True,
+        "test_ternary_constant_expr": True,
+        "test_array_constant_expr": True,
+        "test_map_constant_expr": True,
+        "test_struct_constant_expr": True,
+        "test_module_var_state": True,
+    },
 }

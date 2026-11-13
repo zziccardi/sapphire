@@ -732,7 +732,6 @@ class PythonTranspiler(BaseTranspiler):
     self._collect_struct_metadata(program, track_known_structs=False)
 
     top_level_decls = []
-    executable_stmts = []
     has_main = False
 
     self.global_vars = set()
@@ -752,25 +751,19 @@ class PythonTranspiler(BaseTranspiler):
         top_level_decls.append(decl)
       elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode, VarDeclNode)):
         top_level_decls.append(decl)
-      else:
-        executable_stmts.append(decl)
 
     # 3. Transpile all top-level declarations (types, functions, global variables)
     for decl in top_level_decls:
       self.visit(decl)
       self.newline()
 
-    # 4. Transpile executable top-level statements and/or main call
-    if executable_stmts or has_main:
+    # 4. Transpile main call
+    if has_main:
       self.newline()
       self.emit('if __name__ == "__main__":')
       self.indent()
-      for stmt in executable_stmts:
-        self.newline()
-        self.visit(stmt)
-      if has_main:
-        self.newline()
-        self.emit("main()")
+      self.newline()
+      self.emit("main()")
       self.dedent()
       self.newline()
 

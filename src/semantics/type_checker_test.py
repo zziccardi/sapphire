@@ -1321,11 +1321,11 @@ class TestTypeChecker(unittest.TestCase):
 
     # Prototype struct allowing __proto__
     self._check("""
-    var a = Arena();
     proto Goblin {
       var hp: int;
     }
     func test() {
+      var a = Arena();
       let g = Goblin { hp = 100 } in a;
       let parent = g.__proto__;
     }
@@ -1987,10 +1987,71 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       return 42;
       """)
-    self.assertIn("Return statement outside function context", str(context.exception))
+    self.assertTrue(
+        "Return statement outside function context" in str(context.exception)
+        or "Executable statements are not permitted at module scope" in str(context.exception)
+    )
 
-  def test_top_level_script_statements(self):
-    """Verifies that top-level script statements pass semantic analysis cleanly."""
+  def test_top_level_executable_statements_rejected(self):
+    """Verifies that top-level procedural statements are rejected at module scope."""
+    code = """
+    var count = 0;
+    for i in [1, 2, 3] {
+      count += i;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Executable statements are not permitted at module scope", str(context.exception))
+
+  def test_module_level_constant_expressions(self):
+    """Verifies valid compile-time constant expressions at module scope."""
+    code = """
+    let MAX_SPEED: int = 100 + 20 * 2;
+    let PI = 3.14159;
+    let TITLE = f"Game v{1}";
+    let STATUS = true ? "ACTIVE" : "IDLE";
+    let NUMBERS = [1, 2, 3];
+    let CONFIG = {"timeout": 30};
+
+    struct Point {
+      var x: float;
+      var y: float;
+    }
+
+    let ORIGIN = Point { x = 0.0, y = 0.0 };
+
+    func main() {
+      let speed = MAX_SPEED;
+    }
+    """
+    self._check(code)
+
+  def test_module_level_dynamic_initialization_rejected(self):
+    """Verifies that dynamic function calls are rejected in module-level initializers."""
+    code = """
+    func get_default(): int {
+      return 42;
+    }
+
+    let BAD_VAL = get_default();
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("must be initialized with a compile-time constant expression", str(context.exception))
+
+  def test_module_level_mutable_export_rejected(self):
+    """Verifies that exporting mutable module-level variables is prohibited."""
+    code = """
+    export {
+      my_count,
+    }
+
+    var my_count = 0;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot export mutable module-level variable", str(context.exception))
   def test_extern_and_export_type_checking(self):
     """Verifies that @extern var and trait signatures permit type-safe calls and reject invalid arguments."""
     code = """

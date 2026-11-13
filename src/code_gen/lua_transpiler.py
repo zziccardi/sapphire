@@ -1157,7 +1157,6 @@ class LuaTranspiler(BaseTranspiler):
 
     struct_decls = []
     func_decls = []
-    executable_stmts = []
     has_main = False
 
     for decl in program.declarations:
@@ -1172,8 +1171,6 @@ class LuaTranspiler(BaseTranspiler):
       elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode,
                              VarDeclNode)):
         struct_decls.append(decl)
-      else:
-        executable_stmts.append(decl)
 
     forward_names = []
     if not self.dev_mode:
@@ -1195,11 +1192,7 @@ class LuaTranspiler(BaseTranspiler):
       self.visit(decl)
       self.newline()
 
-    # 4. Transpile executable top-level statements and main invocation
-    for stmt in executable_stmts:
-      self.visit(stmt)
-      self.newline()
-
+    # 4. Transpile main invocation if present
     if has_main:
       self.emit("main()")
       self.newline()

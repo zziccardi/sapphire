@@ -166,9 +166,11 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_compound_assignments(self):
     """Verifies that compound assignments (+=, -=) expand to simple assignments in Lua 5.1."""
     code = """
-    var val = 10;
-    val += 5;
-    val -= 2;
+    func test() {
+      var val = 10;
+      val += 5;
+      val -= 2;
+    }
     """
     lua_code = self._transpile(code)
     self.assertIn("local val = 10", lua_code)
@@ -257,12 +259,14 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
     code = """
-    let numbers = [10, 20, 30];
-    let first = numbers[0];
-    var idx = 1;
-    let dynamic_elem = numbers[idx];
-    for n in numbers {
-      let x = n;
+    func test() {
+      let numbers = [10, 20, 30];
+      let first = numbers[0];
+      var idx = 1;
+      let dynamic_elem = numbers[idx];
+      for n in numbers {
+        let x = n;
+      }
     }
     """
     lua_code = self._transpile(code)
@@ -602,9 +606,11 @@ class TestLuaTranspiler(unittest.TestCase):
     func get_pos(): float, float {
       return 10.0, 20.0;
     }
-    let x, y = get_pos();
-    var a, b = 1.0, 2.0;
-    a, b = get_pos();
+    func test() {
+      let x, y = get_pos();
+      var a, b = 1.0, 2.0;
+      a, b = get_pos();
+    }
     """
     output = self._transpile(code)
     self.assertIn("local get_pos", output)

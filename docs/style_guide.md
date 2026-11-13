@@ -378,11 +378,12 @@ modules, samples, and Sapphire source files should adhere to these guidelines.
      between them.
   3. Module `export { ... }` manifest (for library modules), listing one symbol
      per line with a trailing comma.
-  4. Module-level constants (`let DEFAULT_PORT = 8080;`).
+  4. Module-level constants (`let DEFAULT_PORT = 8080;`) and file-private
+     variables initialized with compile-time constant expressions.
   5. Type definitions (`enum`, `trait`, and `struct`/`proto` declarations with
      their `impl` blocks).
   6. Any `@extern` host bindings depending on preceding trait declarations.
-  7. Module functions and program entry point.
+  7. Module functions and program entry point (`func main()`).
 * **Annotations & host interop (`@extern`, `@export`, `@test`, `@on_reload`)**:
   * Place annotations on their own line directly above the declaration they
     decorate, at the same indentation level, with no blank line between them.
@@ -392,17 +393,19 @@ modules, samples, and Sapphire source files should adhere to these guidelines.
     Everywhere else in Sapphire, `self` is implicit.
   * Use `@export("hostName")` on host trait methods to expose idiomatic
     `snake_case` names in Sapphire while emitting the target host symbol.
-* **Program entry points (`func main()` vs. top-level scripts)**:
-  * Because Sapphire automatically invokes `func main()` after executing any
-    top-level statements, programs defining `func main()` must **not** also call
-    `main();` at top level (which executes `main()` twice).
-  * Prefer `func main()` for standalone applications and multi-function demos
-    so execution state stays function-scoped; reserve top-level executable
-    statements for short scripts that omit `main()`:
+* **Program entry points & prohibition of top-level procedural statements**:
+  * Top-level executable procedural statements (`for`, `while`, `if`, `match`,
+    or standalone expression statements) are prohibited at module scope. All
+    execution logic must reside inside functions.
+  * Standalone applications define `func main()` as their entry point, which is
+    automatically invoked upon program execution.
+  * Module-level `let` constants and `var` variables must be initialized with
+    compile-time constant expressions. Mutable module-level `var` bindings
+    cannot be exported.
     ```sapphire
     /*
      * Module demonstrating declaration ordering, host annotations,
-     * and automatic `main()` entry-point invocation.
+     * and explicit `func main()` entry-point invocation.
      */
 
     import std.math;
