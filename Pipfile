@@ -12,6 +12,7 @@ llvmlite = "*"
 coverage = "*"
 ruff = "*"
 pyright = "*"
+build = "*"
 
 [requires]
 python_version = "3"

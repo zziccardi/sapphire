@@ -176,6 +176,40 @@ execute_turn(hero = hero, target_opt = target_ref);
   existing living prototype/struct instances in-place without losing state, and
   executes `@on_reload` lifecycle hooks.
 
+## Installation
+
+### Compiler and runtime CLI
+
+Install the Sapphire CLI package using `pip` (Python 3.10+):
+
+```bash
+pip install sapphire-lang
+```
+
+Or install the wheel from a local build or GitHub release:
+
+```bash
+pip install sapphire_lang-0.1.0-py3-none-any.whl
+```
+
+For an isolated system-wide command without managing environments, use `pipx`:
+
+```bash
+pipx install sapphire-lang
+```
+
+### VS Code extension
+
+Download the `sapphire-0.1.0.vsix` asset from GitHub releases and install it via
+the command line:
+
+```bash
+code --install-extension sapphire-0.1.0.vsix
+```
+
+Alternatively, open VS Code, navigate to the Extensions pane, click `...` (More
+Actions), and select **Install from VSIX...**.
+
 ## CLI overview
 
 ```bash
