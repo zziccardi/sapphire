@@ -630,6 +630,160 @@ class ArenaChecker:
         return
 
   @staticmethod
+  def collect_stack_borrow_symbols(
+      symbol_table: SymbolTable, node: Any, checker: Any = None
+  ) -> Set[str]:
+    """Collects variable names of local stack borrows attached to *node*."""
+    if node is None:
+      return set()
+    borrows = getattr(node, "stack_borrow_symbols", None)
+    if borrows:
+      return set(borrows)
+    if isinstance(node, (IdentifierNode, MoveNode)):
+      sym = symbol_table.lookup(node.name)
+      if isinstance(sym, VariableSymbol) and sym.stack_borrow_symbols:
+        return set(sym.stack_borrow_symbols)
+      return set()
+    if isinstance(node, MemberAccessNode):
+      return ArenaChecker.collect_stack_borrow_symbols(
+          symbol_table, node.receiver, checker
+      )
+    if isinstance(node, IndexExprNode):
+      return ArenaChecker.collect_stack_borrow_symbols(
+          symbol_table, node.array, checker
+      )
+    if isinstance(node, (UnaryOpNode, CastExprNode)):
+      return ArenaChecker.collect_stack_borrow_symbols(
+          symbol_table, node.expr, checker
+      )
+    if isinstance(node, BinaryOpNode):
+      out: Set[str] = set()
+      out.update(
+          ArenaChecker.collect_stack_borrow_symbols(
+              symbol_table, node.left, checker
+          )
+      )
+      out.update(
+          ArenaChecker.collect_stack_borrow_symbols(
+              symbol_table, node.right, checker
+          )
+      )
+      return out
+    if isinstance(node, TernaryExprNode):
+      out = set()
+      out.update(
+          ArenaChecker.collect_stack_borrow_symbols(
+              symbol_table, node.true_expr, checker
+          )
+      )
+      out.update(
+          ArenaChecker.collect_stack_borrow_symbols(
+              symbol_table, node.false_expr, checker
+          )
+      )
+      return out
+    if isinstance(node, StructInitializerNode):
+      out = set()
+      for f in node.fields:
+        out.update(
+            ArenaChecker.collect_stack_borrow_symbols(
+                symbol_table, f.expr, checker
+            )
+        )
+      return out
+    if isinstance(node, ArrayLiteralNode):
+      out = set()
+      for elem in node.elements:
+        out.update(
+            ArenaChecker.collect_stack_borrow_symbols(
+                symbol_table, elem, checker
+            )
+        )
+      return out
+    if isinstance(node, MapLiteralNode):
+      out = set()
+      for entry in node.entries:
+        out.update(
+            ArenaChecker.collect_stack_borrow_symbols(
+                symbol_table, entry.key, checker
+            )
+        )
+        out.update(
+            ArenaChecker.collect_stack_borrow_symbols(
+                symbol_table, entry.value, checker
+            )
+        )
+      return out
+    return set()
+
+  @staticmethod
+  def validate_stack_borrow_escape(
+      symbol_table: SymbolTable,
+      target_sym: VariableSymbol,
+      expr_node: ASTNode,
+      error_callback: Callable[[str], None],
+      checker: Any = None,
+  ) -> None:
+    """Rejects assigning a closure/coroutine stack borrow to target."""
+    stack_borrows = ArenaChecker.collect_stack_borrow_symbols(
+        symbol_table, expr_node, checker
+    )
+    is_closure = isinstance(expr_node, LambdaNode)
+    if checker is not None:
+      expr_type = checker.node_types.get(expr_node)
+      if isinstance(expr_type, FunctionType):
+        is_closure = True
+    for name in sorted(stack_borrows):
+      b_sym = symbol_table.lookup(name)
+      if isinstance(b_sym, VariableSymbol):
+        if target_sym is not b_sym and ArenaChecker.symbol_outlives(
+            target_sym, b_sym
+        ):
+          kind = "Closure" if is_closure else "Coroutine"
+          action = "capturing" if is_closure else "borrowing"
+          error_callback(
+              f"{kind} {action} local variable '{name}' cannot escape to outer "
+              f"or earlier-declared variable '{target_sym.name}'."
+          )
+          return
+    target_sym.stack_borrow_symbols.update(stack_borrows)
+
+  @staticmethod
+  def validate_stack_borrow_return_escape(
+      symbol_table: SymbolTable,
+      func_scope: Any,
+      expr_node: ASTNode,
+      error_callback: Callable[[str, ASTNode], None],
+      checker: Any = None,
+  ) -> None:
+    """Rejects returning a closure/coroutine capturing local stack variables."""
+    stack_borrows = ArenaChecker.collect_stack_borrow_symbols(
+        symbol_table, expr_node, checker
+    )
+    is_closure = isinstance(expr_node, LambdaNode)
+    if checker is not None:
+      expr_type = checker.node_types.get(expr_node)
+      if isinstance(expr_type, FunctionType):
+        is_closure = True
+    for name in sorted(stack_borrows):
+      b_sym = symbol_table.lookup(name)
+      if isinstance(b_sym, VariableSymbol):
+        is_local = (
+            b_sym.scope_defined is not None
+            and ArenaChecker.is_descendant_scope(
+                b_sym.scope_defined, func_scope
+            )
+        )
+        if is_local:
+          kind = "closure" if is_closure else "coroutine"
+          action = "capturing" if is_closure else "borrowing"
+          error_callback(
+              f"Cannot return {kind} {action} local variable '{name}'.",
+              expr_node,
+          )
+          return
+
+  @staticmethod
   def validate_heap_box_escape(
       symbol_table: SymbolTable,
       box_name: str,
@@ -638,10 +792,21 @@ class ArenaChecker:
       checker: Any = None,
   ) -> None:
     """Rejects boxing arena-tied values into `Ref(...)` or `SharedRef(...)`."""
+    stack_borrows = ArenaChecker.collect_stack_borrow_symbols(
+        symbol_table, arg_expr, checker
+    )
+    if stack_borrows:
+      name = sorted(stack_borrows)[0]
+      error_callback(
+          f"Cannot store closure or coroutine capturing local stack borrow "
+          f"'{name}' inside '{box_name}'."
+      )
+      return
     deps = ArenaChecker.collect_arena_deps(symbol_table, arg_expr, checker)
     if deps:
       error_callback(
-          f"Cannot box arena-dependent value from '{deps[0][0]}' inside '{box_name}'."
+          f"Cannot box arena-dependent value from '{deps[0][0]}' "
+          f"inside '{box_name}'."
       )
       return
     if checker is not None:
@@ -650,7 +815,8 @@ class ArenaChecker:
           arg_type, is_box_check=True
       ):
         error_callback(
-            f"Cannot store arena-referencing type '{arg_type}' inside '{box_name}'."
+            f"Cannot store arena-referencing type '{arg_type}' "
+            f"inside '{box_name}'."
         )
 
   @staticmethod
@@ -700,6 +866,13 @@ class ArenaChecker:
           lambda msg: checker.error(msg, node=error_node or val_expr),
           checker=checker,
           is_partial_mutation=True,
+      )
+      ArenaChecker.validate_stack_borrow_escape(
+          checker.symbol_table,
+          recv_sym,
+          val_expr,
+          lambda msg: checker.error(msg, node=error_node or val_expr),
+          checker=checker,
       )
       val_deps = ArenaChecker.collect_arena_deps(
           checker.symbol_table, val_expr, checker

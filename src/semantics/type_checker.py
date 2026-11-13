@@ -267,6 +267,9 @@ class TypeChecker:
     # Pass 3: Register impl block method signatures
     self._register_impl_signatures(program)
 
+    # Pass 3.5: Pre-analyze module-level var globals and call graph accesses
+    self._analyze_global_accesses(program)
+
     # Pass 4: Type-check top-level statements, functions, and structs
     self.visit_ProgramNode(program)
 
@@ -562,6 +565,199 @@ class TypeChecker:
   # ==========================================
   # Visitor Methods
   # ==========================================
+
+  def _analyze_global_accesses(self, program: ProgramNode) -> None:
+    """Pre-analyzes module-level mutable var globals and call graph accesses."""
+    self.module_var_globals: Set[str] = set()
+    self.exported_symbols: Set[str] = set()
+    for decl in program.declarations:
+      if (
+          isinstance(decl, VarDeclNode)
+          and decl.is_mutable
+          and not getattr(decl, "is_extern", False)
+      ):
+        for name in decl.names:
+          self.module_var_globals.add(name)
+    if getattr(program, "export_block", None):
+      for spec in program.export_block.specifiers:
+        self.exported_symbols.add(spec.symbol)
+    self.exported_var_globals = (
+        self.module_var_globals & self.exported_symbols
+    )
+
+    self.func_direct_globals: Dict[str, Set[str]] = {}
+    self.func_direct_calls: Dict[str, Set[str]] = {}
+    self.func_has_dynamic: Set[str] = set()
+
+    for decl in program.declarations:
+      if isinstance(decl, FuncDeclNode):
+        self._scan_func_global_accesses(decl.name, decl)
+      elif isinstance(decl, ImplBlockNode):
+        for member in decl.members:
+          fdecl = getattr(member, "func_decl", member)
+          if isinstance(fdecl, FuncDeclNode):
+            func_id = f"{decl.struct_name}.{fdecl.name}"
+            self._scan_func_global_accesses(
+                func_id, fdecl, struct_name=decl.struct_name
+            )
+
+    self.func_transitive_globals = {
+        k: set(v) for k, v in self.func_direct_globals.items()
+    }
+    self.func_transitive_dynamic = set(self.func_has_dynamic)
+    changed = True
+    while changed:
+      changed = False
+      for f_id, called_set in self.func_direct_calls.items():
+        for callee in called_set:
+          matching = [
+              k
+              for k in self.func_direct_globals
+              if k == callee or k.endswith(f".{callee}")
+          ]
+          for m in matching:
+            before_len = len(self.func_transitive_globals[f_id])
+            self.func_transitive_globals[f_id].update(
+                self.func_transitive_globals[m]
+            )
+            if len(self.func_transitive_globals[f_id]) > before_len:
+              changed = True
+            if (
+                m in self.func_transitive_dynamic
+                and f_id not in self.func_transitive_dynamic
+            ):
+              self.func_transitive_dynamic.add(f_id)
+              changed = True
+
+  def _scan_func_global_accesses(
+      self,
+      func_id: str,
+      decl: FuncDeclNode,
+      struct_name: Optional[str] = None,
+  ) -> None:
+    direct_globals: Set[str] = set()
+    direct_calls: Set[str] = set()
+    local_names: Set[str] = {p.name for p in decl.parameters}
+    if struct_name:
+      local_names.add("self")
+
+    def walk(node: Any) -> None:
+      if node is None:
+        return
+      if isinstance(node, list):
+        for item in node:
+          walk(item)
+        return
+      if isinstance(node, VarDeclNode):
+        expr_list = getattr(node, "exprs", None) or (
+            [node.expr] if getattr(node, "expr", None) else []
+        )
+        for e in expr_list:
+          walk(e)
+        for n in node.names:
+          local_names.add(n)
+        return
+      if isinstance(node, LambdaNode):
+        saved = set(local_names)
+        for p in node.parameters:
+          local_names.add(p.name)
+        walk(node.body)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IdentifierNode):
+        if (
+            node.name in self.module_var_globals
+            and node.name not in local_names
+        ):
+          direct_globals.add(node.name)
+        return
+      if isinstance(node, CallNode):
+        if isinstance(node.callee, IdentifierNode):
+          direct_calls.add(node.callee.name)
+        elif isinstance(node.callee, MemberAccessNode):
+          if (
+              isinstance(node.callee.receiver, IdentifierNode)
+              and node.callee.receiver.name == "self"
+              and struct_name
+          ):
+            direct_calls.add(f"{struct_name}.{node.callee.member}")
+          else:
+            direct_calls.add(node.callee.member)
+        else:
+          self.func_has_dynamic.add(func_id)
+        for arg in node.arguments:
+          walk(arg.expr)
+        return
+      if isinstance(node, ASTNode):
+        for v in node.__dict__.values():
+          if isinstance(v, (ASTNode, list)):
+            walk(v)
+
+    walk(decl.body)
+    self.func_direct_globals[func_id] = direct_globals
+    self.func_direct_calls[func_id] = direct_calls
+
+  def _scan_lambda_stack_borrows(self, lambda_node: LambdaNode) -> Set[str]:
+    """Finds enclosing local stack non-primitive or var bindings in lambda."""
+    local_names: Set[str] = {p.name for p in lambda_node.parameters}
+    borrows: Set[str] = set()
+
+    def walk(node: Any) -> None:
+      if node is None:
+        return
+      if isinstance(node, list):
+        for item in node:
+          walk(item)
+        return
+      if isinstance(node, VarDeclNode):
+        expr_list = getattr(node, "exprs", None) or (
+            [node.expr] if getattr(node, "expr", None) else []
+        )
+        for e in expr_list:
+          walk(e)
+        for n in node.names:
+          local_names.add(n)
+        return
+      if isinstance(node, LambdaNode):
+        saved = set(local_names)
+        for p in node.parameters:
+          local_names.add(p.name)
+        walk(node.body)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, (IdentifierNode, MoveNode)):
+        if node.name not in local_names:
+          sym = self.symbol_table.lookup(node.name)
+          if isinstance(sym, VariableSymbol):
+            if (
+                sym.scope_defined is not None
+                and sym.scope_defined.parent is not None
+            ):
+              is_ref = ArenaChecker.is_reference_type(sym.symbol_type)
+              is_plain_stack = (
+                  is_ref
+                  and not sym.arena_dep_records
+                  and not isinstance(
+                      sym.symbol_type, (SharedRefType, RefType)
+                  )
+              )
+              if (
+                  sym.is_mutable
+                  or is_plain_stack
+                  or sym.stack_borrow_symbols
+              ):
+                borrows.add(sym.name)
+                borrows.update(sym.stack_borrow_symbols)
+        return
+      if isinstance(node, ASTNode):
+        for v in node.__dict__.values():
+          if isinstance(v, (ASTNode, list)):
+            walk(v)
+
+    walk(lambda_node.body)
+    return borrows
 
   def visit_ProgramNode(self, node: ProgramNode) -> None:
     for imp in getattr(node, "imports", []):
@@ -917,6 +1113,13 @@ class TypeChecker:
           lambda msg: self.error(msg, node=node),
           checker=self,
       )
+      ArenaChecker.validate_stack_borrow_escape(
+          self.symbol_table,
+          sym,
+          expr_node,
+          lambda msg: self.error(msg, node=node),
+          checker=self,
+      )
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     target_types = [self._check_lvalue(t) for t in node.targets]
@@ -955,6 +1158,13 @@ class TypeChecker:
           else:
             target_sym.proto_ancestors.clear()
           ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              target_sym,
+              expr_node,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
+          ArenaChecker.validate_stack_borrow_escape(
               self.symbol_table,
               target_sym,
               expr_node,
@@ -1189,9 +1399,16 @@ class TypeChecker:
       )
       self._check_return_ownership_transfer(ret_expr_node, act, node=node)
 
-    # Check return escaping arena reference
+    # Check return escaping arena reference and stack borrows
     for ret_expr in node.expressions:
       ArenaChecker.validate_return_escape(
+          self.symbol_table,
+          self.current_function_scope,
+          ret_expr,
+          lambda msg, n: self.error(msg, node=n),
+          checker=self,
+      )
+      ArenaChecker.validate_stack_borrow_return_escape(
           self.symbol_table,
           self.current_function_scope,
           ret_expr,
@@ -1228,6 +1445,26 @@ class TypeChecker:
       return
 
     node.is_coroutine_yield = True
+    curr_scope = self.symbol_table.current_scope
+    while curr_scope is not None:
+      for sym in curr_scope.symbols.values():
+        if (
+            isinstance(sym, VariableSymbol)
+            and not sym.is_moved
+            and sym not in self.moved_symbols
+        ):
+          if sym.symbol_type and sym.symbol_type.is_move_only_type(
+              self.symbol_table
+          ):
+            self.error(
+                f"Variable '{sym.name}' of move-only RAII type "
+                f"'{sym.symbol_type}' cannot remain live across 'yield'.",
+                node=node,
+            )
+      if curr_scope is self.current_function_scope:
+        break
+      curr_scope = curr_scope.parent
+
     expected_yield = coro_type.yield_type
 
     expr_nodes = getattr(node, "expressions", None) or (
@@ -1987,12 +2224,136 @@ class TypeChecker:
       self._check_aliasing(node, signature, is_constructor)
       ArenaChecker.check_call_var_sink_escape(self, node, signature, is_constructor)
 
+    # Check module-level var global reentrancy
+    callee_id = None
+    is_known_func = False
+    if isinstance(node.callee, IdentifierNode):
+      callee_id = node.callee.name
+      callee_sym = self.symbol_table.lookup(callee_id)
+      if isinstance(callee_sym, FunctionSymbol):
+        is_known_func = True
+    elif isinstance(node.callee, MemberAccessNode):
+      recv_t = self.node_types.get(node.callee.receiver)
+      if isinstance(recv_t, StructType):
+        callee_id = f"{recv_t.name}.{node.callee.member}"
+      else:
+        callee_id = node.callee.member
+      is_known_func = True
+
+    callee_transitive = getattr(self, "func_transitive_globals", {})
+    callee_dynamic = getattr(self, "func_transitive_dynamic", set())
+    matching_keys = [
+        k for k in callee_transitive
+        if k == callee_id or k.endswith(f".{callee_id}")
+    ] if callee_id else []
+
+    for arg in node.arguments:
+      arg_path = ArenaChecker.get_lvalue_path(self.symbol_table, arg.expr)
+      if arg_path:
+        root, _ = arg_path
+        if root in getattr(self, "module_var_globals", set()):
+          root_sym = self.symbol_table.lookup(root)
+          if (
+              isinstance(root_sym, VariableSymbol)
+              and ArenaChecker.is_reference_type(root_sym.symbol_type)
+          ):
+            if root in getattr(self, "exported_var_globals", set()):
+              self.error(
+                  f"Cannot pass exported mutable global '{root}' by reference.",
+                  node=node,
+              )
+            elif (
+                not is_known_func
+                or any(k in callee_dynamic for k in matching_keys)
+            ):
+              self.error(
+                  f"Cannot pass mutable global '{root}' by reference to "
+                  "dynamic or higher-order callee.",
+                  node=node,
+              )
+            elif any(
+                root in callee_transitive.get(k, set()) for k in matching_keys
+            ):
+              self.error(
+                  f"Cannot pass mutable global '{root}' by reference: callee "
+                  f"accesses '{root}' in its call graph (reentrant global "
+                  "aliasing hazard).",
+                  node=node,
+              )
+
+    if isinstance(node.callee, MemberAccessNode):
+      recv_path = ArenaChecker.get_lvalue_path(
+          self.symbol_table, node.callee.receiver
+      )
+      if recv_path:
+        root, _ = recv_path
+        if root in getattr(self, "module_var_globals", set()):
+          root_sym = self.symbol_table.lookup(root)
+          if (
+              isinstance(root_sym, VariableSymbol)
+              and ArenaChecker.is_reference_type(root_sym.symbol_type)
+          ):
+            if any(
+                root in callee_transitive.get(k, set()) for k in matching_keys
+            ):
+              self.error(
+                  f"Cannot invoke method '{node.callee.member}' on mutable "
+                  f"global '{root}': method accesses '{root}' in its call "
+                  "graph (reentrant global aliasing hazard).",
+                  node=node,
+              )
+
     if is_constructor:
       return callee_type
     ret_type = signature.return_type
     if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
       if not isinstance(ret_type, OptionalType):
         ret_type = OptionalType(ret_type)
+
+    if isinstance(ret_type, CoroutineType):
+      coro_borrows: Set[str] = set()
+      if isinstance(node.callee, MemberAccessNode):
+        r_path = ArenaChecker.get_lvalue_path(
+            self.symbol_table, node.callee.receiver
+        )
+        if r_path:
+          root, _ = r_path
+          r_sym = self.symbol_table.lookup(root)
+          if (
+              isinstance(r_sym, VariableSymbol)
+              and r_sym.scope_defined is not None
+              and r_sym.scope_defined.parent is not None
+          ):
+            coro_borrows.add(r_sym.name)
+            coro_borrows.update(r_sym.stack_borrow_symbols)
+        coro_borrows.update(
+            ArenaChecker.collect_stack_borrow_symbols(
+                self.symbol_table, node.callee.receiver, self
+            )
+        )
+      for arg in node.arguments:
+        a_path = ArenaChecker.get_lvalue_path(self.symbol_table, arg.expr)
+        if a_path:
+          root, _ = a_path
+          a_sym = self.symbol_table.lookup(root)
+          if (
+              isinstance(a_sym, VariableSymbol)
+              and a_sym.scope_defined is not None
+              and a_sym.scope_defined.parent is not None
+              and (
+                  ArenaChecker.is_reference_type(a_sym.symbol_type)
+                  or a_sym.is_mutable
+              )
+          ):
+            coro_borrows.add(a_sym.name)
+            coro_borrows.update(a_sym.stack_borrow_symbols)
+        coro_borrows.update(
+            ArenaChecker.collect_stack_borrow_symbols(
+                self.symbol_table, arg.expr, self
+            )
+        )
+      node.stack_borrow_symbols = coro_borrows
+
     return ret_type
 
   def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False, callee_node: Optional[ASTNode] = None) -> None:
@@ -2478,6 +2839,7 @@ class TypeChecker:
 
     self.moved_symbols = old_moved_symbols
     self.symbol_table.exit_scope()
+    node.stack_borrow_symbols = self._scan_lambda_stack_borrows(node)
     return FunctionType(resolved_param_types, ret_type)
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:

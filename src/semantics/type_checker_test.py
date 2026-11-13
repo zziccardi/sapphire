@@ -6505,6 +6505,364 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(immutable_borrows_ok)
 
+  def test_closure_stack_capture_escapes(self):
+    local_map_ok = """
+    struct Point { var x: int; }
+    func main() {
+      let p = Point { x = 10 };
+      let nums = [1, 2, 3];
+      let res = nums.map(x -> x + p.x);
+    }
+    """
+    self._check(local_map_ok)
+
+    return_capture_struct_reject = """
+    struct Point { var x: int; }
+    func make_closure(): () -> int {
+      let p = Point { x = 10 };
+      return () -> int { return p.x; };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(return_capture_struct_reject)
+    self.assertIn("capturing local variable 'p'", str(ctx1.exception))
+
+    return_capture_var_reject = """
+    func make_counter(): () -> int {
+      var count = 0;
+      return () -> int { return count; };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(return_capture_var_reject)
+    self.assertIn("capturing local variable 'count'", str(ctx2.exception))
+
+    return_capture_scalar_const_ok = """
+    func make_adder(x: int): (int) -> int {
+      return (y: int) -> int { return x + y; };
+    }
+    """
+    self._check(return_capture_scalar_const_ok)
+
+    outer_assign_reject = """
+    struct Point { var x: int; }
+    func main() {
+      var cb: () -> int;
+      {
+        let p = Point { x = 10 };
+        cb = () -> int { return p.x; };
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(outer_assign_reject)
+    self.assertIn(
+        "Closure capturing local variable 'p' cannot escape",
+        str(ctx3.exception),
+    )
+
+    earlier_decl_reject = """
+    struct Point { var x: int; }
+    func main() {
+      var cb: () -> int;
+      let p = Point { x = 10 };
+      cb = () -> int { return p.x; };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(earlier_decl_reject)
+    self.assertIn(
+        "Closure capturing local variable 'p' cannot escape",
+        str(ctx4.exception),
+    )
+
+    box_closure_reject = """
+    struct Point { var x: int; }
+    func main() {
+      let p = Point { x = 10 };
+      let r = Ref(() -> int { return p.x; });
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx5:
+      self._check(box_closure_reject)
+    self.assertIn("inside 'Ref'", str(ctx5.exception))
+
+  def test_coroutine_stack_borrow_escapes(self):
+    local_step_ok = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    func main() {
+      var a = Actor { hp = 100 };
+      var co = a.tick();
+      co.step();
+    }
+    """
+    self._check(local_step_ok)
+
+    return_coro_borrow_reject = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    struct Wrapper { var co: Coroutine<void>; }
+    func make_wrapper(): Wrapper {
+      var a = Actor { hp = 100 };
+      return Wrapper { co = a.tick() };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(return_coro_borrow_reject)
+    self.assertIn("borrowing local variable 'a'", str(ctx1.exception))
+
+    return_coro_arg_reject = """
+    struct Packet { var val: int; }
+    func stream(p: Packet): Coroutine<int> {
+      yield p.val;
+    }
+    struct StreamHolder { var s: Coroutine<int>; }
+    func make_stream(): StreamHolder {
+      let pkt = Packet { val = 42 };
+      return StreamHolder { s = stream(pkt) };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(return_coro_arg_reject)
+    self.assertIn("borrowing local variable 'pkt'", str(ctx2.exception))
+
+    outer_assign_coro_reject = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    func main() {
+      var co: Coroutine<void>;
+      {
+        var a = Actor { hp = 100 };
+        co = a.tick();
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(outer_assign_coro_reject)
+    self.assertIn(
+        "Coroutine borrowing local variable 'a' cannot escape",
+        str(ctx3.exception),
+    )
+
+    earlier_decl_coro_reject = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    func main() {
+      var co: Coroutine<void>;
+      var a = Actor { hp = 100 };
+      co = a.tick();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(earlier_decl_coro_reject)
+    self.assertIn(
+        "Coroutine borrowing local variable 'a' cannot escape",
+        str(ctx4.exception),
+    )
+
+  def test_coroutine_yield_raii_restriction(self):
+    del_across_yield_reject = """
+    struct Resource { var id: int; }
+    impl Resource {
+      func __del__() {}
+    }
+    func coro(): Coroutine<void> {
+      let r = Resource { id = 1 };
+      yield;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(del_across_yield_reject)
+    self.assertIn(
+        "move-only RAII type 'Resource' cannot remain live across 'yield'",
+        str(ctx1.exception),
+    )
+
+    arena_across_yield_reject = """
+    func coro(): Coroutine<void> {
+      var a = Arena();
+      yield;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(arena_across_yield_reject)
+    self.assertIn(
+        "move-only RAII type 'Arena' cannot remain live across 'yield'",
+        str(ctx2.exception),
+    )
+
+    ref_across_yield_reject = """
+    func coro(): Coroutine<void> {
+      let r = Ref(10);
+      yield;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(ref_across_yield_reject)
+    self.assertIn(
+        "move-only RAII type 'Ref<int>' cannot remain live across 'yield'",
+        str(ctx3.exception),
+    )
+
+    scoped_block_before_yield_ok = """
+    struct Resource { var id: int; }
+    impl Resource {
+      func __del__() {}
+    }
+    func coro(): Coroutine<void> {
+      {
+        let r = Resource { id = 1 };
+      }
+      yield;
+    }
+    """
+    self._check(scoped_block_before_yield_ok)
+
+    moved_before_yield_ok = """
+    struct Resource { var id: int; }
+    impl Resource {
+      func __del__() {}
+    }
+    func sink(r: Resource) {}
+    func coro(): Coroutine<void> {
+      let r = Resource { id = 1 };
+      sink(move r);
+      yield;
+    }
+    """
+    self._check(moved_before_yield_ok)
+
+  def test_module_var_global_reentrancy(self):
+    direct_access_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func update(p: Player) {
+      g_player.hp = 0;
+    }
+    func main() {
+      update(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(direct_access_reject)
+    self.assertIn(
+        "callee accesses 'g_player' in its call graph", str(ctx1.exception)
+    )
+
+    transitive_access_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func helper() {
+      g_player.hp = 50;
+    }
+    func update(p: Player) {
+      helper();
+    }
+    func main() {
+      update(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(transitive_access_reject)
+    self.assertIn(
+        "callee accesses 'g_player' in its call graph", str(ctx2.exception)
+    )
+
+    exported_global_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    export {
+      g_player
+    }
+    func inspect(p: Player) {}
+    func main() {
+      inspect(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(exported_global_reject)
+    self.assertIn(
+        "Cannot pass exported mutable global 'g_player' by reference",
+        str(ctx3.exception),
+    )
+
+    dynamic_callee_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func main() {
+      var cb: (Player) -> void = p -> {};
+      cb(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(dynamic_callee_reject)
+    self.assertIn(
+        "Cannot pass mutable global 'g_player' by reference to dynamic",
+        str(ctx4.exception),
+    )
+
+    non_aliasing_method_ok = """
+    struct Button { var id: String; }
+    impl Button {
+      func render() {
+        print(self.id);
+      }
+    }
+    var submit_btn = Button { id = "btn" };
+    func main() {
+      submit_btn.render();
+    }
+    """
+    self._check(non_aliasing_method_ok)
+
+    non_aliasing_func_ok = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func inspect(p: Player) {
+      let h = p.hp;
+    }
+    func main() {
+      inspect(g_player);
+    }
+    """
+    self._check(non_aliasing_func_ok)
+
+    let_global_borrow_ok = """
+    struct Config { let port: int; }
+    let g_cfg = Config { port = 8080 };
+    func run_server(c: Config) {}
+    func main() {
+      run_server(g_cfg);
+    }
+    """
+    self._check(let_global_borrow_ok)
+
+    primitive_var_global_value_ok = """
+    var g_count = 10;
+    func inc(x: int) {}
+    func main() {
+      inc(g_count);
+    }
+    """
+    self._check(primitive_var_global_value_ok)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -796,6 +796,7 @@ class VariableSymbol(Symbol):
     self.arena_dep_records: List[Tuple[str, int]] = []
     self.is_moved: bool = False
     self.proto_ancestors: Set[str] = set()
+    self.stack_borrow_symbols: Set[str] = set()
 
 
 class FunctionSymbol(Symbol):
