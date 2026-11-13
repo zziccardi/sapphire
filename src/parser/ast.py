@@ -71,10 +71,11 @@ class OptionalTypeNode(TypeNode):
 
 
 class ArrayTypeNode(TypeNode):
-  """Represents an array type wrapper (e.g. '[int]')."""
+  """Represents an array type wrapper (e.g. '[int]' or '[int; 3]')."""
 
-  def __init__(self, element_type: TypeNode):
+  def __init__(self, element_type: TypeNode, size: Optional[int] = None):
     self.element_type = element_type
+    self.size = size
 
 
 class MapTypeNode(TypeNode):
@@ -83,7 +84,6 @@ class MapTypeNode(TypeNode):
   def __init__(self, key_type: TypeNode, val_type: TypeNode):
     self.key_type = key_type
     self.val_type = val_type
-
 
 
 class FunctionTypeNode(TypeNode):

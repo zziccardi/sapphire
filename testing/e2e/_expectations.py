@@ -179,4 +179,11 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_struct_constant_expr": True,
         "test_module_var_state": True,
     },
+    "fixed_arrays_test.sp": {
+        "test_fixed_array_indexing": 60,
+        "test_fixed_array_negative_indexing": 60,
+        "test_dynamic_array_negative_indexing": 500,
+        "test_fixed_array_assignment_to_dynamic": 3,
+        "test_fixed_array_mutation_with_negative_index": 99,
+    },
 }

@@ -122,7 +122,7 @@ type
     ;
 
 collectionType
-    : LBRACKET keyType=type (COLON valType=type)? RBRACKET
+    : LBRACKET keyType=type (COLON valType=type | SEMICOLON size=INT_LIT)? RBRACKET
     ;
 
 baseType

@@ -624,11 +624,18 @@ class TestASTBuilder(unittest.TestCase):
 
 
   def test_collection_type_annotations(self):
-    """Verifies parsing of array [T] and map [K: V] type annotations."""
+    """Verifies parsing of array [T], fixed-size array [T; N], and map [K: V] type annotations."""
     ast_arr = self._get_ast('let arr: [int] = [1, 2];')
     decl_arr = ast_arr.declarations[0]
     self.assertIsInstance(decl_arr.val_types[0], ArrayTypeNode)
     self.assertEqual(decl_arr.val_types[0].element_type.name, "int")
+    self.assertIsNone(decl_arr.val_types[0].size)
+
+    ast_fixed = self._get_ast('let fixed_arr: [int; 3] = [1, 2, 3];')
+    decl_fixed = ast_fixed.declarations[0]
+    self.assertIsInstance(decl_fixed.val_types[0], ArrayTypeNode)
+    self.assertEqual(decl_fixed.val_types[0].element_type.name, "int")
+    self.assertEqual(decl_fixed.val_types[0].size, 3)
 
     ast_map = self._get_ast('let m: [String: int] = {"a": 1};')
     decl_map = ast_map.declarations[0]

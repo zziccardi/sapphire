@@ -534,7 +534,10 @@ class TypeChecker:
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))
     if isinstance(node, ArrayTypeNode):
-      return ArrayType(self._resolve_type_node(node.element_type))
+      elem_type = self._resolve_type_node(node.element_type)
+      if node.size is not None:
+        return ArrayType(elem_type, size=node.size, is_fixed_size=True)
+      return ArrayType(elem_type)
     if isinstance(node, MapTypeNode):
       return MapType(self._resolve_type_node(node.key_type), self._resolve_type_node(node.val_type))
     if isinstance(node, FunctionTypeNode):
@@ -1122,7 +1125,7 @@ class TypeChecker:
           self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.", node=node)
         var_type = val_type
         if isinstance(var_type, ArrayType) and isinstance(expr_type, ArrayType) and expr_type.size is not None and var_type.size is None:
-          var_type = ArrayType(var_type.element_type, size=expr_type.size)
+          var_type = ArrayType(var_type.element_type, size=expr_type.size, is_fixed_size=False)
       else:
         if isinstance(expr_type, NoneType):
           self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.", node=node)
@@ -2883,7 +2886,9 @@ class TypeChecker:
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:
       if isinstance(self.expected_type, ArrayType):
-        return ArrayType(self.expected_type.element_type, size=0)
+        if self.expected_type.is_fixed_size and self.expected_type.size != 0:
+          self.error(f"Fixed-size array '[{self.expected_type.element_type}; {self.expected_type.size}]' requires exactly {self.expected_type.size} element(s), got 0.", node=node)
+        return ArrayType(self.expected_type.element_type, size=0, is_fixed_size=self.expected_type.is_fixed_size)
       return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
@@ -2895,14 +2900,18 @@ class TypeChecker:
         if not etype.is_compatible(target_elem):
           self.error(f"Array element of type '{etype}' is not compatible with expected element type '{target_elem}'.")
           break
-      return ArrayType(target_elem, size=len(node.elements))
+      if self.expected_type.is_fixed_size:
+        if len(node.elements) != self.expected_type.size:
+          self.error(f"Fixed-size array '[{target_elem}; {self.expected_type.size}]' requires exactly {self.expected_type.size} element(s), got {len(node.elements)}.", node=node)
+        return ArrayType(target_elem, size=len(node.elements), is_fixed_size=True)
+      return ArrayType(target_elem, size=len(node.elements), is_fixed_size=False)
 
     first_type = elem_types[0]
     for etype in elem_types[1:]:
       if not etype.is_compatible(first_type) and not first_type.is_compatible(etype):
         self.error("Inconsistent element types in array literal.")
         break
-    return ArrayType(first_type, size=len(node.elements))
+    return ArrayType(first_type, size=len(node.elements), is_fixed_size=False)
 
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
     if not node.entries:
@@ -2958,10 +2967,9 @@ class TypeChecker:
     const_idx = self._get_const_int_value(node.index)
     if const_idx is not None:
       size = array_type.size
-      if const_idx < 0:
-        self.error(f"Array index out of bounds: negative index '{const_idx}' is not allowed.")
-      elif size is not None and const_idx >= size:
-        self.error(f"Array index out of bounds: index {const_idx} is out of bounds for array of size {size}.")
+      if size is not None:
+        if const_idx >= size or const_idx < -size:
+          self.error(f"Array index out of bounds: index {const_idx} is out of bounds for array of size {size}.", node=node)
 
   def _check_map_literal_key(self, node: IndexExprNode) -> None:
     if isinstance(node.array, MapLiteralNode) and isinstance(node.index, LiteralNode):

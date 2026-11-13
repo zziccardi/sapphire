@@ -36,6 +36,8 @@ def _format_type_node(node: Optional[TypeNode]) -> str:
   if isinstance(node, OptionalTypeNode):
     return f"{_format_type_node(node.base_type)}?"
   if isinstance(node, ArrayTypeNode):
+    if node.size is not None:
+      return f"[{_format_type_node(node.element_type)}; {node.size}]"
     return f"[{_format_type_node(node.element_type)}]"
   if isinstance(node, MapTypeNode):
     return f"[{_format_type_node(node.key_type)}: {_format_type_node(node.val_type)}]"

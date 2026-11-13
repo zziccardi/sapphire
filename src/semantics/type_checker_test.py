@@ -2994,14 +2994,21 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Array index out of bounds: index 3 is out of bounds for array of size 3.", str(ctx.exception))
 
-    # 2. Negative index on array literal
+    # 2. Valid negative indexing and out of bounds negative index on array literal
+    self._check("""
+    func test() {
+      let last = [10, 20, 30][-1];
+      let first = [10, 20, 30][-3];
+    }
+    """)
+
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
-        let x = [10, 20, 30][-1];
+        let x = [10, 20, 30][-4];
       }
       """)
-    self.assertIn("Array index out of bounds: negative index '-1' is not allowed.", str(ctx.exception))
+    self.assertIn("Array index out of bounds: index -4 is out of bounds for array of size 3.", str(ctx.exception))
 
     # 3. Out of bounds index on array variable
     with self.assertRaises(SemanticError) as ctx:
@@ -3029,8 +3036,79 @@ class TestTypeChecker(unittest.TestCase):
       let arr = [10, 20, 30];
       let first = arr[0];
       let last = arr[2];
+      let back = arr[-1];
     }
     """)
+
+  def test_fixed_size_array_type_checking(self):
+    """Verifies semantic analysis and bounds rules for [T; N] fixed-size arrays."""
+    # 1. Valid declaration, literal assignment, and indexing
+    self._check("""
+    func test() {
+      let scores: [int; 3] = [95, 88, 72];
+      let first = scores[0];
+      let last = scores[2];
+      let back = scores[-1];
+      let front_neg = scores[-3];
+    }
+    """)
+
+    # 2. Literal size mismatch
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let scores: [int; 3] = [95, 88];
+      }
+      """)
+    self.assertIn("Fixed-size array '[int; 3]' requires exactly 3 element(s), got 2.", str(ctx.exception))
+
+    # 3. Constant out of bounds positive index
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let scores: [int; 3] = [95, 88, 72];
+        let val = scores[3];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 3 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 4. Constant out of bounds negative index
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let scores: [int; 3] = [95, 88, 72];
+        let val = scores[-4];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index -4 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 5. Assignable from [T; N] to unbounded [T]
+    self._check("""
+    func test() {
+      let scores: [int; 3] = [95, 88, 72];
+      let dynamic: [int] = scores;
+    }
+    """)
+
+    # 6. Rejection of assigning unbounded [T] to [T; N]
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let dynamic: [int] = [1, 2, 3];
+        let fixed: [int; 3] = dynamic;
+      }
+      """)
+    self.assertIn("Cannot assign expression of type '[int]' to variable 'fixed' of type '[int; 3]'.", str(ctx.exception))
+
+    # 7. Rejection of size mismatch between fixed arrays
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let fixed3: [int; 3] = [1, 2, 3];
+        let fixed4: [int; 4] = fixed3;
+      }
+      """)
+    self.assertIn("Cannot assign expression of type '[int; 3]' to variable 'fixed4' of type '[int; 4]'.", str(ctx.exception))
 
   def test_map_compile_time_key_validation(self):
     """Verifies compile-time key checking for map literals."""
@@ -3068,7 +3146,7 @@ class TestTypeChecker(unittest.TestCase):
     )
     checker.visit_VarDeclNode(var_decl)
     sym = checker.symbol_table.lookup("arr")
-    self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2))
+    self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2, is_fixed_size=False))
 
     with self.assertRaises(SemanticError) as ctx:
       self._check("""

@@ -496,16 +496,19 @@ class InferredType(Type):
 class ArrayType(Type):
   """Represents an array type (e.g. '[int]' or '[int; 3]')."""
 
-  def __init__(self, element_type: Type, size: Optional[int] = None, is_fixed_size: bool = False):
+  def __init__(self, element_type: Type, size: Optional[int] = None, is_fixed_size: Optional[bool] = None):
     self.element_type = element_type
     self.size = size
-    self.is_fixed_size = is_fixed_size
+    self.is_fixed_size = (size is not None) if is_fixed_size is None else is_fixed_size
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, ArrayType):
       if (isinstance(self.element_type, NoneType) or
           isinstance(other.element_type, NoneType)):
         return True
+      if other.is_fixed_size:
+        if not self.is_fixed_size or self.size != other.size:
+          return False
       return self.element_type.is_compatible(other.element_type)
     if isinstance(other, OptionalType):
       return self.is_compatible(other.base_type)
@@ -517,7 +520,7 @@ class ArrayType(Type):
     return self.element_type == other.element_type and self.size == other.size and self.is_fixed_size == other.is_fixed_size
 
   def __repr__(self) -> str:
-    if self.size is not None:
+    if self.is_fixed_size and self.size is not None:
       return f"[{self.element_type}; {self.size}]"
     return f"[{self.element_type}]"
 

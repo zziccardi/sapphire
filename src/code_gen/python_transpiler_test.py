@@ -348,6 +348,19 @@ class TestPythonTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "run_index()")
     self.assertEqual(result, 200)
 
+  def test_fixed_size_array_and_negative_indexing(self):
+    """Verifies that fixed-size arrays and negative indexing execute correctly in Python."""
+    code = """
+    func run_fixed_and_negative(): int {
+      let scores: [int; 3] = [10, 20, 30];
+      let last = scores[-1];
+      let first = scores[-3];
+      return last + first;
+    }
+    """
+    result = self._transpile_and_run(code, "run_fixed_and_negative()")
+    self.assertEqual(result, 40)
+
 
   def test_additional_transpiler_features(self):
     """Verifies standard conditionals, unary ops, strings, default params, empty constructors/methods, and clones."""
