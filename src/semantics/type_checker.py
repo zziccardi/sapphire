@@ -73,6 +73,46 @@ class TypeChecker:
     self._branch_depth: int = 0
     self._init_assigned_arena_fields: Set[str] = set()
     self._init_used_arena_fields: Set[str] = set()
+    self._temporary_frozen_lvalues: List[Tuple[str, List[str], str]] = []
+
+  def get_frozen_lvalue_reason(
+      self, root: str, path: List[str]
+  ) -> Optional[str]:
+    """Returns freeze reason if lvalue path overlaps with a frozen lvalue."""
+    scope = self.symbol_table.current_scope
+    all_frozen = list(self._temporary_frozen_lvalues)
+    while scope is not None:
+      all_frozen.extend(getattr(scope, "frozen_lvalues", []))
+      scope = scope.parent
+    for f_root, f_path, reason in all_frozen:
+      if f_root == root:
+        if f_path[:len(path)] == path or path[:len(f_path)] == f_path:
+          return reason
+    return None
+
+  def has_shared_ref_base(self, node: ASTNode) -> bool:
+    """Returns True if *node* or any base in its chain is a SharedRef."""
+    curr = node
+    while curr is not None:
+      node_t = self.node_types.get(curr)
+      if node_t is None and isinstance(curr, IdentifierNode):
+        sym = self.symbol_table.lookup(curr.name)
+        if isinstance(sym, VariableSymbol):
+          node_t = sym.symbol_type
+      if isinstance(node_t, SharedRefType):
+        return True
+      if (
+          isinstance(node_t, OptionalType)
+          and isinstance(node_t.base_type, SharedRefType)
+      ):
+        return True
+      if isinstance(curr, MemberAccessNode):
+        curr = curr.receiver
+      elif isinstance(curr, IndexExprNode):
+        curr = curr.array
+      else:
+        break
+    return False
 
   def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
     if isinstance(target, IdentifierNode):
@@ -862,6 +902,13 @@ class TypeChecker:
       self.symbol_table.define(name, sym)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if isinstance(expr_node, CloneNode):
+        src_id = ArenaChecker.get_root_identifier(expr_node.expr)
+        if src_id:
+          src_sym = self.symbol_table.lookup(src_id.name)
+          if isinstance(src_sym, VariableSymbol):
+            sym.proto_ancestors.add(src_sym.name)
+            sym.proto_ancestors.update(src_sym.proto_ancestors)
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       ArenaChecker.validate_arena_escape(
           self.symbol_table,
@@ -897,6 +944,16 @@ class TypeChecker:
       if isinstance(target, IdentifierNode):
         target_sym = self._get_target_symbol(target)
         if target_sym:
+          if isinstance(expr_node, CloneNode):
+            src_id = ArenaChecker.get_root_identifier(expr_node.expr)
+            if src_id:
+              src_sym = self.symbol_table.lookup(src_id.name)
+              if isinstance(src_sym, VariableSymbol):
+                target_sym.proto_ancestors = (
+                    {src_sym.name} | set(src_sym.proto_ancestors)
+                )
+          else:
+            target_sym.proto_ancestors.clear()
           ArenaChecker.validate_arena_escape(
               self.symbol_table,
               target_sym,
@@ -960,6 +1017,23 @@ class TypeChecker:
 
   def _check_lvalue(self, node: ASTNode) -> Type:
     """Helper to check if AST node is a mutable lvalue and returns its resolved type."""
+    if self.has_shared_ref_base(node):
+      self.error(
+          "Cannot mutate through deeply immutable 'SharedRef'.", node=node
+      )
+      return PrimitiveType("none")
+
+    res = ArenaChecker.get_lvalue_path(self.symbol_table, node)
+    if res:
+      root_name, field_path = res
+      reason = self.get_frozen_lvalue_reason(root_name, field_path)
+      if reason:
+        self.error(
+            f"Cannot mutate or reassign '{root_name}' while it is frozen "
+            f"({reason}).",
+            node=node,
+        )
+
     if isinstance(node, IdentifierNode):
       sym = self.symbol_table.lookup(node.name)
       if not sym:
@@ -981,6 +1055,9 @@ class TypeChecker:
       # Unwrap optional if chained
       if node.is_optional and isinstance(receiver_type, OptionalType):
         receiver_type = receiver_type.base_type
+
+      if isinstance(receiver_type, RefType):
+        receiver_type = receiver_type.inner_type
 
       if not isinstance(receiver_type, StructType):
         self.error("Property access target is not a struct.", node=node)
@@ -1030,12 +1107,23 @@ class TypeChecker:
       if isinstance(curr, IdentifierNode) and curr.name != "self":
         root_sym = self.symbol_table.lookup(curr.name)
         if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
-          self.error(f"Cannot mutate field '{node.member}' of constant struct variable '{curr.name}'.", node=node)
+          kind = (
+              "Ref "
+              if isinstance(root_sym.symbol_type, RefType)
+              else "struct "
+          )
+          self.error(
+              f"Cannot mutate field '{node.member}' of constant {kind}"
+              f"variable '{curr.name}'.",
+              node=node,
+          )
 
       return field.field_type
 
     if isinstance(node, IndexExprNode):
       array_type = self.visit(node.array)
+      if isinstance(array_type, RefType):
+        array_type = array_type.inner_type
       if not isinstance(array_type, ArrayType):
         self.error("Cannot index non-array type.", node=node)
         return PrimitiveType("none")
@@ -1044,7 +1132,11 @@ class TypeChecker:
       if isinstance(node.array, IdentifierNode):
         sym = self.symbol_table.lookup(node.array.name)
         if sym and not sym.is_mutable:
-          self.error(f"Cannot assign to index of constant array '{sym.name}'.", node=node)
+          kind = "Ref " if isinstance(sym.symbol_type, RefType) else "array "
+          self.error(
+              f"Cannot assign to index of constant {kind}'{sym.name}'.",
+              node=node,
+          )
 
       index_type = self.visit(node.index)
       if index_type != PrimitiveType("int"):
@@ -1340,6 +1432,13 @@ class TypeChecker:
               checker=self,
           )
 
+        if binding.is_unwrap and binding.is_mutable:
+          b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
+          if b_res:
+            self.symbol_table.current_scope.frozen_lvalues.append(
+                (b_res[0], b_res[1], "active 'if var' unwrap")
+            )
+
       if node.condition:
         cond_type = self.visit(node.condition)
         if cond_type != PrimitiveType("bool"):
@@ -1356,10 +1455,15 @@ class TypeChecker:
         then_moved = set(self.moved_symbols)
 
         if node.else_block:
+          saved_frozen = list(self.symbol_table.current_scope.frozen_lvalues)
+          self.symbol_table.current_scope.frozen_lvalues = [
+              f for f in saved_frozen if f[2] != "active 'if var' unwrap"
+          ]
           self.moved_symbols = set(pre_branch_moved)
           self.visit(node.else_block)
           else_moved = set(self.moved_symbols)
           self.moved_symbols = then_moved | else_moved
+          self.symbol_table.current_scope.frozen_lvalues = saved_frozen
         else:
           self.moved_symbols = then_moved
       finally:
@@ -1379,10 +1483,15 @@ class TypeChecker:
         then_moved = set(self.moved_symbols)
 
         if node.else_block:
+          saved_frozen = list(self.symbol_table.current_scope.frozen_lvalues)
+          self.symbol_table.current_scope.frozen_lvalues = [
+              f for f in saved_frozen if f[2] != "active 'if var' unwrap"
+          ]
           self.moved_symbols = set(pre_branch_moved)
           self.visit(node.else_block)
           else_moved = set(self.moved_symbols)
           self.moved_symbols = then_moved | else_moved
+          self.symbol_table.current_scope.frozen_lvalues = saved_frozen
         else:
           self.moved_symbols = then_moved
       finally:
@@ -1414,6 +1523,11 @@ class TypeChecker:
     try:
       iter_type = self.visit(node.iterable)
       self.symbol_table.enter_scope()
+      iter_res = ArenaChecker.get_lvalue_path(self.symbol_table, node.iterable)
+      if iter_res:
+        self.symbol_table.current_scope.frozen_lvalues.append(
+            (iter_res[0], iter_res[1], "for-in loop iteration")
+        )
 
       if isinstance(iter_type, ArrayType):
         if node.key_var is not None:
@@ -2068,6 +2182,12 @@ class TypeChecker:
       self.error(f"WeakRef has no member '{node.member}'; call '.upgrade()' to access the underlying value.", node=node)
       return PrimitiveType("none")
 
+    if isinstance(receiver_type, ArrayType):
+      return CollectionChecker.resolve_array_member(self, node, receiver_type)
+
+    if isinstance(receiver_type, MapType):
+      return CollectionChecker.resolve_map_member(self, node, receiver_type)
+
     if not isinstance(receiver_type, StructType):
       self.error("Member access receiver is not a struct or trait.")
       return PrimitiveType("none")
@@ -2181,6 +2301,13 @@ class TypeChecker:
       return PrimitiveType("none")
     if not isinstance(sym, VariableSymbol):
       self.error(f"Cannot move non-variable symbol '{node.name}'.", node=node)
+      return sym.symbol_type
+    reason = self.get_frozen_lvalue_reason(node.name, [])
+    if reason:
+      self.error(
+          f"Cannot move variable '{node.name}' while it is frozen ({reason}).",
+          node=node,
+      )
       return sym.symbol_type
     if getattr(sym, "is_parameter", False):
       self.error(f"Cannot move out of borrowed parameter '{node.name}'.", node=node)
@@ -2533,6 +2660,13 @@ class TypeChecker:
               lambda msg: self.error(msg, node=node),
               checker=self,
           )
+
+        if binding.is_unwrap and binding.is_mutable:
+          b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
+          if b_res:
+            self.symbol_table.current_scope.frozen_lvalues.append(
+                (b_res[0], b_res[1], "active 'guard var' unwrap")
+            )
       elif clause.condition:
         cond_t = self.visit(clause.condition)
         if cond_t != PrimitiveType("bool"):

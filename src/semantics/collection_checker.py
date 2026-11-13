@@ -132,7 +132,18 @@ class CollectionChecker:
 
       old_expected = checker.expected_type
       checker.expected_type = FunctionType([elem_type], InferredType())
-      fn_type = checker.visit(fn_arg.expr)
+      recv_res = ArenaChecker.get_lvalue_path(
+          checker.symbol_table, node.callee.receiver
+      )
+      if recv_res:
+        checker._temporary_frozen_lvalues.append(
+            (recv_res[0], recv_res[1], ".map() callback")
+        )
+      try:
+        fn_type = checker.visit(fn_arg.expr)
+      finally:
+        if recv_res:
+          checker._temporary_frozen_lvalues.pop()
       checker.expected_type = old_expected
 
       ret_elem_type = PrimitiveType("none")
@@ -151,10 +162,33 @@ class CollectionChecker:
 
       if is_in_place:
         receiver = node.callee.receiver
-        if isinstance(receiver, IdentifierNode):
+        if checker.has_shared_ref_base(receiver):
+          checker.error(
+              "Cannot invoke in-place transformation '.map()' through deeply "
+              "immutable 'SharedRef'."
+          )
+        res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
+        if res:
+          r, path = res
+          sym = checker.symbol_table.lookup(r)
+          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+            checker.error(
+                f"Cannot invoke in-place transformation '.map()' on constant "
+                f"variable '{r}'."
+            )
+          reason = checker.get_frozen_lvalue_reason(r, path)
+          if reason:
+            checker.error(
+                f"Cannot invoke in-place transformation '.map()' on '{r}' "
+                f"while it is frozen ({reason})."
+            )
+        elif isinstance(receiver, IdentifierNode):
           sym = checker.symbol_table.lookup(receiver.name)
           if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-            checker.error(f"Cannot invoke in-place transformation '.map()' on constant variable '{receiver.name}'.")
+            checker.error(
+                f"Cannot invoke in-place transformation '.map()' on constant "
+                f"variable '{receiver.name}'."
+            )
         if isinstance(fn_type, FunctionType) and not ret_elem_type.is_compatible(elem_type):
           checker.error(f"In-place mapping requires closure return type to match element type '{elem_type}', got '{ret_elem_type}'.")
         return ArrayType(elem_type, size=receiver_type.size)
@@ -182,7 +216,18 @@ class CollectionChecker:
 
       old_expected = checker.expected_type
       checker.expected_type = FunctionType([elem_type], PrimitiveType("bool"))
-      fn_type = checker.visit(fn_arg.expr)
+      recv_res = ArenaChecker.get_lvalue_path(
+          checker.symbol_table, node.callee.receiver
+      )
+      if recv_res:
+        checker._temporary_frozen_lvalues.append(
+            (recv_res[0], recv_res[1], ".filter() callback")
+        )
+      try:
+        fn_type = checker.visit(fn_arg.expr)
+      finally:
+        if recv_res:
+          checker._temporary_frozen_lvalues.pop()
       checker.expected_type = old_expected
 
       if isinstance(fn_type, FunctionType):
@@ -203,10 +248,33 @@ class CollectionChecker:
         if receiver_type.is_fixed_size:
           checker.error(f"Cannot invoke in-place '.filter()' on fixed-size array '{receiver_type}'.")
         receiver = node.callee.receiver
-        if isinstance(receiver, IdentifierNode):
+        if checker.has_shared_ref_base(receiver):
+          checker.error(
+              "Cannot invoke in-place transformation '.filter()' through "
+              "deeply immutable 'SharedRef'."
+          )
+        res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
+        if res:
+          r, path = res
+          sym = checker.symbol_table.lookup(r)
+          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+            checker.error(
+                f"Cannot invoke in-place transformation '.filter()' on "
+                f"constant variable '{r}'."
+            )
+          reason = checker.get_frozen_lvalue_reason(r, path)
+          if reason:
+            checker.error(
+                f"Cannot invoke in-place transformation '.filter()' on '{r}' "
+                f"while it is frozen ({reason})."
+            )
+        elif isinstance(receiver, IdentifierNode):
           sym = checker.symbol_table.lookup(receiver.name)
           if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-            checker.error(f"Cannot invoke in-place transformation '.filter()' on constant variable '{receiver.name}'.")
+            checker.error(
+                f"Cannot invoke in-place transformation '.filter()' on "
+                f"constant variable '{receiver.name}'."
+            )
 
       return ArrayType(elem_type)
 
@@ -236,8 +304,20 @@ class CollectionChecker:
 
       old_expected = checker.expected_type
       checker.expected_type = FunctionType([acc_type, elem_type], acc_type)
-      fn_type = checker.visit(fn_arg.expr)
+      recv_res = ArenaChecker.get_lvalue_path(
+          checker.symbol_table, node.callee.receiver
+      )
+      if recv_res:
+        checker._temporary_frozen_lvalues.append(
+            (recv_res[0], recv_res[1], ".reduce() callback")
+        )
+      try:
+        fn_type = checker.visit(fn_arg.expr)
+      finally:
+        if recv_res:
+          checker._temporary_frozen_lvalues.pop()
       checker.expected_type = old_expected
+
 
       if isinstance(fn_type, FunctionType):
         if len(fn_type.param_types) >= 2:
@@ -257,23 +337,68 @@ class CollectionChecker:
 
     elif method in ("push", "pop", "insert", "remove", "clear"):
       if receiver_type.is_fixed_size:
-        checker.error(f"Cannot invoke mutating method '{method}' on fixed-size array '{receiver_type}'.")
+        checker.error(
+            f"Cannot invoke mutating method '{method}' on fixed-size array "
+            f"'{receiver_type}'."
+        )
       receiver = node.callee.receiver
-      if isinstance(receiver, IdentifierNode):
+      if checker.has_shared_ref_base(receiver):
+        checker.error(
+            f"Cannot invoke mutating method '{method}' through deeply "
+            "immutable 'SharedRef'."
+        )
+      res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
+      if res:
+        r, path = res
+        sym = checker.symbol_table.lookup(r)
+        if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+          checker.error(
+              f"Cannot invoke mutating method '{method}' on constant variable "
+              f"'{r}'."
+          )
+        reason = checker.get_frozen_lvalue_reason(r, path)
+        if reason:
+          checker.error(
+              f"Cannot invoke mutating method '{method}' on '{r}' while it is "
+              f"frozen ({reason})."
+          )
+      elif isinstance(receiver, IdentifierNode):
         sym = checker.symbol_table.lookup(receiver.name)
         if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-          checker.error(f"Cannot invoke mutating method '{method}' on constant variable '{receiver.name}'.")
+          checker.error(
+              f"Cannot invoke mutating method '{method}' on constant variable "
+              f"'{receiver.name}'."
+          )
 
       if method == "push":
         if len(node.arguments) != 1:
           checker.error(".push() requires exactly 1 argument (element).")
           return elem_type
-        arg_t = checker.visit(node.arguments[0].expr)
-        checker._check_value_ownership_transfer(node.arguments[0].expr, arg_t, node=node)
+        arg_expr = node.arguments[0].expr
+        arg_t = checker.visit(arg_expr)
+        checker._check_value_ownership_transfer(arg_expr, arg_t, node=node)
         if not arg_t.is_compatible(elem_type):
-          checker.error(f"Argument type mismatch in .push(). Expected '{elem_type}', got '{arg_t}'.")
+          checker.error(
+              f"Argument type mismatch in .push(). Expected '{elem_type}', "
+              f"got '{arg_t}'."
+          )
+        if ArenaChecker.is_reference_type(elem_type):
+          recv_res = ArenaChecker.get_lvalue_path(
+              checker.symbol_table, node.callee.receiver
+          )
+          arg_res = ArenaChecker.get_lvalue_path(checker.symbol_table, arg_expr)
+          if recv_res and arg_res:
+            r1, p1 = recv_res
+            r2, p2 = arg_res
+            if r1 == r2 and (p1[:len(p2)] == p2 or p2[:len(p1)] == p1):
+              checker.error(
+                  "Aliasing conflict: cannot pass element borrowed from "
+                  f"'{r1}' into mutating method 'push' on the same "
+                  "container.",
+                  node=node,
+              )
         ArenaChecker.validate_container_mutation(
-            checker, node.callee.receiver, [node.arguments[0].expr], error_node=node
+            checker, node.callee.receiver, [arg_expr], error_node=node
         )
         return elem_type
 
@@ -305,7 +430,27 @@ class CollectionChecker:
         elem_t = checker.visit(element_arg.expr)
         checker._check_value_ownership_transfer(element_arg.expr, elem_t, node=node)
         if not elem_t.is_compatible(elem_type):
-          checker.error(f"Argument type mismatch in .insert(). Expected '{elem_type}', got '{elem_t}'.")
+          checker.error(
+              f"Argument type mismatch in .insert(). Expected '{elem_type}', "
+              f"got '{elem_t}'."
+          )
+        if ArenaChecker.is_reference_type(elem_type):
+          recv_res = ArenaChecker.get_lvalue_path(
+              checker.symbol_table, node.callee.receiver
+          )
+          arg_res = ArenaChecker.get_lvalue_path(
+              checker.symbol_table, element_arg.expr
+          )
+          if recv_res and arg_res:
+            r1, p1 = recv_res
+            r2, p2 = arg_res
+            if r1 == r2 and (p1[:len(p2)] == p2 or p2[:len(p1)] == p1):
+              checker.error(
+                  "Aliasing conflict: cannot pass element borrowed from "
+                  f"'{r1}' into mutating method 'insert' on the same "
+                  "container.",
+                  node=node,
+              )
         ArenaChecker.validate_container_mutation(
             checker, node.callee.receiver, [element_arg.expr], error_node=node
         )
@@ -355,10 +500,33 @@ class CollectionChecker:
 
       if is_in_place:
         receiver = node.callee.receiver
-        if isinstance(receiver, IdentifierNode):
+        if checker.has_shared_ref_base(receiver):
+          checker.error(
+              "Cannot invoke in-place transformation '.reverse()' through "
+              "deeply immutable 'SharedRef'."
+          )
+        res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
+        if res:
+          r, path = res
+          sym = checker.symbol_table.lookup(r)
+          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+            checker.error(
+                f"Cannot invoke in-place transformation '.reverse()' on "
+                f"constant variable '{r}'."
+            )
+          reason = checker.get_frozen_lvalue_reason(r, path)
+          if reason:
+            checker.error(
+                f"Cannot invoke in-place transformation '.reverse()' on '{r}' "
+                f"while it is frozen ({reason})."
+            )
+        elif isinstance(receiver, IdentifierNode):
           sym = checker.symbol_table.lookup(receiver.name)
           if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-            checker.error(f"Cannot invoke in-place transformation '.reverse()' on constant variable '{receiver.name}'.")
+            checker.error(
+                f"Cannot invoke in-place transformation '.reverse()' on "
+                f"constant variable '{receiver.name}'."
+            )
 
       return ArrayType(elem_type, size=receiver_type.size)
 
@@ -383,7 +551,18 @@ class CollectionChecker:
       if by_arg:
         old_expected = checker.expected_type
         checker.expected_type = FunctionType([elem_type, elem_type], PrimitiveType("int"))
-        by_type = checker.visit(by_arg.expr)
+        recv_res = ArenaChecker.get_lvalue_path(
+            checker.symbol_table, node.callee.receiver
+        )
+        if recv_res:
+          checker._temporary_frozen_lvalues.append(
+              (recv_res[0], recv_res[1], ".sort() callback")
+          )
+        try:
+          by_type = checker.visit(by_arg.expr)
+        finally:
+          if recv_res:
+            checker._temporary_frozen_lvalues.pop()
         checker.expected_type = old_expected
         if isinstance(by_type, FunctionType):
           if not by_type.return_type.is_compatible(PrimitiveType("int")):
@@ -403,10 +582,33 @@ class CollectionChecker:
 
       if is_in_place:
         receiver = node.callee.receiver
-        if isinstance(receiver, IdentifierNode):
+        if checker.has_shared_ref_base(receiver):
+          checker.error(
+              "Cannot invoke in-place transformation '.sort()' through "
+              "deeply immutable 'SharedRef'."
+          )
+        res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
+        if res:
+          r, path = res
+          sym = checker.symbol_table.lookup(r)
+          if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+            checker.error(
+                f"Cannot invoke in-place transformation '.sort()' on constant "
+                f"variable '{r}'."
+            )
+          reason = checker.get_frozen_lvalue_reason(r, path)
+          if reason:
+            checker.error(
+                f"Cannot invoke in-place transformation '.sort()' on '{r}' "
+                f"while it is frozen ({reason})."
+            )
+        elif isinstance(receiver, IdentifierNode):
           sym = checker.symbol_table.lookup(receiver.name)
           if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-            checker.error(f"Cannot invoke in-place transformation '.sort()' on constant variable '{receiver.name}'.")
+            checker.error(
+                f"Cannot invoke in-place transformation '.sort()' on constant "
+                f"variable '{receiver.name}'."
+            )
 
       return ArrayType(elem_type, size=receiver_type.size)
 
@@ -431,10 +633,33 @@ class CollectionChecker:
 
     if method in ("insert", "remove", "clear"):
       receiver = node.callee.receiver
-      if isinstance(receiver, IdentifierNode):
+      if checker.has_shared_ref_base(receiver):
+        checker.error(
+            f"Cannot invoke mutating method '{method}' through deeply "
+            "immutable 'SharedRef'."
+        )
+      res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
+      if res:
+        r, path = res
+        sym = checker.symbol_table.lookup(r)
+        if isinstance(sym, VariableSymbol) and not sym.is_mutable:
+          checker.error(
+              f"Cannot invoke mutating method '{method}' on constant variable "
+              f"'{r}'."
+          )
+        reason = checker.get_frozen_lvalue_reason(r, path)
+        if reason:
+          checker.error(
+              f"Cannot invoke mutating method '{method}' on '{r}' while it is "
+              f"frozen ({reason})."
+          )
+      elif isinstance(receiver, IdentifierNode):
         sym = checker.symbol_table.lookup(receiver.name)
         if isinstance(sym, VariableSymbol) and not sym.is_mutable:
-          checker.error(f"Cannot invoke mutating method '{method}' on constant variable '{receiver.name}'.")
+          checker.error(
+              f"Cannot invoke mutating method '{method}' on constant variable "
+              f"'{receiver.name}'."
+          )
 
     if method == "size":
       if node.arguments:
@@ -491,6 +716,38 @@ class CollectionChecker:
       checker._check_value_ownership_transfer(val_arg.expr, v_arg_type, node=node)
       if not v_arg_type.is_compatible(v_type):
         checker.error(f"Argument 'value' in .insert() must be '{v_type}', got '{v_arg_type}'.")
+      if ArenaChecker.is_reference_type(k_type):
+        recv_res = ArenaChecker.get_lvalue_path(
+            checker.symbol_table, node.callee.receiver
+        )
+        arg_res = ArenaChecker.get_lvalue_path(
+            checker.symbol_table, key_arg.expr
+        )
+        if recv_res and arg_res:
+          r1, p1 = recv_res
+          r2, p2 = arg_res
+          if r1 == r2 and (p1[:len(p2)] == p2 or p2[:len(p1)] == p1):
+            checker.error(
+                f"Aliasing conflict: cannot pass key borrowed from '{r1}' "
+                "into mutating method 'insert' on the same container.",
+                node=node,
+            )
+      if ArenaChecker.is_reference_type(v_type):
+        recv_res = ArenaChecker.get_lvalue_path(
+            checker.symbol_table, node.callee.receiver
+        )
+        arg_res = ArenaChecker.get_lvalue_path(
+            checker.symbol_table, val_arg.expr
+        )
+        if recv_res and arg_res:
+          r1, p1 = recv_res
+          r2, p2 = arg_res
+          if r1 == r2 and (p1[:len(p2)] == p2 or p2[:len(p1)] == p1):
+            checker.error(
+                f"Aliasing conflict: cannot pass value borrowed from '{r1}' "
+                "into mutating method 'insert' on the same container.",
+                node=node,
+            )
       ArenaChecker.validate_container_mutation(
           checker, node.callee.receiver, [key_arg.expr, val_arg.expr], error_node=node
       )

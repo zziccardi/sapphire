@@ -170,6 +170,7 @@ impl Love2D for GameEngine {
         self.player.update(dt);
 
         // Safe optional unwrapping for active enemy
+        var enemy_defeated = false;
         if var enemy ?= self.active_enemy {
           enemy.update(dt);
 
@@ -181,7 +182,7 @@ impl Love2D for GameEngine {
             self.score += 50;
 
             if enemy.health <= 0 {
-              self.active_enemy = none;
+              enemy_defeated = true;
               self.state = GameState.GameOver;
             }
           }
@@ -192,6 +193,10 @@ impl Love2D for GameEngine {
             self.position = Vector2D { x = 120.0, y = 20.0 };
             self.health = 50;
           };
+        }
+
+        if enemy_defeated {
+          self.active_enemy = none;
         }
       },
       GameState.GameOver -> {

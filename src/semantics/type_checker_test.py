@@ -6244,6 +6244,267 @@ class TestTypeChecker(unittest.TestCase):
       self._check(shared_box_none)
     self.assertIn("inside 'SharedRef'", str(ctx7.exception))
 
+  def test_iteration_freeze_and_unwrap_freeze(self):
+    for_in_push = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        arr.push(4);
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_push)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    for_in_assign = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        arr = [4, 5];
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_assign)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    for_in_index_assign = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        arr[0] = 10;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_index_assign)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    for_in_move = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        let y = move arr;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_move)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    map_callback_push = """
+    func main() {
+      var arr = [1, 2, 3];
+      let res = arr.map(x -> {
+        arr.push(10);
+        return x * 2;
+      });
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(map_callback_push)
+    self.assertIn("while it is frozen (.map() callback)", str(ctx.exception))
+
+    if_var_unwrap_freeze = """
+    func main() {
+      var opt: int? = 10;
+      if var x ?= opt {
+        opt = 20;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(if_var_unwrap_freeze)
+    self.assertIn(
+        "while it is frozen (active 'if var' unwrap)", str(ctx.exception)
+    )
+
+    guard_var_unwrap_freeze = """
+    func main() {
+      var opt: int? = 10;
+      guard var x ?= opt else { return; }
+      opt = 20;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(guard_var_unwrap_freeze)
+    self.assertIn(
+        "while it is frozen (active 'guard var' unwrap)", str(ctx.exception)
+    )
+
+    let_unwrap_ok = """
+    func main() {
+      var opt: int? = 10;
+      if let x ?= opt {
+        opt = 20;
+      }
+      guard let y ?= opt else { return; }
+      opt = 30;
+    }
+    """
+    self._check(let_unwrap_ok)
+
+  def test_subscript_and_container_aliasing(self):
+    struct_push_alias = """
+    struct Item { var val: int; }
+    func main() {
+      var arr = [Item { val = 1 }];
+      arr.push(arr[0]);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(struct_push_alias)
+    self.assertIn("cannot pass element borrowed from 'arr'", str(ctx.exception))
+
+    struct_insert_alias = """
+    struct Item { var val: int; }
+    func main() {
+      var arr = [Item { val = 1 }];
+      arr.insert(0, arr[0]);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(struct_insert_alias)
+    self.assertIn("cannot pass element borrowed from 'arr'", str(ctx.exception))
+
+    primitive_push_ok = """
+    func main() {
+      var nums = [1, 2, 3];
+      nums.push(nums[0]);
+    }
+    """
+    self._check(primitive_push_ok)
+
+  def test_deep_shared_ref_and_ref_receiver_mutability(self):
+    ref_let_mut_reject = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      let r = Ref(Counter { count = 0 });
+      r.count = 10;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ref_let_mut_reject)
+    self.assertIn("constant Ref variable 'r'", str(ctx.exception))
+
+    ref_let_method_reject = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      let r = Ref(Counter { count = 0 });
+      r.inc();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ref_let_method_reject)
+    self.assertIn("constant variable 'r'", str(ctx.exception))
+
+    ref_var_mut_allow = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      var r = Ref(Counter { count = 0 });
+      r.count = 10;
+      r.inc();
+    }
+    """
+    self._check(ref_var_mut_allow)
+
+    ref_array_mutability = """
+    func main() {
+      var r_mut = Ref([1, 2, 3]);
+      r_mut.push(4);
+    }
+    """
+    self._check(ref_array_mutability)
+
+    ref_array_const_reject = """
+    func main() {
+      let r_const = Ref([1, 2, 3]);
+      r_const.push(4);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ref_array_const_reject)
+    self.assertIn("constant variable 'r_const'", str(ctx.exception))
+
+    shared_field_reject = """
+    struct Point { var x: int; var y: int; }
+    func main() {
+      var s = SharedRef(Point { x = 1, y = 2 });
+      s.x = 10;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(shared_field_reject)
+    self.assertIn("deeply immutable 'SharedRef'", str(ctx.exception))
+
+    shared_method_reject = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      var s = SharedRef(Counter { count = 0 });
+      s.inc();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(shared_method_reject)
+    self.assertIn("deeply immutable 'SharedRef'", str(ctx.exception))
+
+  def test_directional_proto_lineage_aliasing(self):
+    ancestor_conflict = """
+    proto Monster { var hp: int; }
+    func duel(var m1: Monster, m2: Monster) {}
+    func main() {
+      var a = Arena();
+      var base = Monster { hp = 100 } in a;
+      var minion = clone base {};
+      duel(base, minion);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ancestor_conflict)
+    self.assertIn(
+        "prototype 'base' is mutably borrowed while its cloned descendant "
+        "'minion'",
+        str(ctx.exception),
+    )
+
+    sibling_clones_ok = """
+    proto Monster { var hp: int; }
+    func duel(var m1: Monster, var m2: Monster) {}
+    func main() {
+      var a = Arena();
+      var base = Monster { hp = 100 } in a;
+      var c1 = clone base {};
+      var c2 = clone base {};
+      duel(c1, c2);
+    }
+    """
+    self._check(sibling_clones_ok)
+
+    immutable_borrows_ok = """
+    proto Monster { var hp: int; }
+    func observe(m1: Monster, m2: Monster) {}
+    func main() {
+      var a = Arena();
+      var base = Monster { hp = 100 } in a;
+      var minion = clone base {};
+      observe(base, minion);
+    }
+    """
+    self._check(immutable_borrows_ok)
+
 
 if __name__ == "__main__":
   unittest.main()

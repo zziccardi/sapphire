@@ -821,27 +821,62 @@ class ArenaChecker:
       receiver_type = checker.visit(receiver_node)
       if isinstance(receiver_type, OptionalType):
         receiver_type = receiver_type.base_type
+      is_shared_ref = False
+      if isinstance(receiver_type, SharedRefType):
+        is_shared_ref = True
+        receiver_type = receiver_type.inner_type
+      elif isinstance(receiver_type, RefType):
+        receiver_type = receiver_type.inner_type
+      if checker.has_shared_ref_base(receiver_node):
+        is_shared_ref = True
+
       if isinstance(receiver_type, StructType):
         method = receiver_type.get_method(node.callee.member, checker.symbol_table)
         if method and method.modifier != "static":
           is_mutable = (method.modifier == "var")
+          if is_mutable and is_shared_ref:
+            checker.error(
+                f"Cannot invoke mutating method '{node.callee.member}' "
+                "through deeply immutable 'SharedRef'.",
+                node=node,
+            )
           res = checker._get_lvalue_path(receiver_node)
           if res:
             root, path = res
             borrows.append((root, path, is_mutable))
             if is_mutable:
+              reason = checker.get_frozen_lvalue_reason(root, path)
+              if reason:
+                checker.error(
+                    f"Cannot invoke mutating method '{node.callee.member}' "
+                    f"on '{root}' while it is frozen ({reason}).",
+                    node=node,
+                )
               root_sym = checker.symbol_table.lookup(root)
-              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
-                checker.error(f"Cannot invoke mutating method '{node.callee.member}' on constant variable '{root}'.")
+              if (
+                  isinstance(root_sym, VariableSymbol)
+                  and not root_sym.is_mutable
+              ):
+                checker.error(
+                    f"Cannot invoke mutating method '{node.callee.member}' "
+                    f"on constant variable '{root}'."
+                )
 
     # 2. Check explicit arguments
     expected_param_types = signature.param_types
     expected_param_names = signature.param_names or []
     expected_mutabilities = signature.param_mutabilities
-    if not is_constructor and getattr(signature, "has_self", False) and isinstance(node.callee, MemberAccessNode):
+    if (
+        not is_constructor
+        and getattr(signature, "has_self", False)
+        and isinstance(node.callee, MemberAccessNode)
+    ):
       expected_param_types = signature.param_types[1:]
-      expected_param_names = signature.param_names[1:] if signature.param_names else []
-      expected_mutabilities = signature.param_mutabilities[1:] if signature.param_mutabilities else []
+      expected_param_names = (
+          signature.param_names[1:] if signature.param_names else []
+      )
+      muts = signature.param_mutabilities
+      expected_mutabilities = muts[1:] if muts else []
 
     for idx, arg in enumerate(node.arguments):
       param_idx = idx
@@ -849,16 +884,39 @@ class ArenaChecker:
         param_idx = expected_param_names.index(arg.name)
       if param_idx < len(expected_param_types):
         param_type = expected_param_types[param_idx]
-        is_mutable = expected_mutabilities[param_idx] if param_idx < len(expected_mutabilities) else False
+        is_mutable = (
+            expected_mutabilities[param_idx]
+            if param_idx < len(expected_mutabilities)
+            else False
+        )
         if checker._is_reference_type(param_type):
+          if is_mutable and checker.has_shared_ref_base(arg.expr):
+            checker.error(
+                "Cannot pass field of deeply immutable 'SharedRef' "
+                "to mutable 'var' parameter.",
+                node=node,
+            )
           res = checker._get_lvalue_path(arg.expr)
           if res:
             root, path = res
             borrows.append((root, path, is_mutable))
             if is_mutable:
+              reason = checker.get_frozen_lvalue_reason(root, path)
+              if reason:
+                checker.error(
+                    f"Cannot pass '{root}' to 'var' parameter while it is "
+                    f"frozen ({reason}).",
+                    node=node,
+                )
               root_sym = checker.symbol_table.lookup(root)
-              if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
-                checker.error(f"Cannot pass constant variable '{root}' to mutable 'var' parameter.")
+              if (
+                  isinstance(root_sym, VariableSymbol)
+                  and not root_sym.is_mutable
+              ):
+                checker.error(
+                    f"Cannot pass constant variable '{root}' to mutable 'var' "
+                    "parameter."
+                )
 
     # 3. Check for conflicts among all borrows
     for i in range(len(borrows)):
@@ -872,3 +930,24 @@ class ArenaChecker:
                 f"Aliasing conflict: variable '{r1}' (or a sub-field) "
                 f"is mutably borrowed and cannot be borrowed again in the same call."
             )
+        else:
+          sym1 = checker.symbol_table.lookup(r1)
+          sym2 = checker.symbol_table.lookup(r2)
+          if (
+              isinstance(sym1, VariableSymbol)
+              and isinstance(sym2, VariableSymbol)
+          ):
+            if m1 and (r1 in getattr(sym2, "proto_ancestors", set())):
+              checker.error(
+                  f"Aliasing conflict: prototype '{r1}' is mutably borrowed "
+                  f"while its cloned descendant '{r2}' is borrowed in the same "
+                  "call.",
+                  node=node,
+              )
+            elif m2 and (r2 in getattr(sym1, "proto_ancestors", set())):
+              checker.error(
+                  f"Aliasing conflict: prototype '{r2}' is mutably borrowed "
+                  f"while its cloned descendant '{r1}' is borrowed in the same "
+                  "call.",
+                  node=node,
+              )

@@ -795,6 +795,7 @@ class VariableSymbol(Symbol):
     self.arena_generation: int = 0
     self.arena_dep_records: List[Tuple[str, int]] = []
     self.is_moved: bool = False
+    self.proto_ancestors: Set[str] = set()
 
 
 class FunctionSymbol(Symbol):
@@ -863,6 +864,7 @@ class Scope:
     self.types: Dict[str, Type] = {}
     self.parent = parent
     self._next_decl_order: int = 1
+    self.frozen_lvalues: List[Tuple[str, List[str], str]] = []
 
   def define(self, name: str, symbol: Symbol) -> None:
     """Defines a symbol in the current scope."""
@@ -924,7 +926,6 @@ class SymbolTable:
     self.current_scope.define_type("bool", PrimitiveType("bool"))
     self.current_scope.define_type("String", StringType())
     self.current_scope.define_type("none", NoneType())
-    # TODO: Remove `void`?
     self.current_scope.define_type("void", NoneType())
     self.current_scope.define_type("Coroutine", CoroutineType(NoneType()))
     self.current_scope.define_type("Ref", RefType(NoneType()))
@@ -979,8 +980,6 @@ class SymbolTable:
       fn_t.is_testing_assertion = True
       testcase_trait.methods[name] = fn_t
     self.testcase_trait = testcase_trait
-
-
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""
