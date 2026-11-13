@@ -13,11 +13,20 @@ Lua 5.1 runtime targets.
 Standard library modules are imported using qualified import statements:
 
 ```sapphire
-import std.os as os;
-import std.fs as fs;
-import std.time as time;
-import std.math as math;
+import std.fs;
+import std.math;
+import std.os;
 import std.testing;
+import std.time;
+```
+
+By default, Sapphire binds the terminal component of the import path directly
+into scope (e.g. `import std.os;` binds `os`). The `as <alias>` clause is
+optional and used primarily for abbreviations or to avoid name collisions:
+
+```sapphire
+import lib.love2d.graphics as gfx;
+import std.math as m;
 ```
 
 Module resolution checks the active toolchain distribution path, local
@@ -43,7 +52,7 @@ The `std.os` module provides low-level operating system and process primitives.
 ### Usage example
 
 ```sapphire
-import std.os as os;
+import std.os;
 
 func main() {
   let cmd_args = os.args();
@@ -83,7 +92,7 @@ and file removal operations.
 ### Usage example
 
 ```sapphire
-import std.fs as fs;
+import std.fs;
 
 func main() {
   let path = "config.txt";
@@ -122,7 +131,7 @@ primitives.
 ### Usage example
 
 ```sapphire
-import std.time as time;
+import std.time;
 
 func main() {
   let start_time = time.now();
@@ -164,7 +173,7 @@ types (`int` and `float`), monomorphized automatically across backends.
 ### Usage example
 
 ```sapphire
-import std.math as math;
+import std.math;
 
 func main() {
   let root = math.sqrt(64.0) ?? 0.0;
