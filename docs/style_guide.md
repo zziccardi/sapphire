@@ -236,7 +236,8 @@ modules, samples, and Sapphire source files should adhere to these guidelines.
   external domain constants, provided casing is kept consistent.
 * **Modules & test suites**: Module filenames use `snake_case.sp`. Unit test
   files use `*_test.sp`, `testing.TestCase` structs end in `Test`
-  (e.g. `MathTest`), and test methods or `@test` functions begin with `test_`.
+  (e.g. `MathTest`), and all test methods or standalone test functions
+  begin with `test_` and are annotated with `@test`.
 * **Identifier namespace**: Variables, functions, and structs share the same
   identifier namespace per scope (e.g., a function and a struct cannot share a
   name in the same scope).

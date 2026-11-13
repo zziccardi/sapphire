@@ -992,6 +992,13 @@ class PythonTranspiler(BaseTranspiler):
 
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func = node.func_decl
+    is_test_func = any(
+        getattr(a, "name", "") == "test"
+        for a in getattr(func, "annotations", [])
+    )
+    if is_test_func and not self.test_mode:
+      return
+
     self.newline()
 
     if node.modifier == "static":
