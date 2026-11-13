@@ -215,8 +215,8 @@ sapphire check samples/overview.sp
   [C++ comparison](docs/cpp_comparison.md),
   [Swift comparison](docs/swift_comparison.md),
   [compiler architecture](docs/compiler.md),
-  [development guide](docs/development.md), [builtins](docs/builtins.md), and
-  [testing guide](docs/testing.md).
+  [development guide](docs/development.md), [builtins](docs/builtins.md),
+  [standard library](docs/stdlib.md), and [testing guide](docs/testing.md).
 * `grammar/`: ANTLR4 grammar specification (`Sapphire.g4`).
 * `lib/`: Sapphire standard library (`lib/std/`) and host-engine bindings
   (`lib/love2d/`).
