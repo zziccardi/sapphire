@@ -13,7 +13,8 @@ from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
 from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode, YieldNode, BasicTypeNode
 from src.semantics.type_checker import TypeChecker, SemanticError
-from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType
+from src.semantics.struct_layout_pass import StructLayoutPass
+from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType, StructType, StructField
 
 
 
@@ -845,7 +846,7 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     func test() {
-      let arena = Arena();
+      var arena = Arena();
       var e1 = Entity(s = 10) in arena;
       var e2 = clone e1 {
         self.score = 20;
@@ -1320,7 +1321,7 @@ class TestTypeChecker(unittest.TestCase):
 
     # Prototype struct allowing __proto__
     self._check("""
-    let a = Arena();
+    var a = Arena();
     proto Goblin {
       var hp: int;
     }
@@ -1773,7 +1774,7 @@ class TestTypeChecker(unittest.TestCase):
       var x: int;
     }
     func test() {
-      let my_arena = Arena();
+      var my_arena = Arena();
       let p = Point { x = 10 } in my_arena;
     }
     """
@@ -1811,7 +1812,7 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func escape(): Enemy {
-      let local_arena = Arena();
+      var local_arena = Arena();
       let e = Enemy { hp = 100 } in local_arena;
       let c = clone e in local_arena;
       var arr = [c];
@@ -1829,7 +1830,7 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func escape_multi(): int, Enemy {
-      let local_arena = Arena();
+      var local_arena = Arena();
       let e = Enemy { hp = 100 } in local_arena;
       return 42, e;
     }
@@ -1846,7 +1847,7 @@ class TestTypeChecker(unittest.TestCase):
     func escape() {
       var outer: Point? = none;
       {
-        let local_arena = Arena();
+        var local_arena = Arena();
         let p = Point { x = 10 } in local_arena;
         outer = p; // Error: local_arena has nested scope compared to outer
       }
@@ -1873,7 +1874,7 @@ class TestTypeChecker(unittest.TestCase):
       var x: int;
     }
     func test() {
-      let my_arena = Arena();
+      var my_arena = Arena();
       {
         let p = Point { x = 10 } in my_arena; // Safe!
       }
@@ -1891,7 +1892,7 @@ class TestTypeChecker(unittest.TestCase):
     }
     func escape(out: Outer) {
       {
-        let local_arena = Arena();
+        var local_arena = Arena();
         let p = Point { x = 10 } in local_arena;
         out.pt = p; // Error: local_arena is nested compared to out
       }
@@ -2748,7 +2749,7 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       struct Item {}
       func test_arena_escape(): Item {
-        let a = Arena();
+        var a = Arena();
         return Item {} in a;
       }
       """)
@@ -3236,7 +3237,7 @@ class TestTypeChecker(unittest.TestCase):
       var hp: int;
     }
     func test() {
-      let arena = Arena();
+      var arena = Arena();
       let base = Hero { id = 1, hp = 100 } in arena;
       let cloned = clone base {
         self.id = 2;
@@ -4911,7 +4912,7 @@ class TestTypeChecker(unittest.TestCase):
       }
     }
     func test() {
-      let a = Arena();
+      var a = Arena();
       let g1 = Goblin(hp = 50) in a;
       let g2 = clone g1 {
         self.hp = 100;
@@ -4927,7 +4928,7 @@ class TestTypeChecker(unittest.TestCase):
         return x * 2;
       }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let r = compute(5) in a;
       }
       """)
@@ -5468,7 +5469,7 @@ class TestTypeChecker(unittest.TestCase):
         var hp: int;
       }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let g = Goblin { hp = 50 } in a;
         g.hp = 40;
       }
@@ -5487,7 +5488,7 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let g = Goblin { hp = 50 } in a;
         g.hurt();
       }
@@ -5568,7 +5569,7 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       struct Box { var v: int; }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let r = Ref(Box { v = 1 }) in a;
       }
       """)
@@ -5598,7 +5599,7 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       struct Box { var v: int; }
       func test() {
-        let a = Arena();
+        var a = Arena();
         let s = SharedRef(Box { v = 1 }) in a;
       }
       """)
@@ -5723,6 +5724,1144 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("SharedRef")), SharedRefType)
     self.assertIsInstance(checker._resolve_type_node(BasicTypeNode("WeakRef")), WeakRefType)
     self.assertFalse(checker._expr_references_self(None))
+
+  # ==========================================
+  # Phase 2 Memory Safety Tests
+  # ==========================================
+
+  def test_unboxed_direct_and_mutual_struct_recursion_rejected(self):
+    """Verifies direct, fixed-array, mutual, and generic unboxed struct recursion are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct BadNode {
+        var val: int;
+        var next: BadNode?;
+      }
+      """)
+    self.assertIn("Recursive struct 'BadNode' has infinite inline size via field 'next'", str(ctx.exception))
+
+    checker = TypeChecker()
+    fixed_st = StructType("FixedRec", {})
+    fixed_st.fields["children"] = StructField(
+        "children", ArrayType(fixed_st, size=2, is_fixed_size=True), is_mutable=True
+    )
+    StructLayoutPass.check_unboxed_recursion(checker, [fixed_st])
+    self.assertTrue(
+        any(
+            "Recursive struct 'FixedRec' has infinite inline size via field 'children'" in e
+            for e in checker.errors
+        )
+    )
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      struct LeftNode {
+        var right: RightNode;
+      }
+      struct RightNode {
+        var left: LeftNode?;
+      }
+      """)
+    self.assertIn("has infinite inline size", str(ctx3.exception))
+
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check("""
+      struct GenRec<T> {
+        var val: T;
+        var next: GenRec<T>?;
+      }
+      func test() {
+        let g: GenRec<int>? = none;
+      }
+      """)
+    self.assertIn("Recursive struct 'GenRec__int' has infinite inline size via field 'next'", str(ctx4.exception))
+
+  def test_boxed_dynamic_and_proto_recursive_types_allowed(self):
+    """Verifies Ref, SharedRef, WeakRef, dynamic arrays/maps, and proto break layout recursion."""
+    self._check("""
+    struct HeapTree {
+      var val: int;
+      var left: Ref<HeapTree>?;
+      var shared_parent: SharedRef<HeapTree>?;
+      var weak_parent: WeakRef<HeapTree>?;
+      var children: [HeapTree] = [];
+      var named: [String: HeapTree] = {};
+    }
+    proto ArenaNode {
+      var id: int;
+      var next: ArenaNode?;
+    }
+    func test() {
+      var a = Arena();
+      let n = ArenaNode { id = 1, next = none } in a;
+      let t = HeapTree {
+        val = 1,
+        left = none,
+        shared_parent = none,
+        weak_parent = none,
+      };
+    }
+    """)
+
+  def test_move_only_types_require_explicit_move(self):
+    """Verifies __del__ structs, wrapper structs, Arena, and Coroutine require explicit move."""
+    # 1. __del__ struct copy rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Handle {
+        var fd: int;
+      }
+      impl Handle {
+        func __del__() {}
+      }
+      func test() {
+        let h1 = Handle { fd = 1 };
+        let h2 = h1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Handle'; use explicit 'move h1'", str(ctx.exception))
+
+    # 2. Struct containing move-only field is transitively move-only
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Handle {
+        var fd: int;
+      }
+      impl Handle {
+        func __del__() {}
+      }
+      struct Envelope {
+        var h: Handle;
+      }
+      func test() {
+        let e1 = Envelope { h = Handle { fd = 1 } };
+        let e2 = e1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Envelope'; use explicit 'move e1'", str(ctx2.exception))
+
+    # 3. Arena copy rejected
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func test() {
+        var a1 = Arena();
+        var a2 = a1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Arena'; use explicit 'move a1'", str(ctx3.exception))
+
+    # 4. Coroutine copy rejected, explicit move allowed
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check("""
+      func gen(): Coroutine<int> {
+        yield 1;
+      }
+      func test() {
+        var c1 = gen();
+        var c2 = c1;
+      }
+      """)
+    self.assertIn("Cannot copy move-only type 'Coroutine<int>'; use explicit 'move c1'", str(ctx4.exception))
+
+    self._check("""
+    func gen(): Coroutine<int> {
+      yield 1;
+    }
+    func test() {
+      var c1 = gen();
+      var c2 = move c1;
+    }
+    """)
+
+  def test_partial_moves_and_borrowed_unwraps_rejected(self):
+    """Verifies partial moves out of fields/indices and moves out of borrowed unwraps are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      struct Holder { var h: Handle; }
+      func test() {
+        let holder = Holder { h = Handle { fd = 1 } };
+        let stolen = holder.h;
+      }
+      """)
+    self.assertIn("Cannot copy or partially move move-only type 'Handle' out of a field or collection index.", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      func test() {
+        var arr: [Handle] = [Handle { fd = 1 }];
+        let stolen = move arr[0];
+      }
+      """)
+    self.assertIn("Cannot index into moved variable 'arr'.", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      func test() {
+        let opt: Handle? = Handle { fd = 1 };
+        if let inner ?= opt {
+          let moved_out = move inner;
+        }
+      }
+      """)
+    self.assertIn("Cannot move out of borrowed unwrap binding 'inner'.", str(ctx3.exception))
+
+  def test_shared_ref_requires_explicit_share_or_move(self):
+    """Verifies SharedRef lvalues cannot be copied implicitly without .share() or move."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Node { var v: int; }
+      func test() {
+        let s1 = SharedRef(Node { v = 1 });
+        let s2 = s1;
+      }
+      """)
+    self.assertIn("Cannot implicitly copy 'SharedRef' variable 's1'; call 's1.share()' or use 'move s1'.", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Node { var v: int; }
+      func test() {
+        let s1 = SharedRef(Node { v = 1 });
+        var arr: [SharedRef<Node>] = [];
+        arr.push(s1);
+      }
+      """)
+    self.assertIn("Cannot implicitly copy 'SharedRef' variable 's1'", str(ctx2.exception))
+
+    self._check("""
+    struct Node { var v: int; }
+    func test() {
+      let s1 = SharedRef(Node { v = 1 });
+      var arr: [SharedRef<Node>] = [s1.share()];
+      arr.push(move s1);
+    }
+    """)
+
+  def test_destructor_self_escape_rejected_while_helper_methods_allowed(self):
+    """Verifies self cannot escape __del__() via globals, args, or closures, while self.close() works."""
+    self._check("""
+    struct FileHandle {
+      var is_open: bool;
+    }
+    impl FileHandle {
+      var func close() {
+        self.is_open = false;
+      }
+      func __del__() {
+        if self.is_open {
+          self.close();
+        }
+      }
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Zombie { var id: int; }
+      func inspect(z: Zombie) {}
+      impl Zombie {
+        func __del__() {
+          inspect(self);
+        }
+      }
+      """)
+    self.assertIn("Cannot pass 'self' as an argument from destructor '__del__'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Zombie { var id: int; }
+      var ESCAPED: Zombie? = none;
+      impl Zombie {
+        func __del__() {
+          ESCAPED = self;
+        }
+      }
+      """)
+    self.assertIn("Cannot allow 'self' to escape from destructor '__del__'.", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      struct Zombie { var id: int; }
+      impl Zombie {
+        func __del__() {
+          let fn = () -> self.id;
+        }
+      }
+      """)
+    self.assertIn("Cannot capture 'self' in a closure inside destructor '__del__'.", str(ctx3.exception))
+
+  def test_match_arms_move_union_tracking(self):
+    """Verifies mutually exclusive match arms can move the same variable and union-invalidate it."""
+    self._check("""
+    struct Handle { var id: int; }
+    impl Handle { func __del__() {} }
+    func pick(code: int): Handle {
+      let h = Handle { id = 10 };
+      let chosen = match code {
+        1 -> move h,
+        ... -> move h,
+      };
+      return move chosen;
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Handle { var id: int; }
+      impl Handle { func __del__() {} }
+      func bad_pick(code: int): int {
+        let h = Handle { id = 10 };
+        let chosen = match code {
+          1 -> move h,
+          ... -> Handle { id = 20 },
+        };
+        return h.id + chosen.id;
+      }
+      """)
+    self.assertIn("Use of moved variable 'h'.", str(ctx.exception))
+
+
+  def test_phase3_immutable_and_temp_arena_rejected(self):
+    """Rejects `let` arena and temporary/moved arena in `in <arena>`."""
+    immut_code = """
+    proto Goblin { var hp: int; }
+    func main() {
+      let a = Arena();
+      let g = Goblin { hp = 10 } in a;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(immut_code)
+    self.assertIn("immutable Arena 'a'", str(ctx.exception))
+
+    temp_code = """
+    proto Goblin { var hp: int; }
+    func main() {
+      let g = Goblin { hp = 10 } in Arena();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(temp_code)
+    self.assertIn("mutable 'var' Arena variable", str(ctx2.exception))
+
+  def test_phase3_arena_reassignment_and_move_invalidation(self):
+    """Rejects using proto refs after arena reset or move; allows overwrite or prior block exit."""
+    use_after_reset = """
+    proto Goblin { var hp: int; }
+    func main(): int {
+      var a = Arena();
+      var g = Goblin { hp = 10 } in a;
+      a = Arena();
+      return g.hp;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(use_after_reset)
+    self.assertIn("was reassigned or reset", str(ctx.exception))
+
+    use_after_move = """
+    proto Goblin { var hp: int; }
+    func main(): int {
+      var a = Arena();
+      let g = Goblin { hp = 10 } in a;
+      let b = move a;
+      return g.hp;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(use_after_move)
+    self.assertIn("has been moved", str(ctx2.exception))
+
+    valid_reuse = """
+    proto Goblin { var hp: int; }
+    func main(): int {
+      var a = Arena();
+      {
+        let inner = Goblin { hp = 5 } in a;
+      }
+      var g = Goblin { hp = 10 } in a;
+      a = Arena();
+      g = Goblin { hp = 20 } in a;
+      return g.hp;
+    }
+    """
+    self._check(valid_reuse)
+
+  def test_phase3_self_arena_reassignment_and_field_order(self):
+    """Enforces Arena field order before proto fields and init-only self.arena assignment."""
+    bad_order = """
+    proto Goblin { var hp: int; }
+    struct BadEngine {
+      var g: Goblin?;
+      var arena: Arena;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(bad_order)
+    self.assertIn("must be declared before prototype-referencing field", str(ctx.exception))
+
+    reassign_in_method = """
+    proto Goblin { var hp: int; }
+    struct Engine {
+      var arena: Arena;
+      var g: Goblin?;
+    }
+    impl Engine {
+      func __init__() {
+        self.arena = Arena();
+        self.g = Goblin { hp = 10 } in self.arena;
+      }
+      var func reset() {
+        self.arena = Arena();
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(reassign_in_method)
+    self.assertIn("Cannot reassign Arena field 'arena'", str(ctx2.exception))
+
+    dup_init = """
+    proto Goblin { var hp: int; }
+    struct Engine {
+      var arena: Arena;
+      var g: Goblin?;
+    }
+    impl Engine {
+      func __init__() {
+        self.arena = Arena();
+        self.arena = Arena();
+        self.g = none;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(dup_init)
+    self.assertIn("after initial assignment", str(ctx3.exception))
+
+  def test_phase3_same_scope_lifo_and_transitive_escapes(self):
+    """Rejects same-scope LIFO escapes, container/wrapper/closure/sink escapes, and Ref boxing."""
+    lifo_same_scope = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var g: Goblin? = none;
+      var a = Arena();
+      g = Goblin { hp = 1 } in a;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(lifo_same_scope)
+    self.assertIn("later-declared arena", str(ctx.exception))
+
+    push_escape = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var items: [Goblin] = [];
+      {
+        var a = Arena();
+        items.push(Goblin { hp = 1 } in a);
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(push_escape)
+    self.assertIn("nested arena", str(ctx2.exception))
+
+    for_escape = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var saved: Goblin? = none;
+      {
+        var a = Arena();
+        let list = [Goblin { hp = 1 } in a];
+        for g in list {
+          saved = g;
+        }
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(for_escape)
+    self.assertIn("nested arena", str(ctx3.exception))
+
+    var_sink_escape = """
+    proto Goblin { var hp: int; }
+    func store(var dst: [Goblin], src: Goblin) {
+      dst.push(src);
+    }
+    func main() {
+      var out_list: [Goblin] = [];
+      {
+        var a = Arena();
+        let g = Goblin { hp = 1 } in a;
+        store(out_list, g);
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(var_sink_escape)
+    self.assertIn("nested arena", str(ctx4.exception))
+
+    cross_arena_clone = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var outer_a = Arena();
+      {
+        var inner_a = Arena();
+        let base = Goblin { hp = 1 } in inner_a;
+        let bad = clone base {} in outer_a;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx5:
+      self._check(cross_arena_clone)
+    self.assertIn("shorter-lived Arena", str(ctx5.exception))
+
+    ref_box = """
+    proto Goblin { var hp: int; }
+    func main() {
+      var a = Arena();
+      let g = Goblin { hp = 1 } in a;
+      let r = Ref(g);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx6:
+      self._check(ref_box)
+    self.assertIn("inside 'Ref'", str(ctx6.exception))
+
+    shared_box_none = """
+    proto Goblin { var hp: int; }
+    func main() {
+      let s = SharedRef<Goblin?>(none);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx7:
+      self._check(shared_box_none)
+    self.assertIn("inside 'SharedRef'", str(ctx7.exception))
+
+  def test_iteration_freeze_and_unwrap_freeze(self):
+    for_in_push = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        arr.push(4);
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_push)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    for_in_assign = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        arr = [4, 5];
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_assign)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    for_in_index_assign = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        arr[0] = 10;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_index_assign)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    for_in_move = """
+    func main() {
+      var arr = [1, 2, 3];
+      for x in arr {
+        let y = move arr;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(for_in_move)
+    self.assertIn(
+        "while it is frozen (for-in loop iteration)", str(ctx.exception)
+    )
+
+    map_callback_push = """
+    func main() {
+      var arr = [1, 2, 3];
+      let res = arr.map(x -> {
+        arr.push(10);
+        return x * 2;
+      });
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(map_callback_push)
+    self.assertIn("while it is frozen (.map() callback)", str(ctx.exception))
+
+    if_var_unwrap_freeze = """
+    func main() {
+      var opt: int? = 10;
+      if var x ?= opt {
+        opt = 20;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(if_var_unwrap_freeze)
+    self.assertIn(
+        "while it is frozen (active 'if var' unwrap)", str(ctx.exception)
+    )
+
+    guard_var_unwrap_freeze = """
+    func main() {
+      var opt: int? = 10;
+      guard var x ?= opt else { return; }
+      opt = 20;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(guard_var_unwrap_freeze)
+    self.assertIn(
+        "while it is frozen (active 'guard var' unwrap)", str(ctx.exception)
+    )
+
+    let_unwrap_ok = """
+    func main() {
+      var opt: int? = 10;
+      if let x ?= opt {
+        opt = 20;
+      }
+      guard let y ?= opt else { return; }
+      opt = 30;
+    }
+    """
+    self._check(let_unwrap_ok)
+
+  def test_subscript_and_container_aliasing(self):
+    struct_push_alias = """
+    struct Item { var val: int; }
+    func main() {
+      var arr = [Item { val = 1 }];
+      arr.push(arr[0]);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(struct_push_alias)
+    self.assertIn("cannot pass element borrowed from 'arr'", str(ctx.exception))
+
+    struct_insert_alias = """
+    struct Item { var val: int; }
+    func main() {
+      var arr = [Item { val = 1 }];
+      arr.insert(0, arr[0]);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(struct_insert_alias)
+    self.assertIn("cannot pass element borrowed from 'arr'", str(ctx.exception))
+
+    primitive_push_ok = """
+    func main() {
+      var nums = [1, 2, 3];
+      nums.push(nums[0]);
+    }
+    """
+    self._check(primitive_push_ok)
+
+  def test_deep_shared_ref_and_ref_receiver_mutability(self):
+    ref_let_mut_reject = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      let r = Ref(Counter { count = 0 });
+      r.count = 10;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ref_let_mut_reject)
+    self.assertIn("constant Ref variable 'r'", str(ctx.exception))
+
+    ref_let_method_reject = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      let r = Ref(Counter { count = 0 });
+      r.inc();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ref_let_method_reject)
+    self.assertIn("constant variable 'r'", str(ctx.exception))
+
+    ref_var_mut_allow = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      var r = Ref(Counter { count = 0 });
+      r.count = 10;
+      r.inc();
+    }
+    """
+    self._check(ref_var_mut_allow)
+
+    ref_array_mutability = """
+    func main() {
+      var r_mut = Ref([1, 2, 3]);
+      r_mut.push(4);
+    }
+    """
+    self._check(ref_array_mutability)
+
+    ref_array_const_reject = """
+    func main() {
+      let r_const = Ref([1, 2, 3]);
+      r_const.push(4);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ref_array_const_reject)
+    self.assertIn("constant variable 'r_const'", str(ctx.exception))
+
+    shared_field_reject = """
+    struct Point { var x: int; var y: int; }
+    func main() {
+      var s = SharedRef(Point { x = 1, y = 2 });
+      s.x = 10;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(shared_field_reject)
+    self.assertIn("deeply immutable 'SharedRef'", str(ctx.exception))
+
+    shared_method_reject = """
+    struct Counter { var count: int; }
+    impl Counter { var func inc() { self.count += 1; } }
+    func main() {
+      var s = SharedRef(Counter { count = 0 });
+      s.inc();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(shared_method_reject)
+    self.assertIn("deeply immutable 'SharedRef'", str(ctx.exception))
+
+  def test_directional_proto_lineage_aliasing(self):
+    ancestor_conflict = """
+    proto Monster { var hp: int; }
+    func duel(var m1: Monster, m2: Monster) {}
+    func main() {
+      var a = Arena();
+      var base = Monster { hp = 100 } in a;
+      var minion = clone base {};
+      duel(base, minion);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(ancestor_conflict)
+    self.assertIn(
+        "prototype 'base' is mutably borrowed while its cloned descendant "
+        "'minion'",
+        str(ctx.exception),
+    )
+
+    sibling_clones_ok = """
+    proto Monster { var hp: int; }
+    func duel(var m1: Monster, var m2: Monster) {}
+    func main() {
+      var a = Arena();
+      var base = Monster { hp = 100 } in a;
+      var c1 = clone base {};
+      var c2 = clone base {};
+      duel(c1, c2);
+    }
+    """
+    self._check(sibling_clones_ok)
+
+    immutable_borrows_ok = """
+    proto Monster { var hp: int; }
+    func observe(m1: Monster, m2: Monster) {}
+    func main() {
+      var a = Arena();
+      var base = Monster { hp = 100 } in a;
+      var minion = clone base {};
+      observe(base, minion);
+    }
+    """
+    self._check(immutable_borrows_ok)
+
+  def test_closure_stack_capture_escapes(self):
+    local_map_ok = """
+    struct Point { var x: int; }
+    func main() {
+      let p = Point { x = 10 };
+      let nums = [1, 2, 3];
+      let res = nums.map(x -> x + p.x);
+    }
+    """
+    self._check(local_map_ok)
+
+    return_capture_struct_reject = """
+    struct Point { var x: int; }
+    func make_closure(): () -> int {
+      let p = Point { x = 10 };
+      return () -> int { return p.x; };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(return_capture_struct_reject)
+    self.assertIn("capturing local variable 'p'", str(ctx1.exception))
+
+    return_capture_var_reject = """
+    func make_counter(): () -> int {
+      var count = 0;
+      return () -> int { return count; };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(return_capture_var_reject)
+    self.assertIn("capturing local variable 'count'", str(ctx2.exception))
+
+    return_capture_scalar_const_ok = """
+    func make_adder(x: int): (int) -> int {
+      return (y: int) -> int { return x + y; };
+    }
+    """
+    self._check(return_capture_scalar_const_ok)
+
+    outer_assign_reject = """
+    struct Point { var x: int; }
+    func main() {
+      var cb: () -> int;
+      {
+        let p = Point { x = 10 };
+        cb = () -> int { return p.x; };
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(outer_assign_reject)
+    self.assertIn(
+        "Closure capturing local variable 'p' cannot escape",
+        str(ctx3.exception),
+    )
+
+    earlier_decl_reject = """
+    struct Point { var x: int; }
+    func main() {
+      var cb: () -> int;
+      let p = Point { x = 10 };
+      cb = () -> int { return p.x; };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(earlier_decl_reject)
+    self.assertIn(
+        "Closure capturing local variable 'p' cannot escape",
+        str(ctx4.exception),
+    )
+
+    box_closure_reject = """
+    struct Point { var x: int; }
+    func main() {
+      let p = Point { x = 10 };
+      let r = Ref(() -> int { return p.x; });
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx5:
+      self._check(box_closure_reject)
+    self.assertIn("inside 'Ref'", str(ctx5.exception))
+
+  def test_coroutine_stack_borrow_escapes(self):
+    local_step_ok = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    func main() {
+      var a = Actor { hp = 100 };
+      var co = a.tick();
+      co.step();
+    }
+    """
+    self._check(local_step_ok)
+
+    return_coro_borrow_reject = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    struct Wrapper { var co: Coroutine<void>; }
+    func make_wrapper(): Wrapper {
+      var a = Actor { hp = 100 };
+      return Wrapper { co = a.tick() };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(return_coro_borrow_reject)
+    self.assertIn("borrowing local variable 'a'", str(ctx1.exception))
+
+    return_coro_arg_reject = """
+    struct Packet { var val: int; }
+    func stream(p: Packet): Coroutine<int> {
+      yield p.val;
+    }
+    struct StreamHolder { var s: Coroutine<int>; }
+    func make_stream(): StreamHolder {
+      let pkt = Packet { val = 42 };
+      return StreamHolder { s = stream(pkt) };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(return_coro_arg_reject)
+    self.assertIn("borrowing local variable 'pkt'", str(ctx2.exception))
+
+    outer_assign_coro_reject = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    func main() {
+      var co: Coroutine<void>;
+      {
+        var a = Actor { hp = 100 };
+        co = a.tick();
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(outer_assign_coro_reject)
+    self.assertIn(
+        "Coroutine borrowing local variable 'a' cannot escape",
+        str(ctx3.exception),
+    )
+
+    earlier_decl_coro_reject = """
+    struct Actor { var hp: int; }
+    impl Actor {
+      func tick(): Coroutine<void> {
+        yield;
+      }
+    }
+    func main() {
+      var co: Coroutine<void>;
+      var a = Actor { hp = 100 };
+      co = a.tick();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(earlier_decl_coro_reject)
+    self.assertIn(
+        "Coroutine borrowing local variable 'a' cannot escape",
+        str(ctx4.exception),
+    )
+
+  def test_coroutine_yield_raii_restriction(self):
+    del_across_yield_reject = """
+    struct Resource { var id: int; }
+    impl Resource {
+      func __del__() {}
+    }
+    func coro(): Coroutine<void> {
+      let r = Resource { id = 1 };
+      yield;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(del_across_yield_reject)
+    self.assertIn(
+        "move-only RAII type 'Resource' cannot remain live across 'yield'",
+        str(ctx1.exception),
+    )
+
+    arena_across_yield_reject = """
+    func coro(): Coroutine<void> {
+      var a = Arena();
+      yield;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(arena_across_yield_reject)
+    self.assertIn(
+        "move-only RAII type 'Arena' cannot remain live across 'yield'",
+        str(ctx2.exception),
+    )
+
+    ref_across_yield_reject = """
+    func coro(): Coroutine<void> {
+      let r = Ref(10);
+      yield;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(ref_across_yield_reject)
+    self.assertIn(
+        "move-only RAII type 'Ref<int>' cannot remain live across 'yield'",
+        str(ctx3.exception),
+    )
+
+    scoped_block_before_yield_ok = """
+    struct Resource { var id: int; }
+    impl Resource {
+      func __del__() {}
+    }
+    func coro(): Coroutine<void> {
+      {
+        let r = Resource { id = 1 };
+      }
+      yield;
+    }
+    """
+    self._check(scoped_block_before_yield_ok)
+
+    moved_before_yield_ok = """
+    struct Resource { var id: int; }
+    impl Resource {
+      func __del__() {}
+    }
+    func sink(r: Resource) {}
+    func coro(): Coroutine<void> {
+      let r = Resource { id = 1 };
+      sink(move r);
+      yield;
+    }
+    """
+    self._check(moved_before_yield_ok)
+
+  def test_module_var_global_reentrancy(self):
+    direct_access_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func update(p: Player) {
+      g_player.hp = 0;
+    }
+    func main() {
+      update(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check(direct_access_reject)
+    self.assertIn(
+        "callee accesses 'g_player' in its call graph", str(ctx1.exception)
+    )
+
+    transitive_access_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func helper() {
+      g_player.hp = 50;
+    }
+    func update(p: Player) {
+      helper();
+    }
+    func main() {
+      update(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check(transitive_access_reject)
+    self.assertIn(
+        "callee accesses 'g_player' in its call graph", str(ctx2.exception)
+    )
+
+    exported_global_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    export {
+      g_player
+    }
+    func inspect(p: Player) {}
+    func main() {
+      inspect(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check(exported_global_reject)
+    self.assertIn(
+        "Cannot pass exported mutable global 'g_player' by reference",
+        str(ctx3.exception),
+    )
+
+    dynamic_callee_reject = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func main() {
+      var cb: (Player) -> void = p -> {};
+      cb(g_player);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check(dynamic_callee_reject)
+    self.assertIn(
+        "Cannot pass mutable global 'g_player' by reference to dynamic",
+        str(ctx4.exception),
+    )
+
+    non_aliasing_method_ok = """
+    struct Button { var id: String; }
+    impl Button {
+      func render() {
+        print(self.id);
+      }
+    }
+    var submit_btn = Button { id = "btn" };
+    func main() {
+      submit_btn.render();
+    }
+    """
+    self._check(non_aliasing_method_ok)
+
+    non_aliasing_func_ok = """
+    struct Player { var hp: int; }
+    var g_player = Player { hp = 100 };
+    func inspect(p: Player) {
+      let h = p.hp;
+    }
+    func main() {
+      inspect(g_player);
+    }
+    """
+    self._check(non_aliasing_func_ok)
+
+    let_global_borrow_ok = """
+    struct Config { let port: int; }
+    let g_cfg = Config { port = 8080 };
+    func run_server(c: Config) {}
+    func main() {
+      run_server(g_cfg);
+    }
+    """
+    self._check(let_global_borrow_ok)
+
+    primitive_var_global_value_ok = """
+    var g_count = 10;
+    func inc(x: int) {}
+    func main() {
+      inc(g_count);
+    }
+    """
+    self._check(primitive_var_global_value_ok)
 
 
 if __name__ == "__main__":

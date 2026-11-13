@@ -198,6 +198,25 @@ class BaseTranspiler(ABC):
         st = self.variable_types[expr.name]
         if st in self.structs_with_destructor:
           return st
+    elif isinstance(expr, TernaryExprNode):
+      return (
+          self._expr_destructible_struct(expr.true_expr, return_index=return_index)
+          or self._expr_destructible_struct(expr.false_expr, return_index=return_index)
+      )
+    elif isinstance(expr, MatchExprNode):
+      for case in expr.cases:
+        if isinstance(case.body, BlockNode):
+          for stmt in case.body.statements:
+            if isinstance(stmt, YieldNode):
+              y_exprs = getattr(stmt, "expressions", None) or ([stmt.expr] if getattr(stmt, "expr", None) else [])
+              if return_index < len(y_exprs):
+                st = self._expr_destructible_struct(y_exprs[return_index])
+                if st:
+                  return st
+        else:
+          st = self._expr_destructible_struct(case.body, return_index=return_index)
+          if st:
+            return st
     inferred = getattr(expr, "inferred_type", None)
     if hasattr(inferred, "base_type"):
       inferred = inferred.base_type
@@ -205,15 +224,67 @@ class BaseTranspiler(ABC):
       return inferred.name
     return None
 
+  @staticmethod
+  def _is_owned_unwrap_expr(expr: Any) -> bool:
+    """Returns True if an optional unwrap expression owns the unwrapped value."""
+    if isinstance(expr, MoveNode):
+      return True
+    if isinstance(expr, (IdentifierNode, MemberAccessNode, IndexExprNode)):
+      return False
+    return True
+
+  def _is_active_destructible_var(self, m_name: str) -> bool:
+    """Returns True if *m_name* is tracked in an active destructor stack frame."""
+    return any(m_name in frame for frame in self.destructor_stack)
+
+  def _record_move(self, m_name: str) -> None:
+    """Tracks unconditional vs conditional move of *m_name* for RAII drop flags."""
+    branch_depth = getattr(self, "_branch_depth", 0)
+    var_depths = getattr(self, "_var_branch_depth", None)
+    decl_depth = var_depths.get(m_name, branch_depth) if var_depths is not None else branch_depth
+    if decl_depth < branch_depth:
+      pending = getattr(self, "_pending_null_vars", None)
+      if pending is not None and m_name not in pending:
+        pending.append(m_name)
+    else:
+      self.moved_vars.add(m_name)
+
+  def _drain_pending_null_vars(
+      self,
+      null_literal: str,
+      exclude: Optional[Set[str]] = None,
+  ) -> None:
+    """Emits post-statement drop-flag clearing (`v = None` / `v = nil`) for conditional moves."""
+    pending = getattr(self, "_pending_null_vars", None)
+    if not pending:
+      return
+    for var_name in list(pending):
+      if not exclude or var_name not in exclude:
+        self.newline()
+        self.emit(f"{var_name} = {null_literal}")
+    pending.clear()
+
+  def _visit_in_branch(self, node: ASTNode) -> None:
+    """Visits *node* inside a conditional branch depth for move drop-flag tracking."""
+    self._branch_depth = getattr(self, "_branch_depth", 0) + 1
+    try:
+      self.visit(node)
+    finally:
+      self._branch_depth -= 1
+
+  def _emit_destructor_call(self, var_name: str) -> None:
+    """Emits the teardown statement for a single destructible variable."""
+    self.emit(f"_sapphire_del({var_name})")
+
   def _emit_loop_destructors(self) -> None:
-    """Emits `_sapphire_del` calls for destructible variables in the active loop scopes."""
+    """Emits destructors for variables in the active loop scopes."""
     if self.loop_destructor_depth:
       loop_depth = self.loop_destructor_depth[-1]
       for frame in reversed(self.destructor_stack[loop_depth:]):
         for var_name in reversed(frame):
           if not hasattr(self, "moved_vars") or var_name not in self.moved_vars:
             self.newline()
-            self.emit(f"_sapphire_del({var_name})")
+            self._emit_destructor_call(var_name)
 
   def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
     """Collects struct methods, traits, return types, and destructors from program declarations."""
@@ -240,16 +311,45 @@ class BaseTranspiler(ABC):
         if ret_names:
           self.func_return_types[decl.name] = ret_names
 
+    self.proto_structs: Set[str] = set()
+    self.struct_destructible_fields: Dict[str, List[str]] = {}
+    self.struct_parent_names: Dict[str, List[str]] = {}
+    self.structs_with_destructor = {"Arena"}
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode):
+        if decl.is_prototype:
+          self.proto_structs.add(decl.name)
+        self.struct_parent_names[decl.name] = list(decl.parent_names or [])
+
     for s_name, members in self.struct_methods.items():
+      if s_name in self.proto_structs:
+        continue
       for m in members:
         if getattr(m, "func_decl", None) and m.func_decl.name == "__del__":
           self.structs_with_destructor.add(s_name)
           break
 
-    for decl in program.declarations:
-      if isinstance(decl, StructDeclNode) and getattr(decl, "parent_names", None):
-        if any(p in self.structs_with_destructor for p in decl.parent_names):
-          self.structs_with_destructor.add(decl.name)
+    changed = True
+    while changed:
+      changed = False
+      for decl in program.declarations:
+        if isinstance(decl, StructDeclNode) and not decl.is_prototype:
+          destructible_fields = [
+              f.name
+              for f in decl.fields
+              if extract_type_name(f.field_type) in self.structs_with_destructor
+          ]
+          self.struct_destructible_fields[decl.name] = destructible_fields
+          if decl.name not in self.structs_with_destructor and (
+              destructible_fields
+              or any(
+                  p in self.structs_with_destructor
+                  for p in (decl.parent_names or [])
+              )
+          ):
+            self.structs_with_destructor.add(decl.name)
+            changed = True
 
   # ------------------------------------------------------------------
   # Declaration visitors

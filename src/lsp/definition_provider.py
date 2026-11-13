@@ -16,13 +16,14 @@ from lsprotocol.types import (
 
 from src.parser.ast import (
     BasicTypeNode,
+    BlockNode,
     CallNode,
     EnumDeclNode,
     EnumMemberNode,
     ForNode,
     FuncDeclNode,
+    HeaderBindingNode,
     IdentifierNode,
-    IfNode,
     ImplBlockNode,
     ImportStmtNode,
     MemberAccessNode,
@@ -31,6 +32,12 @@ from src.parser.ast import (
     StructFieldNode,
     TraitDeclNode,
     VarDeclNode,
+    WhileNode,
+)
+from src.semantics.symbol_table import (
+    OptionalType,
+    RefType,
+    SharedRefType,
 )
 from src.semantics.module_resolver import resolve_module_path as sem_resolve_module_path
 from src.lsp.semantic_tokens import find_node_at_position
@@ -75,6 +82,76 @@ def resolve_module_path(
   return None
 
 
+def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
+  """Searches statements (including nested control-flow blocks) for local decl."""
+  for stmt in stmts:
+    st_start = getattr(stmt, "start_line", None)
+    if st_start is not None and st_start > line:
+      continue
+    if isinstance(stmt, VarDeclNode):
+      if getattr(stmt, "name", None) == name or name in getattr(
+          stmt, "names", []
+      ):
+        return stmt
+    elif type(stmt).__name__ in ("IfNode", "GuardStmtNode"):
+      bindings = getattr(
+          stmt,
+          "bindings",
+          [stmt.init_binding]
+          if getattr(stmt, "init_binding", None)
+          else [],
+      )
+      for b in bindings:
+        b_names = getattr(
+            b,
+            "let_names",
+            [b.let_name] if getattr(b, "let_name", None) else [],
+        )
+        for b_name in b_names:
+          if b_name == name:
+            return b
+      if type(stmt).__name__ == "IfNode":
+        then_block = getattr(stmt, "then_block", None)
+        if then_block is not None:
+          found = _find_decl_in_stmts(
+              getattr(then_block, "statements", []), name, line
+          )
+          if found:
+            return found
+        else_block = getattr(stmt, "else_block", None)
+        if else_block is not None:
+          else_stmts = (
+              [else_block]
+              if type(else_block).__name__ == "IfNode"
+              else getattr(else_block, "statements", [])
+          )
+          found = _find_decl_in_stmts(else_stmts, name, line)
+          if found:
+            return found
+    elif isinstance(stmt, ForNode):
+      if (
+          getattr(stmt, "key_var", None) == name
+          or getattr(stmt, "val_var", None) == name
+          or getattr(stmt, "loop_var", None) == name
+      ):
+        return stmt
+      block = getattr(stmt, "block", None)
+      if block is not None:
+        found = _find_decl_in_stmts(getattr(block, "statements", []), name, line)
+        if found:
+          return found
+    elif isinstance(stmt, (WhileNode, BlockNode)):
+      nested = (
+          getattr(stmt, "statements", [])
+          if isinstance(stmt, BlockNode)
+          else getattr(getattr(stmt, "block", None), "statements", [])
+      )
+      found = _find_decl_in_stmts(nested, name, line)
+      if found:
+        return found
+  return None
+
+
 def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
   """Finds local variable or parameter declaration in AST containing line."""
   declarations = getattr(ast, "declarations", [])
@@ -95,40 +172,9 @@ def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
             if hasattr(decl, "body")
             else []
         )
-        for stmt in stmts:
-          st_start = getattr(stmt, "start_line", None)
-          if isinstance(stmt, VarDeclNode):
-            if st_start is None or st_start <= line:
-              if getattr(stmt, "name", None) == name or name in getattr(
-                  stmt, "names", []
-              ):
-                return stmt
-          elif type(stmt).__name__ == "IfNode":
-            if st_start is None or st_start <= line:
-              bindings = getattr(
-                  stmt,
-                  "bindings",
-                  [stmt.init_binding]
-                  if getattr(stmt, "init_binding", None)
-                  else [],
-              )
-              for b in bindings:
-                b_names = getattr(
-                    b,
-                    "let_names",
-                    [b.let_name] if getattr(b, "let_name", None) else [],
-                )
-                for b_name in b_names:
-                  if b_name == name:
-                    return b
-          elif isinstance(stmt, ForNode):
-            if st_start is None or st_start <= line:
-              if (
-                  getattr(stmt, "key_var", None) == name
-                  or getattr(stmt, "val_var", None) == name
-                  or getattr(stmt, "loop_var", None) == name
-              ):
-                return stmt
+        found = _find_decl_in_stmts(stmts, name, line)
+        if found:
+          return found
     elif isinstance(decl, ImplBlockNode):
       for member in decl.members:
         func_decl = getattr(member, "func_decl", None)
@@ -148,40 +194,9 @@ def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
                 if hasattr(func_decl, "body")
                 else []
             )
-            for stmt in stmts:
-              st_start = getattr(stmt, "start_line", None)
-              if isinstance(stmt, VarDeclNode):
-                if st_start is None or st_start <= line:
-                  if getattr(stmt, "name", None) == name or name in getattr(
-                      stmt, "names", []
-                  ):
-                    return stmt
-              elif type(stmt).__name__ == "IfNode":
-                if st_start is None or st_start <= line:
-                  bindings = getattr(
-                      stmt,
-                      "bindings",
-                      [stmt.init_binding]
-                      if getattr(stmt, "init_binding", None)
-                      else [],
-                  )
-                  for b in bindings:
-                    b_names = getattr(
-                        b,
-                        "let_names",
-                        [b.let_name] if getattr(b, "let_name", None) else [],
-                    )
-                    for b_name in b_names:
-                      if b_name == name:
-                        return b
-              elif isinstance(stmt, ForNode):
-                if st_start is None or st_start <= line:
-                  if (
-                      getattr(stmt, "key_var", None) == name
-                      or getattr(stmt, "val_var", None) == name
-                      or getattr(stmt, "loop_var", None) == name
-                  ):
-                    return stmt
+            found = _find_decl_in_stmts(stmts, name, line)
+            if found:
+              return found
     elif isinstance(decl, VarDeclNode):
       if getattr(decl, "name", None) == name or name in getattr(
           decl, "names", []
@@ -334,6 +349,10 @@ class DefinitionProvider:
           receiver_type = sym_table.lookup_type(node.receiver.name)
 
       if receiver_type:
+        if isinstance(receiver_type, OptionalType):
+          receiver_type = receiver_type.base_type
+        if isinstance(receiver_type, (SharedRefType, RefType)):
+          receiver_type = receiver_type.inner_type
         if hasattr(receiver_type, "ast_decl") and receiver_type.ast_decl:
           struct_decl = receiver_type.ast_decl
           if hasattr(struct_decl, "fields"):
@@ -463,6 +482,7 @@ class DefinitionProvider:
         (
             FuncDeclNode,
             VarDeclNode,
+            HeaderBindingNode,
             ParameterNode,
             EnumDeclNode,
             EnumMemberNode,
@@ -480,6 +500,26 @@ class DefinitionProvider:
     name_line = getattr(target_decl, "name_line", None)
     name_col = getattr(target_decl, "name_column", None)
     name_len = getattr(target_decl, "name_length", None)
+
+    if isinstance(target_decl, HeaderBindingNode):
+      bindings_info = getattr(target_decl, "bindings_info", None)
+      matched_info = None
+      if isinstance(bindings_info, list) and bindings_info:
+        if isinstance(node, IdentifierNode):
+          matched_info = next(
+              (info for info in bindings_info if info.get("name") == node.name),
+              None,
+          )
+        if matched_info is None:
+          matched_info = bindings_info[0]
+      if matched_info is not None:
+        name_line = matched_info.get("line")
+        name_col = matched_info.get("column")
+        name_len = matched_info.get("length")
+      else:
+        name_line = getattr(target_decl, "let_name_line", None)
+        name_col = getattr(target_decl, "let_name_column", None)
+        name_len = getattr(target_decl, "let_name_length", None)
 
     if name_line is not None and name_col is not None and name_len is not None:
       start_pos = Position(line=name_line - 1, character=name_col)

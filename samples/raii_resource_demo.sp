@@ -20,40 +20,40 @@ impl FileHandle {
   func __del__() {
     if self.is_open {
       self.is_open = false;
-      print("  [FileHandle] Closed and flushed file: " + self.path);
+      print(f"  [FileHandle] Closed and flushed file: {self.path}");
     }
   }
 }
 
 struct DatabaseTransaction {
   var tx_id: String;
-  var committed: bool;
+  var is_committed = false;
 }
 
 impl DatabaseTransaction {
   func __del__() {
-    if !self.committed {
+    if !self.is_committed {
       print("  [DatabaseTransaction] Rolling back uncommitted transaction: " +
             self.tx_id);
     } else {
-      print("  [DatabaseTransaction] Transaction " + self.tx_id +
-            " finalized successfully");
+      print(f"  [DatabaseTransaction] Transaction {self.tx_id} " +
+            "finalized successfully");
     }
   }
 }
 
 // 2. Helper factory functions
 func open_file(path: String): FileHandle? {
-  if path == "" {
+  if path.empty() {
     return none;
   }
-  print("  [FileHandle] Opened: " + path);
+  print(f"  [FileHandle] Opened: {path}");
   return FileHandle { path = path, is_open = true };
 }
 
 func begin_tx(tx_id: String): DatabaseTransaction {
-  print("  [DatabaseTransaction] Began transaction: " + tx_id);
-  return DatabaseTransaction { tx_id = tx_id, committed = false };
+  print(f"  [DatabaseTransaction] Began transaction: {tx_id}");
+  return DatabaseTransaction { tx_id = tx_id };
 }
 
 // 3. Demo functions
@@ -61,7 +61,7 @@ func demo_basic_scoped_raii() {
   print("--- 1. Basic Single Resource (Scoped Block) ---");
   {
     let f = FileHandle { path = "config.json", is_open = true };
-    print("  Inside block: Reading from " + f.path);
+    print(f"  Inside block: Reading from {f.path}");
   }
   print("  Exited block - resource has been disposed via __del__().");
 }
@@ -71,7 +71,7 @@ func demo_multi_resource_lifo() {
   {
     let src = FileHandle { path = "source.dat", is_open = true };
     let dst = FileHandle { path = "backup.dat", is_open = true };
-    print("  Inside block: Copying from " + src.path + " to " + dst.path);
+    print(f"  Inside block: Copying from {src.path} to {dst.path}");
   }
   print("  Exited block - resources disposed in reverse order (LIFO).");
 }
@@ -79,7 +79,7 @@ func demo_multi_resource_lifo() {
 func demo_fallible_unwrap_if_let(src_path: String) {
   print("\n--- 3. Fallible Resource Unwrapping (?=) with if let ---");
   if let src ?= open_file(path = src_path) {
-    print("  Successfully acquired resource: " + src.path);
+    print(f"  Successfully acquired resource: {src.path}");
   } else {
     print("  Failed to acquire file! Fallback executed.");
   }
@@ -91,20 +91,20 @@ func demo_transaction_rollback() {
     var tx = begin_tx(tx_id = "TX-1001");
     print("  Executing database operations in transaction...");
     // Simulate committing the transaction
-    tx.committed = true;
+    tx.is_committed = true;
   }
 
   {
     var tx_fail = begin_tx(tx_id = "TX-1002");
     print("  Executing operations that fail before commit...");
-    // tx_fail.committed remains false -> automatically rolls back upon block exit
+    // tx_fail.is_committed remains false -> rolls back on block exit
   }
 }
 
 func demo_arena_lifetime() {
   print("\n--- 5. Arena Lifetime Management via Scoped Block ---");
   {
-    let arena = Arena();
+    var arena = Arena();
     print("  Allocated temporary arena for scoped memory management.");
   }
   print("  Arena destroyed and reclaimed upon scope exit.");

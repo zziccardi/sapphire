@@ -89,19 +89,18 @@ impl Boss {
 // Demonstration 1: Explicit Arenas, Struct Allocation, & Clone Propagation
 func demo_explicit_arenas(): int {
   // Instantiate explicit arenas with lexical lifecycles
-  let level_arena = Arena();
-  let combat_arena = Arena();
+  var level_arena = Arena();
+  var combat_arena = Arena();
 
   // Allocate a standard struct in level_arena using 'in'
   let spawn_point = Point(x = 100.0, y = 200.0) in level_arena;
 
   // Allocate a proto instance in level_arena via constructor call
   let base_goblin = Enemy(
-    name = "Goblin Archer",
-    hp = 50,
-    pos = spawn_point,
-    damage = 12
-  ) in level_arena;
+      name = "Goblin Archer",
+      hp = 50,
+      pos = spawn_point,
+      damage = 12) in level_arena;
 
   // Implicit clone arena propagation: minion inherits level_arena from base
   var minion = clone base_goblin {
@@ -126,18 +125,17 @@ func demo_scoped_raii_cleanup(): float {
 
   {
     // Local arena created within a nested block
-    let temp_arena = Arena();
+    var temp_arena = Arena();
 
     let origin = Point(x = 5.0, y = 10.0) in temp_arena;
     let p1 = Particle(pos = origin, lifetime = 1.5) in temp_arena;
     let p2 = Particle(pos = origin, lifetime = 2.5) in temp_arena;
 
     let temp_boss = Boss(
-      name = "Dungeon Boss",
-      hp = 500,
-      pos = origin,
-      phase = 1
-    ) in temp_arena;
+        name = "Dungeon Boss",
+        hp = 500,
+        pos = origin,
+        phase = 1) in temp_arena;
 
     total_lifetime = p1.lifetime + p2.lifetime;
 
@@ -150,7 +148,7 @@ func demo_scoped_raii_cleanup(): float {
 
 // Demonstration 3: Constructor Proto Allocation with Explicit Arena
 func demo_constructor_arena_allocation(): int {
-  let dungeon_arena = Arena();
+  var dungeon_arena = Arena();
   let default_pos = Point(x = 0.0, y = 0.0);
 
   // Protos instantiated via constructor require explicit arena via 'in'
@@ -168,7 +166,7 @@ func demo_constructor_arena_allocation(): int {
 }
 
 // Main demo orchestrator
-func run_demo(): int {
+func main(): int {
   let score1 = demo_explicit_arenas();
   let score2 = demo_constructor_arena_allocation();
   let duration = demo_scoped_raii_cleanup();
@@ -180,6 +178,3 @@ func run_demo(): int {
 
   return result;
 }
-
-// Top-level script execution entry point
-run_demo();

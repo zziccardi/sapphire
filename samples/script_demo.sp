@@ -3,7 +3,7 @@
  * without requiring a main() function entry point.
  */
 
-var count: int = 0;
+var count = 0;
 let items = [10, 20, 30];
 
 for item in items {

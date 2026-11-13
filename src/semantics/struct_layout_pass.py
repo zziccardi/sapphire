@@ -4,13 +4,56 @@ Handles Pass 2: resolves static struct inheritance, copies parent fields,
 detects circular inheritance, and validates shadowing or duplicate field layouts.
 """
 
-from typing import Any
+from typing import Any, Iterator, List, Optional, Set
 from src.parser.ast import ProgramNode, StructDeclNode
-from src.semantics.symbol_table import StructField, StructType
+from src.semantics.symbol_table import ArenaType, ArrayType, MapType, OptionalType, StructField, StructType, Type
 
 
 class StructLayoutPass:
   """Resolves static composition and field layouts for inherited structs."""
+
+  @staticmethod
+  def _iter_inline_structs(ftype: Type) -> Iterator[StructType]:
+    """Yields non-proto StructTypes stored inline within *ftype*."""
+    if isinstance(ftype, OptionalType):
+      yield from StructLayoutPass._iter_inline_structs(ftype.base_type)
+    elif isinstance(ftype, ArrayType) and ftype.is_fixed_size:
+      yield from StructLayoutPass._iter_inline_structs(ftype.element_type)
+    elif isinstance(ftype, StructType) and not ftype.is_prototype:
+      yield ftype
+
+  @staticmethod
+  def check_unboxed_recursion(checker: Any, struct_types: List[Any]) -> None:
+    """Rejects direct or mutual unboxed recursion across non-proto structs."""
+    reported_cycles: Set[frozenset] = getattr(
+        checker, "_reported_recursive_struct_cycles", None
+    )
+    if reported_cycles is None:
+      reported_cycles = set()
+      checker._reported_recursive_struct_cycles = reported_cycles
+
+    fully_checked: Set[str] = set()
+
+    def dfs(st: StructType, path: List[str]) -> None:
+      for field_name, field_obj in st.fields.items():
+        for target_st in StructLayoutPass._iter_inline_structs(field_obj.field_type):
+          if target_st.name in path:
+            idx = path.index(target_st.name)
+            cycle_key = frozenset(path[idx:])
+            if cycle_key not in reported_cycles:
+              reported_cycles.add(cycle_key)
+              checker.error(
+                  f"Recursive struct '{target_st.name}' has infinite inline size via field '{field_name}'; "
+                  f"use 'Ref<{target_st.name}>', 'SharedRef<{target_st.name}>', dynamic '[{target_st.name}]', "
+                  f"or 'proto' in an Arena."
+              )
+          elif target_st.name not in fully_checked:
+            dfs(target_st, path + [target_st.name])
+
+    for st in struct_types:
+      if isinstance(st, StructType) and not st.is_prototype and st.name not in fully_checked:
+        dfs(st, [st.name])
+        fully_checked.add(st.name)
 
   @staticmethod
   def resolve_struct_layouts(checker: Any, program: ProgramNode) -> None:
@@ -63,3 +106,88 @@ class StructLayoutPass:
 
     for s in structs_to_process:
       process_struct(s)
+
+    resolved_types = [
+        checker.symbol_table.lookup_type(s.name) for s in structs_to_process
+    ]
+    StructLayoutPass.check_unboxed_recursion(checker, resolved_types)
+    StructLayoutPass.check_arena_field_ordering(checker, resolved_types)
+
+  @staticmethod
+  def _type_contains_proto(t: Type, seen: Optional[Set[str]] = None) -> bool:
+    """Returns True if `t` is a proto type or contains one inline."""
+    if isinstance(t, OptionalType):
+      return StructLayoutPass._type_contains_proto(t.base_type, seen)
+    if isinstance(t, ArrayType):
+      return StructLayoutPass._type_contains_proto(t.element_type, seen)
+    if isinstance(t, MapType):
+      return (
+          StructLayoutPass._type_contains_proto(t.key_type, seen)
+          or StructLayoutPass._type_contains_proto(t.value_type, seen)
+      )
+    if isinstance(t, StructType):
+      if t.is_prototype:
+        return True
+      seen_set = set() if seen is None else seen
+      if t.name in seen_set:
+        return False
+      seen_set.add(t.name)
+      try:
+        return any(
+            StructLayoutPass._type_contains_proto(f.field_type, seen_set)
+            for f in t.fields.values()
+        )
+      finally:
+        seen_set.remove(t.name)
+    return False
+
+  @staticmethod
+  def _type_contains_arena(t: Type, seen: Optional[Set[str]] = None) -> bool:
+    """Returns True if `t` is an Arena or inline struct owning an Arena."""
+    if isinstance(t, ArenaType):
+      return True
+    if isinstance(t, OptionalType):
+      return StructLayoutPass._type_contains_arena(t.base_type, seen)
+    if isinstance(t, ArrayType):
+      return StructLayoutPass._type_contains_arena(t.element_type, seen)
+    if isinstance(t, MapType):
+      return (
+          StructLayoutPass._type_contains_arena(t.key_type, seen)
+          or StructLayoutPass._type_contains_arena(t.value_type, seen)
+      )
+    if isinstance(t, StructType) and not t.is_prototype:
+      seen_set = set() if seen is None else seen
+      if t.name in seen_set:
+        return False
+      seen_set.add(t.name)
+      try:
+        return any(
+            StructLayoutPass._type_contains_arena(f.field_type, seen_set)
+            for f in t.fields.values()
+        )
+      finally:
+        seen_set.remove(t.name)
+    return False
+
+  @staticmethod
+  def check_arena_field_ordering(
+      checker: Any, struct_types: List[Any]
+  ) -> None:
+    """Enforces that Arena fields precede proto-referencing fields."""
+    for st in struct_types:
+      if not isinstance(st, StructType):
+        continue
+      first_proto_field: Optional[str] = None
+      for field_name, field in st.fields.items():
+        if StructLayoutPass._type_contains_arena(field.field_type):
+          if first_proto_field is not None:
+            checker.error(
+                f"In struct '{st.name}', Arena field '{field_name}' must be "
+                f"declared before prototype-referencing field "
+                f"'{first_proto_field}' to ensure safe LIFO teardown."
+            )
+        elif (
+            first_proto_field is None
+            and StructLayoutPass._type_contains_proto(field.field_type)
+        ):
+          first_proto_field = field_name

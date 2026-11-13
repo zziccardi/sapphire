@@ -453,7 +453,7 @@ class TestLuaTranspiler(unittest.TestCase):
       var unit: Unit;
     }
     func main() {
-      let a = Arena();
+      var a = Arena();
       let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
       var c1 = clone base in a;
       var c2 = clone c1 in a;
@@ -1047,12 +1047,12 @@ class TestLuaTranspiler(unittest.TestCase):
     # Arena destruction inside match return
     arena_ret = """
     struct Item {}
-    func test_arena(): Item {
-      let a = Arena();
-      let item = Item {} in a;
+    func test_arena(): int {
+      var a = Arena();
+      let _item = Item {} in a;
       return match 1 {
-        1 -> item,
-        ... -> item,
+        1 -> 10,
+        ... -> 20,
       };
     }
     """
@@ -1347,6 +1347,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('local empty_str = ""', lua)
     self.assertIn('local single_lit = "just text"', lua)
     self.assertIn('local single_expr = tostring(count)', lua)
+
+  def test_interpolated_string_enum_and_nested_quotes_lua(self):
+    """Verifies Lua transpilation of enum and nested unescaped quotes in f-strings."""
+    code = """
+    enum Direction { North = 1, South = 2 }
+
+    func main() {
+      let d = Direction.South;
+      let s = f"Direction: {d}";
+      let m = {"key": 100};
+      let s_quote = f"Has key: {m.contains("key")}";
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn('("Direction: " .. tostring(d))', lua)
+    self.assertIn('("Has key: " .. tostring(_sapphire_map_contains(m, "key")))', lua)
 
   def test_nested_match_expression_transpilation_lua(self):
     """Verifies Lua transpilation of match expressions used inline within sub-expressions."""
@@ -1898,7 +1914,29 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(r2)", lua_code)
 
   def test_destructor_from_variable_assignment(self):
-    """Verifies that variables assigned from other destructible variables are tracked."""
+    """Verifies that variables moved from destructible variables are tracked and conditional moves emit drop-flag resets in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test(cond: bool) {
+      let a = Resource { id = 1 };
+      if cond {
+        let b = move a;
+        consume(move b);
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("a = nil", lua_code)
+    self.assertIn("_sapphire_del(a)", lua_code)
+
+  def test_destructor_live_var_reassignment(self):
+    """Verifies reassigning a live destructible var destroys the prior value first in Lua."""
     code = """
     struct Resource {
       var id: int;
@@ -1907,13 +1945,14 @@ class TestLuaTranspiler(unittest.TestCase):
       func __del__() {}
     }
     func test() {
-      let a = Resource { id = 1 };
-      let b = a;
+      var a = Resource { id = 1 };
+      a = Resource { id = 2 };
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("_sapphire_del(a)", lua_code)
-    self.assertIn("_sapphire_del(b)", lua_code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertGreaterEqual(test_body.count("_sapphire_del(a)"), 2)
 
   def test_destructor_move_suppresses_source_destructor(self):
     """Verifies moving a resource suppresses destructor on source in Lua."""

@@ -49,7 +49,7 @@ delegation, and explicit fallibility**.
 * **Sapphire's Solution**:
   Sapphire eliminates universal ARC in favor of a predictable, stack-first hierarchy with lexical arenas and caller-driven ownership ([docs/SPEC.md (Memory Architecture)](SPEC.md#memory-architecture-arenas-smart-references)):
   1. **Stack Allocation by Default**: User-defined `struct` instances are stack-allocated by default with deterministic LIFO teardown. Destructors (`func __del__()`) execute predictably upon scope exit or loop jumps (`break`/`continue`), and local returns utilize compiler-enforced Return-Value Optimization (RVO) copy elision.
-  2. **Lexical Arenas (`Arena`)**: Dynamic objects and prototypes live in explicit, lexically scoped arenas (`let arena = Arena(); let e = Entity { ... } in arena;`). When the arena exits its lexical block, all contained allocations are destroyed in bulk in zero-cost fashion. Compile-time **escape-checking** prevents inner-arena references from escaping into outer scopes or returning across function boundaries.
+  2. **Lexical Arenas (`Arena`)**: Dynamic objects and prototypes live in explicit, lexically scoped arenas (`var arena = Arena(); let e = Entity { ... } in arena;`). When the arena exits its lexical block, all contained allocations are destroyed in bulk in zero-cost fashion. Compile-time **escape-checking** prevents inner-arena references from escaping into outer scopes or returning across function boundaries.
   3. **No Retain Cycles in Prototypes**: Cloned prototypes (`clone base`) delegate state live to their prototype without reference-counting cycles.
   4. **Explicit Move Semantics (`move`)**: Ownership transfers are explicitly declared at call sites using `move resource`, statically invalidating the source variable and preventing use-after-move bugs at compile time.
   5. **Explicit Smart Pointers for General Heap Life**: When unconstrained heap lifetimes or graph structures are required, developers opt into explicit smart references (`Ref<T>` for move-only unique ownership, `SharedRef<T>` with explicit `.share()`, and non-owning `WeakRef<T>`), avoiding invisible ARC overhead across the entire codebase.
@@ -57,7 +57,7 @@ delegation, and explicit fallibility**.
 ```sapphire
 // Sapphire: Deterministic LIFO teardown and scoped lexical arena
 {
-  let arena = Arena();
+  var arena = Arena();
 
   // Allocated in arena; bulk-reclaimed when arena goes out of scope
   let goblin = Goblin { hp = 100 } in arena;

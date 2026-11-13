@@ -43,7 +43,7 @@ func run_side_effects(dir: Direction) {
     ... -> {
       let step = 0;
     },
-  };
+  }
 }
 
 func main(): int {
@@ -58,5 +58,3 @@ func main(): int {
 
   return 1;
 }
-
-main();

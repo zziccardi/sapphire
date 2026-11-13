@@ -5,7 +5,7 @@ and the symbol table used to resolve and validate identifiers during
 type-checking.
 """
 
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 # ==========================================
@@ -39,6 +39,45 @@ class Type:
     if not isinstance(other, Type):
       return False
     return type(self) is type(other)
+
+  def is_move_only_type(
+      self,
+      symbol_table: Optional[Any] = None,
+      _seen: Optional[Set[str]] = None,
+  ) -> bool:
+    """Returns True if values of this type have Move-Only ownership."""
+    if isinstance(self, (RefType, ArenaType, CoroutineType)):
+      return True
+    if isinstance(self, OptionalType):
+      return self.base_type.is_move_only_type(symbol_table, _seen)
+    if isinstance(self, ArrayType):
+      return self.element_type.is_move_only_type(symbol_table, _seen)
+    if isinstance(self, MapType):
+      return (
+          self.key_type.is_move_only_type(symbol_table, _seen)
+          or self.value_type.is_move_only_type(symbol_table, _seen)
+      )
+    if isinstance(self, StructType):
+      if self.is_prototype:
+        return False
+      seen = set() if _seen is None else set(_seen)
+      if self.name in seen:
+        return False
+      seen.add(self.name)
+      if self.has_any_destructor(symbol_table):
+        return True
+      for field in self.fields.values():
+        if field.field_type.is_move_only_type(symbol_table, seen):
+          return True
+    return False
+
+  def is_shared_ref_lvalue_type(self) -> bool:
+    """Returns True if this type is SharedRef<T> or Optional<SharedRef<T>>."""
+    if isinstance(self, SharedRefType):
+      return True
+    if isinstance(self, OptionalType):
+      return self.base_type.is_shared_ref_lvalue_type()
+    return False
 
 
 class StringType(Type):
@@ -276,6 +315,25 @@ class StructType(Type):
   @property
   def has_destructor(self) -> bool:
     return "__del__" in self.methods
+
+  def has_any_destructor(
+      self,
+      symbol_table: Optional[Any] = None,
+      _seen: Optional[Set[str]] = None,
+  ) -> bool:
+    """Returns True if this struct or any ancestor struct defines '__del__'."""
+    if "__del__" in self.methods:
+      return True
+    if self.parent_names and symbol_table:
+      seen = set() if _seen is None else set(_seen)
+      if self.name in seen:
+        return False
+      seen.add(self.name)
+      for p_name in self.parent_names:
+        parent = symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
+          return True
+    return False
 
   @parent_name.setter
   def parent_name(self, value: Optional[str]) -> None:
@@ -721,6 +779,7 @@ class Symbol:
     self.name = name
     self.symbol_type = symbol_type
     self.scope_defined: Optional["Scope"] = None
+    self.decl_order: int = 0
 
 
 class VariableSymbol(Symbol):
@@ -733,7 +792,11 @@ class VariableSymbol(Symbol):
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
     self.arena_dependency: Optional[str] = None
+    self.arena_generation: int = 0
+    self.arena_dep_records: List[Tuple[str, int]] = []
     self.is_moved: bool = False
+    self.proto_ancestors: Set[str] = set()
+    self.stack_borrow_symbols: Set[str] = set()
 
 
 class FunctionSymbol(Symbol):
@@ -801,9 +864,17 @@ class Scope:
     self.symbols: Dict[str, Symbol] = {}
     self.types: Dict[str, Type] = {}
     self.parent = parent
+    self._next_decl_order: int = 1
+    self.frozen_lvalues: List[Tuple[str, List[str], str]] = []
 
   def define(self, name: str, symbol: Symbol) -> None:
     """Defines a symbol in the current scope."""
+    existing = self.symbols.get(name)
+    if existing is not None and getattr(existing, "decl_order", 0) > 0:
+      symbol.decl_order = existing.decl_order
+    else:
+      symbol.decl_order = self._next_decl_order
+      self._next_decl_order += 1
     symbol.scope_defined = self
     self.symbols[name] = symbol
 
@@ -856,7 +927,6 @@ class SymbolTable:
     self.current_scope.define_type("bool", PrimitiveType("bool"))
     self.current_scope.define_type("String", StringType())
     self.current_scope.define_type("none", NoneType())
-    # TODO: Remove `void`?
     self.current_scope.define_type("void", NoneType())
     self.current_scope.define_type("Coroutine", CoroutineType(NoneType()))
     self.current_scope.define_type("Ref", RefType(NoneType()))
@@ -911,8 +981,6 @@ class SymbolTable:
       fn_t.is_testing_assertion = True
       testcase_trait.methods[name] = fn_t
     self.testcase_trait = testcase_trait
-
-
 
   def enter_scope(self) -> None:
     """Enters a new nested scope."""

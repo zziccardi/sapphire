@@ -110,6 +110,10 @@ class GenericsChecker:
             f.name, ftype, f.is_mutable, has_default=has_default, has_explicit_default=f.default_expr is not None
         )
 
+      from src.semantics.struct_layout_pass import StructLayoutPass
+      StructLayoutPass.check_unboxed_recursion(checker, [mono_struct_type])
+      StructLayoutPass.check_arena_field_ordering(checker, [mono_struct_type])
+
       # Instantiate generic impl blocks matching generic_struct_type.name
       if hasattr(checker, "program") and checker.program:
         for decl in list(checker.program.declarations):

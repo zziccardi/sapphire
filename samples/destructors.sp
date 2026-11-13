@@ -45,7 +45,7 @@ func acquire_resource(id: int, name: String): Resource {
 
 func main() {
   print("=== 1. Block Scope & LIFO Destruction ===");
-  if true {
+  {
     let first = Resource(id = 1, name = "First");
     let second = Resource(id = 2, name = "Second");
     print("Exiting block scope (expect Second destroyed before First)...");
@@ -53,7 +53,7 @@ func main() {
   print("Block scope exited.\n");
 
   print("=== 2. RVO & Transfer of Ownership ===");
-  if true {
+  {
     let kept = acquire_resource(id = 42, name = "KeptResource");
     print(f"Caller received resource #{kept.id}");
     print("Exiting caller scope (KeptResource destroyed now)...");

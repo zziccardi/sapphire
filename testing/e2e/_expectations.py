@@ -43,6 +43,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_int_enum_value": 2,
         "test_int_enum_comparison": 1,
         "test_string_enum_value": "green",
+        "test_enum_interpolation": "Dir: 2, Color: blue",
     },
     "inheritance_test.sp": {
         "test_inherited_field": 4,
@@ -73,6 +74,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_contains": 1,
         "test_upper": "HELLO",
         "test_lower": "hello",
+        "test_nested_quotes": "Alice: true",
     },
     "arrays_test.sp": {
         "test_array_indexing": 20,
@@ -118,6 +120,14 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
     "raii_and_cleanup_test.sp": {
         "test_destructor_lifo_order": 21,
         "test_destructor_early_return": 105,
+        "test_conditional_move_drop_flag_taken": 172,
+        "test_conditional_move_drop_flag_untaken": 27,
+        "test_match_move_drop_flag": 33993,
+        "test_live_var_reassignment_destroys_old": 458,
+        "test_borrowed_unwrap_single_drop": 616,
+        "test_arena_lifo_proto_destructors": 752,
+        "test_arena_reassignment_destroys_old": 394,
+        "test_struct_owned_arena_and_field_teardown": 68,
     },
     "generics_test.sp": {
         "test_generic_struct_int": 42,
@@ -136,6 +146,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_move_assignment": 30,
         "test_move_into_function": 10,
         "test_move_reinitialization": 15,
+        "test_shared_ref_explicit_share_and_move": 20,
     },
     "heap_smart_refs_test.sp": {
         "test_unique_ref": 42,

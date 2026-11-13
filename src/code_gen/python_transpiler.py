@@ -5,10 +5,10 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from src.parser.ast import *
-from src.code_gen.base_transpiler import BaseTranspiler, get_default_value_for_type_node, is_coroutine_func
+from src.code_gen.base_transpiler import BaseTranspiler, extract_type_name, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.intrinsics import IntrinsicRegistry
 from src.code_gen.transpiler_registry import TranspilerRegistry
 
@@ -78,10 +78,14 @@ class Arena:
         pass
     return obj
   def destroy(self):
-    for obj in self.objects:
+    if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):
+      return
+    for obj in reversed(self.objects):
+      _sapphire_del(obj)
       if hasattr(obj, '__shadow__'):
         obj.__shadow__.clear()
     self.objects.clear()
+    object.__setattr__(self, '_sapphire_disposed_', True)
   def __del__(self):
     self.destroy()
   def __enter__(self):
@@ -90,8 +94,9 @@ class Arena:
     self.destroy()
 
 def _sapphire_del(obj):
-  if obj is not None and hasattr(obj, '__del__') and callable(obj.__del__):
-    obj.__del__()
+  if obj is not None and not getattr(obj, '__dict__', {}).get('_sapphire_disposed_', False):
+    if hasattr(obj, '__del__') and callable(obj.__del__):
+      obj.__del__()
 
 def _sapphire_cow_copy(target, _seen=None):
   if isinstance(target, _LazyCoWProxy):
@@ -663,8 +668,15 @@ class PythonTranspiler(BaseTranspiler):
     self.struct_traits: Dict[str, Set[str]] = {}
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = set()
+    self.structs_with_destructor: Set[str] = {"Arena"}
+    self.proto_structs: Set[str] = set()
+    self.struct_destructible_fields: Dict[str, List[str]] = {}
+    self.struct_parent_names: Dict[str, List[str]] = {}
+    self._current_struct_name: Optional[str] = None
     self.moved_vars: Set[str] = set()
+    self._branch_depth: int = 0
+    self._var_branch_depth: Dict[str, int] = {}
+    self._pending_null_vars: List[str] = []
     self.func_return_types: Dict[str, str] = {}
     self.method_return_types: Dict[str, str] = {}
     self.variable_types: Dict[str, str] = {}
@@ -910,16 +922,69 @@ class PythonTranspiler(BaseTranspiler):
         self.emit("self._init_sapphire(*args, **kwargs)")
       self.dedent()
 
-    # Output impl methods
-    if not methods:
-      self.newline()
-      self.emit("pass")
-    else:
-      for m in methods:
-        self.visit(m)
+    has_explicit_del = any(
+        getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
+        for m in methods
+    )
+    destructible_parents = [
+        p for p in (node.parent_names or []) if p in self.structs_with_destructor
+    ]
+    needs_synth_del = (
+        not is_proto
+        and not has_explicit_del
+        and node.name in self.structs_with_destructor
+        and bool(
+            self.struct_destructible_fields.get(node.name)
+            or len(destructible_parents) > 1
+        )
+    )
+
+    old_struct_name = getattr(self, "_current_struct_name", None)
+    self._current_struct_name = node.name
+    try:
+      # Output impl methods
+      if not methods and not needs_synth_del:
+        self.newline()
+        self.emit("pass")
+      else:
+        for m in methods:
+          self.visit(m)
+        if needs_synth_del:
+          self.newline()
+          self.emit("def __del__(self):")
+          self.indent()
+          self.newline()
+          self.emit("if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):")
+          self.indent()
+          self.newline()
+          self.emit("return")
+          self.dedent()
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+          self._emit_struct_auto_teardown(node.name, call_parents=True)
+          self.dedent()
+    finally:
+      self._current_struct_name = old_struct_name
 
     self.dedent()
     self.newline()
+
+  def _emit_struct_auto_teardown(
+      self, struct_name: str, call_parents: bool = True
+  ) -> None:
+    """Emits LIFO `_sapphire_del` calls for destructible fields and parents."""
+    for f_name in reversed(self.struct_destructible_fields.get(struct_name, [])):
+      self.newline()
+      self.emit(f"_sapphire_del(getattr(self, '{self._mangle_name(f_name)}', None))")
+    if call_parents:
+      for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
+        if p_name in self.structs_with_destructor:
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', False)")
+          self.newline()
+          self.emit(f"{p_name}.__del__(self)")
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
     # Fields are dynamically initialized in __init__, so we do not declare them at class level.
@@ -968,6 +1033,15 @@ class PythonTranspiler(BaseTranspiler):
     else:
       self.emit(f"def {func_name}({', '.join(params)}):")
       self.indent()
+      if func.name == "__del__":
+        self.newline()
+        self.emit("if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):")
+        self.indent()
+        self.newline()
+        self.emit("return")
+        self.dedent()
+        self.newline()
+        self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
       assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
       if assigned_globals:
         self.newline()
@@ -985,7 +1059,32 @@ class PythonTranspiler(BaseTranspiler):
             else:
               args_list.append(val)
           self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
-      self.visit(func.body)
+      cur_struct = getattr(self, "_current_struct_name", None)
+      has_auto_teardown = (
+          func.name == "__del__"
+          and cur_struct
+          and cur_struct not in self.proto_structs
+          and bool(
+              self.struct_destructible_fields.get(cur_struct)
+              or any(
+                  p in self.structs_with_destructor
+                  for p in self.struct_parent_names.get(cur_struct, [])
+              )
+          )
+      )
+      if has_auto_teardown:
+        self.newline()
+        self.emit("try:")
+        self.indent()
+        self.visit(func.body)
+        self.dedent()
+        self.newline()
+        self.emit("finally:")
+        self.indent()
+        self._emit_struct_auto_teardown(cur_struct, call_parents=True)
+        self.dedent()
+      else:
+        self.visit(func.body)
       self.dedent()
 
   def _find_assigned_globals(
@@ -1110,38 +1209,17 @@ class PythonTranspiler(BaseTranspiler):
         self.emit(f"{target_path} = {fn_name}")
 
   def _visit_statements(self, statements: List[StmtNode]) -> None:
-    if not statements:
-      return
-
-    stmt = statements[0]
-    is_arena = (
-        isinstance(stmt, VarDeclNode)
-        and isinstance(stmt.expr, CallNode)
-        and isinstance(stmt.expr.callee, IdentifierNode)
-        and stmt.expr.callee.name == "Arena"
-    )
-
-    if is_arena:
+    for stmt in statements:
       self.visit(stmt)
-      self.newline()
-      self.emit("try:")
-      self.indent()
-      self._visit_statements(statements[1:])
-      self.dedent()
-      self.newline()
-      self.emit("finally:")
-      self.indent()
-      self.newline()
-      self.emit(f"{stmt.name}.destroy()")
-      self.dedent()
-    else:
-      self.visit(stmt)
-      self._visit_statements(statements[1:])
+      if not isinstance(stmt, ReturnNode):
+        self._drain_pending_null_vars("None")
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.destructor_stack.append([])
     if getattr(node, "_block_destructibles", None):
-      self.destructor_stack[-1].extend(node._block_destructibles)
+      for d_var in node._block_destructibles:
+        self.destructor_stack[-1].append(d_var)
+        self._var_branch_depth[d_var] = self._branch_depth
     if not node.statements:
       self.newline()
       self.emit("pass")
@@ -1156,6 +1234,7 @@ class PythonTranspiler(BaseTranspiler):
           self.emit(f"_sapphire_del({var_name})")
     for var_name in current_destructors:
       self.moved_vars.discard(var_name)
+      self._var_branch_depth.pop(var_name, None)
 
   def _emit_lifted_lambda(self, node: LambdaNode) -> str:
     self._temp_lambda_count = getattr(self, "_temp_lambda_count", 0) + 1
@@ -1225,7 +1304,7 @@ class PythonTranspiler(BaseTranspiler):
 
     for idx, name in enumerate(node.names):
       val_type = node.val_types[idx] if idx < len(node.val_types) else None
-      type_name = getattr(val_type, "name", None) if val_type else None
+      type_name = extract_type_name(val_type) if val_type else None
       st_name = None
       if type_name and type_name in self.structs_with_destructor:
         st_name = type_name
@@ -1241,6 +1320,7 @@ class PythonTranspiler(BaseTranspiler):
         self.variable_types[m_name] = st_name
         if self.destructor_stack:
           self.destructor_stack[-1].append(m_name)
+          self._var_branch_depth[m_name] = self._branch_depth
 
     self._lift_match_expressions(node.exprs)
 
@@ -1270,6 +1350,51 @@ class PythonTranspiler(BaseTranspiler):
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     self._lift_match_expressions(node.targets)
     self._lift_match_expressions(node.exprs)
+
+    if node.op == "=":
+      live_destructible_targets = [
+          self._mangle_name(t.name)
+          for t in node.targets
+          if isinstance(t, IdentifierNode)
+          and self._is_active_destructible_var(self._mangle_name(t.name))
+          and self._mangle_name(t.name) not in self.moved_vars
+      ]
+      if live_destructible_targets:
+        self._temp_reassign_count = getattr(self, "_temp_reassign_count", 0) + 1
+        tmp_names = [
+            f"_reassign_{self._temp_reassign_count}_{i + 1}"
+            for i in range(len(node.targets))
+        ]
+        self.newline()
+        self.record_line(getattr(node, "start_line", None))
+        self.emit(", ".join(tmp_names) + " = ")
+        for idx, expr in enumerate(node.exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        for m_t in live_destructible_targets:
+          if m_t not in self.moved_vars and m_t not in self._pending_null_vars:
+            self.newline()
+            self.emit(f"_sapphire_del({m_t})")
+        assigned_id_names = {
+            self._mangle_name(t.name)
+            for t in node.targets
+            if isinstance(t, IdentifierNode)
+        }
+        self._drain_pending_null_vars("None", exclude=assigned_id_names)
+        self.newline()
+        for idx, target in enumerate(node.targets):
+          if isinstance(target, IdentifierNode):
+            self.moved_vars.discard(self._mangle_name(target.name))
+          if idx > 0:
+            self.emit(", ")
+          if isinstance(target, IdentifierNode) and target.name in self.extern_vars:
+            ext_name = self.extern_vars[target.name]
+            self.emit(f"__import__('builtins').{ext_name}")
+          else:
+            self.visit(target)
+        self.emit(" = " + ", ".join(tmp_names))
+        return
 
     self.newline()
     self.record_line(getattr(node, "start_line", None))
@@ -1345,6 +1470,7 @@ class PythonTranspiler(BaseTranspiler):
 
       self.newline()
       self.emit("return " + ", ".join(ret_tmps))
+      self._pending_null_vars.clear()
       return
 
     for var_name in destructors_to_run:
@@ -1361,6 +1487,7 @@ class PythonTranspiler(BaseTranspiler):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    self._pending_null_vars.clear()
 
   def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
     if target_var == "":
@@ -1388,19 +1515,24 @@ class PythonTranspiler(BaseTranspiler):
         self.emit(":")
 
       self.indent()
-      if isinstance(case.body, BlockNode):
-        if not case.body.statements:
+      self._branch_depth += 1
+      try:
+        if isinstance(case.body, BlockNode):
+          if not case.body.statements:
+            self.newline()
+            self.emit("pass")
+          else:
+            self.visit(case.body)
+        else:
           self.newline()
-          self.emit("pass")
-        else:
-          self.visit(case.body)
-      else:
-        self.newline()
-        if target_var:
-          self.emit(f"{target_var} = ")
-          self.visit(case.body)
-        else:
-          self.visit(case.body)  # pragma: no cover
+          if target_var:
+            self.emit(f"{target_var} = ")
+            self.visit(case.body)
+          else:
+            self.visit(case.body)  # pragma: no cover
+        self._drain_pending_null_vars("None")
+      finally:
+        self._branch_depth -= 1
       self.dedent()
 
     self.dedent()
@@ -1457,13 +1589,13 @@ class PythonTranspiler(BaseTranspiler):
       self.visit(node.condition)
       self.emit(":")
       self.indent()
-      self.visit(node.then_block)
+      self._visit_in_branch(node.then_block)
       self.dedent()
       if node.else_block:
         self.newline()
         self.emit("else:")
         self.indent()
-        self.visit(node.else_block)
+        self._visit_in_branch(node.else_block)
         self.dedent()
       return
 
@@ -1510,13 +1642,13 @@ class PythonTranspiler(BaseTranspiler):
           self.emit(f"{self._mangle_name(let_name)} = {val_var}")
 
         st_name = self._expr_destructible_struct(binding.expr)
-        if st_name:
+        if st_name and self._is_owned_unwrap_expr(binding.expr):
           for name in let_names:
             self.variable_types[name] = st_name
             if not hasattr(node.then_block, "_block_destructibles"):
               node.then_block._block_destructibles = []
             node.then_block._block_destructibles.append(name)
-        self.visit(node.then_block)
+        self._visit_in_branch(node.then_block)
         self.dedent()
       else:
         # Standard bind + condition
@@ -1534,14 +1666,14 @@ class PythonTranspiler(BaseTranspiler):
         self.visit(node.condition)
         self.emit(":")
         self.indent()
-        self.visit(node.then_block)
+        self._visit_in_branch(node.then_block)
         self.dedent()
 
       if node.else_block:
         self.newline()
         self.emit("else:")
         self.indent()
-        self.visit(node.else_block)
+        self._visit_in_branch(node.else_block)
         self.dedent()
       return
 
@@ -1564,7 +1696,7 @@ class PythonTranspiler(BaseTranspiler):
         let_name = b.let_name
         st_name = self._expr_destructible_struct(b.expr)
         current_destructibles = list(prior_destructibles)
-        if st_name:
+        if st_name and (not b.is_unwrap or self._is_owned_unwrap_expr(b.expr)):
           for name in let_names:
             self.variable_types[name] = st_name
             if not hasattr(node.then_block, "_block_destructibles"):
@@ -1616,7 +1748,7 @@ class PythonTranspiler(BaseTranspiler):
           self.indent()
           self.newline()
           self.emit(f"{cond_flag} = True")
-          self.visit(node.then_block)
+          self._visit_in_branch(node.then_block)
           self.dedent()
           if prior_destructibles:
             self.newline()
@@ -1631,7 +1763,7 @@ class PythonTranspiler(BaseTranspiler):
         else:
           self.newline()
           self.emit(f"{cond_flag} = True")
-          self.visit(node.then_block)
+          self._visit_in_branch(node.then_block)
 
     emit_binding_level(0, [])
 
@@ -1639,7 +1771,7 @@ class PythonTranspiler(BaseTranspiler):
       self.newline()
       self.emit(f"if not {cond_flag}:")
       self.indent()
-      self.visit(node.else_block)
+      self._visit_in_branch(node.else_block)
       self.dedent()
 
   def visit_WhileNode(self, node: WhileNode) -> None:
@@ -1712,7 +1844,7 @@ class PythonTranspiler(BaseTranspiler):
         escaped_val = part.value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
         self.emit(f'"{escaped_val}"')
       else:
-        self.emit("(lambda x: x.value if hasattr(x, 'value') else str(x))(")
+        self.emit("_sapphire_string_from(")
         self.visit(part)
         self.emit(")")
 
@@ -1884,7 +2016,7 @@ class PythonTranspiler(BaseTranspiler):
   def visit_MoveNode(self, node: MoveNode) -> None:
     m_name = self._mangle_name(node.name)
     name = self._identifier_map.get(m_name, m_name)
-    self.moved_vars.add(m_name)
+    self._record_move(m_name)
     self.emit(name)
 
   def visit_LambdaNode(self, node: LambdaNode) -> None:

@@ -164,7 +164,7 @@ proto ServerFixture {
   var status: String;
 }
 
-let test_arena = Arena();
+var test_arena = Arena();
 let base_server_proto = ServerFixture {
     port = 8080,
     status = "IDLE"

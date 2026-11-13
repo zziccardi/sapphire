@@ -174,7 +174,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_delegation(): [int] {
-      let a = Arena();
+      var a = Arena();
       var base = Item(p = 100) in a;
       var promo_item = clone base {
         self.price = 80;
@@ -227,7 +227,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func run_proto_test(): int {
-      let a = Arena();
+      var a = Arena();
       let e1 = Entity(hp = 75) in a;
       let e2 = clone e1 {
         self.hp = 120;
@@ -373,7 +373,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_features(): int {
-      let a = Arena();
+      var a = Arena();
       let b1 = Base() in a;
       let b2 = clone b1 {
         self.x = 10;
@@ -482,7 +482,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func test_inherited_cloning(): [int] {
-      let a = Arena();
+      var a = Arena();
       var base = Character(id_val = 1, hp = 100) in a;
       var derived_clone = clone base {
         self.health = 80;
@@ -515,7 +515,7 @@ class TestPythonTranspiler(unittest.TestCase):
       }
     }
     func run_cow_test(): [int] {
-      let a = Arena();
+      var a = Arena();
       var original_weapon = Weapon { damage = 10 } in a;
       var base_player = Player(w = original_weapon) in a;
       var clone_player = clone base_player in a;
@@ -555,7 +555,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var stock: int = 5;
     }
     func test_defaults(): [int] {
-      let a = Arena();
+      var a = Arena();
       let it = Item { price = 50, stock = 2 } in a;
       return [it.price, it.stock];
     }
@@ -574,8 +574,8 @@ class TestPythonTranspiler(unittest.TestCase):
       var x: int;
     }
 
-    let my_arena = Arena();
-    let other_arena = Arena();
+    var my_arena = Arena();
+    var other_arena = Arena();
     var leaked_enemy: Enemy? = none;
     var leaked_point: Point? = none;
 
@@ -1313,7 +1313,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var pos: Vector;
     }
     func test_cow(): int {
-      let a = Arena();
+      var a = Arena();
       var base = Entity { pos = Vector { x = 10 } } in a;
       var cloned = clone base in a;
       let initial_read = cloned.pos.x;
@@ -1525,6 +1525,23 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_fstring()")
     self.assertEqual(res, "Hello Hero, status: active, count: 43, none: None")
 
+  def test_interpolated_string_enum_and_nested_quotes_python(self):
+    """Verifies Python transpilation of IntEnum and nested unescaped quotes in f-strings."""
+    code = """
+    enum Direction { North = 1, South = 2 }
+
+    func test_enum_interp(): String {
+      let d = Direction.South;
+      let s_single = f"{d}";
+      let s_multi = f"Direction: {d}";
+      let m = {"key": 100};
+      let s_quote = f"Has key: {m.contains("key")}";
+      return f"{s_single}|{s_multi}|{s_quote}";
+    }
+    """
+    res = self._transpile_and_run(code, "test_enum_interp()")
+    self.assertEqual(res, "2|Direction: 2|Has key: true")
+
   def test_nested_match_expression_transpilation_and_execution(self):
     """Verifies Python transpilation and execution of match expressions used inline within sub-expressions."""
     code = """
@@ -1564,7 +1581,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var count: int;
     }
     func test_proxy_ops(): int {
-      let a = Arena();
+      var a = Arena();
       let base = Container { count = 10 } in a;
       var c = clone base in a;
       c.count += 5;
@@ -1592,7 +1609,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var unit: Unit;
     }
     func test_multi_hop(): int {
-      let a = Arena();
+      var a = Arena();
       let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
       var c1 = clone base in a;
       var c2 = clone c1 in a;
@@ -2036,7 +2053,29 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(r2)", py_code)
 
   def test_destructor_from_variable_assignment(self):
-    """Verifies that variables assigned from other destructible variables are tracked in Python."""
+    """Verifies that variables moved from destructible variables are tracked and conditional moves emit drop-flag resets in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test(cond: bool) {
+      let a = Resource { id = 1 };
+      if cond {
+        let b = move a;
+        consume(move b);
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("a = None", py_code)
+    self.assertIn("_sapphire_del(a)", py_code)
+
+  def test_destructor_live_var_reassignment(self):
+    """Verifies reassigning a live destructible var destroys the prior value first in Python."""
     code = """
     struct Resource {
       var id: int;
@@ -2045,13 +2084,14 @@ class TestPythonTranspiler(unittest.TestCase):
       func __del__() {}
     }
     func test() {
-      let a = Resource { id = 1 };
-      let b = a;
+      var a = Resource { id = 1 };
+      a = Resource { id = 2 };
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("_sapphire_del(a)", py_code)
-    self.assertIn("_sapphire_del(b)", py_code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertGreaterEqual(test_body.count("_sapphire_del(a)"), 2)
 
   def test_destructor_move_suppresses_source_destructor(self):
     """Verifies that moving a resource suppresses destructor on the source."""

@@ -4,11 +4,11 @@
 
 import std.testing;
 
-struct MathSuiteTest {
+struct MathTest {
   var initial_val: int;
 }
 
-impl testing.TestCase for MathSuiteTest {
+impl testing.TestCase for MathTest {
   var func set_up() {
     self.initial_val = 10;
   }

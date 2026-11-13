@@ -1,18 +1,8 @@
 // Multi-Parent Struct Syntactic Delegation Demo in Sapphire
 
 struct Position {
-  var x: float = 0.0;
-  var y: float = 0.0;
-}
-
-struct Health {
-  var hp: int = 100;
-  var max_hp: int = 100;
-}
-
-// Player inlines field layout from both Position and Health
-struct Player: Position, Health {
-  var name: String;
+  var x = 0.0;
+  var y = 0.0;
 }
 
 impl Position {
@@ -20,6 +10,11 @@ impl Position {
     self.x += dx;
     self.y += dy;
   }
+}
+
+struct Health {
+  var hp = 100;
+  var max_hp = 100;
 }
 
 impl Health {
@@ -31,11 +26,16 @@ impl Health {
   }
 }
 
+// Player inlines field layout from both Position and Health
+struct Player: Position, Health {
+  var name: String;
+}
+
 func main() {
   var hero = Player {
     name = "Arthur",
     x = 10.0,
-    y = 20.0
+    y = 20.0,
   };
 
   print(f"Player Name: {hero.name}");

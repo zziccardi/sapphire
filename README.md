@@ -69,7 +69,7 @@ func execute_turn(hero: Entity, target_opt: Entity?) {
   attack(attacker = hero, target = target, bonus = 10);
 }
 
-let arena = Arena();
+var arena = Arena();
 
 // Scoped prototype allocated within an explicit lexical arena
 let base_goblin = Entity {
@@ -82,6 +82,7 @@ let base_goblin = Entity {
 var elite_goblin = clone base_goblin {
   self.health = 120;
 };
+var target_ref: Entity? = elite_goblin;
 
 let hero = Entity {
   name = "Hero",
@@ -89,7 +90,6 @@ let hero = Entity {
   pos = Position { x = 10.0, y = 5.0 }
 } in arena;
 
-var target_ref: Entity? = elite_goblin;
 execute_turn(hero = hero, target_opt = target_ref);
 ```
 

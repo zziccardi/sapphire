@@ -244,7 +244,7 @@ class SemanticParityTest(unittest.TestCase):
     }
     @test
     func test_arena_return(): int {
-      let arena = Arena();
+      var arena = Arena();
       let item = Item { value = 99 } in arena;
       return item.value;
     }
