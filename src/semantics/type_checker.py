@@ -1916,7 +1916,23 @@ class TypeChecker:
       type_sym = self.symbol_table.lookup_type(node.name)
       if type_sym:
         return type_sym
-      self.error(f"Undefined identifier '{node.name}'.", node=node)
+      matching_mods = self._find_imported_modules_with_prefix(node.name)
+      if len(matching_mods) == 1:
+        mod = matching_mods[0]
+        self.error(
+            f"Undefined identifier '{node.name}'. Module '{mod.module_path}' "
+            f"was imported as '{mod.name}'. Did you mean '{mod.name}'?",
+            node=node,
+        )
+      elif len(matching_mods) > 1:
+        names = ", ".join(f"'{m.name}'" for m in matching_mods)
+        self.error(
+            f"Undefined identifier '{node.name}'. Modules under '{node.name}' "
+            f"are imported by their module name directly (e.g. {names}).",
+            node=node,
+        )
+      else:
+        self.error(f"Undefined identifier '{node.name}'.", node=node)
       return PrimitiveType("none")
     if isinstance(sym, VariableSymbol):
       if sym in self.moved_symbols:
@@ -2057,6 +2073,43 @@ class TypeChecker:
     """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
     ArenaChecker.check_aliasing(self, node, signature, is_constructor)
 
+  def _get_dotted_path(self, expr: Any) -> Optional[List[str]]:
+    """Returns the dotted identifier path components of an expression."""
+    if isinstance(expr, IdentifierNode):
+      return [expr.name]
+    if isinstance(expr, MemberAccessNode) and not expr.is_optional:
+      recv = self._get_dotted_path(expr.receiver)
+      if recv is not None:
+        return recv + [expr.member]
+    return None
+
+  def _find_imported_module_by_path(self, path: str) -> Optional[ModuleSymbol]:
+    """Finds an imported ModuleSymbol by its full import path."""
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    for sym in root_scope.symbols.values():
+      if isinstance(sym, ModuleSymbol) and sym.module_path == path:
+        return sym
+    return None
+
+  def _find_imported_modules_with_prefix(
+      self, prefix: str
+  ) -> List[ModuleSymbol]:
+    """Returns all imported ModuleSymbols starting with prefix."""
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    res: List[ModuleSymbol] = []
+    prefix_dot = prefix + "."
+    for sym in root_scope.symbols.values():
+      if (
+          isinstance(sym, ModuleSymbol)
+          and sym.module_path.startswith(prefix_dot)
+      ):
+        res.append(sym)
+    return res
+
   def visit_CallNode(self, node: CallNode) -> Type:
     # Generic function resolution & monomorphization
     sym = None
@@ -2106,6 +2159,8 @@ class TypeChecker:
             mod_sym.exports[mangled_name] = mono_sym
 
     # 1. Resolve callee
+    if isinstance(node.callee, MemberAccessNode):
+      node.callee.is_call = True
     callee_type = self.visit(node.callee)
 
     if getattr(node.callee, "is_string_from", False):
@@ -2474,6 +2529,78 @@ class TypeChecker:
     if isinstance(node.receiver, MoveNode):
       self.error(f"Cannot access member '{node.member}' on moved variable '{node.receiver.name}'.", node=node)
       return PrimitiveType("none")
+
+    if getattr(node, "has_diagnosed_module_import", False):
+      return getattr(node, "diagnosed_module_type", PrimitiveType("none"))
+
+    # Check if receiver is a dotted path to an imported module (e.g.
+    # std.os.args)
+    dotted_recv = self._get_dotted_path(node.receiver)
+    if dotted_recv and len(dotted_recv) >= 2:
+      root_ident = dotted_recv[0]
+      if (
+          self.symbol_table.lookup(root_ident) is None
+          and self.symbol_table.lookup_type(root_ident) is None
+      ):
+        for i in range(len(dotted_recv), 1, -1):
+          sub_path = ".".join(dotted_recv[:i])
+          mod_sym = self._find_imported_module_by_path(sub_path)
+          if mod_sym:
+            remaining = dotted_recv[i:]
+            call_suffix = "()" if getattr(node, "is_call", False) else ""
+            if remaining:
+              sug = (
+                  f"{mod_sym.name}.{'.'.join(remaining)}.{node.member}"
+                  f"{call_suffix}"
+              )
+            else:
+              sug = f"{mod_sym.name}.{node.member}{call_suffix}"
+            self.error(
+                f"Undefined identifier '{root_ident}'. Module "
+                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
+                f"Did you mean '{sug}'?",
+                node=node.receiver,
+            )
+            node.receiver.has_diagnosed_module_import = True
+            node.receiver.diagnosed_module_type = ModuleType(
+                mod_sym.module_path
+            )
+            if not remaining:
+              exp_sym = mod_sym.lookup_export(node.member)
+              if exp_sym:
+                return (
+                    exp_sym.symbol_type
+                    if hasattr(exp_sym, "symbol_type")
+                    else exp_sym
+                )
+            return PrimitiveType("none")
+
+    dotted_self = self._get_dotted_path(node)
+    if dotted_self and len(dotted_self) >= 2:
+      root_ident = dotted_self[0]
+      if (
+          self.symbol_table.lookup(root_ident) is None
+          and self.symbol_table.lookup_type(root_ident) is None
+      ):
+        for i in range(len(dotted_self), 1, -1):
+          sub_path = ".".join(dotted_self[:i])
+          mod_sym = self._find_imported_module_by_path(sub_path)
+          if mod_sym:
+            remaining = dotted_self[i:]
+            if remaining:
+              sug = f"{mod_sym.name}.{'.'.join(remaining)}"
+            else:
+              sug = mod_sym.name
+            self.error(
+                f"Undefined identifier '{root_ident}'. Module "
+                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
+                f"Did you mean '{sug}'?",
+                node=node,
+            )
+            node.has_diagnosed_module_import = True
+            node.diagnosed_module_type = ModuleType(mod_sym.module_path)
+            return ModuleType(mod_sym.module_path)
+
     receiver_type = self.visit(node.receiver)
 
     # Optional chaining check

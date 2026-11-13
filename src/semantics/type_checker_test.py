@@ -7132,6 +7132,77 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Hint: Collections are frozen during iteration to prevent iterator invalidation", err)
     self.assertIn("nums.filter(fn, in_place = true)", err)
 
+  def test_qualified_import_diagnostic(self):
+    """Verifies helpful diagnostics for full package paths of imported modules."""
+    # 1. Qualified call std.os.args()
+    code1 = """
+    import std.os;
+
+    func main() {
+      let a = std.os.args();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code1)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Module 'std.os' was imported as 'os'. "
+        "Did you mean 'os.args()'?",
+        err,
+    )
+
+    # 2. Qualified module access without call std.os
+    code2 = """
+    import std.os;
+
+    func main() {
+      let m = std.os;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code2)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Module 'std.os' was imported as 'os'. "
+        "Did you mean 'os'?",
+        err,
+    )
+
+    # 3. Aliased import std.math as m
+    code3 = """
+    import std.math as m;
+
+    func main() {
+      let val = std.math.abs(-5);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code3)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Module 'std.math' was imported as 'm'. "
+        "Did you mean 'm.abs()'?",
+        err,
+    )
+
+    # 4. Multiple modules under prefix std used as raw identifier
+    code4 = """
+    import std.os;
+    import std.fs;
+
+    func main() {
+      let x = std;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code4)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Modules under 'std' are imported by "
+        "their module name directly",
+        err,
+    )
+
 
 if __name__ == "__main__":
   unittest.main()

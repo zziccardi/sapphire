@@ -32,43 +32,6 @@ import std.math as m;
 Module resolution checks the active toolchain distribution path, local
 workspace directories, and installed `site-packages` packaging automatically.
 
-## Operating system module (`std.os`)
-
-The `std.os` module provides low-level operating system and process primitives.
-
-### Exported functions
-
-* `func args(): [String]`
-  Returns command-line arguments passed to the current process. The first
-  entry (`args()[0]`) contains the program or script name.
-* `func get_env(name: String): String?`
-  Retrieves the value of an environment variable. Returns `none` if the
-  variable is unset.
-* `func set_env(name: String, value: String)`
-  Sets or updates the specified environment variable for the current process.
-* `func exit(code: int = 0)`
-  Terminates the current process immediately with the specified exit status.
-
-### Usage example
-
-```sapphire
-import std.os;
-
-func main() {
-  let cmd_args = os.args();
-  if cmd_args.size() > 1 {
-    print("Received argument: " + cmd_args[1]);
-  }
-
-  os.set_env("APP_ENV", "production");
-  guard let env_val ?= os.get_env("APP_ENV") else {
-    os.exit(1);
-    return;
-  }
-  print("Environment: " + env_val);
-}
-```
-
 ## Filesystem module (`std.fs`)
 
 The `std.fs` module provides basic filesystem read, write, existence checking,
@@ -113,36 +76,6 @@ func main() {
 }
 ```
 
-## Time module (`std.time`)
-
-The `std.time` module provides system epoch time querying and execution delay
-primitives.
-
-### Exported functions
-
-* `func now(): float`
-  Returns current system timestamp in seconds since the Unix Epoch (January 1,
-  1970 UTC) as a floating-point number.
-* `func sleep(seconds: float)`
-  Suspends execution of the current thread or process for the given duration
-  in fractional seconds. When running under the Love2D engine target, it
-  delegates automatically to `love.timer.sleep`.
-
-### Usage example
-
-```sapphire
-import std.time;
-
-func main() {
-  let start_time = time.now();
-  time.sleep(0.05);
-  let elapsed = time.now() - start_time;
-  if elapsed >= 0.05 {
-    print("Sleep completed successfully.");
-  }
-}
-```
-
 ## Math module (`std.math`)
 
 The `std.math` module provides generic mathematical functions for numeric
@@ -180,6 +113,43 @@ func main() {
   let clamped = math.min(100, math.max(10, 50));
   let quotient = math.safe_div(100, 4) ?? 0;
   print("Root: " + root + ", Clamped: " + clamped + ", Div: " + quotient);
+}
+```
+
+## Operating system module (`std.os`)
+
+The `std.os` module provides low-level operating system and process primitives.
+
+### Exported functions
+
+* `func args(): [String]`
+  Returns command-line arguments passed to the current process. The first
+  entry (`args()[0]`) contains the program or script name.
+* `func get_env(name: String): String?`
+  Retrieves the value of an environment variable. Returns `none` if the
+  variable is unset.
+* `func set_env(name: String, value: String)`
+  Sets or updates the specified environment variable for the current process.
+* `func exit(code: int = 0)`
+  Terminates the current process immediately with the specified exit status.
+
+### Usage example
+
+```sapphire
+import std.os;
+
+func main() {
+  let cmd_args = os.args();
+  if cmd_args.size() > 1 {
+    print("Received argument: " + cmd_args[1]);
+  }
+
+  os.set_env("APP_ENV", "production");
+  guard let env_val ?= os.get_env("APP_ENV") else {
+    os.exit(1);
+    return;
+  }
+  print("Environment: " + env_val);
 }
 ```
 
@@ -221,6 +191,36 @@ impl testing.TestCase for CalculatorTest {
   var func test_increment() {
     self.count = self.count + 1;
     self.assert_eq(self.count, 1, "Counter should be 1 after increment");
+  }
+}
+```
+
+## Time module (`std.time`)
+
+The `std.time` module provides system epoch time querying and execution delay
+primitives.
+
+### Exported functions
+
+* `func now(): float`
+  Returns current system timestamp in seconds since the Unix Epoch (January 1,
+  1970 UTC) as a floating-point number.
+* `func sleep(seconds: float)`
+  Suspends execution of the current thread or process for the given duration
+  in fractional seconds. When running under the Love2D engine target, it
+  delegates automatically to `love.timer.sleep`.
+
+### Usage example
+
+```sapphire
+import std.time;
+
+func main() {
+  let start_time = time.now();
+  time.sleep(0.05);
+  let elapsed = time.now() - start_time;
+  if elapsed >= 0.05 {
+    print("Sleep completed successfully.");
   }
 }
 ```
