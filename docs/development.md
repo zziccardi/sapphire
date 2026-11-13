@@ -217,5 +217,6 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
    compilations.
 2. Builds the source distribution and wheel packages via `python -m build`.
 3. Compiles and packages the VS Code extension into a `.vsix` archive.
-4. Publishes a GitHub Release with auto-generated release notes and attaches the
+4. Publishes distribution packages directly to PyPI via Trusted Publishing.
+5. Publishes a GitHub Release with auto-generated release notes and attaches the
    `.whl`, `.tar.gz`, and `.vsix` release artifacts.
