@@ -145,16 +145,28 @@ This will also create an HTML version of the coverage report.
 To build the source distribution (`.tar.gz`) and binary wheel (`.whl`) locally:
 
 ```bash
-pip install build
+pip install build twine
 python -m build
 ```
 
-This generates distribution artifacts under `dist/`:
+Verify that the package archives and README metadata render without errors:
+
+```bash
+twine check dist/*
+```
+
+This generates verified distribution artifacts under `dist/`:
 * `dist/sapphire_lang-0.1.0-py3-none-any.whl`
 * `dist/sapphire_lang-0.1.0.tar.gz`
 
 Both packages bundle all standard library modules (`lib/std/`), Love2D engine
 bindings (`lib/love2d/`), and runtime resources.
+
+To publish the packages to PyPI (optional):
+
+```bash
+twine upload dist/*
+```
 
 ### Packaging the VS Code extension
 

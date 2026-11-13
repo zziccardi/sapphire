@@ -47,8 +47,8 @@ jobs:
             | sudo tee -a /usr/local/bin/antlr > /dev/null
           sudo chmod +x /usr/local/bin/antlr
 
-      - name: Install Pipenv and build tool
-        run: pip install --upgrade pip pipenv build
+      - name: Install Pipenv and build tools
+        run: pip install --upgrade pip pipenv build twine
 
       - name: Install dependencies
         run: |
@@ -77,6 +77,9 @@ jobs:
 
       - name: Build Python sdist and wheel
         run: python -m build
+
+      - name: Verify package archives with Twine
+        run: twine check dist/*
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
