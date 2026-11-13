@@ -34,3 +34,10 @@ func test_int_enum_comparison(): int {
 func test_string_enum_value(): String {
   return Color.Green as String;
 }
+
+@test
+func test_enum_interpolation(): String {
+  let d = Direction.South;
+  let c = Color.Blue;
+  return f"Dir: {d}, Color: {c}";
+}

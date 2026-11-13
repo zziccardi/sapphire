@@ -1844,7 +1844,7 @@ class PythonTranspiler(BaseTranspiler):
         escaped_val = part.value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
         self.emit(f'"{escaped_val}"')
       else:
-        self.emit("(lambda x: x.value if hasattr(x, 'value') else str(x))(")
+        self.emit("_sapphire_string_from(")
         self.visit(part)
         self.emit(")")
 

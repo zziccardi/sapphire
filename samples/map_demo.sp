@@ -15,10 +15,8 @@ func main() {
   print(f"Map size: {scores.size()}");
   print(f"Is scores empty: {scores.empty()}");
   print(f"Is empty_map empty: {empty_map.empty()}");
-  let has_alice = scores.contains("alice");
-  let has_david = scores.contains("david");
-  print(f"Contains 'alice': {has_alice}");
-  print(f"Contains 'david': {has_david}");
+  print(f"Contains 'alice': {scores.contains("alice")}");
+  print(f"Contains 'david': {scores.contains("david")}");
 
   // 2. Extractions: keys() & values()
   let k_arr = scores.keys();

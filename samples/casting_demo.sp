@@ -76,11 +76,11 @@ func main() {
   print("\n--- 4. Fallible Enum Conversions (`EnumName.from`) ---");
 
   if let d1 ?= Direction.from(1) {
-    print(f"Direction.from(1): {String.from(d1)}");
+    print(f"Direction.from(1): {d1}");
   }
 
   if let d2 ?= Direction.from("South") {
-    print(f"Direction.from(\"South\"): {String.from(d2)}");
+    print(f"Direction.from(\"South\"): {d2}");
   }
 
   if let l1 ?= LogLevel.from("INFO") {

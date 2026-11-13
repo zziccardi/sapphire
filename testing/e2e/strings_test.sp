@@ -51,3 +51,9 @@ func test_upper(): String {
 func test_lower(): String {
   return "HELLO".lower();
 }
+
+@test
+func test_nested_quotes(): String {
+  let scores = {"alice": 100};
+  return f"Alice: {scores.contains("alice")}";
+}

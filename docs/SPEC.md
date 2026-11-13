@@ -93,7 +93,7 @@ string interpolation using the `f"..."` prefix and binary `+` concatenation:
 * **String concatenation**: Expressions evaluate string concatenation via `+`
   whenever either operand is a `String` (e.g. `"Hello " + name`).
 * **Nested quotes**: Expressions inside interpolation braces support nested
-  quotes (e.g. `f"Hello {user.get(\"name\")}"`).
+  quotes directly without escaping (e.g. `f"Hello {user.get("name")}"`).
 * **Brace escaping**: Double curly braces `{{` and `}}` within an f-string
   evaluate to literal `{` and `}` characters.
 * **Automatic type coercion**: Primitive types (`int`, `float`, `bool`),

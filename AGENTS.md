@@ -379,3 +379,7 @@ pipenv run sapphire run samples/overview.sp --dev
      correctly.
    * [ ] Newly created files adhere to repository naming and layout
      conventions.
+
+## 8. Planning (`/plan`)
+Whenever `/plan` is used, always generate the plan as an artifact rather than
+outputting it only inline in chat.

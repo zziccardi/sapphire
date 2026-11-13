@@ -1348,6 +1348,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('local single_lit = "just text"', lua)
     self.assertIn('local single_expr = tostring(count)', lua)
 
+  def test_interpolated_string_enum_and_nested_quotes_lua(self):
+    """Verifies Lua transpilation of enum and nested unescaped quotes in f-strings."""
+    code = """
+    enum Direction { North = 1, South = 2 }
+
+    func main() {
+      let d = Direction.South;
+      let s = f"Direction: {d}";
+      let m = {"key": 100};
+      let s_quote = f"Has key: {m.contains("key")}";
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn('("Direction: " .. tostring(d))', lua)
+    self.assertIn('("Has key: " .. tostring(_sapphire_map_contains(m, "key")))', lua)
+
   def test_nested_match_expression_transpilation_lua(self):
     """Verifies Lua transpilation of match expressions used inline within sub-expressions."""
     code = """

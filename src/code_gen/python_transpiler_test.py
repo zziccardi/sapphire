@@ -1525,6 +1525,23 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "test_fstring()")
     self.assertEqual(res, "Hello Hero, status: active, count: 43, none: None")
 
+  def test_interpolated_string_enum_and_nested_quotes_python(self):
+    """Verifies Python transpilation of IntEnum and nested unescaped quotes in f-strings."""
+    code = """
+    enum Direction { North = 1, South = 2 }
+
+    func test_enum_interp(): String {
+      let d = Direction.South;
+      let s_single = f"{d}";
+      let s_multi = f"Direction: {d}";
+      let m = {"key": 100};
+      let s_quote = f"Has key: {m.contains("key")}";
+      return f"{s_single}|{s_multi}|{s_quote}";
+    }
+    """
+    res = self._transpile_and_run(code, "test_enum_interp()")
+    self.assertEqual(res, "2|Direction: 2|Has key: true")
+
   def test_nested_match_expression_transpilation_and_execution(self):
     """Verifies Python transpilation and execution of match expressions used inline within sub-expressions."""
     code = """

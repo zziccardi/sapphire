@@ -43,6 +43,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_int_enum_value": 2,
         "test_int_enum_comparison": 1,
         "test_string_enum_value": "green",
+        "test_enum_interpolation": "Dir: 2, Color: blue",
     },
     "inheritance_test.sp": {
         "test_inherited_field": 4,
@@ -73,6 +74,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_contains": 1,
         "test_upper": "HELLO",
         "test_lower": "hello",
+        "test_nested_quotes": "Alice: true",
     },
     "arrays_test.sp": {
         "test_array_indexing": 20,

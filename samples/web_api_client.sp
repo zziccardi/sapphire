@@ -97,7 +97,7 @@ func main() {
       print(f"Received payload successfully: {json_data}");
     }
   } else if let err ?= response.error_message {
-    print(f"API Error [{String.from(response.status_code)}]: {err}");
+    print(f"API Error [{response.status_code}]: {err}");
   }
 
   // Making a POST request using named arguments at call site
