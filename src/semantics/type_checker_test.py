@@ -6924,6 +6924,136 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(primitive_var_global_value_ok)
 
+  def test_array_swap_semantics(self):
+    """Verifies type checking and semantic constraints for Array.swap(i, j)."""
+    # 1. Valid swap on dynamic array
+    self._check("""
+    func main() {
+      var arr = [10, 20, 30];
+      arr.swap(0, 2);
+      arr.swap(i = 1, j = -1);
+    }
+    """)
+
+    # 2. Valid swap on fixed-size array
+    checker = TypeChecker()
+    checker.symbol_table.define(
+        "fixed",
+        VariableSymbol(
+            "fixed",
+            ArrayType(PrimitiveType("int"), size=3, is_fixed_size=True),
+            is_mutable=True,
+        ),
+    )
+    call_node = CallNode(
+        MemberAccessNode(IdentifierNode("fixed"), "swap", is_optional=False),
+        [ArgumentNode(None, LiteralNode(0, "int")), ArgumentNode(None, LiteralNode(2, "int"))],
+    )
+    res_t = checker.visit(call_node)
+    self.assertEqual(res_t, PrimitiveType("none"))
+    self.assertEqual(checker.errors, [])
+
+    # 3. Valid swap on array of move-only structs
+    self._check("""
+    struct Resource {
+      var handle: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func main() {
+      var res_arr = [Resource { handle = 1 }, Resource { handle = 2 }];
+      res_arr.swap(0, 1);
+    }
+    """)
+
+    # 4. Error: Calling swap on immutable array
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2, 3];
+        arr.swap(0, 1);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'swap' on constant variable 'arr'", str(ctx.exception))
+
+    # 5. Error: Calling swap through deeply immutable SharedRef
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let s = SharedRef([1, 2, 3]);
+        s.swap(0, 1);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'swap' through deeply immutable 'SharedRef'", str(ctx.exception))
+
+    # 6. Error: Argument types must be int
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2, 3];
+        arr.swap("first", 1);
+      }
+      """)
+    self.assertIn("Argument 'i' in .swap() must be 'int'", str(ctx.exception))
+
+    # 7. Error: Missing arguments
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2, 3];
+        arr.swap(0);
+      }
+      """)
+    self.assertIn(".swap() requires mandatory 'i' and 'j' arguments", str(ctx.exception))
+
+  def test_enhanced_aliasing_hints(self):
+    """Verifies that aliasing conflict and frozen collection diagnostics include actionable hints."""
+    # 1. Subscript aliasing hint
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Item { var v: int; }
+      func process(var a: Item, b: Item) {}
+      func main() {
+        var items = [Item { v = 1 }, Item { v = 2 }];
+        process(items[0], items[1]);
+      }
+      """)
+    err = str(ctx.exception)
+    self.assertIn("Aliasing conflict: variable 'items' (or a sub-field) is mutably borrowed", err)
+    self.assertIn("Hint: To swap two elements in a collection, use 'items.swap(i, j)'", err)
+
+    # 2. Self-field method call aliasing hint
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Entity { var target: Entity?; }
+      impl Entity {
+        func __init__() { self.target = none; }
+        var func update(other: Entity?) { self.target = other; }
+        var func self_update() {
+          self.update(self.target);
+        }
+      }
+      """)
+    err = str(ctx.exception)
+    self.assertIn("Aliasing conflict: variable 'self' (or a sub-field) is mutably borrowed", err)
+    self.assertIn("Hint: Invoking a mutating method on 'self' conflicts with borrowing its field 'self.target'", err)
+
+    # 3. Frozen collection in for-in loop hint
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var nums = [1, 2, 3];
+        for n in nums {
+          nums.remove(0);
+        }
+      }
+      """)
+    err = str(ctx.exception)
+    self.assertIn("Cannot invoke mutating method 'remove' on 'nums' while it is frozen (for-in loop iteration)", err)
+    self.assertIn("Hint: Collections are frozen during iteration to prevent iterator invalidation", err)
+    self.assertIn("nums.filter(fn, in_place = true)", err)
+
 
 if __name__ == "__main__":
   unittest.main()

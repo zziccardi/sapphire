@@ -333,6 +333,7 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
 | `insert(index: int, element: T): T` | Inserts `element` at `index` in a mutable dynamic array (`var [T]`) and returns `element`. |
 | `remove(index: int): T?` | Removes and returns element at `index` in a mutable dynamic array (`var [T]`), or `none` if out of bounds. |
 | `clear(): void` | Clears all elements from a mutable dynamic array (`var [T]`). |
+| `swap(i: int, j: int): void` | Swaps elements at indices `i` and `j` in place on a mutable array (`var [T]` or `var [T; N]`). Negative indices count from the back (`-1` is the last element). If either index is out of bounds, the operation is a safe no-op. Returns `void` (`none`). |
 
 ##### Detailed method behavior
 
@@ -459,6 +460,30 @@ Sapphire provides standard methods on `Array` instances (`[T]` and `[T; N]`).
   ```sapphire
   var items = [10, 20];
   items.clear();  // items is now []
+  ```
+
+* **`swap(i: int, j: int): void`**
+
+  Swaps the elements at indices `i` and `j` in place.
+  * **Mutability**: Requires a mutable array binding (`var [T]` or
+    `var [T; N]`). Rejects invocation on immutable `let` arrays and
+    deeply immutable `SharedRef`.
+  * **Negative indexing**: Negative integers count backwards from the end of the
+    array (for example, `-1` references the last element, `-2` the
+    second-to-last).
+  * **Safe bounds handling**: If either `i` or `j` is out of bounds, the
+    operation performs a safe no-op without halting or panicking.
+  * **Return value**: Returns `void` (`none`), keeping call sites clean and
+    avoiding unused-value warnings.
+  * **Move-only support**: Safely swaps move-only RAII types (such as `struct`s
+    defining `__del__()` or holding `Ref<T>`) without triggering ownership
+    invalidation or duplicate drops.
+
+  ```sapphire
+  var items = [10, 20, 30, 40];
+  items.swap(0, 2);   // [30, 20, 10, 40]
+  items.swap(1, -1);  // Negative index wraps: swaps index 1 and 3 -> [30, 40, 10, 20]
+  items.swap(0, 99);  // Out of bounds: safe no-op
   ```
 
 #### Operations and capabilities

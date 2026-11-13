@@ -48,3 +48,15 @@ func test_array_get(): int {
   }
   return 0;
 }
+
+@test
+func test_array_swap(): int {
+  var items = [10, 20, 30];
+  items.swap(0, 2);
+  items.swap(1, -1);
+  items.swap(0, 100);
+  if items[0] == 30 && items[1] == 10 && items[2] == 20 {
+    return 1;
+  }
+  return 0;
+}

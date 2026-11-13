@@ -507,6 +507,13 @@ def _sapphire_array_remove(arr, index):
 def _sapphire_array_clear(arr):
   arr.clear()
 
+def _sapphire_array_swap(arr, i, j):
+  n = len(arr)
+  idx_i = n + i if i < 0 else i
+  idx_j = n + j if j < 0 else j
+  if 0 <= idx_i < n and 0 <= idx_j < n:
+    arr[idx_i], arr[idx_j] = arr[idx_j], arr[idx_i]
+
 def _sapphire_map_size(m):
   return len(m)
 

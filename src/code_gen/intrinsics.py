@@ -787,6 +787,42 @@ def _emit_arr_clear_lua(transpiler: Any, node: CallNode) -> None:
   transpiler.emit(")")
 
 
+@IntrinsicRegistry.register("Array", "swap", "python")
+def _emit_arr_swap_py(transpiler: Any, node: CallNode) -> None:
+  transpiler.emit("_sapphire_array_swap(")
+  transpiler.visit(node.callee.receiver)
+  i_expr = None
+  j_expr = None
+  for idx, arg in enumerate(node.arguments):
+    if arg.name == "i" or (idx == 0 and not arg.name):
+      i_expr = arg.expr
+    elif arg.name == "j" or (idx == 1 and not arg.name):
+      j_expr = arg.expr
+  transpiler.emit(", ")
+  transpiler.visit(i_expr)
+  transpiler.emit(", ")
+  transpiler.visit(j_expr)
+  transpiler.emit(")")
+
+
+@IntrinsicRegistry.register("Array", "swap", "lua")
+def _emit_arr_swap_lua(transpiler: Any, node: CallNode) -> None:
+  transpiler.emit("_sapphire_array_swap(")
+  transpiler.visit(node.callee.receiver)
+  i_expr = None
+  j_expr = None
+  for idx, arg in enumerate(node.arguments):
+    if arg.name == "i" or (idx == 0 and not arg.name):
+      i_expr = arg.expr
+    elif arg.name == "j" or (idx == 1 and not arg.name):
+      j_expr = arg.expr
+  transpiler.emit(", ")
+  transpiler.visit(i_expr)
+  transpiler.emit(", ")
+  transpiler.visit(j_expr)
+  transpiler.emit(")")
+
+
 # ==============================================================================
 # Map Methods (Python & Lua)
 # ==============================================================================

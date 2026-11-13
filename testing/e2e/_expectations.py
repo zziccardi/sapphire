@@ -82,6 +82,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_array_mutation": 99,
         "test_array_push": 3,
         "test_array_contains": 1,
+        "test_array_swap": 1,
     },
     "expressions_and_casting_test.sp": {
         "test_float_to_int_cast": 9,

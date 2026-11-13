@@ -171,8 +171,8 @@ let concat = "Greetings, " + name;
   let numbers: [int] = [10, 20, 30];
   ```
   Arrays support functional transformations and mutating operations such as
-  `.map()`, `.filter()`, `.reduce()`, `.push()`, `.pop()`, and `.sort()`. For
-  the full method suite, see
+  `.map()`, `.filter()`, `.reduce()`, `.push()`, `.pop()`, `.swap()`, and
+  `.sort()`. For the full method suite, see
   [built-in array methods](builtins.md#built-in-methods-1).
 * **Map literals (`[K: V]`)**: Maps are strongly typed key-value dictionaries
   defined inside curly braces (`{key: value}`). Keys must be `String`, `int`,
@@ -661,6 +661,12 @@ annotations, the compiler enforces compile-time **reference exclusivity**:
   collection built-ins such as `items.push(items[0])` and
   `items.insert(0, items[0])`), the receiver is implicitly treated as a mutable
   argument, preventing buffer reallocation while element borrows are evaluated.
+* **Collection subscript projection exclusivity**: Because subscript paths
+  (`items[i]`, `items[j]`) resolve to a shared element projection `items['[]']`,
+  passing two elements from the same collection where at least one is a mutable
+  parameter (`var`) is rejected at compile time. To swap two elements within
+  the same collection in place without triggering aliasing conflicts, use the
+  built-in `items.swap(i, j)` method.
 * **Directional prototype-lineage exclusivity**: Because `proto` clones read
   unshadowed fields live from their prototype chain, mutably borrowing a
   prototype ancestor (`var base`) in the same call that borrows (mutably or

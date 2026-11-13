@@ -621,6 +621,17 @@ local _sapphire_array_clear = function(arr)
   end
 end
 
+local _sapphire_array_swap = function(arr, i, j)
+  local len = #arr
+  local idx_i = i < 0 and (len + i + 1) or (i + 1)
+  local idx_j = j < 0 and (len + j + 1) or (j + 1)
+  if idx_i >= 1 and idx_i <= len and idx_j >= 1 and idx_j <= len then
+    local tmp = arr[idx_i]
+    arr[idx_i] = arr[idx_j]
+    arr[idx_j] = tmp
+  end
+end
+
 local _sapphire_array_get = function(arr, index)
   if arr == nil then return nil end
   local len = #arr
@@ -994,7 +1005,7 @@ end
 local _SP_RT = _sp_load_runtime()
 local _Coroutine, Arena, _clone_helper, _create_cow_proxy, _create_proto_object = _SP_RT._Coroutine, _SP_RT.Arena, _SP_RT._clone_helper, _SP_RT._create_cow_proxy, _SP_RT._create_proto_object
 local _sapphire_string_strip, _sapphire_string_split, _sapphire_string_find, _sapphire_string_to_int, _sapphire_string_to_float, _sapphire_string_to_bool, _sapphire_cast_int, _sapphire_enum_from = _SP_RT._sapphire_string_strip, _SP_RT._sapphire_string_split, _SP_RT._sapphire_string_find, _SP_RT._sapphire_string_to_int, _SP_RT._sapphire_string_to_float, _SP_RT._sapphire_string_to_bool, _SP_RT._sapphire_cast_int, _SP_RT._sapphire_enum_from
-local _sapphire_array_map, _sapphire_array_filter, _sapphire_array_reduce, _sapphire_array_contains, _sapphire_array_reverse, _sapphire_array_sort, _sapphire_array_join, _sapphire_array_push, _sapphire_array_pop, _sapphire_array_insert, _sapphire_array_remove, _sapphire_array_clear, _sapphire_array_get = _SP_RT._sapphire_array_map, _SP_RT._sapphire_array_filter, _SP_RT._sapphire_array_reduce, _SP_RT._sapphire_array_contains, _SP_RT._sapphire_array_reverse, _SP_RT._sapphire_array_sort, _SP_RT._sapphire_array_join, _SP_RT._sapphire_array_push, _SP_RT._sapphire_array_pop, _SP_RT._sapphire_array_insert, _SP_RT._sapphire_array_remove, _SP_RT._sapphire_array_clear, _SP_RT._sapphire_array_get
+local _sapphire_array_map, _sapphire_array_filter, _sapphire_array_reduce, _sapphire_array_contains, _sapphire_array_reverse, _sapphire_array_sort, _sapphire_array_join, _sapphire_array_push, _sapphire_array_pop, _sapphire_array_insert, _sapphire_array_remove, _sapphire_array_clear, _sapphire_array_swap, _sapphire_array_get = _SP_RT._sapphire_array_map, _SP_RT._sapphire_array_filter, _SP_RT._sapphire_array_reduce, _SP_RT._sapphire_array_contains, _SP_RT._sapphire_array_reverse, _SP_RT._sapphire_array_sort, _SP_RT._sapphire_array_join, _SP_RT._sapphire_array_push, _SP_RT._sapphire_array_pop, _SP_RT._sapphire_array_insert, _SP_RT._sapphire_array_remove, _SP_RT._sapphire_array_clear, _SP_RT._sapphire_array_swap, _SP_RT._sapphire_array_get
 local _sapphire_map_size, _sapphire_map_empty, _sapphire_map_contains, _sapphire_map_get, _sapphire_map_keys, _sapphire_map_values, _sapphire_map_insert, _sapphire_map_remove, _sapphire_map_clear = _SP_RT._sapphire_map_size, _SP_RT._sapphire_map_empty, _SP_RT._sapphire_map_contains, _SP_RT._sapphire_map_get, _SP_RT._sapphire_map_keys, _SP_RT._sapphire_map_values, _SP_RT._sapphire_map_insert, _SP_RT._sapphire_map_remove, _SP_RT._sapphire_map_clear
 local _sapphire_iter_array, _sapphire_range, _sapphire_del, _Ref, Ref, _SharedRef, _WeakRef, SharedRef, WeakRef = _SP_RT._sapphire_iter_array, _SP_RT._sapphire_range, _SP_RT._sapphire_del, _SP_RT._Ref, _SP_RT.Ref, _SP_RT._SharedRef, _SP_RT._WeakRef, _SP_RT.SharedRef, _SP_RT.WeakRef
 """
@@ -1026,6 +1037,7 @@ return {
   _sapphire_array_insert = _sapphire_array_insert,
   _sapphire_array_remove = _sapphire_array_remove,
   _sapphire_array_clear = _sapphire_array_clear,
+  _sapphire_array_swap = _sapphire_array_swap,
   _sapphire_array_get = _sapphire_array_get,
   _sapphire_map_size = _sapphire_map_size,
   _sapphire_map_empty = _sapphire_map_empty,

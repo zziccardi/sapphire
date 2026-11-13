@@ -753,6 +753,7 @@ ARRAY_METHODS: Dict[str, bool] = {
     "insert": True,
     "remove": True,
     "clear": True,
+    "swap": True,
 }
 
 
