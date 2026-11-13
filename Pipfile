@@ -12,6 +12,8 @@ llvmlite = "*"
 coverage = "*"
 ruff = "*"
 pyright = "*"
+build = "*"
+twine = "*"
 
 [requires]
 python_version = "3"

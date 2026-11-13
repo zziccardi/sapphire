@@ -79,7 +79,7 @@ class TestSymbolTable(unittest.TestCase):
     self.assertEqual(arr_int_size, ArrayType(self.int_type, size=3))
     self.assertNotEqual(arr_int, arr_int_size)
     self.assertTrue(arr_int_size.is_compatible(arr_int))
-    self.assertTrue(arr_int.is_compatible(arr_int_size))
+    self.assertFalse(arr_int.is_compatible(arr_int_size))
     self.assertTrue(arr_int.is_compatible(OptionalType(arr_int)))
     self.assertFalse(arr_int.is_compatible(self.int_type))
 

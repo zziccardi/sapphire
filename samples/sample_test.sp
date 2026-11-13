@@ -17,12 +17,14 @@ impl testing.TestCase for MathTest {
     self.initial_val = 0;
   }
 
+  @test
   func test_addition() {
     let result = self.initial_val + 5;
     self.expect_eq(result, 15, "Initial value + 5 should equal 15");
     self.expect_true(result > 10);
   }
 
+  @test
   func test_subtraction() {
     let result = self.initial_val - 3;
     self.assert_eq(result, 7);

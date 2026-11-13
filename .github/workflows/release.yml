@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build-and-release:
+    name: Build, Verify, and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install system dependencies (Lua)
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+
+      - name: Install ANTLR 4.13.2
+        run: |
+          sudo curl -fsSL \
+            https://www.antlr.org/download/antlr-4.13.2-complete.jar \
+            -o /usr/local/lib/antlr-4.13.2-complete.jar
+          JAR=/usr/local/lib/antlr-4.13.2-complete.jar
+          printf '#!/bin/sh\n' | sudo tee /usr/local/bin/antlr > /dev/null
+          printf 'exec java -jar %s "$@"\n' "$JAR" \
+            | sudo tee -a /usr/local/bin/antlr > /dev/null
+          sudo chmod +x /usr/local/bin/antlr
+
+      - name: Install Pipenv and build tools
+        run: pip install --upgrade pip pipenv build twine
+
+      - name: Install dependencies
+        run: |
+          pipenv --python 3.14 install --dev --deploy || \
+            pipenv --python 3.14 install --dev --skip-lock
+
+      - name: Verify ANTLR-generated parser files are up-to-date
+        run: |
+          pipenv run antlr
+          git diff --exit-code src/parser/gen
+
+      - name: Run Python unit tests
+        run: pipenv run test
+
+      - name: Run test coverage verification
+        run: pipenv run coverage
+
+      - name: Run Sapphire native E2E test runner (Python)
+        run: pipenv run sapphire test
+
+      - name: Run Sapphire native E2E test runner (Lua)
+        run: pipenv run sapphire test -t lua
+
+      - name: Verify sample programs
+        run: pipenv run check-samples
+
+      - name: Build Python sdist and wheel
+        run: python -m build
+
+      - name: Verify package archives with Twine
+        run: twine check dist/*
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: startsWith(github.ref, 'refs/tags/v')
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build VS Code extension
+        working-directory: tools/vscode-extension
+        run: |
+          npm ci
+          npx @vscode/vsce package --no-dependencies
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          github.event_name == 'workflow_dispatch'
+        with:
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            tools/vscode-extension/*.vsix

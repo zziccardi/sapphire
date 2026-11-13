@@ -166,9 +166,11 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_compound_assignments(self):
     """Verifies that compound assignments (+=, -=) expand to simple assignments in Lua 5.1."""
     code = """
-    var val = 10;
-    val += 5;
-    val -= 2;
+    func test() {
+      var val = 10;
+      val += 5;
+      val -= 2;
+    }
     """
     lua_code = self._transpile(code)
     self.assertIn("local val = 10", lua_code)
@@ -257,19 +259,39 @@ class TestLuaTranspiler(unittest.TestCase):
   def test_array_indexing_and_loops(self):
     """Verifies that 0-based array indexing is offset by 1 in Lua table syntax."""
     code = """
-    let numbers = [10, 20, 30];
-    let first = numbers[0];
-    var idx = 1;
-    let dynamic_elem = numbers[idx];
-    for n in numbers {
-      let x = n;
+    func test() {
+      let numbers = [10, 20, 30];
+      let first = numbers[0];
+      var idx = 1;
+      let dynamic_elem = numbers[idx];
+      for n in numbers {
+        let x = n;
+      }
     }
     """
     lua_code = self._transpile(code)
     self.assertIn("local numbers = {10, 20, 30}", lua_code)
     self.assertIn("local first = numbers[1]", lua_code)
-    self.assertIn("numbers[idx + 1]", lua_code)
+    self.assertIn("numbers[_sapphire_array_idx(numbers, idx)]", lua_code)
     self.assertIn("for _, n in _sapphire_iter_array(numbers) do", lua_code)
+
+  def test_fixed_size_array_and_negative_indexing(self):
+    """Verifies Lua code generation for fixed-size arrays and negative indices."""
+    code = """
+    func test() {
+      let scores: [int; 3] = [10, 20, 30];
+      let last = scores[-1];
+      let first = scores[-3];
+      var idx = -1;
+      let dynamic_last = scores[idx];
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local scores = {10, 20, 30}", lua_code)
+    # Fixed size constant negative index evaluates to 1-based index 3 directly (3 + -1 + 1 = 3)
+    self.assertIn("local last = scores[3]", lua_code)
+    self.assertIn("local first = scores[1]", lua_code)
+    self.assertIn("scores[_sapphire_array_idx(scores, idx)]", lua_code)
 
   def test_struct_declaration_and_impl(self):
     """Verifies struct constructor generation, field defaults, static methods, and traits."""
@@ -602,9 +624,11 @@ class TestLuaTranspiler(unittest.TestCase):
     func get_pos(): float, float {
       return 10.0, 20.0;
     }
-    let x, y = get_pos();
-    var a, b = 1.0, 2.0;
-    a, b = get_pos();
+    func test() {
+      let x, y = get_pos();
+      var a, b = 1.0, 2.0;
+      a, b = get_pos();
+    }
     """
     output = self._transpile(code)
     self.assertIn("local get_pos", output)

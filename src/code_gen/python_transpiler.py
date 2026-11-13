@@ -507,6 +507,13 @@ def _sapphire_array_remove(arr, index):
 def _sapphire_array_clear(arr):
   arr.clear()
 
+def _sapphire_array_swap(arr, i, j):
+  n = len(arr)
+  idx_i = n + i if i < 0 else i
+  idx_j = n + j if j < 0 else j
+  if 0 <= idx_i < n and 0 <= idx_j < n:
+    arr[idx_i], arr[idx_j] = arr[idx_j], arr[idx_i]
+
 def _sapphire_map_size(m):
   return len(m)
 
@@ -732,7 +739,6 @@ class PythonTranspiler(BaseTranspiler):
     self._collect_struct_metadata(program, track_known_structs=False)
 
     top_level_decls = []
-    executable_stmts = []
     has_main = False
 
     self.global_vars = set()
@@ -752,25 +758,19 @@ class PythonTranspiler(BaseTranspiler):
         top_level_decls.append(decl)
       elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode, VarDeclNode)):
         top_level_decls.append(decl)
-      else:
-        executable_stmts.append(decl)
 
     # 3. Transpile all top-level declarations (types, functions, global variables)
     for decl in top_level_decls:
       self.visit(decl)
       self.newline()
 
-    # 4. Transpile executable top-level statements and/or main call
-    if executable_stmts or has_main:
+    # 4. Transpile main call
+    if has_main:
       self.newline()
       self.emit('if __name__ == "__main__":')
       self.indent()
-      for stmt in executable_stmts:
-        self.newline()
-        self.visit(stmt)
-      if has_main:
-        self.newline()
-        self.emit("main()")
+      self.newline()
+      self.emit("main()")
       self.dedent()
       self.newline()
 
@@ -992,6 +992,13 @@ class PythonTranspiler(BaseTranspiler):
 
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func = node.func_decl
+    is_test_func = any(
+        getattr(a, "name", "") == "test"
+        for a in getattr(func, "annotations", [])
+    )
+    if is_test_func and not self.test_mode:
+      return
+
     self.newline()
 
     if node.modifier == "static":

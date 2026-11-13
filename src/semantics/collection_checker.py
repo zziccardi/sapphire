@@ -63,6 +63,8 @@ class CollectionChecker:
         return FunctionType([receiver_type, PrimitiveType("int")], OptionalType(elem_t), param_names=["self", "index"], has_self=True)
       elif node.member == "clear":
         return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
+      elif node.member == "swap":
+        return FunctionType([receiver_type, PrimitiveType("int"), PrimitiveType("int")], PrimitiveType("none"), param_names=["self", "i", "j"], has_self=True)
     checker.error(f"Array has no method '{node.member}'.")
     return PrimitiveType("none")
 
@@ -335,8 +337,8 @@ class CollectionChecker:
 
       return acc_type
 
-    elif method in ("push", "pop", "insert", "remove", "clear"):
-      if receiver_type.is_fixed_size:
+    elif method in ("push", "pop", "insert", "remove", "clear", "swap"):
+      if receiver_type.is_fixed_size and method != "swap":
         checker.error(
             f"Cannot invoke mutating method '{method}' on fixed-size array "
             f"'{receiver_type}'."
@@ -358,9 +360,18 @@ class CollectionChecker:
           )
         reason = checker.get_frozen_lvalue_reason(r, path)
         if reason:
+          hint = ""
+          if "for-in loop iteration" in reason:
+            hint = (
+                f" Hint: Collections are frozen during iteration to prevent "
+                f"iterator invalidation. To remove elements matching a "
+                f"predicate, use '{r}.filter(fn, in_place = true)'. To spawn "
+                f"or insert elements, stage them in a separate array and "
+                f"append after the loop."
+            )
           checker.error(
               f"Cannot invoke mutating method '{method}' on '{r}' while it is "
-              f"frozen ({reason})."
+              f"frozen ({reason}).{hint}"
           )
       elif isinstance(receiver, IdentifierNode):
         sym = checker.symbol_table.lookup(receiver.name)
@@ -468,6 +479,33 @@ class CollectionChecker:
       elif method == "clear":
         if node.arguments:
           checker.error(".clear() takes no arguments.")
+        return PrimitiveType("none")
+
+      elif method == "swap":
+        i_arg = None
+        j_arg = None
+        for idx, arg in enumerate(node.arguments):
+          if arg.name == "i":
+            i_arg = arg
+          elif arg.name == "j":
+            j_arg = arg
+          elif idx == 0 and not arg.name:
+            i_arg = arg
+          elif idx == 1 and not arg.name:
+            j_arg = arg
+
+        if not i_arg or not j_arg:
+          checker.error(".swap() requires mandatory 'i' and 'j' arguments.")
+          return PrimitiveType("none")
+
+        i_t = checker.visit(i_arg.expr)
+        if not i_t.is_compatible(PrimitiveType("int")):
+          checker.error(f"Argument 'i' in .swap() must be 'int', got '{i_t}'.")
+
+        j_t = checker.visit(j_arg.expr)
+        if not j_t.is_compatible(PrimitiveType("int")):
+          checker.error(f"Argument 'j' in .swap() must be 'int', got '{j_t}'.")
+
         return PrimitiveType("none")
 
     elif method == "contains":

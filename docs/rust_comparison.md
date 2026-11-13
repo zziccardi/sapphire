@@ -57,6 +57,14 @@ Sapphire targets a different balance:
      ([docs/SPEC.md (Calling Conventions)](SPEC.md#calling-conventions-vs-storage-semantics)).
   4. **No lifetime syntax**: The language contains no lifetime parameters or
      lifetime subtyping rules.
+  5. **Collection mutation ergonomics**: In Rust, mutating two elements of the
+     same slice or vector simultaneously requires `slice::split_at_mut` or
+     `slice::swap`, and removing elements during iteration requires
+     `Vec::retain` or index loops. Sapphire provides native `arr.swap(i, j)`
+     to swap elements in place (including move-only RAII types, with negative
+     index support) without unsafe or split borrowings, and provides in-place
+     functional filters (`arr.filter(fn, in_place = true)`) for clean in-place
+     removal.
 
 ### 2.2 Graphs, cyclic structures, and self-referential data
 
@@ -221,4 +229,5 @@ where Rust chooses absolute fine-grained control:
 | **Iteration & dev loops** | Full native recompile; no hot reload | Live hot-reloading (`--dev`) with in-place metatable patching | Instant game/simulation tweaking without state loss |
 | **Optional unwrapping** | `if let Some(x) = opt`, `match`, `?` | `if let x ?= opt`, `guard let x ?= opt else`, `??`, `?.` | Swift-style readability; un-indented guard promotion |
 | **Destructors & RAII** | `Drop::drop` | Move-only `__del__()` (with RVO & drop flags) and lexical `{ ... }` blocks | Deterministic LIFO scope destruction without exception overhead |
+| **Pairwise collection mutation** | `slice::swap`, `split_at_mut`, `Vec::retain` | Native `arr.swap(i, j)` and `arr.filter(..., in_place = true)` | Built-in safe in-place swaps (supporting negative indices) and functional in-place mutations |
 | **Scriptability & embeddability** | Complex FFI; heavy binary footprint | Native Lua 5.1 / Love2D and Python transpilation; `@extern`, `@export` | Effortless integration into host game and scripting runtimes |

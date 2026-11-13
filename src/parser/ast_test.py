@@ -33,9 +33,17 @@ class TestASTNodes(unittest.TestCase):
 
     node = ArrayTypeNode(BasicTypeNode("int"))
     self.assertEqual(node.element_type.name, "int")
+    self.assertIsNone(node.size)
     node_dict = node.to_dict()
     self.assertEqual(node_dict["node_type"], "ArrayTypeNode")
     self.assertEqual(node_dict["element_type"]["name"], "int")
+    self.assertIsNone(node_dict["size"])
+
+    fixed_node = ArrayTypeNode(BasicTypeNode("int"), size=3)
+    self.assertEqual(fixed_node.element_type.name, "int")
+    self.assertEqual(fixed_node.size, 3)
+    fixed_dict = fixed_node.to_dict()
+    self.assertEqual(fixed_dict["size"], 3)
 
   def test_literal_node(self):
     """Verifies LiteralNode creation and conversion to dictionary."""

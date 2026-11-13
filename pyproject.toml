@@ -7,19 +7,44 @@ name = "sapphire-lang"
 version = "0.1.0"
 description = "Sapphire programming language compiler and runtime"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Zach Ziccardi" }
+]
 requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Interpreters",
+]
 dependencies = [
     "antlr4-python3-runtime",
     "pygls",
     "llvmlite"
 ]
 
+[project.urls]
+Homepage = "https://zziccardi.github.io/sapphire/"
+Repository = "https://github.com/zziccardi/sapphire"
+"Bug Tracker" = "https://github.com/zziccardi/sapphire/issues"
+
 [project.scripts]
 sapphire = "src.cli.sapphire:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["src*", "lib*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.sp", "*.lua", "*.lua.map"]
 
 [tool.ruff]
 line-length = 80

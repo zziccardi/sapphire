@@ -1,15 +1,17 @@
 /*
- * Sample Sapphire program demonstrating top-level script execution
- * without requiring a main() function entry point.
+ * Sample Sapphire program demonstrating module entry with func main()
+ * and module-level compile-time constant expressions.
  */
 
-var count = 0;
-let items = [10, 20, 30];
+let ITEMS = [10, 20, 30];
 
-for item in items {
-  count += item;
-}
+func main() {
+  var count = 0;
+  for item in ITEMS {
+    count += item;
+  }
 
-if count > 50 {
-  // Script logic executed directly
+  if count > 50 {
+    print("Items processed successfully");
+  }
 }

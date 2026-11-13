@@ -350,6 +350,8 @@ class ASTBuilder(SapphireVisitor):
     if ctx.valType:
       val_type = self.visit(ctx.valType)
       return MapTypeNode(key_type, val_type)
+    elif ctx.size:
+      return ArrayTypeNode(key_type, size=int(ctx.size.text))
     else:
       return ArrayTypeNode(key_type)
 

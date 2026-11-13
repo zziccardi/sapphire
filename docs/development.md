@@ -29,12 +29,12 @@ This will create `SapphireLexer.py`, `SapphireParser.py`, `SapphireListener.py`,
 and `SapphireVisitor.py` in `src/parser/gen/`. These generated files are
 tracked in Git and verified to be in sync with `grammar/Sapphire.g4` by CI.
 
-## Installing CLI as a package
+## Installing the CLI as a package
 
 You can install the `sapphire` CLI directly into your Python environment so it
 can be executed from anywhere without prefixing `pipenv run`:
 
-### Option A: Editable installation via `pipenv` virtual environment
+### Option A: Editable installation via Pipenv virtual environment
 
 Inside `pipenv shell` (or with an active virtualenv):
 
@@ -49,7 +49,7 @@ sapphire run samples/overview.sp
 sapphire build samples/overview.sp
 ```
 
-### Option B: System-wide global CLI via `pipx`
+### Option B: System-wide global CLI via pipx
 
 To install `sapphire` as a global executable isolated from system Python:
 
@@ -60,11 +60,13 @@ pipx install -e .
 sapphire samples/overview.sp
 ```
 
-## Compilation & execution
+## Compilation and execution
 
-The `sapphire` CLI tool provides convenient commands for compiling and executing Sapphire programs across supported targets (`python`, `lua`).
+The `sapphire` CLI tool provides convenient commands for compiling and
+executing Sapphire programs across supported targets (`python`, `lua`).
 
-To compile and immediately run a Sapphire source file in one step (Python by default, or Lua 5.1 via `-t lua`):
+To compile and immediately run a Sapphire source file in one step (Python by
+default, or Lua 5.1 via `-t lua`):
 
 ```bash
 # Python target (default)
@@ -77,7 +79,8 @@ sapphire samples/overview.sp -t lua
 pipenv run sapphire samples/overview.sp -t lua
 ```
 
-To transpile a Sapphire source file to Python (`.py`) or Lua (`.lua`) without running it:
+To transpile a Sapphire source file to Python (`.py`) or Lua (`.lua`) without
+running it:
 
 ```bash
 # Transpile to Python (.py)
@@ -102,11 +105,12 @@ pipenv run sapphire dump-ast samples/overview.sp
 pipenv run sapphire check samples/overview.sp
 ```
 
-## Testing & verification
+## Testing and verification
 
 ### Running unit and integration tests
 
-Run the following to execute all unit tests under `src/` (which automatically includes all samples compilation tests):
+Run the following to execute all unit tests under `src/` (which automatically
+includes all samples compilation tests):
 
 ```bash
 pipenv run test
@@ -114,7 +118,9 @@ pipenv run test
 
 ### Verifying sample programs compilation
 
-To exclusively verify that all 25+ demo programs in `samples/` compile cleanly across both Python and Lua 5.1 target backends without writing artifacts to disk:
+To exclusively verify that all 25+ demo programs in `samples/` compile cleanly
+across both Python and Lua 5.1 target backends without writing artifacts to
+disk:
 
 ```bash
 pipenv run check-samples
@@ -131,3 +137,86 @@ pipenv run coverage
 Note that this requires each directory to include an `__init__.py` file.
 
 This will also create an HTML version of the coverage report.
+
+## Packaging and distribution
+
+### Building distribution packages
+
+To build the source distribution (`.tar.gz`) and binary wheel (`.whl`) locally:
+
+```bash
+pip install build twine
+python -m build
+```
+
+Verify that the package archives and README metadata render without errors:
+
+```bash
+twine check dist/*
+```
+
+This generates verified distribution artifacts under `dist/`:
+* `dist/sapphire_lang-0.1.0-py3-none-any.whl`
+* `dist/sapphire_lang-0.1.0.tar.gz`
+
+Both packages bundle all standard library modules (`lib/std/`), Love2D engine
+bindings (`lib/love2d/`), and runtime resources.
+
+To publish the packages to PyPI (optional):
+
+```bash
+twine upload dist/*
+```
+
+### Packaging the VS Code extension
+
+The Sapphire VS Code extension resides in `tools/vscode-extension`. To package
+it into a `.vsix` archive locally:
+
+```bash
+cd tools/vscode-extension
+npm ci
+npm run compile
+npx @vscode/vsce package --no-dependencies
+```
+
+This creates `tools/vscode-extension/sapphire-0.1.0.vsix`. Install the extension
+into VS Code via:
+
+```bash
+code --install-extension tools/vscode-extension/sapphire-0.1.0.vsix
+```
+
+## Release workflow
+
+Sapphire uses automated GitHub Actions workflows for continuous integration and
+releases.
+
+### Versioning convention
+
+Releases adhere to [semantic versioning](https://semver.org/)
+(`vMAJOR.MINOR.PATCH`). When releasing a new version:
+
+1. Update the version string in `pyproject.toml` under `[project] version`.
+2. Update the version string in `tools/vscode-extension/package.json`.
+3. Commit the version bump:
+   ```bash
+   git commit -am "chore: bump version to v0.1.0"
+   ```
+4. Create and push an annotated Git tag:
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+### Release CI automation
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
+1. Runs the complete test suite: Python unit tests, coverage verification,
+   Sapphire native E2E test suites on both Python and Lua backends, and sample
+   compilations.
+2. Builds the source distribution and wheel packages via `python -m build`.
+3. Compiles and packages the VS Code extension into a `.vsix` archive.
+4. Publishes distribution packages directly to PyPI via Trusted Publishing.
+5. Publishes a GitHub Release with auto-generated release notes and attaches the
+   `.whl`, `.tar.gz`, and `.vsix` release artifacts.

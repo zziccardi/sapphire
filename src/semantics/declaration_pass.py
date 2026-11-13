@@ -15,6 +15,7 @@ from src.parser.ast import (
     EnumDeclNode,
     FuncDeclNode,
     IdentifierNode,
+    ImplBlockNode,
     MemberAccessNode,
     ParameterNode,
     ProgramNode,
@@ -122,7 +123,7 @@ class DeclarationPass:
           cached_entry = DeclarationPass._module_cache.get(mod_file_path)
           if cached_entry is not None and mtime is not None and cached_entry[0] == mtime and cached_entry[1] == fsize:
             mod_sym.exports.update(cached_entry[2])
-            if is_builtin:
+            if imp.path == "std.testing" or imp.path.startswith("std.testing"):
               mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
             continue
 
@@ -210,6 +211,24 @@ class DeclarationPass:
   def declare_globals(checker: Any, program: ProgramNode) -> None:
     """Pass 1: Collect struct, enum, and function declarations into global scope."""
     for decl in program.declarations:
+      if not isinstance(
+          decl,
+          (
+              StructDeclNode,
+              EnumDeclNode,
+              TraitDeclNode,
+              VarDeclNode,
+              FuncDeclNode,
+              ImplBlockNode,
+          ),
+      ):
+        checker.error(
+            "Executable statements are not permitted at module scope. All "
+            "executable logic must reside inside 'func main()' or a function.",
+            node=decl,
+        )
+        continue
+
       if hasattr(decl, "annotations") and decl.annotations:
         DeclarationPass.validate_annotations(checker, decl.annotations, node=decl)
       if isinstance(decl, TraitDeclNode):
@@ -327,6 +346,7 @@ class DeclarationPass:
               checker.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.", node=decl)
             sym = VariableSymbol(name, v_type, decl.is_mutable)
             sym._from_declare_globals = True
+            sym.is_extern = True
             checker.symbol_table.define(name, sym)
           elif decl.exprs and i < len(decl.exprs):
             expr_node = decl.exprs[i]

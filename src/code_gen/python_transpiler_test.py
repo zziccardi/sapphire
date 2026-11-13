@@ -348,6 +348,19 @@ class TestPythonTranspiler(unittest.TestCase):
     result = self._transpile_and_run(code, "run_index()")
     self.assertEqual(result, 200)
 
+  def test_fixed_size_array_and_negative_indexing(self):
+    """Verifies that fixed-size arrays and negative indexing execute correctly in Python."""
+    code = """
+    func run_fixed_and_negative(): int {
+      let scores: [int; 3] = [10, 20, 30];
+      let last = scores[-1];
+      let first = scores[-3];
+      return last + first;
+    }
+    """
+    result = self._transpile_and_run(code, "run_fixed_and_negative()")
+    self.assertEqual(result, 40)
+
 
   def test_additional_transpiler_features(self):
     """Verifies standard conditionals, unary ops, strings, default params, empty constructors/methods, and clones."""
@@ -574,12 +587,7 @@ class TestPythonTranspiler(unittest.TestCase):
       var x: int;
     }
 
-    var my_arena = Arena();
-    var other_arena = Arena();
-    var leaked_enemy: Enemy? = none;
-    var leaked_point: Point? = none;
-
-    func run_scope(): [int] {
+    func run_scope(var my_arena: Arena, var other_arena: Arena): [int] {
       let base = Enemy { hp = 100 } in my_arena;
 
       // Implicit clone arena propagation
@@ -591,14 +599,13 @@ class TestPythonTranspiler(unittest.TestCase):
       // Explicit struct allocation in arena
       let pt = Point { x = 42 } in my_arena;
 
-      leaked_enemy = cloned;
-      leaked_point = pt;
-
       return [cloned.hp, pt.x, cloned_override.hp];
     }
 
     func test_arena_raii(): [int] {
-      let vals = run_scope();
+      var my_arena = Arena();
+      var other_arena = Arena();
+      let vals = run_scope(my_arena = my_arena, other_arena = other_arena);
       return [vals[0], vals[1], vals[2]];
     }
     """
@@ -648,10 +655,9 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("pass", py_code)
 
   def test_top_level_script_transpilation_without_main(self):
-    """Verifies that top-level script statements transpile into if __name__ == '__main__': block."""
+    """Verifies that module constants transpile at module scope without main block."""
     code = """
-    var val: int = 10;
-    val += 5;
+    let MAX_SPEED: int = 100;
     """
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
@@ -662,8 +668,8 @@ class TestPythonTranspiler(unittest.TestCase):
     ast = builder.visit(tree)
     transpiler = Transpiler()
     py_code = transpiler.transpile(ast)
-    self.assertIn('if __name__ == "__main__":', py_code)
-    self.assertIn('val += 5', py_code)
+    self.assertIn("MAX_SPEED = 100", py_code)
+    self.assertNotIn('if __name__ == "__main__":', py_code)
 
   def test_top_level_script_with_main_function(self):
     """Verifies that defining main() appends main() call inside if __name__ == '__main__': block."""
@@ -935,9 +941,11 @@ class TestPythonTranspiler(unittest.TestCase):
     func get_pos(): float, float {
       return 10.0, 20.0;
     }
-    let x, y = get_pos();
-    var a, b = 1.0, 2.0;
-    a, b = get_pos();
+    func test() {
+      let x, y = get_pos();
+      var a, b = 1.0, 2.0;
+      a, b = get_pos();
+    }
     """
     py_code = self._transpile(code)
     self.assertIn("def get_pos():", py_code)

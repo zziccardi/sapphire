@@ -57,15 +57,61 @@ through five key pillars:
   Lua 5.1/LuaJIT for game frameworks like Love2D), while enforcing strict
   compile-time type checks and deterministic semantics across all backends.
 
-## Program entry & top-level script execution
+## Program entry and module structure
 
-Sapphire supports top-level script-style execution. Programs do not require a
-mandatory `func main()` entry point. Top-level statements (variable
-initializations, function calls, conditional branches, and loops) are
-executed sequentially upon program execution. If a `func main()` function is
-defined, it will be automatically invoked after any top-level statements
-execute. Return statements (`return`) at top-level module scope are prohibited
-and produce a compile-time error.
+Sapphire enforces an explicit, declarative module structure. Executable
+procedural statements (`for`, `while`, `if`, `match` statements, and standalone
+expression statements such as function calls) are prohibited at module scope.
+All execution logic must reside inside functions.
+
+Standalone applications define an explicit `func main()` entry point, which
+serves as the sole entry point upon execution:
+
+```sapphire
+let MAX_RETRIES = 3;
+
+func main() {
+  var count = 0;
+  while count < MAX_RETRIES {
+    print(f"Attempt: {count + 1}");
+    count += 1;
+  }
+}
+```
+
+Files interoperating with external host engines (such as Love2D) expose
+entry points via exported callback annotations (e.g., `@export("love.update")`),
+and test suites define test functions using `@test`.
+
+### Compile-time constant expressions
+
+Variables declared at module scope (`let` and `var`) must be initialized with
+**compile-time constant expressions** that can be resolved statically without
+runtime execution or dynamic allocations:
+
+* **Supported constant expressions**:
+  * Literal primitive values (`int`, `float`, `bool`, `String`, `none`).
+  * Constant unary (`-`, `+`, `!`) and binary operations (`+`, `-`, `*`, `/`,
+    `%`, `&&`, `||`, comparisons) over constant expressions.
+  * String interpolation where all interpolated values are constant
+    expressions.
+  * Ternary expressions (`cond ? a : b`) where condition and branches are
+    constant expressions.
+  * Explicit type casts (`as`) on constant expressions (e.g. `10 as float`).
+  * Enum variants (e.g. `Direction.North`).
+  * Homogeneous array and map literals containing only constant expressions.
+  * Plain data struct initializers (`Point { x = 0.0, y = 0.0 }`) where fields
+    are constant expressions.
+* **Prohibited at module scope**:
+  * Function and method calls (`compute()`).
+  * Memory arena allocations (`in my_arena`).
+  * Dynamic prototype cloning (`clone base`).
+  * Move expressions (`move x`) and lambda expressions.
+
+Module-level `let` constants are deeply immutable. Module-level `var` variables
+are supported for file-private state (such as game-loop coordinates), but
+cannot be exported across modules (`export { my_var }` produces a compile-time
+error) to avoid shared mutable state between modules.
 
 ## Types, literals, & string interpolation
 
@@ -125,8 +171,8 @@ let concat = "Greetings, " + name;
   let numbers: [int] = [10, 20, 30];
   ```
   Arrays support functional transformations and mutating operations such as
-  `.map()`, `.filter()`, `.reduce()`, `.push()`, `.pop()`, and `.sort()`. For
-  the full method suite, see
+  `.map()`, `.filter()`, `.reduce()`, `.push()`, `.pop()`, `.swap()`, and
+  `.sort()`. For the full method suite, see
   [built-in array methods](builtins.md#built-in-methods-1).
 * **Map literals (`[K: V]`)**: Maps are strongly typed key-value dictionaries
   defined inside curly braces (`{key: value}`). Keys must be `String`, `int`,
@@ -615,6 +661,12 @@ annotations, the compiler enforces compile-time **reference exclusivity**:
   collection built-ins such as `items.push(items[0])` and
   `items.insert(0, items[0])`), the receiver is implicitly treated as a mutable
   argument, preventing buffer reallocation while element borrows are evaluated.
+* **Collection subscript projection exclusivity**: Because subscript paths
+  (`items[i]`, `items[j]`) resolve to a shared element projection `items['[]']`,
+  passing two elements from the same collection where at least one is a mutable
+  parameter (`var`) is rejected at compile time. To swap two elements within
+  the same collection in place without triggering aliasing conflicts, use the
+  built-in `items.swap(i, j)` method.
 * **Directional prototype-lineage exclusivity**: Because `proto` clones read
   unshadowed fields live from their prototype chain, mutably borrowing a
   prototype ancestor (`var base`) in the same call that borrows (mutably or
@@ -1463,6 +1515,27 @@ Unnamed positional elements (`tuple[0]`) degrade code readability and introduce
 fragile indexing assumptions across refactors. Because Sapphire structs compile
 to zero-cost contiguous memory, named structs provide superior clarity with
 zero performance penalty.
+
+### Eliminating dual-entry semantics in favor of explicit entry points
+
+Early iterations of scripting languages often allow arbitrary procedural
+statements at the root of a file alongside declarations. Sapphire explicitly
+rejects this dual-entry pattern:
+* **Elimination of import-time side effects**: Modules that execute procedural
+  statements on import cause subtle ordering bugs, hidden global mutations, and
+  unintended network or filesystem I/O during compilation or dependency-loading.
+* **Deterministic static initialization**: Module-level variables are restricted
+  to compile-time constant expressions. This prevents static initialization
+  order fiascos where the value of a global depends on the arbitrary order of
+  imported modules.
+* **AOT and JIT compiler optimization**: Explicit entry points (`func main()`,
+  test blocks, or engine callbacks) give the compiler unambiguous call graphs.
+  Ahead-of-time (AOT) dead-code elimination, whole-program optimization, and
+  deterministic runtime startup sequences require modules to be purely
+  declarative.
+* **Isolation of mutable state**: File-private mutable state (`var`) initialized
+  with constant expressions cannot be exported across modules, preventing
+  spooky action-at-a-distance and data races across compilation units.
 
 ### Future considerations & exploratory directions
 

@@ -9,7 +9,12 @@ from unittest.mock import MagicMock, patch
 from testing.test_utils import suppress_output
 
 
-from src.cli.sapphire import main, _collect_sp_watch_files, _run_dev_watcher
+from src.cli.sapphire import (
+    main,
+    _collect_sp_watch_files,
+    _prepare_exec_env,
+    _run_dev_watcher,
+)
 
 
 class SapphireCLITest(unittest.TestCase):
@@ -453,6 +458,25 @@ class SapphireCLITest(unittest.TestCase):
         with suppress_output():
           main()
       self.assertEqual(cm.exception.code, 1)
+
+  def test_prepare_exec_env_contains_library_paths(self):
+    env = _prepare_exec_env()
+    self.assertIn("PYTHONPATH", env)
+    self.assertIn("LUA_PATH", env)
+    pythonpath = env["PYTHONPATH"]
+    self.assertTrue(any("lib" in p for p in pythonpath.split(os.pathsep)))
+    luapath = env["LUA_PATH"]
+    self.assertTrue("?.lua" in luapath)
+
+  def test_prepare_exec_env_preserves_custom_paths(self):
+    custom_py = "/custom/python/path"
+    custom_lua = "/custom/lua/path/?.lua"
+    with patch.dict(
+        os.environ, {"PYTHONPATH": custom_py, "LUA_PATH": custom_lua}
+    ):
+      env = _prepare_exec_env()
+      self.assertIn(custom_py, env["PYTHONPATH"])
+      self.assertIn(custom_lua, env["LUA_PATH"])
 
 
 if __name__ == "__main__":

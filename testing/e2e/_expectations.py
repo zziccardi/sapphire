@@ -19,6 +19,18 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_log": 2.0,
         "test_pow_ceil_floor": 1,
     },
+    "std_os_test.sp": {
+        "test_args": 1,
+        "test_env": 1,
+    },
+    "std_fs_test.sp": {
+        "test_file_roundtrip": 1,
+        "test_nonexistent_file": 1,
+    },
+    "std_time_test.sp": {
+        "test_now": 1,
+        "test_sleep": 1,
+    },
     "arithmetic_test.sp": {
         "test_integer_arithmetic": 15,
         "test_integer_division": 4.25,
@@ -82,6 +94,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_array_mutation": 99,
         "test_array_push": 3,
         "test_array_contains": 1,
+        "test_array_swap": 1,
     },
     "expressions_and_casting_test.sp": {
         "test_float_to_int_cast": 9,
@@ -167,5 +180,22 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_coroutine_exhaustion": 1,
         "test_guard_unwrapping_rejection": 42,
         "test_nil_coalescing_fallback": 99,
+    },
+    "module_constants_test.sp": {
+        "test_integer_constant_expr": True,
+        "test_float_constant_expr": True,
+        "test_string_constant_expr": True,
+        "test_ternary_constant_expr": True,
+        "test_array_constant_expr": True,
+        "test_map_constant_expr": True,
+        "test_struct_constant_expr": True,
+        "test_module_var_state": True,
+    },
+    "fixed_arrays_test.sp": {
+        "test_fixed_array_indexing": 60,
+        "test_fixed_array_negative_indexing": 60,
+        "test_dynamic_array_negative_indexing": 500,
+        "test_fixed_array_assignment_to_dynamic": 3,
+        "test_fixed_array_mutation_with_negative_index": 99,
     },
 }

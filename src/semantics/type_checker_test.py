@@ -1321,11 +1321,11 @@ class TestTypeChecker(unittest.TestCase):
 
     # Prototype struct allowing __proto__
     self._check("""
-    var a = Arena();
     proto Goblin {
       var hp: int;
     }
     func test() {
+      var a = Arena();
       let g = Goblin { hp = 100 } in a;
       let parent = g.__proto__;
     }
@@ -1987,10 +1987,71 @@ class TestTypeChecker(unittest.TestCase):
       self._check("""
       return 42;
       """)
-    self.assertIn("Return statement outside function context", str(context.exception))
+    self.assertTrue(
+        "Return statement outside function context" in str(context.exception)
+        or "Executable statements are not permitted at module scope" in str(context.exception)
+    )
 
-  def test_top_level_script_statements(self):
-    """Verifies that top-level script statements pass semantic analysis cleanly."""
+  def test_top_level_executable_statements_rejected(self):
+    """Verifies that top-level procedural statements are rejected at module scope."""
+    code = """
+    var count = 0;
+    for i in [1, 2, 3] {
+      count += i;
+    }
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Executable statements are not permitted at module scope", str(context.exception))
+
+  def test_module_level_constant_expressions(self):
+    """Verifies valid compile-time constant expressions at module scope."""
+    code = """
+    let MAX_SPEED: int = 100 + 20 * 2;
+    let PI = 3.14159;
+    let TITLE = f"Game v{1}";
+    let STATUS = true ? "ACTIVE" : "IDLE";
+    let NUMBERS = [1, 2, 3];
+    let CONFIG = {"timeout": 30};
+
+    struct Point {
+      var x: float;
+      var y: float;
+    }
+
+    let ORIGIN = Point { x = 0.0, y = 0.0 };
+
+    func main() {
+      let speed = MAX_SPEED;
+    }
+    """
+    self._check(code)
+
+  def test_module_level_dynamic_initialization_rejected(self):
+    """Verifies that dynamic function calls are rejected in module-level initializers."""
+    code = """
+    func get_default(): int {
+      return 42;
+    }
+
+    let BAD_VAL = get_default();
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("must be initialized with a compile-time constant expression", str(context.exception))
+
+  def test_module_level_mutable_export_rejected(self):
+    """Verifies that exporting mutable module-level variables is prohibited."""
+    code = """
+    export {
+      my_count,
+    }
+
+    var my_count = 0;
+    """
+    with self.assertRaises(SemanticError) as context:
+      self._check(code)
+    self.assertIn("Cannot export mutable module-level variable", str(context.exception))
   def test_extern_and_export_type_checking(self):
     """Verifies that @extern var and trait signatures permit type-safe calls and reject invalid arguments."""
     code = """
@@ -2933,14 +2994,21 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Array index out of bounds: index 3 is out of bounds for array of size 3.", str(ctx.exception))
 
-    # 2. Negative index on array literal
+    # 2. Valid negative indexing and out of bounds negative index on array literal
+    self._check("""
+    func test() {
+      let last = [10, 20, 30][-1];
+      let first = [10, 20, 30][-3];
+    }
+    """)
+
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       func test() {
-        let x = [10, 20, 30][-1];
+        let x = [10, 20, 30][-4];
       }
       """)
-    self.assertIn("Array index out of bounds: negative index '-1' is not allowed.", str(ctx.exception))
+    self.assertIn("Array index out of bounds: index -4 is out of bounds for array of size 3.", str(ctx.exception))
 
     # 3. Out of bounds index on array variable
     with self.assertRaises(SemanticError) as ctx:
@@ -2968,8 +3036,79 @@ class TestTypeChecker(unittest.TestCase):
       let arr = [10, 20, 30];
       let first = arr[0];
       let last = arr[2];
+      let back = arr[-1];
     }
     """)
+
+  def test_fixed_size_array_type_checking(self):
+    """Verifies semantic analysis and bounds rules for [T; N] fixed-size arrays."""
+    # 1. Valid declaration, literal assignment, and indexing
+    self._check("""
+    func test() {
+      let scores: [int; 3] = [95, 88, 72];
+      let first = scores[0];
+      let last = scores[2];
+      let back = scores[-1];
+      let front_neg = scores[-3];
+    }
+    """)
+
+    # 2. Literal size mismatch
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let scores: [int; 3] = [95, 88];
+      }
+      """)
+    self.assertIn("Fixed-size array '[int; 3]' requires exactly 3 element(s), got 2.", str(ctx.exception))
+
+    # 3. Constant out of bounds positive index
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let scores: [int; 3] = [95, 88, 72];
+        let val = scores[3];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index 3 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 4. Constant out of bounds negative index
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let scores: [int; 3] = [95, 88, 72];
+        let val = scores[-4];
+      }
+      """)
+    self.assertIn("Array index out of bounds: index -4 is out of bounds for array of size 3.", str(ctx.exception))
+
+    # 5. Assignable from [T; N] to unbounded [T]
+    self._check("""
+    func test() {
+      let scores: [int; 3] = [95, 88, 72];
+      let dynamic: [int] = scores;
+    }
+    """)
+
+    # 6. Rejection of assigning unbounded [T] to [T; N]
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let dynamic: [int] = [1, 2, 3];
+        let fixed: [int; 3] = dynamic;
+      }
+      """)
+    self.assertIn("Cannot assign expression of type '[int]' to variable 'fixed' of type '[int; 3]'.", str(ctx.exception))
+
+    # 7. Rejection of size mismatch between fixed arrays
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let fixed3: [int; 3] = [1, 2, 3];
+        let fixed4: [int; 4] = fixed3;
+      }
+      """)
+    self.assertIn("Cannot assign expression of type '[int; 3]' to variable 'fixed4' of type '[int; 4]'.", str(ctx.exception))
 
   def test_map_compile_time_key_validation(self):
     """Verifies compile-time key checking for map literals."""
@@ -3007,7 +3146,7 @@ class TestTypeChecker(unittest.TestCase):
     )
     checker.visit_VarDeclNode(var_decl)
     sym = checker.symbol_table.lookup("arr")
-    self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2))
+    self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2, is_fixed_size=False))
 
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
@@ -6862,6 +7001,207 @@ class TestTypeChecker(unittest.TestCase):
     }
     """
     self._check(primitive_var_global_value_ok)
+
+  def test_array_swap_semantics(self):
+    """Verifies type checking and semantic constraints for Array.swap(i, j)."""
+    # 1. Valid swap on dynamic array
+    self._check("""
+    func main() {
+      var arr = [10, 20, 30];
+      arr.swap(0, 2);
+      arr.swap(i = 1, j = -1);
+    }
+    """)
+
+    # 2. Valid swap on fixed-size array
+    checker = TypeChecker()
+    checker.symbol_table.define(
+        "fixed",
+        VariableSymbol(
+            "fixed",
+            ArrayType(PrimitiveType("int"), size=3, is_fixed_size=True),
+            is_mutable=True,
+        ),
+    )
+    call_node = CallNode(
+        MemberAccessNode(IdentifierNode("fixed"), "swap", is_optional=False),
+        [ArgumentNode(None, LiteralNode(0, "int")), ArgumentNode(None, LiteralNode(2, "int"))],
+    )
+    res_t = checker.visit(call_node)
+    self.assertEqual(res_t, PrimitiveType("none"))
+    self.assertEqual(checker.errors, [])
+
+    # 3. Valid swap on array of move-only structs
+    self._check("""
+    struct Resource {
+      var handle: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func main() {
+      var res_arr = [Resource { handle = 1 }, Resource { handle = 2 }];
+      res_arr.swap(0, 1);
+    }
+    """)
+
+    # 4. Error: Calling swap on immutable array
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let arr = [1, 2, 3];
+        arr.swap(0, 1);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'swap' on constant variable 'arr'", str(ctx.exception))
+
+    # 5. Error: Calling swap through deeply immutable SharedRef
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let s = SharedRef([1, 2, 3]);
+        s.swap(0, 1);
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'swap' through deeply immutable 'SharedRef'", str(ctx.exception))
+
+    # 6. Error: Argument types must be int
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2, 3];
+        arr.swap("first", 1);
+      }
+      """)
+    self.assertIn("Argument 'i' in .swap() must be 'int'", str(ctx.exception))
+
+    # 7. Error: Missing arguments
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var arr = [1, 2, 3];
+        arr.swap(0);
+      }
+      """)
+    self.assertIn(".swap() requires mandatory 'i' and 'j' arguments", str(ctx.exception))
+
+  def test_enhanced_aliasing_hints(self):
+    """Verifies that aliasing conflict and frozen collection diagnostics include actionable hints."""
+    # 1. Subscript aliasing hint
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Item { var v: int; }
+      func process(var a: Item, b: Item) {}
+      func main() {
+        var items = [Item { v = 1 }, Item { v = 2 }];
+        process(items[0], items[1]);
+      }
+      """)
+    err = str(ctx.exception)
+    self.assertIn("Aliasing conflict: variable 'items' (or a sub-field) is mutably borrowed", err)
+    self.assertIn("Hint: To swap two elements in a collection, use 'items.swap(i, j)'", err)
+
+    # 2. Self-field method call aliasing hint
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Entity { var target: Entity?; }
+      impl Entity {
+        func __init__() { self.target = none; }
+        var func update(other: Entity?) { self.target = other; }
+        var func self_update() {
+          self.update(self.target);
+        }
+      }
+      """)
+    err = str(ctx.exception)
+    self.assertIn("Aliasing conflict: variable 'self' (or a sub-field) is mutably borrowed", err)
+    self.assertIn("Hint: Invoking a mutating method on 'self' conflicts with borrowing its field 'self.target'", err)
+
+    # 3. Frozen collection in for-in loop hint
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var nums = [1, 2, 3];
+        for n in nums {
+          nums.remove(0);
+        }
+      }
+      """)
+    err = str(ctx.exception)
+    self.assertIn("Cannot invoke mutating method 'remove' on 'nums' while it is frozen (for-in loop iteration)", err)
+    self.assertIn("Hint: Collections are frozen during iteration to prevent iterator invalidation", err)
+    self.assertIn("nums.filter(fn, in_place = true)", err)
+
+  def test_qualified_import_diagnostic(self):
+    """Verifies helpful diagnostics for full package paths of imported modules."""
+    # 1. Qualified call std.os.args()
+    code1 = """
+    import std.os;
+
+    func main() {
+      let a = std.os.args();
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code1)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Module 'std.os' was imported as 'os'. "
+        "Did you mean 'os.args()'?",
+        err,
+    )
+
+    # 2. Qualified module access without call std.os
+    code2 = """
+    import std.os;
+
+    func main() {
+      let m = std.os;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code2)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Module 'std.os' was imported as 'os'. "
+        "Did you mean 'os'?",
+        err,
+    )
+
+    # 3. Aliased import std.math as m
+    code3 = """
+    import std.math as m;
+
+    func main() {
+      let val = std.math.abs(-5);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code3)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Module 'std.math' was imported as 'm'. "
+        "Did you mean 'm.abs()'?",
+        err,
+    )
+
+    # 4. Multiple modules under prefix std used as raw identifier
+    code4 = """
+    import std.os;
+    import std.fs;
+
+    func main() {
+      let x = std;
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code4)
+    err = str(ctx.exception)
+    self.assertIn(
+        "Undefined identifier 'std'. Modules under 'std' are imported by "
+        "their module name directly",
+        err,
+    )
 
 
 if __name__ == "__main__":

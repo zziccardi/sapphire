@@ -534,7 +534,10 @@ class TypeChecker:
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))
     if isinstance(node, ArrayTypeNode):
-      return ArrayType(self._resolve_type_node(node.element_type))
+      elem_type = self._resolve_type_node(node.element_type)
+      if node.size is not None:
+        return ArrayType(elem_type, size=node.size, is_fixed_size=True)
+      return ArrayType(elem_type)
     if isinstance(node, MapTypeNode):
       return MapType(self._resolve_type_node(node.key_type), self._resolve_type_node(node.val_type))
     if isinstance(node, FunctionTypeNode):
@@ -763,7 +766,24 @@ class TypeChecker:
     for imp in getattr(node, "imports", []):
       self.visit(imp)
     for decl in node.declarations:
-      self.visit(decl)
+      if not isinstance(
+          decl,
+          (
+              StructDeclNode,
+              EnumDeclNode,
+              TraitDeclNode,
+              VarDeclNode,
+              FuncDeclNode,
+              ImplBlockNode,
+          ),
+      ):
+        self.error(
+            "Executable statements are not permitted at module scope. All "
+            "executable logic must reside inside 'func main()' or a function.",
+            node=decl,
+        )
+      else:
+        self.visit(decl)
     if getattr(node, "export_block", None):
       self.visit(node.export_block)
 
@@ -783,6 +803,12 @@ class TypeChecker:
         type_sym = self.symbol_table.lookup_type(spec.symbol)
         if not sym and not type_sym:
           self.error(f"Exported symbol '{spec.symbol}' is not defined in module.", node=spec)
+        elif isinstance(sym, VariableSymbol) and sym.is_mutable and not getattr(sym, "is_extern", False):
+          self.error(
+              f"Cannot export mutable module-level variable '{spec.symbol}'. "
+              "Module-level mutable state cannot be exported.",
+              node=spec,
+          )
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     # Fields already verified in pre-pass
@@ -1058,6 +1084,19 @@ class TypeChecker:
         self.symbol_table.define(name, sym)
       return
 
+    # Check compile-time constant expressions for module-level variables
+    if self.current_function is None:
+      from src.semantics.const_eval import is_constant_expression
+      for i, name in enumerate(node.names):
+        expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+        is_const, err_reason = is_constant_expression(expr_node, self.symbol_table)
+        if not is_const:
+          self.error(
+              f"Module-level variable '{name}' must be initialized with a "
+              f"compile-time constant expression. {err_reason}",
+              node=node,
+          )
+
     # Set expected_type for type inference (e.g. lambdas)
     old_expected = self.expected_type
     if len(node.names) == 1 and node.val_types[0]:
@@ -1086,7 +1125,7 @@ class TypeChecker:
           self.error(f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.", node=node)
         var_type = val_type
         if isinstance(var_type, ArrayType) and isinstance(expr_type, ArrayType) and expr_type.size is not None and var_type.size is None:
-          var_type = ArrayType(var_type.element_type, size=expr_type.size)
+          var_type = ArrayType(var_type.element_type, size=expr_type.size, is_fixed_size=False)
       else:
         if isinstance(expr_type, NoneType):
           self.error(f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.", node=node)
@@ -1095,6 +1134,8 @@ class TypeChecker:
           var_type = expr_type
 
       sym = VariableSymbol(name, var_type, node.is_mutable)
+      if self.current_function is None and not node.is_mutable:
+        sym.is_constant_expr = True
       self.symbol_table.define(name, sym)
 
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
@@ -1875,7 +1916,23 @@ class TypeChecker:
       type_sym = self.symbol_table.lookup_type(node.name)
       if type_sym:
         return type_sym
-      self.error(f"Undefined identifier '{node.name}'.", node=node)
+      matching_mods = self._find_imported_modules_with_prefix(node.name)
+      if len(matching_mods) == 1:
+        mod = matching_mods[0]
+        self.error(
+            f"Undefined identifier '{node.name}'. Module '{mod.module_path}' "
+            f"was imported as '{mod.name}'. Did you mean '{mod.name}'?",
+            node=node,
+        )
+      elif len(matching_mods) > 1:
+        names = ", ".join(f"'{m.name}'" for m in matching_mods)
+        self.error(
+            f"Undefined identifier '{node.name}'. Modules under '{node.name}' "
+            f"are imported by their module name directly (e.g. {names}).",
+            node=node,
+        )
+      else:
+        self.error(f"Undefined identifier '{node.name}'.", node=node)
       return PrimitiveType("none")
     if isinstance(sym, VariableSymbol):
       if sym in self.moved_symbols:
@@ -2016,6 +2073,43 @@ class TypeChecker:
     """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
     ArenaChecker.check_aliasing(self, node, signature, is_constructor)
 
+  def _get_dotted_path(self, expr: Any) -> Optional[List[str]]:
+    """Returns the dotted identifier path components of an expression."""
+    if isinstance(expr, IdentifierNode):
+      return [expr.name]
+    if isinstance(expr, MemberAccessNode) and not expr.is_optional:
+      recv = self._get_dotted_path(expr.receiver)
+      if recv is not None:
+        return recv + [expr.member]
+    return None
+
+  def _find_imported_module_by_path(self, path: str) -> Optional[ModuleSymbol]:
+    """Finds an imported ModuleSymbol by its full import path."""
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    for sym in root_scope.symbols.values():
+      if isinstance(sym, ModuleSymbol) and sym.module_path == path:
+        return sym
+    return None
+
+  def _find_imported_modules_with_prefix(
+      self, prefix: str
+  ) -> List[ModuleSymbol]:
+    """Returns all imported ModuleSymbols starting with prefix."""
+    root_scope = self.symbol_table.current_scope
+    while root_scope.parent:
+      root_scope = root_scope.parent
+    res: List[ModuleSymbol] = []
+    prefix_dot = prefix + "."
+    for sym in root_scope.symbols.values():
+      if (
+          isinstance(sym, ModuleSymbol)
+          and sym.module_path.startswith(prefix_dot)
+      ):
+        res.append(sym)
+    return res
+
   def visit_CallNode(self, node: CallNode) -> Type:
     # Generic function resolution & monomorphization
     sym = None
@@ -2065,6 +2159,8 @@ class TypeChecker:
             mod_sym.exports[mangled_name] = mono_sym
 
     # 1. Resolve callee
+    if isinstance(node.callee, MemberAccessNode):
+      node.callee.is_call = True
     callee_type = self.visit(node.callee)
 
     if getattr(node.callee, "is_string_from", False):
@@ -2433,6 +2529,78 @@ class TypeChecker:
     if isinstance(node.receiver, MoveNode):
       self.error(f"Cannot access member '{node.member}' on moved variable '{node.receiver.name}'.", node=node)
       return PrimitiveType("none")
+
+    if getattr(node, "has_diagnosed_module_import", False):
+      return getattr(node, "diagnosed_module_type", PrimitiveType("none"))
+
+    # Check if receiver is a dotted path to an imported module (e.g.
+    # std.os.args)
+    dotted_recv = self._get_dotted_path(node.receiver)
+    if dotted_recv and len(dotted_recv) >= 2:
+      root_ident = dotted_recv[0]
+      if (
+          self.symbol_table.lookup(root_ident) is None
+          and self.symbol_table.lookup_type(root_ident) is None
+      ):
+        for i in range(len(dotted_recv), 1, -1):
+          sub_path = ".".join(dotted_recv[:i])
+          mod_sym = self._find_imported_module_by_path(sub_path)
+          if mod_sym:
+            remaining = dotted_recv[i:]
+            call_suffix = "()" if getattr(node, "is_call", False) else ""
+            if remaining:
+              sug = (
+                  f"{mod_sym.name}.{'.'.join(remaining)}.{node.member}"
+                  f"{call_suffix}"
+              )
+            else:
+              sug = f"{mod_sym.name}.{node.member}{call_suffix}"
+            self.error(
+                f"Undefined identifier '{root_ident}'. Module "
+                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
+                f"Did you mean '{sug}'?",
+                node=node.receiver,
+            )
+            node.receiver.has_diagnosed_module_import = True
+            node.receiver.diagnosed_module_type = ModuleType(
+                mod_sym.module_path
+            )
+            if not remaining:
+              exp_sym = mod_sym.lookup_export(node.member)
+              if exp_sym:
+                return (
+                    exp_sym.symbol_type
+                    if hasattr(exp_sym, "symbol_type")
+                    else exp_sym
+                )
+            return PrimitiveType("none")
+
+    dotted_self = self._get_dotted_path(node)
+    if dotted_self and len(dotted_self) >= 2:
+      root_ident = dotted_self[0]
+      if (
+          self.symbol_table.lookup(root_ident) is None
+          and self.symbol_table.lookup_type(root_ident) is None
+      ):
+        for i in range(len(dotted_self), 1, -1):
+          sub_path = ".".join(dotted_self[:i])
+          mod_sym = self._find_imported_module_by_path(sub_path)
+          if mod_sym:
+            remaining = dotted_self[i:]
+            if remaining:
+              sug = f"{mod_sym.name}.{'.'.join(remaining)}"
+            else:
+              sug = mod_sym.name
+            self.error(
+                f"Undefined identifier '{root_ident}'. Module "
+                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
+                f"Did you mean '{sug}'?",
+                node=node,
+            )
+            node.has_diagnosed_module_import = True
+            node.diagnosed_module_type = ModuleType(mod_sym.module_path)
+            return ModuleType(mod_sym.module_path)
+
     receiver_type = self.visit(node.receiver)
 
     # Optional chaining check
@@ -2845,7 +3013,9 @@ class TypeChecker:
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:
       if isinstance(self.expected_type, ArrayType):
-        return ArrayType(self.expected_type.element_type, size=0)
+        if self.expected_type.is_fixed_size and self.expected_type.size != 0:
+          self.error(f"Fixed-size array '[{self.expected_type.element_type}; {self.expected_type.size}]' requires exactly {self.expected_type.size} element(s), got 0.", node=node)
+        return ArrayType(self.expected_type.element_type, size=0, is_fixed_size=self.expected_type.is_fixed_size)
       return ArrayType(NoneType(), size=0)
 
     elem_types = [self.visit(e) for e in node.elements]
@@ -2857,14 +3027,18 @@ class TypeChecker:
         if not etype.is_compatible(target_elem):
           self.error(f"Array element of type '{etype}' is not compatible with expected element type '{target_elem}'.")
           break
-      return ArrayType(target_elem, size=len(node.elements))
+      if self.expected_type.is_fixed_size:
+        if len(node.elements) != self.expected_type.size:
+          self.error(f"Fixed-size array '[{target_elem}; {self.expected_type.size}]' requires exactly {self.expected_type.size} element(s), got {len(node.elements)}.", node=node)
+        return ArrayType(target_elem, size=len(node.elements), is_fixed_size=True)
+      return ArrayType(target_elem, size=len(node.elements), is_fixed_size=False)
 
     first_type = elem_types[0]
     for etype in elem_types[1:]:
       if not etype.is_compatible(first_type) and not first_type.is_compatible(etype):
         self.error("Inconsistent element types in array literal.")
         break
-    return ArrayType(first_type, size=len(node.elements))
+    return ArrayType(first_type, size=len(node.elements), is_fixed_size=False)
 
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
     if not node.entries:
@@ -2920,10 +3094,9 @@ class TypeChecker:
     const_idx = self._get_const_int_value(node.index)
     if const_idx is not None:
       size = array_type.size
-      if const_idx < 0:
-        self.error(f"Array index out of bounds: negative index '{const_idx}' is not allowed.")
-      elif size is not None and const_idx >= size:
-        self.error(f"Array index out of bounds: index {const_idx} is out of bounds for array of size {size}.")
+      if size is not None:
+        if const_idx >= size or const_idx < -size:
+          self.error(f"Array index out of bounds: index {const_idx} is out of bounds for array of size {size}.", node=node)
 
   def _check_map_literal_key(self, node: IndexExprNode) -> None:
     if isinstance(node.array, MapLiteralNode) and isinstance(node.index, LiteralNode):

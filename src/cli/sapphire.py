@@ -26,6 +26,7 @@ from src.parser.ast_builder import ASTBuilder
 from src.parser.error_listener import CustomErrorListener
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
+from src.semantics.module_resolver import find_sapphire_lib_dir
 from src.semantics.type_checker import TypeChecker, SemanticError
 
 TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
@@ -53,13 +54,25 @@ def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
 def _prepare_exec_env() -> Dict[str, str]:
   """Prepares execution environment with standard Sapphire library paths."""
   env = os.environ.copy()
-  lib_dir = os.path.join(root_dir, "lib")
-  py_paths = [root_dir, lib_dir]
+  discovered_lib = find_sapphire_lib_dir()
+  lib_dir = discovered_lib or os.path.join(root_dir, "lib")
+  lib_parent = os.path.dirname(lib_dir)
+
+  py_paths = []
+  for p in (root_dir, lib_parent, lib_dir, os.path.join(lib_dir, "std")):
+    if p and p not in py_paths:
+      py_paths.append(p)
   if "PYTHONPATH" in env and env["PYTHONPATH"]:
     py_paths.append(env["PYTHONPATH"])
   env["PYTHONPATH"] = os.pathsep.join(py_paths)
 
-  lua_paths = [f"{lib_dir}/?.lua", f"{lib_dir}/?/init.lua"]
+  lua_paths = [
+      f"{lib_dir}/?.lua",
+      f"{lib_dir}/?/init.lua",
+      f"{lib_dir}/std/?.lua",
+      f"{lib_dir}/love2d/?.lua",
+      f"{lib_parent}/?.lua",
+  ]
   if "LUA_PATH" in env and env["LUA_PATH"]:
     lua_paths.append(env["LUA_PATH"])
   else:

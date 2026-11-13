@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from typing import List
 import unittest
 from unittest.mock import patch
 
@@ -24,7 +25,6 @@ from src.parser.ast import FuncDeclNode, StructDeclNode, AnnotationNode, BlockNo
 from src.semantics.type_checker import SemanticError
 
 from testing.test_utils import suppress_output
-
 
 
 class TestRunnerEngineTest(unittest.TestCase):
@@ -51,10 +51,12 @@ impl t.TestCase for SuiteTest {
     self.count = 0;
   }
 
+  @test
   func test_suite_pass() {
     self.expect_eq(self.count, 5);
   }
 
+  @test
   func test_suite_fail() {
     self.expect_eq(self.count, 999, "Expected 999");
     self.assert_eq(self.count, 999, "Fatal 999");
@@ -89,6 +91,7 @@ impl t.TestCase for BadSetupTest {
     t.assert_true(false, "Setup failed");
   }
 
+  @test
   func test_dummy() {
     t.assert_true(true);
   }
@@ -141,6 +144,50 @@ impl t.TestCase for BadSetupTest {
     self.assertIn("test_suite_pass", suites["SuiteTest"])
     self.assertIn("test_suite_fail", suites["SuiteTest"])
 
+  def test_discover_tests_mandates_at_test_and_warns(self):
+    warn_sp = os.path.join(self.temp_dir, "test_warnings.sp")
+    with open(warn_sp, "w", encoding="utf-8") as f:
+      f.write("""
+import std.testing as t;
+
+struct WarnSuite {}
+
+impl t.TestCase for WarnSuite {
+  @test
+  func test_annotated() {}
+
+  func test_unannotated_method() {}
+
+  func helper_method() {}
+}
+
+@test
+func test_annotated_standalone() {}
+
+func test_unannotated_standalone() {}
+
+func normal_helper() {}
+""")
+    ast = parse_ast(warn_sp)
+    warnings: List[str] = []
+    standalone, suites = discover_tests(ast, warnings=warnings)
+
+    # Annotated tests are discovered
+    self.assertEqual(standalone, ["test_annotated_standalone"])
+    self.assertEqual(suites, {"WarnSuite": ["test_annotated"]})
+
+    # Unannotated functions/methods prefixed with test_ trigger warnings
+    self.assertEqual(len(warnings), 2)
+    self.assertTrue(
+        any("test_unannotated_standalone" in w for w in warnings)
+    )
+    self.assertTrue(
+        any("WarnSuite.test_unannotated_method" in w for w in warnings)
+    )
+    # Non-test helpers do not trigger warnings
+    self.assertFalse(any("helper_method" in w for w in warnings))
+    self.assertFalse(any("normal_helper" in w for w in warnings))
+
   def test_at_test_conditional_compilation(self):
     # Normal transpile: @test function should be omitted
     out_normal = os.path.join(self.temp_dir, "normal.py")
@@ -148,6 +195,7 @@ impl t.TestCase for BadSetupTest {
     with open(out_normal, "r", encoding="utf-8") as f:
       content = f.read()
     self.assertNotIn("def test_standalone_pass", content)
+    self.assertNotIn("def test_suite_pass", content)
     self.assertIn("def normal_function", content)
 
     # Test transpile: @test function should be emitted
@@ -156,6 +204,7 @@ impl t.TestCase for BadSetupTest {
     with open(out_test, "r", encoding="utf-8") as f:
       content = f.read()
     self.assertIn("def test_standalone_pass", content)
+    self.assertIn("def test_suite_pass", content)
 
   def test_run_tests_python_full(self):
     ast = parse_ast(self.sample_sp)
@@ -360,6 +409,7 @@ impl TestCase for UnimportedSuite {
 import std.testing as t;
 struct NoneKindTest {}
 impl t.TestCase for NoneKindTest {
+  @test
   func test_none_fail() {
     let x: int? = 42;
     self.expect_not_none(x);

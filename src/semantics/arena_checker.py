@@ -1099,9 +1099,26 @@ class ArenaChecker:
         if r1 == r2:
           overlap = p1[:len(p2)] == p2 or p2[:len(p1)] == p1
           if overlap and (m1 or m2):
+            hint = ""
+            if "[]" in p1 and "[]" in p2:
+              hint = (
+                  f" Hint: To swap two elements in a collection, use "
+                  f"'{r1}.swap(i, j)'. To pass an element while modifying "
+                  f"another, bind a local snapshot or process elements "
+                  f"sequentially."
+              )
+            elif (not p1 and p2) or (not p2 and p1):
+              field_path = ".".join(p2 if p2 else p1)
+              hint = (
+                  f" Hint: Invoking a mutating method on '{r1}' conflicts with "
+                  f"borrowing its field '{r1}.{field_path}'. Bind the field to "
+                  f"a local variable before the call, or pass individual fields "
+                  f"directly."
+              )
             checker.error(
                 f"Aliasing conflict: variable '{r1}' (or a sub-field) "
-                f"is mutably borrowed and cannot be borrowed again in the same call."
+                f"is mutably borrowed and cannot be borrowed again in the same "
+                f"call.{hint}"
             )
         else:
           sym1 = checker.symbol_table.lookup(r1)

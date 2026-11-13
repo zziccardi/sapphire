@@ -1,6 +1,5 @@
 """Test discovery and execution engine for Sapphire (`sapphire test`)."""
 
-import glob
 import importlib.util
 import os
 import shutil
@@ -8,19 +7,16 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import List, Tuple, Dict, Any, Optional
+from typing import Dict, List, Tuple, Optional
 
 from antlr4 import FileStream, CommonTokenStream
-from antlr4.error.ErrorListener import ErrorListener
 
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
-from src.parser.ast import FuncDeclNode, ImplBlockNode, IdentifierNode
+from src.parser.ast import FuncDeclNode, ImplBlockNode
 from src.code_gen.transpiler import transpile_file
-from src.code_gen.source_map import SourceMapBuilder
-from src.cli.diagnostics import get_source_line, format_diagnostic
-
+from src.cli.diagnostics import get_source_line
 
 
 from src.common.errors import SapphireError, SapphireSyntaxError
@@ -31,7 +27,6 @@ class TestDiscoveryError(SapphireError):
   """Raised when test discovery or test suite parsing encounters invalid states."""
 
   pass
-
 
 
 def find_sp_files(path: str) -> List[str]:
@@ -70,8 +65,15 @@ def parse_ast(sp_file: str):
   return builder.visit(tree)
 
 
-def discover_tests(ast) -> Tuple[List[str], Dict[str, List[str]]]:
+def discover_tests(
+    ast, warnings: Optional[List[str]] = None
+) -> Tuple[List[str], Dict[str, List[str]]]:
   """Discovers standalone @test functions and struct-based TestCase methods.
+
+  Args:
+    ast: The parsed AST node.
+    warnings: Optional list to collect discovery warnings (e.g. methods named
+      with 'test_' prefix but missing '@test' annotation).
 
   Returns:
     (standalone_test_funcs, {struct_name: [test_methods]})
@@ -80,18 +82,24 @@ def discover_tests(ast) -> Tuple[List[str], Dict[str, List[str]]]:
   suite_tests = {}
 
   # Check imports to ensure std.testing is referenced
-  has_testing_import = False
   for imp in getattr(ast, "imports", []):
     if imp.path == "std.testing" or imp.path.startswith("std.testing"):
-      has_testing_import = True
       break
 
   # Discover standalone @test functions
   for stmt in getattr(ast, "declarations", []):
     if isinstance(stmt, FuncDeclNode):
-      for ann in getattr(stmt, "annotations", []):
-        if ann.name == "test":
-          standalone_tests.append(stmt.name)
+      has_test_ann = any(
+          getattr(ann, "name", "") == "test"
+          for ann in getattr(stmt, "annotations", [])
+      )
+      if has_test_ann:
+        standalone_tests.append(stmt.name)
+      elif stmt.name.startswith("test_") and warnings is not None:
+        warnings.append(
+            f"Function '{stmt.name}' begins with 'test_' but is missing "
+            "'@test' annotation; it will not be executed as a test."
+        )
 
     # Discover impl blocks for structs implementing TestCase
     elif isinstance(stmt, ImplBlockNode):
@@ -101,8 +109,19 @@ def discover_tests(ast) -> Tuple[List[str], Dict[str, List[str]]]:
         test_methods = []
         for member in stmt.members:
           func_decl = getattr(member, "func_decl", member)
-          if isinstance(func_decl, FuncDeclNode) and func_decl.name.startswith("test_"):
-            test_methods.append(func_decl.name)
+          if isinstance(func_decl, FuncDeclNode):
+            has_test_ann = any(
+                getattr(a, "name", "") == "test"
+                for a in getattr(func_decl, "annotations", [])
+            )
+            if has_test_ann:
+              test_methods.append(func_decl.name)
+            elif func_decl.name.startswith("test_") and warnings is not None:
+              warnings.append(
+                  f"Method '{struct_name}.{func_decl.name}' begins with "
+                  "'test_' but is missing '@test' annotation; it will not be "
+                  "executed as a test."
+              )
         if test_methods:
           suite_tests[struct_name] = test_methods
 
@@ -170,10 +189,14 @@ def run_tests_python(
     workspace_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
     )
-    lib_dir = os.path.join(workspace_root, "lib")
+    from src.semantics.module_resolver import find_sapphire_lib_dir
+
+    discovered_lib = find_sapphire_lib_dir()
+    lib_dir = discovered_lib or os.path.join(workspace_root, "lib")
+    lib_parent = os.path.dirname(lib_dir)
     sp_dir = os.path.dirname(os.path.abspath(sp_file))
     cwd = os.getcwd()
-    for path_entry in (workspace_root, lib_dir, cwd, sp_dir):
+    for path_entry in (workspace_root, lib_parent, lib_dir, cwd, sp_dir):
       if path_entry:
         if path_entry in sys.path:
           sys.path.remove(path_entry)
@@ -807,7 +830,10 @@ def run_tests(
   for sp_file in sp_files:
     try:
       ast = parse_ast(sp_file)
-      standalone_tests, suite_tests = discover_tests(ast)
+      disc_warnings: List[str] = []
+      standalone_tests, suite_tests = discover_tests(ast, warnings=disc_warnings)
+      for w in disc_warnings:
+        print(f"[ WARNING ] {os.path.basename(sp_file)}: {w}")
     except BaseException as e:  # pragma: no cover
       print(f"[ FAIL ] {os.path.basename(sp_file)} (parsing failed)")
       for line in str(e).splitlines():

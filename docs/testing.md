@@ -1,9 +1,15 @@
 # Testing framework
 
 ## 1. Overview
-The `std.testing` module provides a lightweight, robust, and extensible testing framework built natively into Sapphire's standard library. It supports both:
-1. **Struct-based test suites** implementing the `TestCase` trait (for tests requiring state management, setup, and teardown).
+The `std.testing` module provides a lightweight, robust, and extensible testing
+framework built natively into Sapphire's standard library. It supports both:
+1. **Struct-based test suites** implementing the `TestCase` trait (for tests
+   requiring state management, setup, and teardown).
 2. **Standalone `@test` annotated functions** (for simple, stateless unit tests).
+
+All test methods and standalone test functions must be annotated with `@test`
+to be discovered and executed by `sapphire test`. Non-annotated functions and
+methods are treated as non-test helpers and are never executed directly.
 
 It features both **fatal (`assert_*`)** assertions (aborts test execution on failure) and **soft (`expect_*`)** assertions (logs failures and continues execution to catch multiple errors in a single run).
 
@@ -79,7 +85,8 @@ impl testing.TestCase for UserDatabaseTest {
     self.db.close();
   }
 
-  // Test method (prefixed with test_)
+  // Test method (annotated with `@test`)
+  @test
   func test_user_retrieval() {
     let user = self.db.find_user(self.test_user_id);
 
@@ -92,6 +99,7 @@ impl testing.TestCase for UserDatabaseTest {
     }
   }
 
+  @test
   func test_user_deletion() {
     self.db.delete_user(self.test_user_id);
 
@@ -181,6 +189,7 @@ impl testing.TestCase for ServerTest {
     self.fixture = clone base_server_proto;
   }
 
+  @test
   var func test_server_start() {
     self.fixture.status = "RUNNING";
 

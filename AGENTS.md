@@ -48,6 +48,12 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 ### 3.2 Memory Semantics & Variables
 * `let`: Immutable binding (constant).
 * `var`: Mutable binding.
+* **Module-level declarations**: Executable procedural statements are
+  prohibited at module scope; all execution logic must reside in functions
+  (`func main()`, `@test`, or host callbacks). Module-level variables (`let`
+  and `var`) must be initialized with compile-time constant expressions.
+  Module-level `var` variables are file-private and cannot be exported across
+  modules.
 * **Storage & Ownership**:
   * Plain data `struct`s, primitives, `enum`s, `String`, `Range`, `proto`
     handles, and collections of Copy types copy (or CoW-share) on assignment.
@@ -67,8 +73,14 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 * **Call-site exclusivity & iteration freeze**: A reference path (including
   member chains and subscript projections `arr[i]`) cannot be passed mutably
   (`var`) if any overlapping path is also referenced in the same call.
-  Collections are frozen against mutation during `for-in` loops and
-  `.map`/`.filter`/`.reduce`/`.sort` callbacks.
+  * Collections are frozen against mutation during `for-in` loops and
+    `.map`/`.filter`/`.reduce`/`.sort` callbacks.
+  * Container projections cannot be passed to mutating methods on the same
+    container (`arr.push(arr[0])` is rejected to prevent reallocation UAF).
+  * `SharedRef<T>` is deeply immutable across all projections; `let Ref<T>`
+    prohibits field mutations and `var func` calls (requires `var Ref<T>`).
+  * Mutably borrowing an ancestor prototype (`var base`) while borrowing a
+    descendant clone in the same call is rejected.
 
 ### 3.3 Optionals & Unwrapping
 * Optionals are denoted by `?` (e.g. `int?`, `Player?`). Null is represented as `none`.
@@ -105,12 +117,19 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 * Default parameters: `func attack(target: Entity, bonus: int = 0)`.
 * Multiple returns: `func pos(): float, float { return x, y; }` with destructuring `let x, y = pos();`.
 * Lambdas: Single parameter shorthand `numbers.map(x -> x * 2)` or multi-param
-  `(a: int, b: int) -> int { return a + b; }`. Escaping closures cannot capture
-  local stack borrows.
+  `(a: int, b: int) -> int { return a + b; }`. Escaping closures (returned or
+  stored into an outer/earlier LIFO variable or boxed in `Ref`/`SharedRef`)
+  cannot capture local stack non-primitives or local `var` bindings; immutable
+  primitive scalars (`let x: int`) are copied by value and allowed.
 * Coroutines: Declared with `Coroutine<T>` or `Coroutine<void>` (move-only;
   cannot escape local stack borrows or hold live move-only RAII bindings across
   `yield`). Use `yield;` or `yield <expr>;`. Stepped via `.step()`,
-  `.is_done()`, `.reset()`.
+  `.is_done()`, `.reset()`. Scoped RAII resources must complete inside an
+  inner `{ ... }` block that exits before `yield`, or be moved before `yield`.
+* Module-level `var` global reentrancy: Mutable non-primitive `var` bindings
+  cannot be passed by reference if exported or if the callee reads/mutates them
+  in its transitive call graph; top-level non-aliased method calls
+  (`submit_btn.render()`) and `let` constants remain valid.
 
 ### 3.6 Structs & Implementation Blocks
 * Data definition (`struct`) and method implementation (`impl`) must be strictly separated:
@@ -159,6 +178,7 @@ All Sapphire code files (`.sp`) must strictly adhere to the specification in [`d
 
 ### 3.8 Modules & Encapsulation
 * All top-level declarations are **module-private by default**.
+* Module-level `var` variables (except `@extern var`) cannot be exported.
 * Exactly one `export { ... }` manifest block per file defines public API:
   ```sapphire
   export {
@@ -319,6 +339,8 @@ pipenv run sapphire run samples/overview.sp --dev
    * Do **not** generate code or semantics relying on vtables or dynamic method overriding (vtables are strictly confined to explicit `Dynamic<Trait>` for open ABI boundaries).
    * Do **not** allow struct up-casting.
    * Do **not** introduce exceptions or stack-unwinding constructs into Sapphire syntax.
+   * Do **not** place executable procedural statements at module scope
+     (wrap execution in `func main()`, `@test`, or host callbacks).
    * Always enforce semicolon statement termination in `.sp` code.
 3. **Preserve Documentation & Comments**:
    * Do not delete or mangle docstrings, inline architectural comments, or existing specs.
@@ -336,6 +358,11 @@ pipenv run sapphire run samples/overview.sp --dev
      `_sapphire_disposed_`) must inspect own storage (`__dict__` /
      `object.__setattr__` in Python; `rawget`/`rawset` in Lua), and implicit
      `clone` must inherit the source object's `__arena`.
+   * In `TypeChecker`, `self.moved_symbols` stores `VariableSymbol` instances
+     (not string names); check `sym not in self.moved_symbols and not
+     sym.is_moved`.
+   * In Sapphire grammar, the `export { ... }` manifest block does not take a
+     trailing semicolon after the closing brace `}`.
 4. **Code Quality Standards**:
    * Python codebase: Follow the Google Python Style Guide rather than PEP 8,
      maintain 2-space or 4-space consistency with surrounding files, include
