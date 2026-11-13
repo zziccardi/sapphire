@@ -123,7 +123,7 @@ class DeclarationPass:
           cached_entry = DeclarationPass._module_cache.get(mod_file_path)
           if cached_entry is not None and mtime is not None and cached_entry[0] == mtime and cached_entry[1] == fsize:
             mod_sym.exports.update(cached_entry[2])
-            if is_builtin:
+            if imp.path == "std.testing" or imp.path.startswith("std.testing"):
               mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
             continue
 

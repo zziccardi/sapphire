@@ -19,6 +19,18 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_log": 2.0,
         "test_pow_ceil_floor": 1,
     },
+    "std_os_test.sp": {
+        "test_args": 1,
+        "test_env": 1,
+    },
+    "std_fs_test.sp": {
+        "test_file_roundtrip": 1,
+        "test_nonexistent_file": 1,
+    },
+    "std_time_test.sp": {
+        "test_now": 1,
+        "test_sleep": 1,
+    },
     "arithmetic_test.sp": {
         "test_integer_arithmetic": 15,
         "test_integer_division": 4.25,

@@ -7,7 +7,13 @@ data structures (String, Array, Map, Range, and Enum) across Python and Lua back
 from typing import Any, Callable, Dict, Tuple
 from src.parser.ast import CallNode, IdentifierNode, MemberAccessNode
 
-BUILTIN_MODULES = ("std.testing", "std.math")
+BUILTIN_MODULES = (
+    "std.testing",
+    "std.math",
+    "std.os",
+    "std.fs",
+    "std.time",
+)
 
 
 def is_builtin_module(import_path: str) -> bool:

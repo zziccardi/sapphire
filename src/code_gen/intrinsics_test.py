@@ -13,6 +13,9 @@ class TestIntrinsicRegistry(unittest.TestCase):
     self.assertTrue(is_builtin_module("std.math"))
     self.assertTrue(is_builtin_module("std.math.special"))
     self.assertTrue(is_builtin_module("std.testing"))
+    self.assertTrue(is_builtin_module("std.os"))
+    self.assertTrue(is_builtin_module("std.fs"))
+    self.assertTrue(is_builtin_module("std.time"))
     self.assertFalse(is_builtin_module("entities.character"))
     self.assertFalse(is_builtin_module("custom_math"))
 
