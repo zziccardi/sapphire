@@ -19,7 +19,10 @@ sapphire = "src.cli.sapphire:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["src*", "lib*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.sp", "*.lua", "*.lua.map"]
 
 [tool.ruff]
 line-length = 80

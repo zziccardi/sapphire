@@ -189,10 +189,14 @@ def run_tests_python(
     workspace_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
     )
-    lib_dir = os.path.join(workspace_root, "lib")
+    from src.semantics.module_resolver import find_sapphire_lib_dir
+
+    discovered_lib = find_sapphire_lib_dir()
+    lib_dir = discovered_lib or os.path.join(workspace_root, "lib")
+    lib_parent = os.path.dirname(lib_dir)
     sp_dir = os.path.dirname(os.path.abspath(sp_file))
     cwd = os.getcwd()
-    for path_entry in (workspace_root, lib_dir, cwd, sp_dir):
+    for path_entry in (workspace_root, lib_parent, lib_dir, cwd, sp_dir):
       if path_entry:
         if path_entry in sys.path:
           sys.path.remove(path_entry)
