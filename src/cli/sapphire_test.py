@@ -437,6 +437,47 @@ class SapphireCLITest(unittest.TestCase):
           main()
       self.assertEqual(cm.exception.code, 1)
 
+  def test_check_subcommand_imported_semantic_error(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    dep_sp = os.path.join(self.temp_dir.name, "dep_sem_err.sp")
+    with open(dep_sp, "w", encoding="utf-8") as f:
+      f.write("export { state }\nvar state: int = 0;\n")
+    entry_sp = os.path.join(self.temp_dir.name, "entry_sem_err.sp")
+    with open(entry_sp, "w", encoding="utf-8") as f:
+      f.write("import dep_sem_err;\nfunc main() {}\n")
+
+    test_args = ["sapphire", "check", entry_sp]
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", test_args):
+      with redirect_stdout(io.StringIO()), redirect_stderr(stderr_buf):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+    self.assertIn("dep_sem_err.sp", stderr_buf.getvalue())
+
+  def test_check_subcommand_imported_syntax_error(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    dep_sp = os.path.join(self.temp_dir.name, "dep_syn_err.sp")
+    with open(dep_sp, "w", encoding="utf-8") as f:
+      f.write("func broken( {\n")
+    entry_sp = os.path.join(self.temp_dir.name, "entry_syn_err.sp")
+    with open(entry_sp, "w", encoding="utf-8") as f:
+      f.write("import dep_syn_err;\nfunc main() {}\n")
+
+    test_args = ["sapphire", "check", entry_sp]
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", test_args):
+      with redirect_stdout(io.StringIO()), redirect_stderr(stderr_buf):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+    self.assertIn("Syntax Error:", stderr_buf.getvalue())
+    self.assertIn("dep_syn_err.sp", stderr_buf.getvalue())
+
   def test_build_subcommand_compiler_error(self):
     bad_sp = os.path.join(self.temp_dir.name, "bad_build.sp")
     with open(bad_sp, "w", encoding="utf-8") as f:

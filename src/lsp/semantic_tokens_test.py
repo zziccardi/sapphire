@@ -554,6 +554,47 @@ class TestSemanticTokens(unittest.TestCase):
         checker.check(ast)
         self.assertEqual(checker.lsp_errors, [])
 
+  def test_imported_module_error_anchored_on_import_line(self):
+    """Ensures imported-module diagnostics anchor to the import statement in LSP."""
+    import os
+    import tempfile
+    from src.common.errors import SemanticError
+    from src.semantics.declaration_pass import DeclarationPass
+
+    DeclarationPass.clear_cache()
+    with tempfile.TemporaryDirectory() as tmpdir:
+      dep_sp = os.path.join(tmpdir, "broken_dep.sp")
+      with open(dep_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "\n\n\n\n"
+            "func fail_on_line_5() {\n"
+            "  let bad: int = \"nope\";\n"
+            "}\n"
+        )
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      code = "import broken_dep;\nfunc ok() {}\n"
+      lexer = SapphireLexer(InputStream(code))
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      ast = ASTBuilder().visit(parser.program())
+
+      checker = SemanticTokensTypeChecker(
+          doc_text=code, source_file_path=main_sp
+      )
+      with self.assertRaises(SemanticError):
+        checker.check(ast)
+
+      self.assertEqual(len(checker.lsp_errors), 1)
+      self.assertEqual(checker.lsp_errors[0]["range"]["start"]["line"], 0)
+      self.assertIn(
+          "Imported module 'broken_dep' contains syntax or semantic errors.",
+          checker.lsp_errors[0]["message"],
+      )
+      self.assertNotIn(
+          os.path.abspath(dep_sp), DeclarationPass._module_cache
+      )
+
 
 
 

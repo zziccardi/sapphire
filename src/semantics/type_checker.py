@@ -5,7 +5,7 @@ checking and type inference, and validates all semantic constraints of the
 Sapphire language.
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import *
 from src.semantics.symbol_table import (
@@ -86,6 +86,12 @@ class TypeChecker(
     self._init_assigned_arena_fields: Set[str] = set()
     self._init_used_arena_fields: Set[str] = set()
     self._temporary_frozen_lvalues: List[Tuple[str, List[str], str]] = []
+    self._checked_import_results: Dict[
+        str, Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]
+    ] = {}
+    self._active_import_stack: Set[str] = set()
+    self._reported_import_errors: Set[str] = set()
+    self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
 
   def get_frozen_lvalue_reason(
       self, root: str, path: List[str]

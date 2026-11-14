@@ -2507,7 +2507,7 @@ class TestTypeChecker(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       mod_a = os.path.join(tmpdir, "mod_a.sp")
       with open(mod_a, "w") as f:
-        f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n};\n")
+        f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n}\n")
 
       code = f"import mod_a;\n"
       input_stream = InputStream(code)
@@ -2543,7 +2543,7 @@ class TestTypeChecker(unittest.TestCase):
 
 
   def test_module_import_with_error(self):
-    """Verifies graceful handling when an imported module contains syntax or semantic errors."""
+    """Verifies imported module syntax and semantic errors propagate to importer."""
     import tempfile, os
     with tempfile.TemporaryDirectory() as tmpdir:
       invalid_sp = os.path.join(tmpdir, "invalid.sp")
@@ -2559,7 +2559,10 @@ class TestTypeChecker(unittest.TestCase):
       ast = ASTBuilder().visit(tree)
 
       checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
-      checker.check(ast)
+      with self.assertRaises(SemanticError) as ctx:
+        checker.check(ast)
+      self.assertIn("invalid.sp", str(ctx.exception))
+      self.assertIn("Cannot assign expression of type 'bool'", str(ctx.exception))
 
       syntax_err_sp = os.path.join(tmpdir, "syntax_err.sp")
       with open(syntax_err_sp, "w") as f:
@@ -2574,8 +2577,10 @@ class TestTypeChecker(unittest.TestCase):
       ast2 = ASTBuilder().visit(tree2)
 
       checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
-      with suppress_output():
+      with self.assertRaises(SemanticError) as ctx2:
         checker2.check(ast2)
+      self.assertIn("syntax_err.sp", str(ctx2.exception))
+      self.assertIn("Syntax Error:", str(ctx2.exception))
 
   def test_import_module_without_export_block(self):
     """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
@@ -4641,7 +4646,7 @@ class TestTypeChecker(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       char_sp = os.path.join(tmpdir, "character.sp")
       with open(char_sp, "w") as f:
-        f.write("export { Character }; struct Character {}\n")
+        f.write("export { Character }\nstruct Character {}\n")
 
       enemy_sp = os.path.join(tmpdir, "enemy.sp")
       code = "import game.entities.character;\n"
