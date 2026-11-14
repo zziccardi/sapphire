@@ -18,6 +18,25 @@ struct Vector2 {
 }
 
 let ORIGIN = Vector2 { x = 0.0, y = 0.0 };
+let STANDING_FRAME: int = 1;
+let DOUBLE_FRAME = STANDING_FRAME * 2;
+
+struct AnimatedSprite {
+  var frame: int = STANDING_FRAME;
+  var double_frame = DOUBLE_FRAME;
+  var pos: Vector2 = ORIGIN;
+  var label: String = GREETING;
+}
+
+impl AnimatedSprite {
+  func compute(bonus: int = STANDING_FRAME, scale: int = 2): int {
+    return (self.frame + self.double_frame + bonus) * scale;
+  }
+}
+
+func use_default_const(limit: int = MAX_USERS): int {
+  return limit;
+}
 
 var module_counter = 100;
 
@@ -61,4 +80,19 @@ func test_struct_constant_expr(): bool {
 func test_module_var_state(): bool {
   module_counter += 25;
   return module_counter == 125;
+}
+
+@test
+func test_const_in_struct_and_method_defaults(): bool {
+  let sprite = AnimatedSprite {};
+  return sprite.frame == 1 &&
+         sprite.double_frame == 2 &&
+         sprite.pos.x == 0.0 &&
+         sprite.label == "Welcome to Sapphire!" &&
+         sprite.compute() == 8;
+}
+
+@test
+func test_const_in_func_default(): bool {
+  return use_default_const() == 250;
 }

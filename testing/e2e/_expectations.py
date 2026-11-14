@@ -190,6 +190,8 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_map_constant_expr": True,
         "test_struct_constant_expr": True,
         "test_module_var_state": True,
+        "test_const_in_struct_and_method_defaults": True,
+        "test_const_in_func_default": True,
     },
     "fixed_arrays_test.sp": {
         "test_fixed_array_indexing": 60,

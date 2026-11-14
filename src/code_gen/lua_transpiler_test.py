@@ -2160,6 +2160,97 @@ class TestLuaTranspiler(unittest.TestCase):
         proc = subprocess.run([lua_bin, lua_path], capture_output=True, text=True, check=True)
         self.assertEqual(proc.stdout.strip(), "2,4,6,8")
 
+  def test_defaults_and_base_init_preserve_module_context_lua(self):
+    """Verifies _make_expr_transpiler preserves imported_modules, _identifier_map, and constants in defaults/base_inits."""
+    code = """
+    let STANDING_FRAME: int = 1;
+
+    struct Base {
+      var val: int;
+    }
+    impl Base {
+      func __init__(val: int) {
+        self.val = val;
+      }
+    }
+
+    struct Child: Base {
+      var frame: int = STANDING_FRAME;
+    }
+    impl Child {
+      func __init__(v: int): Base(val = v + STANDING_FRAME) {}
+      func reset(frame: int = STANDING_FRAME): int {
+        return self.val + self.frame + frame;
+      }
+    }
+
+    func global_fn(frame: int = STANDING_FRAME): int {
+      return frame * 10;
+    }
+
+    func main() {
+      let c = Child(v = 5);
+      print(f"{c.reset()},{global_fn()}");
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      dep_sp = os.path.join(tmpdir, "helpers.sp")
+      with open(dep_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export {\n"
+            "  STEP,\n"
+            "  bonus,\n"
+            "}\n"
+            "let STEP: int = 3;\n"
+            "func bonus(): int {\n"
+            "  return 4;\n"
+            "}\n"
+        )
+
+      main_code = (
+          "import helpers;\n"
+          + code.replace("func global_fn(frame: int = STANDING_FRAME): int {\n",
+                         "struct HelperUser {\n"
+                         "  var s: int = helpers.STEP;\n"
+                         "}\n"
+                         "func global_fn(frame: int = helpers.STEP + helpers.bonus()): int {\n")
+      )
+      main_sp = os.path.join(tmpdir, "main.sp")
+      dep_lua = os.path.join(tmpdir, "helpers.lua")
+      main_lua = os.path.join(tmpdir, "main.lua")
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      transpile_file(dep_sp, dep_lua, target="lua", quiet=True)
+      transpile_file(main_sp, main_lua, target="lua", quiet=True)
+      with open(main_lua, "r", encoding="utf-8") as f:
+        main_lua_text = f.read()
+
+      self.assertIn("helpers.STEP", main_lua_text)
+      self.assertIn("helpers.bonus()", main_lua_text)
+      self.assertNotIn("helpers:bonus()", main_lua_text)
+
+      lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      if lua_bin:
+        env = os.environ.copy()
+        env["LUA_PATH"] = f"{tmpdir}/?.lua;;"
+        proc = subprocess.run([lua_bin, main_lua], capture_output=True, text=True, check=True, env=env)
+        self.assertEqual(proc.stdout.strip(), "8,70")
+
+  def test_make_expr_transpiler_preserves_identifier_map_lua(self):
+    """Verifies LuaTranspiler._make_expr_transpiler inherits _identifier_map and imported_modules."""
+    lt = LuaTranspiler()
+    lt.known_structs.add("MyStruct")
+    lt.imported_modules.add("mod")
+    lt._identifier_map["local_var"] = "_val_local_var"
+    sub = lt._make_expr_transpiler()
+    self.assertIsInstance(sub, LuaTranspiler)
+    self.assertIn("MyStruct", sub.known_structs)
+    self.assertIn("mod", sub.imported_modules)
+    self.assertEqual(sub._identifier_map["local_var"], "_val_local_var")
+    sub.visit(CallNode(MemberAccessNode(IdentifierNode("mod"), "fn", False), [ArgumentNode(None, IdentifierNode("local_var"))]))
+    self.assertEqual(sub.get_output(), "mod.fn(_val_local_var)")
+
 
 
 # ---------------------------------------------------------------------------

@@ -102,6 +102,8 @@ runtime execution or dynamic allocations:
   * Homogeneous array and map literals containing only constant expressions.
   * Plain data struct initializers (`Point { x = 0.0, y = 0.0 }`) where fields
     are constant expressions.
+  * Previously declared module-level `let` constants (same-file or imported),
+    which may also be used in struct field and parameter default expressions.
 * **Prohibited at module scope**:
   * Function and method calls (`compute()`).
   * Memory arena allocations (`in my_arena`).

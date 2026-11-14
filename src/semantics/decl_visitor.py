@@ -68,6 +68,13 @@ class DeclVisitorMixin:
             node=decl,
         )
       else:
+        if isinstance(decl, VarDeclNode) and getattr(
+            decl, "_prechecked_module_const", False
+        ):
+          for name, sym in getattr(decl, "_prechecked_symbols", {}).items():
+            if sym is not None:
+              self.symbol_table.define(name, sym)
+          continue
         self.visit(decl)
     if getattr(node, "export_block", None):
       self.visit(node.export_block)
@@ -178,6 +185,28 @@ class DeclVisitorMixin:
               self._expr_references_self(expr.false_expr))
     return False
 
+  def _check_parameter_defaults(
+      self,
+      parameters: List[ParameterNode],
+      resolved_types: List[Type],
+  ) -> None:
+    """Type-checks parameter default expressions against declared parameter types."""
+    for p, ptype in zip(parameters, resolved_types):
+      if p.name == "self" or getattr(p, "default_expr", None) is None:
+        continue
+      old_expected = self.expected_type
+      self.expected_type = ptype
+      try:
+        expr_type = self.visit(p.default_expr)
+      finally:
+        self.expected_type = old_expected
+      if not expr_type.is_compatible(ptype):
+        self.error(
+            f"Default expression of type '{expr_type}' is not compatible "
+            f"with parameter '{p.name}' of type '{ptype}'.",
+            node=p,
+        )
+
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func_decl = node.func_decl
     struct_type = self.current_struct
@@ -187,11 +216,20 @@ class DeclVisitorMixin:
     old_moved_symbols = set(self.moved_symbols)
     self.moved_symbols = set()
 
+    resolved_params = [
+        (
+            struct_type
+            if p.name == "self" and p.param_type is None
+            else self._resolve_type_node(p.param_type)
+        )
+        for p in func_decl.parameters
+    ]
+    self._check_parameter_defaults(func_decl.parameters, resolved_params)
+
     # Define parameters in scope before evaluating base initializers
-    for p in func_decl.parameters:
+    for p, ptype in zip(func_decl.parameters, resolved_params):
       if p.name == "self":
         continue
-      ptype = self._resolve_type_node(p.param_type)
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
 
     # Reject base initializers on non-init methods
@@ -262,7 +300,6 @@ class DeclVisitorMixin:
       self.symbol_table.define("self", VariableSymbol("self", struct_type, is_mutable))
 
     # Save function signature context
-    resolved_params = [self._resolve_type_node(p.param_type) for p in func_decl.parameters]
     param_mutabilities = [p.is_mutable for p in func_decl.parameters]
     ret_types = self._resolve_return_types(func_decl)
     num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
@@ -297,7 +334,15 @@ class DeclVisitorMixin:
     self.symbol_table.exit_scope()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
-    pass
+    if node.type_params:
+      return
+    trait_type = self.symbol_table.lookup_type(node.name)
+    if not isinstance(trait_type, TraitType):
+      return
+    for member in node.members:
+      fn_type = trait_type.methods.get(member.name)
+      if fn_type is not None:
+        self._check_parameter_defaults(member.parameters, fn_type.param_types)
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
     if hasattr(node, "annotations") and node.annotations:
@@ -313,11 +358,12 @@ class DeclVisitorMixin:
     old_function_scope = self.current_function_scope
     self.current_function_scope = self.symbol_table.current_scope
 
-    for p in node.parameters:
-      ptype = self._resolve_type_node(p.param_type)
+    resolved_params = [self._resolve_type_node(p.param_type) for p in node.parameters]
+    self._check_parameter_defaults(node.parameters, resolved_params)
+
+    for p, ptype in zip(node.parameters, resolved_params):
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
 
-    resolved_params = [self._resolve_type_node(p.param_type) for p in node.parameters]
     param_mutabilities = [p.is_mutable for p in node.parameters]
     ret_types = self._resolve_return_types(node)
     num_defaults = sum(1 for p in node.parameters if getattr(p, "default_expr", None) is not None)

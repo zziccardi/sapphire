@@ -279,11 +279,11 @@ class TypeChecker(
     # Pass 1: Declare global symbols (Structs, Traits, Functions)
     self._declare_globals(program)
 
-    # Pass 2: Copy inheritance layouts and resolve struct fields
-    self._resolve_struct_layouts(program)
-
-    # Pass 3: Register impl block method signatures
+    # Pass 2: Register impl block method signatures
     self._register_impl_signatures(program)
+
+    # Pass 3: Resolve struct layouts and module-level let constants in source order
+    self._resolve_struct_layouts(program)
 
     # Pass 3.5: Pre-analyze module-level var globals and call graph accesses
     self._analyze_global_accesses(program)

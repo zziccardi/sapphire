@@ -595,6 +595,32 @@ class TestSemanticTokens(unittest.TestCase):
           os.path.abspath(dep_sp), DeclarationPass._module_cache
       )
 
+  def test_module_let_constant_tokens_in_defaults_not_duplicated(self):
+    """Verifies module let constant tokens highlight once and resolve inside struct and param defaults."""
+    code = (
+        "let STANDING_FRAME: int = 1;\n"
+        "struct Character {\n"
+        "  var frame: int = STANDING_FRAME;\n"
+        "}\n"
+        "func reset(frame: int = STANDING_FRAME) {}\n"
+    )
+    lexer = SapphireLexer(InputStream(code))
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    ast = ASTBuilder().visit(parser.program())
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+    self.assertEqual(checker.lsp_errors, [])
+
+    decl_tok = (1, 4, len("STANDING_FRAME"), "variable", 5)
+    self.assertEqual(checker.raw_tokens.count(decl_tok), 1)
+
+    struct_default_tok = (3, 19, len("STANDING_FRAME"), "variable", 4)
+    param_default_tok = (5, 24, len("STANDING_FRAME"), "variable", 4)
+    self.assertEqual(checker.raw_tokens.count(struct_default_tok), 1)
+    self.assertEqual(checker.raw_tokens.count(param_default_tok), 1)
+
 
 
 

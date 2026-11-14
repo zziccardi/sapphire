@@ -52,7 +52,12 @@ class TypeResolverMixin:
     if f.field_type:
       ftype = self._resolve_type_node(f.field_type)
       if f.default_expr:
-        expr_type = self.visit(f.default_expr)
+        old_expected = self.expected_type
+        self.expected_type = ftype
+        try:
+          expr_type = self.visit(f.default_expr)
+        finally:
+          self.expected_type = old_expected
         if not expr_type.is_compatible(ftype):
           self.error(
               f"Default expression of type '{expr_type}' is not compatible with field '{f.name}' of type '{ftype}'.",

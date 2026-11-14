@@ -7208,6 +7208,139 @@ class TestTypeChecker(unittest.TestCase):
         err,
     )
 
+  def test_module_let_constants_in_struct_and_param_defaults(self):
+    """Verifies same-file module let constants in struct field and parameter defaults."""
+    code = """
+    let STANDING_FRAME: int = 1;
+    let SCALED_FRAME = STANDING_FRAME + 2;
+
+    struct Point {
+      var x: int = STANDING_FRAME;
+      var y = SCALED_FRAME;
+    }
+
+    let ORIGIN = Point {};
+
+    struct Character {
+      var frame: int = STANDING_FRAME;
+      var inferred_frame = SCALED_FRAME;
+      var pos: Point = ORIGIN;
+    }
+
+    impl Character {
+      func reset(frame: int = STANDING_FRAME, y: int = SCALED_FRAME): int {
+        return frame + y;
+      }
+    }
+
+    trait Resettable {
+      func reset_to(frame: int = STANDING_FRAME);
+    }
+
+    func reset_global(frame: int = STANDING_FRAME): int {
+      return frame;
+    }
+    """
+    self._check(code)
+
+  def test_imported_let_constants_in_struct_and_param_defaults(self):
+    """Verifies imported module let constants in struct field and parameter defaults."""
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      consts_sp = os.path.join(tmpdir, "consts.sp")
+      with open(consts_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export {\n"
+            "  DEFAULT_SPEED,\n"
+            "}\n"
+            "let DEFAULT_SPEED: float = 120.0;\n"
+        )
+
+      code = """
+      import consts;
+
+      struct Mover {
+        var speed: float = consts.DEFAULT_SPEED;
+      }
+
+      impl Mover {
+        func boost(extra: float = consts.DEFAULT_SPEED): float {
+          return self.speed + extra;
+        }
+      }
+
+      func get_default_speed(speed: float = consts.DEFAULT_SPEED): float {
+        return speed;
+      }
+      """
+      lexer = SapphireLexer(InputStream(code))
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      ast = ASTBuilder().visit(parser.program())
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+      self.assertEqual(checker.errors, [])
+
+  def test_forward_ref_module_let_constants_rejected(self):
+    """Verifies forward references to later module let constants are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct BadStruct {
+        var x: int = LATER;
+      }
+      let LATER: int = 1;
+      """)
+    self.assertIn("Undefined identifier 'LATER'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      let EARLIER: int = LATER + 1;
+      let LATER: int = 1;
+      """)
+    self.assertIn("Undefined identifier 'LATER'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_fn(x: int = LATER): int {
+        return x;
+      }
+      let LATER: int = 1;
+      """)
+    self.assertIn("Undefined identifier 'LATER'", str(ctx.exception))
+
+  def test_parameter_default_type_and_scope_errors(self):
+    """Verifies parameter defaults enforce type compatibility and disallow sibling params."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_fn(x: int = "wrong") {}
+      """)
+    self.assertIn(
+        "Default expression of type 'String' is not compatible with parameter 'x' of type 'int'.",
+        str(ctx.exception),
+    )
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct S {}
+      impl S {
+        func bad_method(x: int = "wrong") {}
+      }
+      """)
+    self.assertIn(
+        "Default expression of type 'String' is not compatible with parameter 'x' of type 'int'.",
+        str(ctx.exception),
+    )
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_ref(a: int, b: int = a): int {
+        return b;
+      }
+      """)
+    self.assertIn("Undefined identifier 'a'", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

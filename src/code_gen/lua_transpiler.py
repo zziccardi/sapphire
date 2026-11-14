@@ -157,6 +157,27 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self._identifier_map: Dict[str, str] = {}
     self._loop_stack: List[bool] = []
 
+  def _make_expr_transpiler(self) -> "LuaTranspiler":
+    """Creates a sub-transpiler inheriting module, struct, and rename state."""
+    temp = type(self)(
+        test_mode=self.test_mode,
+        dev_mode=self.dev_mode,
+        use_runtime_module=self.use_runtime_module,
+    )
+    temp.known_structs = self.known_structs
+    temp.imported_modules = self.imported_modules
+    temp._identifier_map = self._identifier_map
+    temp.proto_structs = self.proto_structs
+    temp.structs_with_destructor = self.structs_with_destructor
+    temp.struct_methods = self.struct_methods
+    temp.struct_parent_names = self.struct_parent_names
+    temp.struct_destructible_fields = self.struct_destructible_fields
+    temp.func_return_types = self.func_return_types
+    temp.method_return_types = self.method_return_types
+    temp.variable_types = self.variable_types
+    temp.moved_vars = self.moved_vars
+    return temp
+
   def emit(self, text: str) -> None:
     """Emits text on the current line and updates line/column numbers."""
     lines = text.split("\n")
@@ -420,8 +441,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
       if default_expr:
         self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
+        temp = self._make_expr_transpiler()
         temp.visit(default_expr)
         self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
     self.dedent()
@@ -649,8 +669,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     for p in func.parameters:
       if p.default_expr:
         self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
+        temp = self._make_expr_transpiler()
         temp.visit(p.default_expr)
         pname = self._mangle_name(p.name)
         self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")
@@ -681,8 +700,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           if param_names:
             args_by_name = {}
             for idx, arg in enumerate(base_init.arguments):
-              temp = LuaTranspiler()
-              temp.known_structs = self.known_structs
+              temp = self._make_expr_transpiler()
               temp.visit(arg.expr)
               val = temp.get_output()
               if arg.name:
@@ -692,8 +710,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
             args_strs.extend(args_by_name.get(p_name, "nil") for p_name in param_names)
           else:
             for arg in base_init.arguments:
-              temp = LuaTranspiler()
-              temp.known_structs = self.known_structs
+              temp = self._make_expr_transpiler()
               temp.visit(arg.expr)
               args_strs.append(temp.get_output())
 
@@ -760,8 +777,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     for p in node.parameters:
       if p.default_expr:
         self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
+        temp = self._make_expr_transpiler()
         temp.visit(p.default_expr)
         pname = self._mangle_name(p.name)
         self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")

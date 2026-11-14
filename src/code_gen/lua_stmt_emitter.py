@@ -124,8 +124,7 @@ class LuaStmtMixin:
         val_type = node.val_types[idx] if idx < len(node.val_types) else None
         default_expr = get_default_value_for_type_node(val_type)
         if default_expr:
-          temp = type(self)()
-          temp.known_structs = self.known_structs
+          temp = self._make_expr_transpiler()
           temp.visit(default_expr)
           defaults.append(temp.get_output())
           if default_expr.lit_type != "none":
