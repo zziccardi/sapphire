@@ -1,7 +1,30 @@
 """Unit tests for ArenaChecker in src/semantics/arena_checker.py."""
 
 import unittest
-from src.parser.ast import IdentifierNode, StructInitializerNode, CloneNode, LiteralNode, CallNode
+from src.parser.ast import (
+    ArrayLiteralNode,
+    BinaryOpNode,
+    BlockNode,
+    CallNode,
+    CastExprNode,
+    CloneNode,
+    ExprStmtNode,
+    IdentifierNode,
+    LambdaNode,
+    LambdaParamNode,
+    LiteralNode,
+    MapEntryNode,
+    MapLiteralNode,
+    MatchCaseNode,
+    MatchExprNode,
+    MemberAccessNode,
+    MoveNode,
+    ReturnNode,
+    StructInitializerNode,
+    TernaryExprNode,
+    UnaryOpNode,
+    VarDeclNode,
+)
 from src.semantics.symbol_table import (
     ArenaType,
     OptionalType,
@@ -138,5 +161,130 @@ class TestArenaChecker(unittest.TestCase):
     ArenaChecker.validate_arena_escape(st, int_sym, IdentifierNode("val"), int_errors.append)
     self.assertEqual(len(int_errors), 0)
     self.assertEqual(int_sym.arena_dep_records, [])
+
+  def test_validate_arena_mutability_variants(self):
+    st = SymbolTable()
+    # MoveNode arena target
+    errs = []
+    ArenaChecker.validate_arena_mutability(st, MoveNode("a"), errs.append)
+    self.assertIn("moved Arena", errs[0])
+
+    # Moved IdentifierNode
+    moved_a = VariableSymbol("moved_a", ArenaType(), is_mutable=True)
+    moved_a.is_moved = True
+    st.define("moved_a", moved_a)
+    errs = []
+    ArenaChecker.validate_arena_mutability(st, IdentifierNode("moved_a"), errs.append)
+    self.assertIn("moved Arena", errs[0])
+
+    # MemberAccessNode without root identifier
+    errs = []
+    ArenaChecker.validate_arena_mutability(
+        st, MemberAccessNode(LiteralNode(1, "int"), "arena", False), errs.append
+    )
+    self.assertIn("not a temporary expression", errs[0])
+
+    # MemberAccessNode with moved root
+    holder = VariableSymbol("holder", StructType("H"), is_mutable=True)
+    holder.is_moved = True
+    st.define("holder", holder)
+    errs = []
+    ArenaChecker.validate_arena_mutability(
+        st, MemberAccessNode(IdentifierNode("holder"), "arena", False), errs.append
+    )
+    self.assertIn("moved Arena owner", errs[0])
+
+    # MemberAccessNode with immutable root
+    immut_holder = VariableSymbol("immut_h", StructType("H"), is_mutable=False)
+    st.define("immut_h", immut_holder)
+    errs = []
+    ArenaChecker.validate_arena_mutability(
+        st, MemberAccessNode(IdentifierNode("immut_h"), "arena", False), errs.append
+    )
+    self.assertIn("immutable binding", errs[0])
+
+    # MemberAccessNode with immutable Arena field on mutable root
+    box_t = StructType("Box")
+    box_t.fields["arena"] = VariableSymbol("arena", ArenaType(), is_mutable=False)
+    mut_box = VariableSymbol("mut_box", box_t, is_mutable=True)
+    st.define("mut_box", mut_box)
+    recv = IdentifierNode("mut_box")
+    fake_checker = type("C", (), {"node_types": {recv: box_t}})()
+    errs = []
+    ArenaChecker.validate_arena_mutability(
+        st, MemberAccessNode(recv, "arena", False), errs.append, checker=fake_checker
+    )
+    self.assertIn("immutable Arena field", errs[0])
+
+    # Temporary expression
+    errs = []
+    ArenaChecker.validate_arena_mutability(st, LiteralNode(1, "int"), errs.append)
+    self.assertIn("not a temporary expression", errs[0])
+
+  def test_collect_arena_deps_compound_and_lambda_expressions(self):
+    st = SymbolTable()
+    proto_t = StructType("Goblin", is_prototype=True)
+    v1 = VariableSymbol("v1", proto_t, is_mutable=False)
+    v1.arena_dependency = "a1"
+    st.define("v1", v1)
+
+    v2 = VariableSymbol("v2", proto_t, is_mutable=False)
+    v2.arena_dep_records = [("a2", 0)]
+    st.define("v2", v2)
+
+    # MapLiteralNode, TernaryExprNode, BinaryOpNode(??), UnaryOpNode, CastExprNode
+    m = MapLiteralNode([MapEntryNode(IdentifierNode("v1"), IdentifierNode("v2"))])
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, m), [("a1", 0), ("a2", 0)]
+    )
+    tern = TernaryExprNode(
+        LiteralNode(True, "bool"), IdentifierNode("v1"), IdentifierNode("v2")
+    )
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, tern), [("a1", 0), ("a2", 0)]
+    )
+    coal = BinaryOpNode(IdentifierNode("v1"), "??", IdentifierNode("v2"))
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, coal), [("a1", 0), ("a2", 0)]
+    )
+    cast = CastExprNode(UnaryOpNode("-", IdentifierNode("v1")), PrimitiveType("int"))
+    self.assertEqual(ArenaChecker.collect_arena_deps(st, cast), [("a1", 0)])
+
+    # MatchExprNode with BlockNode cases (ReturnNode and ExprStmtNode)
+    match_expr = MatchExprNode(
+        LiteralNode(1, "int"),
+        [
+            MatchCaseNode(
+                LiteralNode(1, "int"),
+                BlockNode([ReturnNode([IdentifierNode("v1")])]),
+            ),
+            MatchCaseNode(
+                LiteralNode(2, "int"),
+                BlockNode([ExprStmtNode(IdentifierNode("v2"))]),
+            ),
+        ],
+    )
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, match_expr), [("a1", 0), ("a2", 0)]
+    )
+
+    # Lambda capturing IdentifierNode, MoveNode, VarDeclNode, and nested LambdaNode
+    lam = LambdaNode(
+        [LambdaParamNode("p")],
+        None,
+        BlockNode([
+            VarDeclNode(False, ["local_v"], exprs=IdentifierNode("v1")),
+            ExprStmtNode(
+                LambdaNode(
+                    [LambdaParamNode("inner_p")],
+                    None,
+                    MoveNode("v2"),
+                )
+            ),
+        ]),
+    )
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, lam), [("a1", 0), ("a2", 0)]
+    )
 
 

@@ -127,6 +127,57 @@ class ModuleResolverTest(unittest.TestCase):
     self.assertIsNotNone(resolved)
     self.assertTrue(resolved.endswith(os.path.join("love2d", "enums.sp")))
 
+  def test_find_sapphire_lib_dir_importlib_origin(self):
+    """Verifies importlib spec.origin discovery when repo lib is absent."""
+    fake_lib = os.path.join(self.base_dir, "site", "lib")
+    fake_std_init = os.path.join(fake_lib, "std", "__init__.py")
+    os.makedirs(os.path.dirname(fake_std_init), exist_ok=True)
+    mock_spec = MagicMock()
+    mock_spec.origin = fake_std_init
+
+    def isdir_side_effect(path):
+      return path == fake_lib
+
+    with patch("os.path.isdir", side_effect=isdir_side_effect):
+      with patch.dict(os.environ, {}, clear=True):
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+          self.assertEqual(find_sapphire_lib_dir(), os.path.abspath(fake_lib))
+
+  def test_find_sapphire_lib_dir_importlib_namespace(self):
+    """Verifies importlib submodule_search_locations discovery."""
+    fake_lib = os.path.join(self.base_dir, "ns", "lib")
+    fake_std_dir = os.path.join(fake_lib, "std")
+    os.makedirs(fake_std_dir, exist_ok=True)
+    mock_spec = MagicMock()
+    mock_spec.origin = None
+    mock_spec.submodule_search_locations = [fake_std_dir]
+
+    def isdir_side_effect(path):
+      return path == fake_lib
+
+    with patch("os.path.isdir", side_effect=isdir_side_effect):
+      with patch.dict(os.environ, {}, clear=True):
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+          self.assertEqual(find_sapphire_lib_dir(), os.path.abspath(fake_lib))
+
+  def test_find_sapphire_lib_dir_none_when_unavailable(self):
+    """Verifies None is returned when no library directory exists."""
+    with patch("os.path.isdir", return_value=False):
+      with patch.dict(os.environ, {}, clear=True):
+        with patch(
+            "importlib.util.find_spec", side_effect=ImportError("no mod")
+        ):
+          self.assertIsNone(find_sapphire_lib_dir())
+
+  def test_resolve_module_path_adds_lib_parent_from_different_cwd(self):
+    """Verifies lib_parent is added to search_dirs when cwd differs."""
+    with patch("os.getcwd", return_value=self.base_dir):
+      resolved = resolve_module_path(
+          "lib.std.math", source_file_path=self.main_file
+      )
+      self.assertIsNotNone(resolved)
+      self.assertTrue(resolved.endswith(os.path.join("std", "math.sp")))
+
 
 if __name__ == "__main__":
   unittest.main()
