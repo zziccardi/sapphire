@@ -601,8 +601,14 @@ func calculate_damage(attacker: Player, target: Enemy,
 
 * **Named parameters**: Callers may invoke functions using named arguments
   (e.g. `calculate_damage(attacker = p, target = e, is_critical = true)`).
+  Positional arguments must precede any named arguments at a call site;
+  unknown parameter names, duplicate bindings to the same parameter, and
+  omitted required parameters are rejected at compile time.
 * **Default parameters**: Parameters with default values must appear after
-  positional parameters without defaults.
+  positional parameters without defaults. Callers may omit trailing defaulted
+  parameters or skip intermediate defaulted parameters using named arguments;
+  reordered named arguments preserve strict left-to-right call-site
+  evaluation order across all backends.
 * **Void functions**: Functions returning nothing omit the return type or
   specify `: void`.
 

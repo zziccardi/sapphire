@@ -445,7 +445,6 @@ class ExprVisitorMixin:
     old_func = self.current_function
     old_func_scope = self.current_function_scope
     declared_ret = self._resolve_type_node(node.return_type) if node.return_type else None
-    from src.semantics.symbol_table import FunctionSymbol
     lambda_sym = FunctionSymbol("<lambda>", None)
     lambda_sym.return_types = [declared_ret] if declared_ret else []
     self.current_function = lambda_sym
@@ -473,7 +472,11 @@ class ExprVisitorMixin:
     self.moved_symbols = old_moved_symbols
     self.symbol_table.exit_scope()
     node.stack_borrow_symbols = self._scan_lambda_stack_borrows(node)
-    return FunctionType(resolved_param_types, ret_type)
+    return FunctionType(
+        resolved_param_types,
+        ret_type,
+        param_names=[p.name for p in node.parameters],
+    )
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
     if not node.elements:

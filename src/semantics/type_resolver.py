@@ -120,9 +120,14 @@ class TypeResolverMixin:
           [self._substitute_type_params(p, type_map) for p in t.param_types],
           self._substitute_type_params(t.return_type, type_map),
           param_mutabilities=t.param_mutabilities,
-          param_names=t.param_names,
+          param_names=(
+              t.param_names if getattr(t, "has_named_params", True) else None
+          ),
           has_self=t.has_self,
+          extern_name=t.extern_name,
           num_defaults=t.num_defaults,
+          param_defaults=t.param_defaults,
+          ast_decl=t.ast_decl,
       )
     return t
 
@@ -166,12 +171,15 @@ class TypeResolverMixin:
             param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_return_types(func_decl)
           num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
+          param_defaults = [getattr(p, "default_expr", None) for p in func_decl.parameters]
           signature = FunctionType(
               param_types,
               ret_type,
               param_mutabilities,
               param_names=[p.name for p in func_decl.parameters],
               num_defaults=num_defaults,
+              param_defaults=param_defaults,
+              ast_decl=func_decl,
           )
 
           method = StructMethod(func_decl.name, signature, member.modifier)

@@ -72,7 +72,9 @@ class LuaStmtMixin:
         self._lift_match_expressions(item)
       return
     if isinstance(node, ASTNode):
-      for v in node.__dict__.values():
+      for k, v in node.__dict__.items():
+        if k.startswith("_"):
+          continue
         if isinstance(v, (ASTNode, list)):
           self._lift_match_expressions(v)
 
@@ -207,6 +209,19 @@ class LuaStmtMixin:
       return
     self._lift_match_expressions(node.expr)
     self.newline()
+    if (
+        isinstance(node.expr, CallNode)
+        and not node.expr.arena_expr
+        and not getattr(node.expr, "_is_struct_constructor", False)
+        and (
+            getattr(node.expr, "_requires_eval_order_temps", False)
+            or (
+                isinstance(node.expr.callee, MemberAccessNode)
+                and node.expr.callee.is_optional
+            )
+        )
+    ):
+      self.emit("local _ = ")
     self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:

@@ -7341,6 +7341,205 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Undefined identifier 'a'", str(ctx.exception))
 
+  def test_named_arguments_validation_errors(self):
+    """Verifies ordering, unknown, duplicate, missing, and unnamed fn errors."""
+    # Positional argument following a named argument.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(a = 1, 2);
+      }
+      """)
+    self.assertIn(
+        "Positional argument cannot follow a named argument.",
+        str(ctx.exception),
+    )
+
+    # Unknown named argument.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(a = 1, c = 2);
+      }
+      """)
+    self.assertIn("Unexpected named argument 'c'.", str(ctx.exception))
+
+    # Duplicate via positional + named.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(1, a = 2);
+      }
+      """)
+    self.assertIn(
+        "Multiple values provided for parameter 'a'.", str(ctx.exception)
+    )
+
+    # Duplicate via two named arguments.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int = 10): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(a = 1, a = 2);
+      }
+      """)
+    self.assertIn(
+        "Multiple values provided for parameter 'a'.", str(ctx.exception)
+    )
+
+    # Missing required parameter when optional named args satisfy raw count.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func calc(a: int, b: int = 10, c: int = 20): int {
+        return a + b + c;
+      }
+      func main(): int {
+        return calc(b = 1, c = 2);
+      }
+      """)
+    self.assertIn(
+        "Missing required argument for parameter 'a'.", str(ctx.exception)
+    )
+
+    # Reject named arguments when calling an unnamed FunctionType variable.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func apply_cb(cb: (int) -> int): int {
+        return cb(p0 = 5);
+      }
+      """)
+    self.assertIn(
+        "Named argument 'p0' is not supported when calling an unnamed function type.",
+        str(ctx.exception),
+    )
+
+  def test_named_arguments_accepted_across_call_targets_and_range(self):
+    """Verifies skipped defaults and reordered named args across call forms."""
+    self._check("""
+    trait Greeter {
+      func greet(a: int, b: int = 10, c: int = 20): int;
+    }
+
+    struct Base {
+      var x: int;
+      var y: int;
+      var z: int;
+    }
+
+    impl Base {
+      func __init__(a: int, b: int = 10, c: int = 20) {
+        self.x = a;
+        self.y = b;
+        self.z = c;
+      }
+
+      func compute(a: int, b: int = 10, c: int = 20): int {
+        return a + b + c;
+      }
+
+      static func create(a: int, b: int = 10, c: int = 20): Base {
+        return Base(c = c, a = a);
+      }
+    }
+
+    impl Greeter for Base {
+      func greet(a: int, b: int = 10, c: int = 20): int {
+        return a + b + c;
+      }
+    }
+
+    struct Derived: Base {
+      var w: int;
+    }
+
+    impl Derived {
+      func __init__(a: int, c: int) : Base(c = c, a = a) {
+        self.w = 1;
+      }
+    }
+
+    struct Pair<K, V> {
+      let key: K;
+      let val: V;
+    }
+
+    func make_pair<K, V>(k: K, v: V): Pair<K, V> {
+      return Pair<K, V> { key = k, val = v };
+    }
+
+    func create_enemy(id: int, hp: int = 10, unit_hp: int = 5): int {
+      return id + hp + unit_hp;
+    }
+
+    func use_greeter(g: Greeter): int {
+      return g.greet(c = 30, a = 5);
+    }
+
+    func run(): int {
+      let f = create_enemy(id = 1, unit_hp = 19);
+      let s = Base.create(c = 3, a = 1);
+      let m = s.compute(c = 4, a = 2);
+      let d = Derived(c = 7, a = 3);
+      let g = use_greeter(d);
+      let p = make_pair(v = "hi", k = 42);
+      var sum = f + m + g + p.key + d.y + s.z;
+      for i in range(stop = 10, step = 2) {
+        sum = sum + i;
+      }
+      return sum;
+    }
+    """)
+
+  def test_range_invalid_named_calls_rejected(self):
+    """Verifies invalid range() named calls fail semantic checking."""
+    for bad_call in [
+        "range(start = 2)",
+        "range(1, start = 2)",
+        "range(1, step = 2)",
+    ]:
+      with self.subTest(bad_call=bad_call):
+        with self.assertRaises(SemanticError):
+          self._check(f"""
+          func main(): int {{
+            var s = 0;
+            for i in {bad_call} {{
+              s = s + i;
+            }}
+            return s;
+          }}
+          """)
+
+  def test_reordered_named_arguments_detect_aliasing_conflict(self):
+    """Verifies borrow aliasing checks still trigger with reordered named args."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Counter {
+        var val: int;
+      }
+
+      func bump(src: Counter, var dst: Counter): int {
+        dst.val = dst.val + src.val;
+        return dst.val;
+      }
+
+      func main(): int {
+        var c = Counter { val = 1 };
+        return bump(dst = c, src = c);
+      }
+      """)
+    self.assertIn("Aliasing conflict", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

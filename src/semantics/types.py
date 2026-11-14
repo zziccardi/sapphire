@@ -170,6 +170,7 @@ class FunctionType(Type):
     else:
       self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
+    self.has_named_params: bool = param_names is not None
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
     self.has_self = (
         has_self or (bool(self.param_names) and self.param_names[0] == "self"))

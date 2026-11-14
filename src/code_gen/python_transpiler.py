@@ -287,7 +287,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.dedent()
       if has_init:
         self.newline()
+        self.emit(f"if type(self)._init_sapphire is {node.name}._init_sapphire:")
+        self.indent()
+        self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
+        self.dedent()
       self.dedent()
       self.dedent()
     else:
@@ -312,7 +316,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.dedent()
       if has_init:
         self.newline()
+        self.emit(f"if type(self)._init_sapphire is {node.name}._init_sapphire:")
+        self.indent()
+        self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
+        self.dedent()
       self.dedent()
 
     has_explicit_del = any(
@@ -455,7 +463,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
             temp.visit(arg.expr)
             val = temp.get_output()
             if arg.name:
-              args_list.append(f"{arg.name}={val}")
+              args_list.append(f"{self._mangle_name(arg.name)}={val}")
             else:
               args_list.append(val)
           self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")

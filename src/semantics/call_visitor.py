@@ -121,9 +121,18 @@ class CallVisitorMixin:
             mod_sym.exports[mangled_name] = mono_sym
       else:
         inferred_map = {}
+        param_names = sym.symbol_type.param_names or []
         for idx, arg in enumerate(node.arguments):
-          if idx < len(sym.symbol_type.param_types):
-            param_t = sym.symbol_type.param_types[idx]
+          if arg.name:
+            param_idx = (
+                param_names.index(arg.name)
+                if arg.name in param_names
+                else None
+            )
+          else:
+            param_idx = idx
+          if param_idx is not None and param_idx < len(sym.symbol_type.param_types):
+            param_t = sym.symbol_type.param_types[param_idx]
             arg_t = self.visit(arg.expr)
             if isinstance(param_t, GenericTypeParameter):
               inferred_map[param_t.name] = arg_t
@@ -263,6 +272,7 @@ class CallVisitorMixin:
           return callee_type
 
       is_constructor = True
+      node._is_struct_constructor = True
       # Look up constructor
       init_method = callee_type.methods.get("__init__")
       if not init_method:
@@ -270,7 +280,9 @@ class CallVisitorMixin:
         return callee_type
       signature = init_method.method_type
       # Match arguments
-      self._check_arguments(node.arguments, signature, is_constructor=True)
+      self._check_arguments(
+          node.arguments, signature, is_constructor=True, call_node=node
+      )
       if callee_type.is_prototype and not node.arena_expr:
         self.error(f"Proto constructor call for '{callee_type.name}' requires an explicit arena via 'in <arena>'.")
       if node.arena_expr:
@@ -299,7 +311,12 @@ class CallVisitorMixin:
       if node.arena_expr:
         self.error("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.")
       signature = callee_type
-      self._check_arguments(node.arguments, signature, callee_node=node.callee)
+      self._check_arguments(
+          node.arguments,
+          signature,
+          callee_node=node.callee,
+          call_node=node,
+      )
 
     # Perform borrow checking / aliasing rules
     if signature:
@@ -438,78 +455,345 @@ class CallVisitorMixin:
 
     return ret_type
 
-  def _check_arguments(self, arguments: List[ArgumentNode], signature: FunctionType, is_constructor: bool = False, callee_node: Optional[ASTNode] = None) -> None:
-    """Helper to match argument lists against signatures (including parameter modes)."""
-    expected_param_types = signature.param_types
-    expected_param_names = signature.param_names or []
-    if getattr(signature, "has_self", False) and isinstance(callee_node, MemberAccessNode):
-      expected_param_types = signature.param_types[1:]
-      expected_param_names = signature.param_names[1:] if signature.param_names else []
+  def _is_expr_pure(self, expr: Any) -> bool:
+    """Returns True when evaluating expr cannot cause or observe side effects."""
+    if expr is None or isinstance(expr, (LiteralNode, IdentifierNode)):
+      return True
+    if isinstance(expr, (UnaryOpNode, CastExprNode)):
+      return self._is_expr_pure(expr.expr)
+    if isinstance(expr, BinaryOpNode):
+      return self._is_expr_pure(expr.left) and self._is_expr_pure(expr.right)
+    if isinstance(expr, TernaryExprNode):
+      return (
+          self._is_expr_pure(expr.condition)
+          and self._is_expr_pure(expr.true_expr)
+          and self._is_expr_pure(expr.false_expr)
+      )
+    if isinstance(expr, MemberAccessNode):
+      return self._is_expr_pure(expr.receiver)
+    if isinstance(expr, IndexExprNode):
+      return self._is_expr_pure(expr.array) and self._is_expr_pure(expr.index)
+    if isinstance(expr, InterpolatedStringNode):
+      return all(self._is_expr_pure(p) for p in expr.parts)
+    if isinstance(expr, ArrayLiteralNode):
+      return all(self._is_expr_pure(e) for e in expr.elements)
+    if isinstance(expr, MapLiteralNode):
+      return all(
+          self._is_expr_pure(e.key) and self._is_expr_pure(e.value)
+          for e in expr.entries
+      )
+    return False
 
-    num_defaults = getattr(signature, "num_defaults", 0)
-    min_required = max(0, len(expected_param_types) - num_defaults)
-    if len(arguments) < min_required:
-      self.error(f"Not enough arguments passed to call. Expected at least {min_required}, got {len(arguments)}.")
-      return
-
-    for idx, arg in enumerate(arguments):
-      # Pass expected parameter type for lambda type inference
-      old_expected = self.expected_type
-      param_idx = idx
-      if arg.name and expected_param_names and arg.name in expected_param_names:
-        param_idx = expected_param_names.index(arg.name)
-
-      if param_idx < len(expected_param_types):
-        self.expected_type = expected_param_types[param_idx]
-      else:
-        self.expected_type = None
-
-      arg_type = self.visit(arg.expr)
+  def _visit_call_arg_expr(
+      self, expr: ASTNode, expected: Optional[Type]
+  ) -> Type:
+    """Visits an argument expression with optional expected type context."""
+    old_expected = self.expected_type
+    self.expected_type = expected
+    try:
+      arg_type = self.visit(expr)
+    finally:
       self.expected_type = old_expected
+    if self.is_in_del and isinstance(expr, IdentifierNode) and expr.name == "self":
+      self.error(
+          "Cannot pass 'self' as an argument from destructor '__del__'; "
+          "'self' cannot escape destruction.",
+          node=expr,
+      )
+    return arg_type
 
-      if self.is_in_del and isinstance(arg.expr, IdentifierNode) and arg.expr.name == "self":
+  def _check_single_argument(
+      self,
+      idx: int,
+      arg: ArgumentNode,
+      arg_type: Type,
+      param_idx: int,
+      expected_param_types: List[Type],
+      expected_mutabilities: List[bool],
+  ) -> None:
+    """Validates mode and type compatibility for a single resolved argument."""
+    param_type = expected_param_types[param_idx]
+    param_is_var = (
+        expected_mutabilities[param_idx]
+        if param_idx < len(expected_mutabilities)
+        else False
+    )
+
+    effective_arg_type = arg_type
+    # Auto-borrowing
+    if isinstance(arg_type, RefType) and not isinstance(param_type, RefType):
+      effective_arg_type = arg_type.inner_type
+      arg.is_auto_borrow = True
+    elif isinstance(arg_type, SharedRefType) and not isinstance(param_type, SharedRefType):
+      if param_is_var:
         self.error(
-            "Cannot pass 'self' as an argument from destructor '__del__'; 'self' cannot escape destruction.",
-            node=arg.expr,
+            f"Cannot pass 'SharedRef<{arg_type.inner_type}>' as mutable "
+            "'var' parameter; shared references are read-only borrows."
+        )
+      else:
+        effective_arg_type = arg_type.inner_type
+        arg.is_auto_borrow = True
+
+    # Explicit move check when passing to RefType parameter
+    if isinstance(param_type, RefType):
+      if isinstance(arg.expr, IdentifierNode) and not isinstance(arg.expr, MoveNode):
+        self.error(
+            f"Cannot pass move-only type '{arg_type}' by value; use "
+            f"explicit 'move {arg.expr.name}' to transfer ownership."
+        )
+      elif isinstance(arg.expr, (MemberAccessNode, IndexExprNode)):
+        self.error(
+            f"Cannot copy or partially move move-only type '{arg_type}' "
+            "out of a field or collection index."
         )
 
-      is_test_assert = getattr(signature, "is_testing_assertion", False)
-      if param_idx < len(expected_param_types):
-        param_type = expected_param_types[param_idx]
-        param_is_var = False
-        param_mutabilities = getattr(signature, "param_mutabilities", None)
-        if param_mutabilities:
-          mut_idx = param_idx
-          if getattr(signature, "has_self", False) and isinstance(callee_node, MemberAccessNode):
-            mut_idx = param_idx + 1
-          if mut_idx < len(param_mutabilities):
-            param_is_var = param_mutabilities[mut_idx]
+    if not effective_arg_type.is_compatible(param_type):
+      self.error(
+          f"Argument type mismatch at position {idx+1}. "
+          f"Expected '{param_type}', got '{arg_type}'."
+      )
 
-        effective_arg_type = arg_type
-        # Auto-borrowing
-        if isinstance(arg_type, RefType) and not isinstance(param_type, RefType):
-          effective_arg_type = arg_type.inner_type
-          arg.is_auto_borrow = True
-        elif isinstance(arg_type, SharedRefType) and not isinstance(param_type, SharedRefType):
-          if param_is_var:
-            self.error(f"Cannot pass 'SharedRef<{arg_type.inner_type}>' as mutable 'var' parameter; shared references are read-only borrows.")
-          else:
-            effective_arg_type = arg_type.inner_type
-            arg.is_auto_borrow = True
+  def _check_range_arguments(
+      self,
+      arguments: List[ArgumentNode],
+      call_node: Optional[CallNode] = None,
+  ) -> None:
+    """Validates positional and named arguments for built-in range()."""
+    if len(arguments) < 1:
+      for arg in arguments:
+        self._visit_call_arg_expr(arg.expr, PrimitiveType("int"))
+      self.error(
+          "Not enough arguments passed to call. Expected at least 1, got 0.",
+          node=call_node,
+      )
+      return
 
-        # Explicit move check when passing to RefType parameter
-        if isinstance(param_type, RefType):
-          if isinstance(arg.expr, IdentifierNode) and not isinstance(arg.expr, MoveNode):
-            self.error(f"Cannot pass move-only type '{arg_type}' by value; use explicit 'move {arg.expr.name}' to transfer ownership.")
-          elif isinstance(arg.expr, (MemberAccessNode, IndexExprNode)):
-            self.error(f"Cannot copy or partially move move-only type '{arg_type}' out of a field or collection index.")
+    seen_named = False
+    pos_count = 0
+    named_args: Dict[str, ArgumentNode] = {}
+    int_t = PrimitiveType("int")
 
-        if not is_test_assert and not effective_arg_type.is_compatible(param_type):
-          self.error(f"Argument type mismatch at position {idx+1}. Expected '{param_type}', got '{arg_type}'.")
+    for idx, arg in enumerate(arguments):
+      if arg.name:
+        seen_named = True
+        if arg.name not in ("start", "stop", "step"):
+          self.error(f"Unexpected named argument '{arg.name}'.", node=arg)
+        elif arg.name in named_args:
+          self.error(
+              f"Multiple values provided for parameter '{arg.name}'.",
+              node=arg,
+          )
+        else:
+          named_args[arg.name] = arg
       else:
-        # Extra parameter
-        if not is_constructor and not is_test_assert:
-          self.error("Too many arguments passed to call.")
+        if seen_named:
+          self.error(
+              "Positional argument cannot follow a named argument.",
+              node=arg,
+          )
+        pos_count += 1
+
+      arg_type = self._visit_call_arg_expr(arg.expr, int_t)
+      if not arg_type.is_compatible(int_t):
+        self.error(
+            f"Argument type mismatch at position {idx+1}. "
+            f"Expected 'int', got '{arg_type}'."
+        )
+
+    if len(arguments) > 3:
+      self.error("Too many arguments passed to call.", node=call_node)
+      return
+
+    conflict_keys = {
+        1: ("start",),
+        2: ("start", "stop"),
+        3: ("start", "stop", "step"),
+    }.get(pos_count, ())
+    for key in conflict_keys:
+      if key in named_args:
+        self.error(
+            f"Multiple values provided for parameter '{key}'.",
+            node=named_args[key],
+        )
+    if "stop" not in named_args and (
+        pos_count == 0
+        or (pos_count == 1 and "start" not in named_args and "step" in named_args)
+    ):
+      self.error(
+          "Missing required argument for parameter 'stop'.",
+          node=call_node,
+      )
+
+  def _check_arguments(
+      self,
+      arguments: List[ArgumentNode],
+      signature: FunctionType,
+      is_constructor: bool = False,
+      callee_node: Optional[ASTNode] = None,
+      call_node: Optional[CallNode] = None,
+  ) -> None:
+    """Matches argument lists against signatures and canonicalizes call metadata."""
+    is_test_assert = getattr(signature, "is_testing_assertion", False)
+    if is_test_assert:
+      seen_named = False
+      for arg in arguments:
+        if arg.name:
+          seen_named = True
+        elif seen_named:
+          self.error(
+              "Positional argument cannot follow a named argument.",
+              node=arg,
+          )
+        self._visit_call_arg_expr(arg.expr, None)
+      return
+
+    if (
+        isinstance(callee_node, IdentifierNode)
+        and callee_node.name == "range"
+        and isinstance(signature.return_type, RangeType)
+        and getattr(signature, "ast_decl", None) is None
+    ):
+      self._check_range_arguments(arguments, call_node=call_node)
+      return
+
+    expected_param_types = signature.param_types
+    expected_param_names = signature.param_names or []
+    expected_mutabilities = getattr(signature, "param_mutabilities", None) or []
+    has_implicit_self = (
+        getattr(signature, "has_self", False)
+        and bool(expected_param_names)
+        and expected_param_names[0] == "self"
+        and len(expected_param_types) == len(expected_param_names)
+        and (isinstance(callee_node, MemberAccessNode) or is_constructor)
+    )
+    if has_implicit_self:
+      expected_param_types = expected_param_types[1:]
+      expected_param_names = expected_param_names[1:]
+      expected_mutabilities = expected_mutabilities[1:]
+
+    has_named_params = getattr(signature, "has_named_params", True)
+    num_params = len(expected_param_types)
+    num_defaults = getattr(signature, "num_defaults", 0)
+    min_required = max(0, num_params - num_defaults)
+    if len(arguments) < min_required:
+      self.error(
+          f"Not enough arguments passed to call. "
+          f"Expected at least {min_required}, got {len(arguments)}."
+      )
+      for idx, arg in enumerate(arguments):
+        p_idx = None
+        if arg.name and has_named_params and arg.name in expected_param_names:
+          p_idx = expected_param_names.index(arg.name)
+        elif not arg.name and idx < num_params:
+          p_idx = idx
+        exp_t = expected_param_types[p_idx] if p_idx is not None else None
+        self._visit_call_arg_expr(arg.expr, exp_t)
+      return
+
+    seen_named = False
+    bound_slots: Dict[int, ArgumentNode] = {}
+    arg_param_indices: List[Optional[int]] = []
+    has_binding_error = False
+
+    for idx, arg in enumerate(arguments):
+      param_idx: Optional[int] = None
+      if arg.name:
+        seen_named = True
+        if not has_named_params:
+          self.error(
+              f"Named argument '{arg.name}' is not supported when calling "
+              "an unnamed function type.",
+              node=arg,
+          )
+          has_binding_error = True
+        elif arg.name not in expected_param_names:
+          self.error(
+              f"Unexpected named argument '{arg.name}'.",
+              node=arg,
+          )
+          has_binding_error = True
+        else:
+          cand_idx = expected_param_names.index(arg.name)
+          if cand_idx in bound_slots:
+            self.error(
+                f"Multiple values provided for parameter '{arg.name}'.",
+                node=arg,
+            )
+            has_binding_error = True
+          else:
+            param_idx = cand_idx
+            bound_slots[param_idx] = arg
+      else:
+        if seen_named:
+          self.error(
+              "Positional argument cannot follow a named argument.",
+              node=arg,
+          )
+          has_binding_error = True
+        elif idx >= num_params:
+          self.error("Too many arguments passed to call.", node=arg)
+          has_binding_error = True
+        else:
+          param_idx = idx
+          bound_slots[param_idx] = arg
+
+      exp_t = (
+          expected_param_types[param_idx]
+          if param_idx is not None and param_idx < num_params
+          else None
+      )
+      arg_type = self._visit_call_arg_expr(arg.expr, exp_t)
+      if param_idx is not None and param_idx < num_params:
+        self._check_single_argument(
+            idx,
+            arg,
+            arg_type,
+            param_idx,
+            expected_param_types,
+            expected_mutabilities,
+        )
+      arg_param_indices.append(param_idx)
+
+    if not has_binding_error:
+      for m_idx in range(min_required):
+        if m_idx not in bound_slots:
+          p_name = (
+              expected_param_names[m_idx]
+              if m_idx < len(expected_param_names)
+              else f"p{m_idx}"
+          )
+          self.error(
+              f"Missing required argument for parameter '{p_name}'.",
+              node=call_node,
+          )
+          has_binding_error = True
+
+    if call_node is not None and not has_binding_error:
+      if not bound_slots:
+        call_node._resolved_arguments = []
+        call_node._requires_eval_order_temps = False
+        call_node._eval_order_slots = []
+      else:
+        max_idx = max(bound_slots.keys())
+        call_node._resolved_arguments = [
+            bound_slots[i].expr if i in bound_slots else LiteralNode(None, "none")
+            for i in range(max_idx + 1)
+        ]
+        valid_slots = [p for p in arg_param_indices if p is not None]
+        is_reordered = any(
+            valid_slots[k] > valid_slots[k + 1]
+            for k in range(len(valid_slots) - 1)
+        )
+        eval_exprs = [a.expr for a in arguments]
+        if isinstance(callee_node, MemberAccessNode):
+          eval_exprs.append(callee_node.receiver)
+        elif callee_node is not None and not isinstance(callee_node, IdentifierNode):
+          eval_exprs.append(callee_node)
+        has_side_effects = any(not self._is_expr_pure(e) for e in eval_exprs)
+        call_node._requires_eval_order_temps = bool(
+            is_reordered and has_side_effects
+        )
+        call_node._eval_order_slots = valid_slots
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> Type:
     if isinstance(node.receiver, MoveNode):

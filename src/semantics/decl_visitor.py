@@ -278,7 +278,12 @@ class DeclVisitorMixin:
               init_method = parent_type.methods.get("__init__")
               if init_method:
                 if not has_self_ref:
-                  self._check_arguments(base_init.arguments, init_method.method_type, is_constructor=True)
+                  self._check_arguments(
+                      base_init.arguments,
+                      init_method.method_type,
+                      is_constructor=True,
+                      call_node=base_init,
+                  )
               elif base_init.arguments:
                 self.error(f"Parent struct '{parent_name}' does not define an '__init__' constructor.", node=base_init)
 
@@ -303,12 +308,15 @@ class DeclVisitorMixin:
     param_mutabilities = [p.is_mutable for p in func_decl.parameters]
     ret_types = self._resolve_return_types(func_decl)
     num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
+    param_defaults = [getattr(p, "default_expr", None) for p in func_decl.parameters]
     self.current_function = FunctionType(
         resolved_params,
         ret_types,
         param_mutabilities,
         param_names=[p.name for p in func_decl.parameters],
         num_defaults=num_defaults,
+        param_defaults=param_defaults,
+        ast_decl=func_decl,
     )
 
     # Visit body
@@ -367,12 +375,15 @@ class DeclVisitorMixin:
     param_mutabilities = [p.is_mutable for p in node.parameters]
     ret_types = self._resolve_return_types(node)
     num_defaults = sum(1 for p in node.parameters if getattr(p, "default_expr", None) is not None)
+    param_defaults = [getattr(p, "default_expr", None) for p in node.parameters]
     self.current_function = FunctionType(
         resolved_params,
         ret_types,
         param_mutabilities,
         param_names=[p.name for p in node.parameters],
         num_defaults=num_defaults,
+        param_defaults=param_defaults,
+        ast_decl=node,
     )
 
     self.visit(node.body)

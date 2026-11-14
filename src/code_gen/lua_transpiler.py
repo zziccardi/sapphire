@@ -497,11 +497,20 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       else:
         init_args = []
         for idx, p in enumerate(init_params):
-          init_args.append(f"(_arg1['{p.name}'] ~= nil and _arg1['{p.name}'] or _arg1[{idx + 1}])")
+          pname = self._mangle_name(p.name)
+          init_args.append(
+              f"(function() if _arg1['{pname}'] ~= nil then "
+              f"return _arg1['{pname}'] else return _arg1[{idx + 1}] end end)()"
+          )
         call_args = ["self"] + init_args
 
-        param_checks = " or ".join(f"_arg1['{p.name}'] ~= nil" for p in init_params)
-        self.emit(f"if type(_arg1) == \"table\" and ({param_checks} or _arg1[1] ~= nil) then")
+        param_checks = " or ".join(
+            f"_arg1['{self._mangle_name(p.name)}'] ~= nil" for p in init_params
+        )
+        self.emit(
+            f'if type(_arg1) == "table" and '
+            f"({param_checks} or _arg1[1] ~= nil or next(_arg1) == nil) then"
+        )
         self.indent()
         self.newline()
         self.emit(f"{struct_name}._init_sapphire({', '.join(call_args)})")
@@ -692,6 +701,38 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       if func.name == "__init__" and getattr(func, "base_initializers", None):
         for base_init in func.base_initializers:
           parent_name = base_init.callee.name
+          resolved = getattr(base_init, "_resolved_arguments", None)
+          if resolved is not None:
+            if getattr(base_init, "_requires_eval_order_temps", False):
+              temp_binds = []
+              for arg_idx, arg in enumerate(base_init.arguments):
+                temp = self._make_expr_transpiler()
+                temp.visit(arg.expr)
+                temp_binds.append(f"local _a{arg_idx} = {temp.get_output()}")
+              slot_to_temp = {
+                  slot: f"_a{arg_idx}"
+                  for arg_idx, slot in enumerate(
+                      getattr(base_init, "_eval_order_slots", [])
+                  )
+              }
+              call_args = ["self"] + [
+                  slot_to_temp.get(i, "nil") for i in range(len(resolved))
+              ]
+              self.newline()
+              self.emit(
+                  f"do {'; '.join(temp_binds)}; "
+                  f"{parent_name}._init_sapphire({', '.join(call_args)}) end"
+              )
+            else:
+              args_strs = ["self"]
+              for expr in resolved:
+                temp = self._make_expr_transpiler()
+                temp.visit(expr)
+                args_strs.append(temp.get_output())
+              self.newline()
+              self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
+            continue
+
           p_members = self.struct_methods.get(parent_name, [])
           p_init = next((m for m in p_members if getattr(m, "func_decl", None) and m.func_decl.name == "__init__"), None)
           param_names = [p.name for p in p_init.func_decl.parameters if p.name != "self"] if p_init else []
