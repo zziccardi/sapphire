@@ -2496,6 +2496,80 @@ class TestLuaTranspiler(unittest.TestCase):
     })
     self.assertEqual(out, "02468|234567")
 
+  def test_qualified_ancestor_static_dispatch_cross_module_lua(self):
+    """Verifies 3-level cross-module, multi-parent, named-arg, and coroutine ancestor dispatch in Lua."""
+    out = self._run_lua_project({
+        "entity.sp": """
+        struct Entity {
+          var hp: int;
+        }
+
+        impl Entity {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            self.hp = self.hp + dt * mult + bonus;
+          }
+
+          func base_tag(): int {
+            return self.hp;
+          }
+        }
+
+        export {
+          Entity,
+        }
+        """,
+        "character.sp": """
+        import entity;
+
+        struct Character: entity.Entity {
+          var shield: int;
+        }
+
+        impl Character {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            entity.Entity.update(self, mult = mult, dt = dt);
+            self.shield = self.shield + 1;
+          }
+        }
+
+        export {
+          Character,
+        }
+        """,
+        "main.sp": """
+        import character;
+
+        struct Flyer {
+          var alt: int;
+        }
+
+        impl Flyer {
+          var func glide(d: int) {
+            self.alt = self.alt + d;
+          }
+        }
+
+        struct Enemy: character.Character, Flyer {
+          var rage: int;
+        }
+
+        impl Enemy {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            character.Character.update(self, mult = mult, dt = dt);
+            Flyer.glide(self, 3);
+            self.rage = character.Character.base_tag(self);
+          }
+        }
+
+        func main() {
+          var e = Enemy { hp = 5, shield = 0, alt = 2, rage = 0 };
+          e.update(4, mult = 3);
+          print(f"{e.hp},{e.shield},{e.alt},{e.rage}");
+        }
+        """,
+    })
+    self.assertEqual(out, "27,1,5,27")
+
 
 
 # ---------------------------------------------------------------------------

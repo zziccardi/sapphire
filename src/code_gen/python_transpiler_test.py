@@ -2397,6 +2397,63 @@ class TestPythonTranspiler(unittest.TestCase):
     )
     self.assertEqual(result, "129,false,3,10,7,305,false,CAYX")
 
+  def test_qualified_ancestor_static_dispatch_python(self):
+    """Verifies multi-parent, transitive, and named-arg ancestor dispatch in Python."""
+    result = self._transpile_and_run(
+        """
+        struct Entity {
+          var hp: int;
+        }
+
+        impl Entity {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            self.hp = self.hp + dt * mult + bonus;
+          }
+        }
+
+        struct Character: Entity {
+          var shield: int;
+        }
+
+        impl Character {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            Entity.update(self, mult = mult, dt = dt);
+            self.shield = self.shield + 1;
+          }
+        }
+
+        struct Flyer {
+          var alt: int;
+        }
+
+        impl Flyer {
+          var func glide(d: int) {
+            self.alt = self.alt + d;
+          }
+        }
+
+        struct Enemy: Character, Flyer {
+          var rage: int;
+        }
+
+        impl Enemy {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            Character.update(self, mult = mult, dt = dt);
+            Flyer.glide(self, 3);
+            self.rage = self.hp;
+          }
+        }
+
+        func run_test(): String {
+          var e = Enemy { hp = 5, shield = 0, alt = 2, rage = 0 };
+          e.update(4, mult = 3);
+          return f"{e.hp},{e.shield},{e.alt},{e.rage}";
+        }
+        """,
+        "run_test()",
+    )
+    self.assertEqual(result, "27,1,5,27")
+
 
 # ---------------------------------------------------------------------------
 # End-to-end integration tests

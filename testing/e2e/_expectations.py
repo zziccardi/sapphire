@@ -61,6 +61,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_inherited_field": 4,
         "test_overridden_field": 6,
         "test_own_field": 1,
+        "test_qualified_ancestor_static_dispatch": 274,
     },
     "maps_test.sp": {
         "test_map_lookup": 2,

@@ -416,6 +416,9 @@ class TypeResolverMixin:
               and struct_name
           ):
             direct_calls.add(f"{struct_name}.{node.callee.member}")
+          elif isinstance(node.callee.receiver, IdentifierNode):
+            direct_calls.add(f"{node.callee.receiver.name}.{node.callee.member}")
+            direct_calls.add(node.callee.member)
           else:
             direct_calls.add(node.callee.member)
         else:

@@ -4,9 +4,10 @@ This module validates that positioning coordinates are correctly extracted from 
 nodes and delta-encoded into standard LSP 5-integer arrays.
 """
 
-import unittest
-import sys
 import os
+import sys
+import tempfile
+import unittest
 
 # Insert workspace src directory into python path to allow direct imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -620,6 +621,48 @@ class TestSemanticTokens(unittest.TestCase):
     param_default_tok = (5, 24, len("STANDING_FRAME"), "variable", 4)
     self.assertEqual(checker.raw_tokens.count(struct_default_tok), 1)
     self.assertEqual(checker.raw_tokens.count(param_default_tok), 1)
+
+  def test_qualified_ancestor_dispatch_tokens(self):
+    """Verifies semantic tokens for Base.method(self) and mod.Base.method(self)."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      base_sp = os.path.join(tmp_dir, "base_mod.sp")
+      main_sp = os.path.join(tmp_dir, "main.sp")
+      with open(base_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "struct Base {\n"
+            "  var x: int;\n"
+            "}\n"
+            "impl Base {\n"
+            "  func draw(): int {\n"
+            "    return self.x;\n"
+            "  }\n"
+            "}\n"
+            "export { Base, }\n"
+        )
+      code = (
+          "import base_mod;\n"
+          "struct Child: base_mod.Base {\n"
+          "  var y: int;\n"
+          "}\n"
+          "impl Child {\n"
+          "  func draw(): int {\n"
+          "    return base_mod.Base.draw(self) + self.y;\n"
+          "  }\n"
+          "}\n"
+      )
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(code)
+
+      parser = SapphireParser(CommonTokenStream(SapphireLexer(InputStream(code))))
+      ast = ASTBuilder().visit(parser.program())
+      checker = SemanticTokensTypeChecker(doc_text=code, source_file_path=main_sp)
+      checker.check(ast)
+      self.assertEqual(checker.lsp_errors, [])
+
+      # Line 7: '    return base_mod.Base.draw(self) + self.y;'
+      line_7_tokens = [t for t in checker.raw_tokens if t[0] == 7]
+      self.assertIn((7, 20, 4, "struct", 0), line_7_tokens)
+      self.assertIn((7, 25, 4, "method", 0), line_7_tokens)
 
 
 

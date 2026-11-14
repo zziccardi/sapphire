@@ -332,7 +332,10 @@ class BorrowChecker:
   ) -> None:
     """Validates arena transfers into `var` parameters or mutating receivers."""
     arg_exprs = [a.expr for a in node.arguments]
-    if isinstance(node.callee, MemberAccessNode):
+    if (
+        isinstance(node.callee, MemberAccessNode)
+        and not getattr(node.callee, "is_qualified_ancestor_call", False)
+    ):
       recv_expr = node.callee.receiver
       # If mutating method on variable receiver (or receiver symbol is Arena-aware),
       # check whether any arg escapes into receiver's outer scope/lifetime.
@@ -418,7 +421,11 @@ class BorrowChecker:
     borrows: List[Tuple[str, List[str], bool]] = []
 
     # 1. Check implicit self receiver for non-static method calls
-    if not is_constructor and isinstance(node.callee, MemberAccessNode):
+    if (
+        not is_constructor
+        and isinstance(node.callee, MemberAccessNode)
+        and not getattr(node.callee, "is_qualified_ancestor_call", False)
+    ):
       receiver_node = node.callee.receiver
       receiver_type = checker.visit(receiver_node)
       if isinstance(receiver_type, OptionalType):

@@ -82,6 +82,7 @@ class StructLayoutPass:
         return
 
       if node.parent_names:
+        struct_type.parent_types = []
         for parent_name in node.parent_names:
           parent_type = checker.symbol_table.lookup_type(parent_name)
           if not parent_type:
@@ -89,6 +90,8 @@ class StructLayoutPass:
           elif not isinstance(parent_type, StructType):
             checker.error(f"Parent '{parent_name}' of '{node.name}' is not a struct type.")
           else:
+            if parent_type not in struct_type.parent_types:
+              struct_type.parent_types.append(parent_type)
             parent_node = next((s for s in structs_to_process if s.name == parent_name), None)
             if parent_node:
               process_struct(parent_node)

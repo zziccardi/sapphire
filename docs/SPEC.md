@@ -1042,6 +1042,46 @@ Sapphire **strictly disallows up-casting** for statically inherited structures
 * **Separates concerns**: Static inheritance is strictly for *layout and code
   reuse*. Behavioral polymorphism is offloaded to **traits**.
 
+#### Qualified ancestor static dispatch
+
+Inside an instance method of a child `impl` block, an overriding method can
+statically invoke an ancestor's implementation using qualified dispatch:
+`Ancestor.method(self, ...)` or `mod.Ancestor.method(self, ...)`, provided
+`Ancestor` is a transitive parent of the enclosing struct:
+
+```sapphire
+struct Base {
+  var hp: int;
+}
+
+impl Base {
+  var func take_damage(amount: int) {
+    self.hp = self.hp - amount;
+  }
+}
+
+struct Armored: Base {
+  var armor: int;
+}
+
+impl Armored {
+  var func take_damage(amount: int) {
+    let reduced = amount - self.armor;
+    if reduced > 0 {
+      Base.take_damage(self, reduced);
+    }
+  }
+}
+```
+
+* **Zero vtables**: The call resolves at compile time to the ancestor's `impl`
+  function with `self` passed as the first positional argument.
+* **No up-casting**: `let p: Base = self;` and `self as Base` remain rejected,
+  and unbound method values such as `let f = Base.take_damage;` are disallowed.
+* **Borrow & mutability safety**: Calling a `var func` ancestor method requires
+  an enclosing `var func` method and enforces standard call-site reference
+  exclusivity on `self`.
+
 #### Syntactic delegation (transparent forwarding)
 
 Under the hood, structural inheritance compiles to **syntactic delegation**

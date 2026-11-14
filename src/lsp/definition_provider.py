@@ -377,13 +377,13 @@ class DefinitionProvider:
               if target_ast:
                 break
 
-        if (
-            not target_ast
-            and hasattr(receiver_type, "methods")
-            and node.member in receiver_type.methods
-        ):
-          method = receiver_type.methods[node.member]
-          if hasattr(method, "ast_decl") and method.ast_decl:
+        if not target_ast and hasattr(receiver_type, "methods"):
+          method = (
+              receiver_type.get_method(node.member, sym_table)
+              if hasattr(receiver_type, "get_method")
+              else receiver_type.methods.get(node.member)
+          )
+          if method and hasattr(method, "ast_decl") and method.ast_decl:
             target_ast = method.ast_decl
         if (
             not target_ast

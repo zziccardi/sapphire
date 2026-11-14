@@ -7540,6 +7540,207 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Aliasing conflict", str(ctx.exception))
 
+  def test_qualified_ancestor_static_dispatch_accepted(self):
+    """Verifies single, multi-parent, named-arg, and coroutine ancestor calls."""
+    self._check("""
+    struct Flyer {
+      var alt: int;
+    }
+
+    impl Flyer {
+      var func ascend(delta: int, bonus: int = 2, extra: int = 5): int {
+        self.alt = self.alt + delta + bonus + extra;
+        return self.alt;
+      }
+    }
+
+    struct Echolocation {
+      var ping_count: int;
+    }
+
+    impl Echolocation {
+      func pulse(scale: int): int {
+        return self.ping_count * scale;
+      }
+
+      func scan_gen(): Coroutine<int> {
+        yield self.ping_count;
+      }
+    }
+
+    struct Bat: Flyer, Echolocation {
+      var energy: int;
+    }
+
+    impl Bat {
+      var func ascend(delta: int, bonus: int = 2, extra: int = 5): int {
+        return Flyer.ascend(self, extra = extra, delta = delta);
+      }
+
+      func probe(): int {
+        let p = Echolocation.pulse(self, 3);
+        var gen = Echolocation.scan_gen(self);
+        let y = gen.step() ?? 0;
+        return p + y;
+      }
+    }
+
+    func main(): int {
+      var b = Bat { alt = 0, ping_count = 4, energy = 10 };
+      return b.ascend(10) + b.probe();
+    }
+    """)
+
+  def test_qualified_ancestor_static_dispatch_errors(self):
+    """Verifies negative rules for qualified ancestor static dispatch."""
+    # 1. Up-casting remains disallowed.
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Base { var x: int; }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func bad(): int {
+          let p: Base = self;
+          return p.x;
+        }
+      }
+      """)
+
+    # 2. Non-self first argument rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func draw(a: int): int { return self.x + a; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func draw(a: int): int {
+          let other = Child { x = 1, y = 2 };
+          return Base.draw(other, a);
+        }
+      }
+      """)
+    self.assertIn("must pass 'self' as the first positional argument", str(ctx.exception))
+
+    # 3. Immutable func calling var func ancestor rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        var func bump(v: int) { self.x = self.x + v; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func inspect() {
+          Base.bump(self, 1);
+        }
+      }
+      """)
+    self.assertIn("Cannot call mutating ancestor method", str(ctx.exception))
+
+    # 4. Aliasing conflict on Parent.mut(self, self.x).
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      struct Base { var box: Box; }
+      impl Base {
+        var func merge(other: Box): int {
+          self.box.v = self.box.v + other.v;
+          return self.box.v;
+        }
+      }
+      struct Child: Base { var z: int; }
+      impl Child {
+        var func merge(other: Box): int {
+          return Base.merge(self, self.box);
+        }
+      }
+      """)
+    self.assertIn("Aliasing conflict", str(ctx.exception))
+
+    # 5. Child.method(self) self-call rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func draw(): int { return Child.draw(self); }
+      }
+      """)
+    self.assertIn("on own struct 'Child'", str(ctx.exception))
+
+    # 6. Unbound Parent.method reference rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func draw(): int { return self.x; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func draw(): int {
+          let f = Base.draw;
+          return 0;
+        }
+      }
+      """)
+    self.assertIn("Cannot reference unbound instance method", str(ctx.exception))
+
+    # 7. Unrelated struct rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Other { var x: int; }
+      impl Other {
+        func draw(): int { return self.x; }
+      }
+      struct Child { var y: int; }
+      impl Child {
+        func draw(): int { return Other.draw(self); }
+      }
+      """)
+    self.assertIn("is not an ancestor of 'Child'", str(ctx.exception))
+
+    # 8. Outside impl method rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func draw(): int { return self.x; }
+      }
+      func main(): int {
+        let b = Base { x = 1 };
+        return Base.draw(b);
+      }
+      """)
+    self.assertIn("only allowed inside an instance method", str(ctx.exception))
+
+    # 9. Direct __init__ and field access on type receiver rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func __init__(x: int) { self.x = x; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func reset() {
+          Base.__init__(self, 1);
+        }
+      }
+      """)
+    self.assertIn("Cannot call '__init__' directly", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func read_base(): int { return Base.x; }
+      }
+      """)
+    self.assertIn("Cannot access instance field 'x' on type 'Base'", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

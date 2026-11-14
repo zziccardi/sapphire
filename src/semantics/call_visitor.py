@@ -25,6 +25,7 @@ from src.semantics.symbol_table import (
     GenericTypeParameter,
     VariableSymbol,
     FunctionSymbol,
+    StructSymbol,
     EnumSymbol,
     ModuleSymbol,
     CoroutineType,
@@ -311,6 +312,29 @@ class CallVisitorMixin:
       if node.arena_expr:
         self.error("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.")
       signature = callee_type
+      if (
+          isinstance(node.callee, MemberAccessNode)
+          and getattr(node.callee, "is_qualified_ancestor_call", False)
+      ):
+        if (
+            not node.arguments
+            or node.arguments[0].name is not None
+            or not (
+                isinstance(node.arguments[0].expr, IdentifierNode)
+                and node.arguments[0].expr.name == "self"
+            )
+        ):
+          anc_t = getattr(node.callee, "qualified_ancestor_type", None)
+          anc_name = anc_t.name if anc_t else "Ancestor"
+          self.error(
+              f"Qualified ancestor call '{anc_name}.{node.callee.member}' "
+              "must pass 'self' as the first positional argument.",
+              node=node,
+          )
+          rets = callee_type.return_types
+          if len(rets) > 1:
+            return MultiReturnType(rets)
+          return rets[0] if rets else PrimitiveType("none")
       self._check_arguments(
           node.arguments,
           signature,
@@ -1006,6 +1030,9 @@ class CallVisitorMixin:
       self.error("Destructor '__del__' cannot be manually invoked.")
       return PrimitiveType("none")
 
+    if self._is_struct_type_receiver(node.receiver):
+      return self._resolve_struct_type_member_access(node, receiver_type)
+
     # Resolve field
     field = receiver_type.fields.get(node.member)
     if field:
@@ -1023,4 +1050,124 @@ class CallVisitorMixin:
 
     self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
     return PrimitiveType("none")
+
+  def _is_struct_type_receiver(self, expr: ASTNode) -> bool:
+    """Returns True if *expr* refers to a struct type rather than a value."""
+    if isinstance(expr, IdentifierNode):
+      sym = self.symbol_table.lookup(expr.name)
+      if sym is not None:
+        return isinstance(sym, StructSymbol)
+      return isinstance(self.symbol_table.lookup_type(expr.name), StructType)
+    if (
+        isinstance(expr, MemberAccessNode)
+        and isinstance(expr.receiver, IdentifierNode)
+        and not expr.is_optional
+    ):
+      mod_sym = self.symbol_table.lookup(expr.receiver.name)
+      if isinstance(mod_sym, ModuleSymbol):
+        exp_sym = mod_sym.lookup_export(expr.member)
+        if isinstance(exp_sym, StructSymbol):
+          return True
+        return (
+            exp_sym is not None
+            and not isinstance(exp_sym, VariableSymbol)
+            and isinstance(getattr(exp_sym, "symbol_type", exp_sym), StructType)
+        )
+    return False
+
+  def _resolve_struct_type_member_access(
+      self, node: MemberAccessNode, receiver_type: StructType
+  ) -> Type:
+    """Resolves `StructType.member` for static methods or ancestor dispatch."""
+    if node.member == "__init__":
+      self.error(
+          f"Cannot call '__init__' directly on '{receiver_type.name}'; "
+          f"use ': {receiver_type.name}(...)' in a subclass '__init__' or "
+          f"'{receiver_type.name}(...)' to construct.",
+          node=node,
+      )
+      return PrimitiveType("none")
+
+    if node.member in receiver_type.fields:
+      self.error(
+          f"Cannot access instance field '{node.member}' on type "
+          f"'{receiver_type.name}'.",
+          node=node,
+      )
+      return PrimitiveType("none")
+
+    method = receiver_type.get_method(node.member, self.symbol_table)
+    if not method:
+      self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
+      return PrimitiveType("none")
+
+    if method.modifier == "static":
+      node.is_static_method = True
+      node.is_instance_method = False
+      return method.method_type
+
+    if not getattr(node, "is_call", False):
+      self.error(
+          f"Cannot reference unbound instance method "
+          f"'{receiver_type.name}.{node.member}' as a value; call it with "
+          "'(self, ...)' inside a subclass method.",
+          node=node,
+      )
+      return PrimitiveType("none")
+
+    self_sym = self.symbol_table.lookup("self")
+    if not self.current_struct or not isinstance(self_sym, VariableSymbol):
+      self.error(
+          f"Qualified method call '{receiver_type.name}.{node.member}(self, ...)' "
+          "is only allowed inside an instance method of a subclass.",
+          node=node,
+      )
+      return PrimitiveType("none")
+
+    if not self.current_struct.has_ancestor(receiver_type, self.symbol_table):
+      if self.current_struct == receiver_type:
+        self.error(
+            f"Cannot use qualified ancestor dispatch "
+            f"'{receiver_type.name}.{node.member}(self, ...)' on own struct "
+            f"'{self.current_struct.name}'; use 'self.{node.member}(...)' instead.",
+            node=node,
+        )
+      else:
+        self.error(
+            f"Struct '{receiver_type.name}' is not an ancestor of "
+            f"'{self.current_struct.name}'.",
+            node=node,
+        )
+      return PrimitiveType("none")
+
+    if method.modifier == "var" and not self_sym.is_mutable:
+      self.error(
+          f"Cannot call mutating ancestor method "
+          f"'{receiver_type.name}.{node.member}' from immutable method; "
+          "declare the enclosing method as 'var func'.",
+          node=node,
+      )
+      return PrimitiveType("none")
+
+    node.is_qualified_ancestor_call = True
+    node.qualified_ancestor_type = receiver_type
+    node.qualified_ancestor_method = method
+    node.is_static_method = True
+    node.is_instance_method = False
+
+    mt = method.method_type
+    self_mut = method.modifier == "var"
+    fn_t = FunctionType(
+        param_types=[self.current_struct] + list(mt.param_types),
+        return_type=mt.return_type,
+        param_names=["self"] + list(mt.param_names),
+        param_mutabilities=[self_mut] + list(mt.param_mutabilities),
+        has_self=False,
+        num_defaults=mt.num_defaults,
+        param_defaults=[None] + list(getattr(mt, "param_defaults", [])),
+        ast_decl=mt.ast_decl,
+    )
+    # Explicit `self` is passed as argument 0, so disable implicit-self slicing.
+    fn_t.has_self = False
+    return fn_t
 
