@@ -143,6 +143,68 @@ class TestDefinitionProvider(unittest.TestCase):
     self.assertEqual(res_parent.range.start.line, 2)
     self.assertEqual(res_parent.range.start.character, parent_decl_col)
 
+  def test_local_decl_inside_control_flow_blocks(self):
+    code = "\n".join([
+        "func demo(flag: bool): void {",
+        "  if flag {",
+        "    let a: int = 1;",
+        "    let x: int = a;",
+        "  } else if !flag {",
+        "    let b: int = 2;",
+        "    let y: int = b;",
+        "  } else {",
+        "    let c: int = 3;",
+        "    let z: int = c;",
+        "  }",
+        "  for i in 0..3 {",
+        "    let d: int = 4;",
+        "    let w: int = d;",
+        "  }",
+        "  while false {",
+        "    let e: int = 5;",
+        "    let u: int = e;",
+        "  }",
+        "  {",
+        "    let f: int = 6;",
+        "    let v: int = f;",
+        "  }",
+        "}",
+    ])
+    ls = SapphireLanguageServer("sapphire", "v0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///tmp/test_cf_def.sp"
+    doc = MagicMock()
+    doc.source = code
+    doc.uri = doc_uri
+    ls.workspace.get_text_document.return_value = doc
+    validate_source(ls, doc_uri, code)
+
+    lines = code.splitlines()
+    checks = [
+        (3, "a;", 2, "a:"),
+        (6, "b;", 5, "b:"),
+        (9, "c;", 8, "c:"),
+        (13, "d;", 12, "d:"),
+        (17, "e;", 16, "e:"),
+        (21, "f;", 20, "f:"),
+    ]
+    for use_line, use_tok, decl_line, decl_tok in checks:
+      res = DefinitionProvider.provide_definition(
+          ls,
+          DefinitionParams(
+              text_document=TextDocumentIdentifier(uri=doc_uri),
+              position=Position(
+                  line=use_line, character=lines[use_line].index(use_tok)
+              ),
+          ),
+      )
+      self.assertIsNotNone(res)
+      self.assertEqual(res.range.start.line, decl_line)
+      self.assertEqual(
+          res.range.start.character, lines[decl_line].index(decl_tok)
+      )
+
 
 if __name__ == "__main__":
   unittest.main()

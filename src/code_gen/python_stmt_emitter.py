@@ -1,0 +1,664 @@
+"""Statement and control-flow code generation mixin for PythonTranspiler."""
+
+from typing import Any, Dict, List, Optional, Set
+
+from src.parser.ast import *
+from src.code_gen.base_transpiler import extract_type_name, get_default_value_for_type_node, is_coroutine_func
+from src.code_gen.intrinsics import IntrinsicRegistry
+
+
+class PythonStmtMixin:
+  """Provides statement and control-flow AST emission for Python."""
+
+  def visit_BlockNode(self, node: BlockNode) -> None:
+    self.destructor_stack.append([])
+    if getattr(node, "_block_destructibles", None):
+      for d_var in node._block_destructibles:
+        self.destructor_stack[-1].append(d_var)
+        self._var_branch_depth[d_var] = self._branch_depth
+    if not node.statements:
+      self.newline()
+      self.emit("pass")
+    else:
+      self._visit_statements(node.statements)
+    current_destructors = self.destructor_stack.pop()
+    has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
+    if not has_returned:
+      for var_name in reversed(current_destructors):
+        if var_name not in self.moved_vars:
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+    for var_name in current_destructors:
+      self.moved_vars.discard(var_name)
+      self._var_branch_depth.pop(var_name, None)
+
+  def _emit_lifted_lambda(self, node: LambdaNode) -> str:
+    self._temp_lambda_count = getattr(self, "_temp_lambda_count", 0) + 1
+    fn_name = f"_lambda_{self._temp_lambda_count}"
+    params = [self._mangle_name(p.name) for p in node.parameters]
+    self.newline()
+    self.emit(f"def {fn_name}({', '.join(params)}):")
+    self.indent()
+    assigned_globals = self._find_assigned_globals(node.body, local_params=set(params))
+    if assigned_globals:
+      self.newline()
+      self.emit(f"global {', '.join(sorted(assigned_globals))}")
+    self.visit(node.body)
+    self.dedent()
+    return fn_name
+
+  def _lift_match_expressions(self, node: Any) -> None:
+    """Finds all MatchExprNode and block-bodied LambdaNode in the AST subtree and emits helper statements first."""
+    if node is None:
+      return
+    if isinstance(node, LambdaNode) and isinstance(node.body, BlockNode):
+      if not getattr(node, "_is_lifted", False):
+        node._is_lifted = True
+        node._lifted_name = self._emit_lifted_lambda(node)
+      return
+    if isinstance(node, MatchExprNode):
+      if not getattr(node, "_is_lifted", False):
+        node._is_lifted = True
+        for case in node.cases:
+          self._lift_match_expressions(case.body)
+        node._lifted_var = self._emit_match_statement(node)
+      return
+    if isinstance(node, list):
+      for item in node:
+        self._lift_match_expressions(item)
+      return
+    if isinstance(node, ASTNode):
+      for v in node.__dict__.values():
+        if isinstance(v, (ASTNode, list)):
+          self._lift_match_expressions(v)
+
+  def visit_VarDeclNode(self, node: VarDeclNode) -> None:
+    extern_ann = next((a for a in getattr(node, "annotations", []) if a.name == "extern"), None)
+    if extern_ann:
+      # @extern variables represent ambient host symbols (e.g. Love2D engine `love`
+      # or Python standard library / host modules).
+      # If an external module name is provided in the annotation (e.g. @extern("module.name")),
+      # we attempt to import it directly into the Python module namespace so standard library
+      # components are immediately accessible.
+      for name in node.names:
+        ext_target = extern_ann.arg if extern_ann.arg else name
+        self.extern_vars[name] = ext_target
+        if extern_ann.arg:
+          self.newline()
+          self.emit("try:")
+          self.indent()
+          self.newline()
+          self.emit(f"import {extern_ann.arg} as {name}")
+          self.dedent()
+          self.newline()
+          self.emit("except ImportError:")
+          self.indent()
+          self.newline()
+          self.emit("pass")
+          self.dedent()
+      return
+
+    for idx, name in enumerate(node.names):
+      val_type = node.val_types[idx] if idx < len(node.val_types) else None
+      type_name = extract_type_name(val_type) if val_type else None
+      st_name = None
+      if type_name and type_name in self.structs_with_destructor:
+        st_name = type_name
+      elif node.exprs and idx < len(node.exprs):
+        st_name = self._expr_destructible_struct(node.exprs[idx])
+      elif node.exprs and len(node.exprs) == 1:
+        st_name = self._expr_destructible_struct(node.exprs[0], return_index=idx)
+      elif node.expr:
+        st_name = self._expr_destructible_struct(node.expr, return_index=idx)
+
+      if st_name:
+        m_name = self._mangle_name(name)
+        self.variable_types[m_name] = st_name
+        if self.destructor_stack:
+          self.destructor_stack[-1].append(m_name)
+          self._var_branch_depth[m_name] = self._branch_depth
+
+    self._lift_match_expressions(node.exprs)
+
+    self.newline()
+    self.record_line(getattr(node, "start_line", None))
+    names_str = ", ".join([self._mangle_name(n) for n in node.names])
+    self.emit(f"{names_str}")
+    if node.exprs:
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
+    else:
+      defaults = []
+      for idx, name in enumerate(node.names):
+        val_type = node.val_types[idx] if idx < len(node.val_types) else None
+        default_expr = get_default_value_for_type_node(val_type)
+        if default_expr:
+          temp = type(self)()
+          temp.visit(default_expr)
+          defaults.append(temp.get_output())
+        else:
+          defaults.append("None")
+      self.emit(" = " + ", ".join(defaults))
+
+  def visit_AssignmentNode(self, node: AssignmentNode) -> None:
+    self._lift_match_expressions(node.targets)
+    self._lift_match_expressions(node.exprs)
+
+    if node.op == "=":
+      live_destructible_targets = [
+          self._mangle_name(t.name)
+          for t in node.targets
+          if isinstance(t, IdentifierNode)
+          and self._is_active_destructible_var(self._mangle_name(t.name))
+          and self._mangle_name(t.name) not in self.moved_vars
+      ]
+      if live_destructible_targets:
+        self._temp_reassign_count = getattr(self, "_temp_reassign_count", 0) + 1
+        tmp_names = [
+            f"_reassign_{self._temp_reassign_count}_{i + 1}"
+            for i in range(len(node.targets))
+        ]
+        self.newline()
+        self.record_line(getattr(node, "start_line", None))
+        self.emit(", ".join(tmp_names) + " = ")
+        for idx, expr in enumerate(node.exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+        for m_t in live_destructible_targets:
+          if m_t not in self.moved_vars and m_t not in self._pending_null_vars:
+            self.newline()
+            self.emit(f"_sapphire_del({m_t})")
+        assigned_id_names = {
+            self._mangle_name(t.name)
+            for t in node.targets
+            if isinstance(t, IdentifierNode)
+        }
+        self._drain_pending_null_vars("None", exclude=assigned_id_names)
+        self.newline()
+        for idx, target in enumerate(node.targets):
+          if isinstance(target, IdentifierNode):
+            self.moved_vars.discard(self._mangle_name(target.name))
+          if idx > 0:
+            self.emit(", ")
+          if isinstance(target, IdentifierNode) and target.name in self.extern_vars:
+            ext_name = self.extern_vars[target.name]
+            self.emit(f"__import__('builtins').{ext_name}")
+          else:
+            self.visit(target)
+        self.emit(" = " + ", ".join(tmp_names))
+        return
+
+    self.newline()
+    self.record_line(getattr(node, "start_line", None))
+    if node.op == "=":
+      for idx, target in enumerate(node.targets):
+        if isinstance(target, IdentifierNode):
+          self.moved_vars.discard(self._mangle_name(target.name))
+        if idx > 0:
+          self.emit(", ")
+        # Assigning to an @extern variable inside a function must mutate Python's
+        # `builtins` namespace so other modules reading the ambient symbol (e.g. `love`)
+        # can resolve it via standard LEGB scope lookup.
+        if isinstance(target, IdentifierNode) and target.name in self.extern_vars:
+          ext_name = self.extern_vars[target.name]
+          self.emit(f"__import__('builtins').{ext_name}")
+        else:
+          self.visit(target)
+      self.emit(" = ")
+      for idx, expr in enumerate(node.exprs):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
+    else:
+      if isinstance(node.target, IdentifierNode):
+        self.moved_vars.discard(self._mangle_name(node.target.name))
+        if node.target.name in self.extern_vars:
+          ext_name = self.extern_vars[node.target.name]
+          self.emit(f"__import__('builtins').{ext_name}")
+        else:
+          self.visit(node.target)
+      else:
+        self.visit(node.target)
+      self.emit(f" {node.op} ")
+      self.visit(node.expr)
+
+  def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
+    if isinstance(node.expr, MatchExprNode):
+      self._emit_match_statement(node.expr, target_var=None)
+      return
+    self._lift_match_expressions(node.expr)
+    self.newline()
+    self.record_line(getattr(node, "start_line", None))
+    self.visit(node.expr)
+
+  def visit_ReturnNode(self, node: ReturnNode) -> None:
+    self._lift_match_expressions(node.expressions)
+    all_active_destructors = [
+        d for frame in reversed(self.destructor_stack) for d in reversed(frame)
+    ]
+    returned_ids = {
+        self._mangle_name(expr.name)
+        for expr in node.expressions
+        if isinstance(expr, (IdentifierNode, MoveNode))
+    }
+    destructors_to_run = [
+        d for d in all_active_destructors
+        if d not in returned_ids and d not in self.moved_vars
+    ]
+
+    if node.expressions and destructors_to_run and not all(isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions):
+      ret_tmps = []
+      for idx, expr in enumerate(node.expressions):
+        tmp_name = f"_ret_val_{idx + 1}"
+        ret_tmps.append(tmp_name)
+        self.newline()
+        self.emit(f"{tmp_name} = ")
+        self.visit(expr)
+
+      for var_name in destructors_to_run:
+        if var_name not in self.moved_vars:
+          self.newline()
+          self.emit(f"_sapphire_del({var_name})")
+
+      self.newline()
+      self.emit("return " + ", ".join(ret_tmps))
+      self._pending_null_vars.clear()
+      return
+
+    for var_name in destructors_to_run:
+      if var_name not in self.moved_vars:
+        self.newline()
+        self.emit(f"_sapphire_del({var_name})")
+
+    self.newline()
+    if not node.expressions:
+      self.emit("return")
+    else:
+      self.emit("return ")
+      for idx, expr in enumerate(node.expressions):
+        if idx > 0:
+          self.emit(", ")
+        self.visit(expr)
+    self._pending_null_vars.clear()
+
+  def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
+    if target_var == "":
+      self._temp_match_count = getattr(self, "_temp_match_count", 0) + 1
+      target_var = f"_match_res_{self._temp_match_count}"
+      self.newline()
+      self.emit(f"{target_var} = None")
+
+    self.newline()
+    self.emit("match ")
+    self.visit(node.subject)
+    self.emit(":")
+    self.indent()
+
+    prev_target = getattr(self, "_current_match_target", None)
+    self._current_match_target = target_var
+
+    for case in node.cases:
+      self.newline()
+      if isinstance(case.pattern, EllipsisPatternNode):
+        self.emit("case _:")
+      else:
+        self.emit("case ")
+        self.visit(case.pattern)
+        self.emit(":")
+
+      self.indent()
+      self._branch_depth += 1
+      try:
+        if isinstance(case.body, BlockNode):
+          if not case.body.statements:
+            self.newline()
+            self.emit("pass")
+          else:
+            self.visit(case.body)
+        else:
+          self.newline()
+          if target_var:
+            self.emit(f"{target_var} = ")
+            self.visit(case.body)
+          else:
+            self.visit(case.body)  # pragma: no cover
+        self._drain_pending_null_vars("None")
+      finally:
+        self._branch_depth -= 1
+      self.dedent()
+
+    self.dedent()
+    self._current_match_target = prev_target
+    return target_var or ""
+
+  def visit_YieldNode(self, node: YieldNode) -> None:
+    exprs = getattr(node, "expressions", None) or ([node.expr] if node.expr else [])
+    self._lift_match_expressions(exprs)
+    target = getattr(self, "_current_match_target", None)
+    self.newline()
+    if target:
+      self.emit(f"{target} = ")
+      if not exprs:
+        self.emit("None")
+      elif len(exprs) == 1:
+        self.visit(exprs[0])
+      else:
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+    else:
+      self.emit("yield")
+      if not exprs:
+        self.emit(" None")
+      elif len(exprs) == 1:
+        self.emit(" ")
+        self.visit(exprs[0])
+      else:
+        self.emit(" ")
+        for idx, expr in enumerate(exprs):
+          if idx > 0:
+            self.emit(", ")
+          self.visit(expr)
+
+  def visit_MatchExprNode(self, node: MatchExprNode) -> None:
+    if not getattr(node, "_is_lifted", False):
+      node._is_lifted = True
+      node._lifted_var = self._emit_match_statement(node)
+    self.emit(node._lifted_var)
+
+  def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
+    self.emit("_")
+
+  def visit_IfNode(self, node: IfNode) -> None:
+    bindings = getattr(node, "bindings", [node.init_binding] if getattr(node, "init_binding", None) else [])
+
+    if not bindings:
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+      self.newline()
+      self.emit("if ")
+      self.visit(node.condition)
+      self.emit(":")
+      self.indent()
+      self._visit_in_branch(node.then_block)
+      self.dedent()
+      if node.else_block:
+        self.newline()
+        self.emit("else:")
+        self.indent()
+        self._visit_in_branch(node.else_block)
+        self.dedent()
+      return
+
+    if len(bindings) == 1:
+      binding = bindings[0]
+      self._lift_match_expressions(binding.expr)
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+      let_names = getattr(binding, "let_names", [binding.let_name])
+      let_name = binding.let_name
+
+      self.newline()
+      if binding.is_unwrap:
+        val_var = f"_val_{let_name}"
+        self.emit(f"{val_var} = ")
+        self.visit(binding.expr)
+        self.newline()
+
+        # Map identifier to temporary variable during condition check
+        old_map = self._identifier_map.copy()
+        if len(let_names) == 1:
+          self._identifier_map[let_name] = val_var
+        else:
+          for idx, name in enumerate(let_names):
+            self._identifier_map[name] = f"{val_var}[{idx}]"
+
+        self.emit(f"if {val_var} is not None")
+        if node.condition:
+          self.emit(" and ")
+          self.visit(node.condition)
+        self.emit(":")
+
+        # Restore identifier map
+        self._identifier_map = old_map
+
+        self.indent()
+        self.newline()
+        if len(let_names) > 1:
+          for idx, name in enumerate(let_names):
+            self.emit(f"{self._mangle_name(name)} = {val_var}[{idx}]")
+            if idx < len(let_names) - 1:
+              self.newline()
+        else:
+          self.emit(f"{self._mangle_name(let_name)} = {val_var}")
+
+        st_name = self._expr_destructible_struct(binding.expr)
+        if st_name and self._is_owned_unwrap_expr(binding.expr):
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
+        self._visit_in_branch(node.then_block)
+        self.dedent()
+      else:
+        # Standard bind + condition
+        self.emit(f"{let_name} = ")
+        self.visit(binding.expr)
+        st_name = self._expr_destructible_struct(binding.expr)
+        if st_name:
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
+        self.newline()
+        self.emit("if ")
+        self.visit(node.condition)
+        self.emit(":")
+        self.indent()
+        self._visit_in_branch(node.then_block)
+        self.dedent()
+
+      if node.else_block:
+        self.newline()
+        self.emit("else:")
+        self.indent()
+        self._visit_in_branch(node.else_block)
+        self.dedent()
+      return
+
+    # Multi-binding (len(bindings) > 1) with sequential short-circuiting and LIFO destructors
+    self._temp_if_count = getattr(self, "_temp_if_count", 0) + 1
+    cond_flag = f"_if_ok_{self._temp_if_count}"
+
+    for b in bindings:
+      self._lift_match_expressions(b.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+
+    self.newline()
+    self.emit(f"{cond_flag} = False")
+
+    def emit_binding_level(idx: int, prior_destructibles: List[str]):
+      if idx < len(bindings):
+        b = bindings[idx]
+        let_names = getattr(b, "let_names", [b.let_name])
+        let_name = b.let_name
+        st_name = self._expr_destructible_struct(b.expr)
+        current_destructibles = list(prior_destructibles)
+        if st_name and (not b.is_unwrap or self._is_owned_unwrap_expr(b.expr)):
+          for name in let_names:
+            self.variable_types[name] = st_name
+            if not hasattr(node.then_block, "_block_destructibles"):
+              node.then_block._block_destructibles = []
+            node.then_block._block_destructibles.append(name)
+          current_destructibles.extend(let_names)
+
+        if b.is_unwrap:
+          val_var = f"_val_{let_name}_{idx + 1}"
+          self.newline()
+          self.emit(f"{val_var} = ")
+          self.visit(b.expr)
+          self.newline()
+          self.emit(f"if {val_var} is not None:")
+          self.indent()
+          self.newline()
+          if len(let_names) > 1:
+            for n_idx, name in enumerate(let_names):
+              self.emit(f"{name} = {val_var}[{n_idx}]")
+              if n_idx < len(let_names) - 1:
+                self.newline()
+          else:
+            self.emit(f"{let_name} = {val_var}")
+
+          emit_binding_level(idx + 1, current_destructibles)
+          self.dedent()
+          if prior_destructibles:
+            self.newline()
+            self.emit("else:")
+            self.indent()
+            for d_var in reversed(prior_destructibles):
+              self.newline()
+              self.emit(f"_sapphire_del({d_var})")
+            self.newline()
+            self.emit("pass")
+            self.dedent()
+        else:
+          self.newline()
+          self.emit(f"{let_name} = ")
+          self.visit(b.expr)
+          emit_binding_level(idx + 1, current_destructibles)
+      else:
+        # All bindings acquired; check condition if present
+        if node.condition:
+          self.newline()
+          self.emit("if ")
+          self.visit(node.condition)
+          self.emit(":")
+          self.indent()
+          self.newline()
+          self.emit(f"{cond_flag} = True")
+          self._visit_in_branch(node.then_block)
+          self.dedent()
+          if prior_destructibles:
+            self.newline()
+            self.emit("else:")
+            self.indent()
+            for d_var in reversed(prior_destructibles):
+              self.newline()
+              self.emit(f"_sapphire_del({d_var})")
+            self.newline()
+            self.emit("pass")
+            self.dedent()
+        else:
+          self.newline()
+          self.emit(f"{cond_flag} = True")
+          self._visit_in_branch(node.then_block)
+
+    emit_binding_level(0, [])
+
+    if node.else_block:
+      self.newline()
+      self.emit(f"if not {cond_flag}:")
+      self.indent()
+      self._visit_in_branch(node.else_block)
+      self.dedent()
+
+  def visit_WhileNode(self, node: WhileNode) -> None:
+    self.loop_destructor_depth.append(len(self.destructor_stack))
+    try:
+      if node.condition:
+        self._lift_match_expressions(node.condition)
+
+      self.newline()
+      self.emit("while ")
+      self.visit(node.condition)
+      self.emit(":")
+      self.indent()
+      self.visit(node.block)
+      self.dedent()
+    finally:
+      self.loop_destructor_depth.pop()
+
+  def visit_ForNode(self, node: ForNode) -> None:
+    self.loop_destructor_depth.append(len(self.destructor_stack))
+    try:
+      self._lift_match_expressions(node.iterable)
+      self.newline()
+      if node.key_var is not None:
+        self.emit(f"for {self._mangle_name(node.key_var)}, {self._mangle_name(node.val_var)} in ")
+        self.visit(node.iterable)
+        self.emit(".items():")
+      else:
+        self.emit(f"for {self._mangle_name(node.val_var)} in ")
+        self.visit(node.iterable)
+        self.emit(":")
+      self.indent()
+      self.visit(node.block)
+      self.dedent()
+    finally:
+      self.loop_destructor_depth.pop()
+
+  def visit_BreakNode(self, node: BreakNode) -> None:
+    self._emit_loop_destructors()
+    self.newline()
+    self.emit("break")
+
+  def visit_ContinueNode(self, node: ContinueNode) -> None:
+    self._emit_loop_destructors()
+    self.newline()
+    self.emit("continue")
+
+  # ==========================================
+  # Expressions Visitor
+  # ==========================================
+
+  def visit_GuardClauseNode(self, node: GuardClauseNode) -> None:
+    if node.binding:
+      self.visit(node.binding.expr)
+    elif node.condition:
+      self.visit(node.condition)
+
+  def visit_GuardStmtNode(self, node: GuardStmtNode) -> None:
+    for clause in node.clauses:
+      self.newline()
+      if clause.binding:
+        binding = clause.binding
+        self._lift_match_expressions(binding.expr)
+        let_names = getattr(binding, "let_names", [binding.let_name])
+        self._temp_guard_count = getattr(self, "_temp_guard_count", 0) + 1
+        tmp_var = f"_guard_val_{self._temp_guard_count}"
+
+        self.emit(f"{tmp_var} = ")
+        self.visit(binding.expr)
+        self.newline()
+
+        if binding.is_unwrap:
+          self.emit(f"if {tmp_var} is None:")
+          self.indent()
+          self.visit(node.else_block)
+          self.dedent()
+          self.newline()
+
+        if len(let_names) > 1:
+          for idx, name in enumerate(let_names):
+            self.emit(f"{self._mangle_name(name)} = {tmp_var}[{idx}]")
+            if idx < len(let_names) - 1:
+              self.newline()
+        else:
+          self.emit(f"{self._mangle_name(binding.let_name)} = {tmp_var}")
+      elif clause.condition:
+        self._lift_match_expressions(clause.condition)
+        self.emit("if not (")
+        self.visit(clause.condition)
+        self.emit("):")
+        self.indent()
+        self.visit(node.else_block)
+        self.dedent()
+

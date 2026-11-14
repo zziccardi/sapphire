@@ -253,6 +253,69 @@ class SemanticParityTest(unittest.TestCase):
     self.assertEqual(py_val, 99)
     self.assertEqual(lua_val, 99)
 
+  def test_inherited_struct_destructor_and_positional_super_init(self):
+    """Verifies Child.__del__ runs auto-teardown on Parent.__del__ and positional Parent.__init__."""
+    code = """
+    var teardown_order: int = 0;
+    struct Parent {
+      var p_val: int;
+    }
+    impl Parent {
+      func __init__(v: int) {
+        self.p_val = v;
+      }
+      func __del__() {
+        teardown_order = teardown_order * 10 + 1;
+      }
+    }
+    struct Child: Parent {
+      var c_val: int;
+    }
+    impl Child {
+      func __init__(v: int): Parent(v) {
+        self.c_val = v + 1;
+      }
+      func __del__() {
+        teardown_order = teardown_order * 10 + 2;
+      }
+    }
+    @test
+    func test_inherited_del(): int {
+      {
+        let c = Child(10);
+      }
+      return teardown_order;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_inherited_del")
+    self.assertEqual(py_val, 21)
+    self.assertEqual(lua_val, 21)
+
+  def test_global_mutation_with_map_loop_if_let_and_guard(self):
+    """Verifies global var tracking with map loops, if-let, and guard-let."""
+    code = """
+    var g_sum: int = 0;
+    @test
+    func test_globals(): int {
+      let m: [String: int] = {"a": 1, "b": 2};
+      for k, v in m {
+        g_sum = g_sum + v;
+      }
+      let opt: int? = 10;
+      if let x ?= opt {
+        g_sum = g_sum + x;
+      }
+      guard let y ?= opt else {
+        return -1;
+      }
+      g_sum = g_sum + y;
+      return g_sum;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_globals")
+    self.assertEqual(py_val, 23)
+    self.assertEqual(lua_val, 23)
+
 
 if __name__ == "__main__":
   unittest.main()
