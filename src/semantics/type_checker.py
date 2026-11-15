@@ -289,6 +289,7 @@ class TypeChecker(
 
     # Pass 3.5: Pre-analyze module-level var globals and call graph accesses
     self._analyze_global_accesses(program)
+    self._analyze_method_self_fields(program)
 
     # Pass 4: Type-check top-level statements, functions, and structs
     self.visit_ProgramNode(program)

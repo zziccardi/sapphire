@@ -454,7 +454,19 @@ class BorrowChecker:
             root, path = res
             borrows.append((root, path, is_mutable))
             if is_mutable:
-              reason = checker.get_frozen_lvalue_reason(root, path)
+              reason = None
+              method_fields = getattr(
+                  checker, "_method_self_field_accesses", {}
+              ).get((receiver_type.name, node.callee.member))
+              if method_fields is not None and len(method_fields) > 0:
+                for field_name in method_fields:
+                  reason = checker.get_frozen_lvalue_reason(
+                      root, path + [field_name]
+                  )
+                  if reason:
+                    break
+              else:
+                reason = checker.get_frozen_lvalue_reason(root, path)
               if reason:
                 checker.error(
                     f"Cannot invoke mutating method '{node.callee.member}' "

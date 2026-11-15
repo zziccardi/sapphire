@@ -7802,6 +7802,61 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot assign type 'String' to target of type 'int'", str(ctx.exception))
 
+  def test_guard_var_allows_disjoint_mutating_method(self):
+    """Verifies field-disjoint var func calls succeed during guard var unwrap."""
+    self._check("""
+    struct Enemy {
+      var x: int = 0;
+    }
+    impl Enemy {
+      var func step(nx: int) { self.x = nx; }
+    }
+    struct Controller {
+      var active_enemy: Enemy? = none;
+      var index: int = 0;
+      var in_progress: bool = false;
+    }
+    impl Controller {
+      var func clear_turn() {
+        self.index = 0;
+        self.in_progress = false;
+      }
+      var func set_enemy(e: Enemy?) {
+        self.active_enemy = e;
+        self.clear_turn();
+      }
+      var func advance_path() {
+        guard var e ?= self.active_enemy else { return; }
+        e.step(5);
+        self.clear_turn();
+      }
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Enemy { var x: int = 0; }
+      struct Controller {
+        var active_enemy: Enemy? = none;
+        var index: int = 0;
+      }
+      impl Controller {
+        var func clear_turn() { self.index = 0; }
+        var func set_enemy(e: Enemy?) {
+          self.active_enemy = e;
+          self.clear_turn();
+        }
+        var func advance_path() {
+          guard var e ?= self.active_enemy else { return; }
+          self.set_enemy(none);
+        }
+      }
+      """)
+    self.assertIn(
+        "Cannot invoke mutating method 'set_enemy' on 'self' while it is frozen",
+        str(ctx.exception),
+    )
+
 
 if __name__ == "__main__":
   unittest.main()
