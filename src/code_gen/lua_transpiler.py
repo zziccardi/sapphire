@@ -782,6 +782,15 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.dedent()
     self.newline()
     self.emit("end")
+    export_ann = next(
+        (a for a in getattr(func, "annotations", []) if a.name == "export"),
+        None,
+    )
+    if export_ann and export_ann.arg:
+      alias_name = self._mangle_name(export_ann.arg)
+      if alias_name != func_name:
+        self.newline()
+        self.emit(f"{struct_name}.{alias_name} = {struct_name}.{func_name}")
     self.newline()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:

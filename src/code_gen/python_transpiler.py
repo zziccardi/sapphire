@@ -494,6 +494,15 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       else:
         self.visit(func.body)
       self.dedent()
+    export_ann = next(
+        (a for a in getattr(func, "annotations", []) if a.name == "export"),
+        None,
+    )
+    if export_ann and export_ann.arg:
+      alias_name = self._mangle_name(export_ann.arg)
+      if alias_name != func_name:
+        self.newline()
+        self.emit(f"{alias_name} = {func_name}")
 
   def _find_assigned_globals(
       self, node: Any, local_params: Optional[Set[str]] = None
