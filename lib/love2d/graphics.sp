@@ -86,6 +86,8 @@ trait Graphics {
                       sw: float, sh: float): Quad;
 
   static func setCanvas(canvas: Canvas? = none);
+  static func setDefaultFilter(min_filter: enums.FilterMode,
+                               mag_filter: enums.FilterMode);
   static func getFont(): Font;
   static func setFont(font: Font);
 
