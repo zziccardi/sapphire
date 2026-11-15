@@ -506,7 +506,9 @@ def run_tests_lua(
 
     # Construct Lua runner script
     pkg_path = (
-        f'package.path = "{esc_workspace_root}/lib/?.lua;'
+        f'package.path = "{esc_workspace_root}/?.lua;'
+        f'{esc_workspace_root}/?/init.lua;'
+        f'{esc_workspace_root}/lib/?.lua;'
         f'{esc_workspace_root}/lib/?/init.lua;'
         f'{esc_sp_dir}/?.lua;{esc_sp_dir}/?/init.lua;" .. package.path'
     )

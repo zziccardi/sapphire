@@ -52,6 +52,16 @@ trait Graphics {
   static func setBackgroundColor(r: float, g: float, b: float, a: float = 1.0);
   static func present();
 
+  @export("draw")
+  static func drawImage(image: Image, quad: Quad? = none,
+                        x: float = 0.0, y: float = 0.0, r: float = 0.0,
+                        sx: float = 1.0, sy: float = 1.0);
+
+  @export("draw")
+  static func drawCanvas(canvas: Canvas, quad: Quad? = none,
+                         x: float = 0.0, y: float = 0.0, r: float = 0.0,
+                         sx: float = 1.0, sy: float = 1.0);
+
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
@@ -75,4 +85,8 @@ trait Graphics {
 
   static func setCanvas(canvas: Canvas? = none);
   static func setFont(font: Font);
+
+  static func getDimensions(): float, float;
+  static func getWidth(): float;
+  static func getHeight(): float;
 }
