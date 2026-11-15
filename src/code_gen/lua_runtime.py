@@ -361,6 +361,24 @@ local _sapphire_string_strip = function(s, chars)
   return s:match(pattern) or ""
 end
 
+local _sapphire_string_slice = function(s, start_idx, end_idx)
+  if s == nil then return "" end
+  local len = #s
+  local i = start_idx or 0
+  if i < 0 then i = len + i end
+  if i < 0 then i = 0 end
+  if i > len then return "" end
+  local j = end_idx
+  if j == nil then
+    j = len
+  else
+    if j < 0 then j = len + j end
+    if j > len then j = len end
+  end
+  if j <= i then return "" end
+  return s:sub(i + 1, j)
+end
+
 local _sapphire_string_split = function(s, sep)
   if s == nil then return {} end
   local res = {}

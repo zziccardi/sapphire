@@ -6463,6 +6463,7 @@ class TestTypeChecker(unittest.TestCase):
       var opt: int? = 10;
       if var x ?= opt {
         opt = 20;
+        let y = x;
       }
     }
     """
@@ -7856,6 +7857,75 @@ class TestTypeChecker(unittest.TestCase):
         "Cannot invoke mutating method 'set_enemy' on 'self' while it is frozen",
         str(ctx.exception),
     )
+
+
+  def test_optional_chain_flattens_nested_optional(self):
+    code = """
+    struct Inner { var name: String? = none; }
+    func get_name(x: Inner?): String {
+      return x?.name ?? "default";
+    }
+    """
+    self._check(code)
+
+  def test_array_bounds_invalidated_after_mutation(self):
+    code_push = """
+    func main() {
+      var arr: [int] = [];
+      arr.push(42);
+      let x = arr[0];
+    }
+    """
+    self._check(code_push)
+
+    code_var_param = """
+    func fill(var a: [int]) {
+      a.push(1);
+    }
+    func main() {
+      var arr: [int] = [];
+      fill(arr);
+      let x = arr[0];
+    }
+    """
+    self._check(code_var_param)
+
+  def test_if_var_post_last_use_and_field_disjoint_unfreezing(self):
+    code_ok = """
+    struct Session { var step: int = 0; }
+    impl Session {
+      var func advance() { self.step = self.step + 1; }
+    }
+    struct Runner {
+      var session: Session? = none;
+      var done: bool = false;
+    }
+    impl Runner {
+      var func finish() {
+        self.session = none;
+        self.done = true;
+      }
+      var func update() {
+        if var s ?= self.session {
+          s.advance();
+          self.finish();
+        }
+      }
+    }
+    """
+    self._check(code_ok)
+
+  def test_builtin_assert_and_string_slice(self):
+    code = """
+    func main() {
+      assert(true);
+      assert(1 + 1 == 2, "math works");
+      let s: String = "hello world";
+      let a: String = s.slice(0, 5);
+      let b: String = s.slice(6);
+    }
+    """
+    self._check(code)
 
 
 if __name__ == "__main__":

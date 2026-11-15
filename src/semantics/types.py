@@ -773,6 +773,13 @@ STRING_METHODS: Dict[str, FunctionType] = {
         param_names=["self"],
         has_self=True,
     ),
+    "slice": FunctionType(
+        [StringType(), PrimitiveType("int"), OptionalType(PrimitiveType("int"))],
+        StringType(),
+        param_names=["self", "start", "end"],
+        has_self=True,
+        num_defaults=1,
+    ),
 }
 
 

@@ -677,6 +677,7 @@ class StmtVisitorMixin:
     if node.bindings:
       self.symbol_table.enter_scope()
       has_unwrap = False
+      unwrap_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
       for binding in node.bindings:
         expr_type = self.visit(binding.expr)
         is_borrowed_unwrap = False
@@ -725,9 +726,9 @@ class StmtVisitorMixin:
         if binding.is_unwrap and binding.is_mutable:
           b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
           if b_res:
-            self.symbol_table.current_scope.frozen_lvalues.append(
-                (b_res[0], b_res[1], "active 'if var' unwrap")
-            )
+            freeze_entry = (b_res[0], b_res[1], "active 'if var' unwrap")
+            self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
+            unwrap_freezes.append((binding.let_name, freeze_entry))
 
       if node.condition:
         cond_type = self.visit(node.condition)
@@ -741,7 +742,35 @@ class StmtVisitorMixin:
       pre_branch_moved = set(self.moved_symbols)
       self._branch_depth += 1
       try:
-        self.visit(node.then_block)
+        if unwrap_freezes and isinstance(node.then_block, BlockNode):
+          if_scope = self.symbol_table.current_scope
+          stmts = node.then_block.statements
+          last_use_idx: Dict[str, int] = {}
+          for var_name, freeze_entry in unwrap_freezes:
+            last_idx = -1
+            for s_idx, stmt in enumerate(stmts):
+              if self._ast_references_ident(stmt, var_name):
+                last_idx = s_idx
+            last_use_idx[var_name] = last_idx
+            if last_idx == -1 and freeze_entry in if_scope.frozen_lvalues:
+              if_scope.frozen_lvalues.remove(freeze_entry)
+
+          self.symbol_table.enter_scope()
+          for s_idx, stmt in enumerate(stmts):
+            self.visit(stmt)
+            for var_name, freeze_entry in unwrap_freezes:
+              if (
+                  last_use_idx.get(var_name) == s_idx
+                  and freeze_entry in if_scope.frozen_lvalues
+              ):
+                if_scope.frozen_lvalues.remove(freeze_entry)
+          cur_scope = self.symbol_table.current_scope
+          self.moved_symbols = {
+              s for s in self.moved_symbols if s.scope_defined != cur_scope
+          }
+          self.symbol_table.exit_scope()
+        else:
+          self.visit(node.then_block)
         then_moved = set(self.moved_symbols)
 
         if node.else_block:

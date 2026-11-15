@@ -1181,6 +1181,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('local pos = _sapphire_string_find(clean, "o", nil, true)', lua_out)
     self.assertIn('local parts = _sapphire_string_split(clean, ",")', lua_out)
 
+  def test_string_slice_and_assert_lua(self):
+    code = """
+    func main() {
+      let s = "hello world";
+      let a = s.slice(0, 5);
+      let b = s.slice(6);
+      assert(a == "hello");
+      assert(b == "world", "expected world");
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("_sapphire_string_slice(s, 0, 5)", lua_out)
+    self.assertIn("_sapphire_string_slice(s, 6)", lua_out)
+    self.assertIn('assert((a == "hello"), "assertion failed")', lua_out)
+    self.assertIn('assert((b == "world"), "expected world")', lua_out)
+
   def test_transpile_with_explicit_args(self):
     """Verifies passing source_file and source_map_builder directly to transpile method."""
     input_stream = InputStream("let x = 10;")

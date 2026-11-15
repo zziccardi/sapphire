@@ -142,19 +142,25 @@ class TypeChecker(
       return self._get_target_symbol(target.receiver)
     return None
 
-  def _ast_references_self(self, ast_node: Any) -> bool:
-    """Returns True if *ast_node* contains an IdentifierNode('self')."""
+  def _ast_references_ident(self, ast_node: Any, name: str) -> bool:
+    """Returns True if *ast_node* contains an IdentifierNode with *name*."""
     if ast_node is None:
       return False
-    if isinstance(ast_node, IdentifierNode) and ast_node.name == "self":
+    if isinstance(ast_node, IdentifierNode) and ast_node.name == name:
       return True
     if isinstance(ast_node, list):
-      return any(self._ast_references_self(item) for item in ast_node)
+      return any(self._ast_references_ident(item, name) for item in ast_node)
     if isinstance(ast_node, ASTNode):
       for val in ast_node.__dict__.values():
-        if isinstance(val, (ASTNode, list)) and self._ast_references_self(val):
+        if isinstance(val, (ASTNode, list)) and self._ast_references_ident(
+            val, name
+        ):
           return True
     return False
+
+  def _ast_references_self(self, ast_node: Any) -> bool:
+    """Returns True if *ast_node* contains an IdentifierNode('self')."""
+    return self._ast_references_ident(ast_node, "self")
 
   def _check_value_ownership_transfer(
       self,

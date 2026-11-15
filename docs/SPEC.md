@@ -152,7 +152,7 @@ string interpolation using the `f"..."` prefix and binary `+` concatenation:
   `{player.to_string()}`) must be called.
 * **Built-in methods**: Strings provide built-in methods including `.size()`,
   `.empty()`, `.lower()`, `.upper()`, `.strip()`, `.split()`, `.contains()`,
-  `.find()`, `.to_int()`, `.to_float()`, and `.to_bool()`. For full method
+  `.find()`, `.slice()`, `.to_int()`, `.to_float()`, and `.to_bool()`. For full method
   specifications, see
   [built-in string methods](builtins.md#built-in-methods) and
   [string operations](builtins.md#operations-and-capabilities).
@@ -366,10 +366,12 @@ if let active_target ?= target {
   the binding's scope.
 * **In-place mutable unwrap (`if var ?=` / `guard var ?=`)**: Requires a
   mutable source lvalue and binds an in-place mutable reference to the inner
-  payload. While the unwrapped `var` binding is in scope, the source optional
-  path (and any prefix lvalue) is statically frozen against direct reassignment
-  (`target = none;`), `move`, or conflicting borrows, preventing dangling
-  interior pointers.
+  payload. While the unwrapped `var` binding is live, the source optional
+  path (and any overlapping prefix lvalue) is statically frozen against direct
+  reassignment (`target = none;`), `move`, or conflicting borrows, preventing
+  dangling interior pointers. Field-disjoint mutations and `if var` mutations
+  occurring after the unwrapped binding's last use in the `then` block
+  (non-lexical lifetime unfreezing) are permitted.
 
 ### Optional chaining (`?.`)
 

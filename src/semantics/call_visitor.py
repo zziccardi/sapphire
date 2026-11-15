@@ -578,6 +578,18 @@ class CallVisitorMixin:
           node=arg,
       )
 
+    if param_is_var and isinstance(arg.expr, IdentifierNode):
+      sym = self.symbol_table.lookup(arg.expr.name)
+      if (
+          isinstance(sym, VariableSymbol)
+          and isinstance(sym.symbol_type, ArrayType)
+          and not sym.symbol_type.is_fixed_size
+          and sym.symbol_type.size is not None
+      ):
+        sym.symbol_type = ArrayType(
+            sym.symbol_type.element_type, size=None, is_fixed_size=False
+        )
+
   def _check_range_arguments(
       self,
       arguments: List[ArgumentNode],
@@ -922,6 +934,17 @@ class CallVisitorMixin:
       return PrimitiveType("none")
 
     if isinstance(receiver_type, ArrayType):
+      if (
+          node.member in ("push", "pop", "insert", "remove", "clear")
+          and not receiver_type.is_fixed_size
+          and receiver_type.size is not None
+          and isinstance(node.receiver, IdentifierNode)
+      ):
+        sym = self.symbol_table.lookup(node.receiver.name)
+        if isinstance(sym, VariableSymbol) and isinstance(sym.symbol_type, ArrayType):
+          sym.symbol_type = ArrayType(
+              sym.symbol_type.element_type, size=None, is_fixed_size=False
+          )
       return CollectionChecker.resolve_array_member(self, node, receiver_type)
 
     if isinstance(receiver_type, MapType):
@@ -1008,6 +1031,17 @@ class CallVisitorMixin:
       return PrimitiveType("none")
 
     if isinstance(receiver_type, ArrayType):
+      if (
+          node.member in ("push", "pop", "insert", "remove", "clear")
+          and not receiver_type.is_fixed_size
+          and receiver_type.size is not None
+          and isinstance(node.receiver, IdentifierNode)
+      ):
+        sym = self.symbol_table.lookup(node.receiver.name)
+        if isinstance(sym, VariableSymbol) and isinstance(sym.symbol_type, ArrayType):
+          sym.symbol_type = ArrayType(
+              sym.symbol_type.element_type, size=None, is_fixed_size=False
+          )
       return CollectionChecker.resolve_array_member(self, node, receiver_type)
 
     if isinstance(receiver_type, MapType):
