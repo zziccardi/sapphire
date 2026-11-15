@@ -1038,8 +1038,10 @@ class CallVisitorMixin:
     # Resolve field
     field = receiver_type.fields.get(node.member)
     if field:
-      # If optional chained, result type is optional
+      # If optional chained, result type is optional (flatten T?? -> T?)
       if node.is_optional:
+        if isinstance(field.field_type, OptionalType):
+          return field.field_type
         return OptionalType(field.field_type)
       return field.field_type
 

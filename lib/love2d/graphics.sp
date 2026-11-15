@@ -76,6 +76,8 @@ trait Graphics {
   static func circle(mode: enums.DrawMode, x: float, y: float, radius: float);
   static func line(x1: float, y1: float, x2: float, y2: float);
   static func print(text: String, x: float, y: float);
+  static func printf(text: String, x: float, y: float, limit: float,
+                     align: String = "left");
 
   static func newImage(path: String): Image;
   static func newCanvas(width: float = 0.0, height: float = 0.0): Canvas;
@@ -84,6 +86,7 @@ trait Graphics {
                       sw: float, sh: float): Quad;
 
   static func setCanvas(canvas: Canvas? = none);
+  static func getFont(): Font;
   static func setFont(font: Font);
 
   static func getDimensions(): float, float;
