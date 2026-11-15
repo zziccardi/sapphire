@@ -7762,6 +7762,46 @@ class TestTypeChecker(unittest.TestCase):
       checker.check(ast)
     self.assertIn("sample.sp:3:6 - Argument type mismatch at position 1.", str(ctx.exception))
 
+  def test_map_bracket_assignment(self):
+    """Verifies map[k] = v assignment, key type checks, and constness."""
+    self._check("""
+    func main() {
+      var counts: [String: int] = {};
+      counts["a"] = 1;
+      counts["a"] += 2;
+      var nested: [int: [int: bool]] = {};
+      nested[0] = { 1: true };
+      nested[0][2] = false;
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m: [String: int] = { "a": 1 };
+        m["b"] = 2;
+      }
+      """)
+    self.assertIn("Cannot assign to key of constant map 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m: [String: int] = {};
+        m[123] = 2;
+      }
+      """)
+    self.assertIn("Map index type 'int' is not compatible with key type 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m: [String: int] = {};
+        m["a"] = "wrong";
+      }
+      """)
+    self.assertIn("Cannot assign type 'String' to target of type 'int'", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
