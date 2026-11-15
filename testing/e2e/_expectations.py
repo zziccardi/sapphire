@@ -61,6 +61,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_inherited_field": 4,
         "test_overridden_field": 6,
         "test_own_field": 1,
+        "test_qualified_ancestor_static_dispatch": 274,
     },
     "maps_test.sp": {
         "test_map_lookup": 2,
@@ -108,6 +109,10 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_override_default_parameter": 30,
         "test_named_parameters": 20,
         "test_multiple_returns_destructuring": 40,
+        "test_skipped_middle_default_named_args": 129,
+        "test_reordered_named_args_eval_order_and_destructuring": 72491,
+        "test_optional_chain_named_args": 137,
+        "test_constructor_skipped_default_and_false_bool": 35,
     },
     "guards_and_traits_test.sp": {
         "test_guard_taken": 80,
@@ -190,6 +195,8 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_map_constant_expr": True,
         "test_struct_constant_expr": True,
         "test_module_var_state": True,
+        "test_const_in_struct_and_method_defaults": True,
+        "test_const_in_func_default": True,
     },
     "fixed_arrays_test.sp": {
         "test_fixed_array_indexing": 60,

@@ -37,7 +37,7 @@ local function _sp_load_runtime()
 end
 local _SP_RT = _sp_load_runtime()
 local _Coroutine, Arena, _clone_helper, _create_cow_proxy, _create_proto_object = _SP_RT._Coroutine, _SP_RT.Arena, _SP_RT._clone_helper, _SP_RT._create_cow_proxy, _SP_RT._create_proto_object
-local _sapphire_string_strip, _sapphire_string_split, _sapphire_string_find, _sapphire_string_to_int, _sapphire_string_to_float, _sapphire_string_to_bool, _sapphire_cast_int, _sapphire_enum_from = _SP_RT._sapphire_string_strip, _SP_RT._sapphire_string_split, _SP_RT._sapphire_string_find, _SP_RT._sapphire_string_to_int, _SP_RT._sapphire_string_to_float, _SP_RT._sapphire_string_to_bool, _SP_RT._sapphire_cast_int, _SP_RT._sapphire_enum_from
+local _sapphire_string_strip, _sapphire_string_slice, _sapphire_string_split, _sapphire_string_find, _sapphire_string_to_int, _sapphire_string_to_float, _sapphire_string_to_bool, _sapphire_cast_int, _sapphire_enum_from = _SP_RT._sapphire_string_strip, _SP_RT._sapphire_string_slice, _SP_RT._sapphire_string_split, _SP_RT._sapphire_string_find, _SP_RT._sapphire_string_to_int, _SP_RT._sapphire_string_to_float, _SP_RT._sapphire_string_to_bool, _SP_RT._sapphire_cast_int, _SP_RT._sapphire_enum_from
 local _sapphire_array_map, _sapphire_array_filter, _sapphire_array_reduce, _sapphire_array_contains, _sapphire_array_reverse, _sapphire_array_sort, _sapphire_array_join, _sapphire_array_push, _sapphire_array_pop, _sapphire_array_insert, _sapphire_array_remove, _sapphire_array_clear, _sapphire_array_swap, _sapphire_array_get, _sapphire_array_idx = _SP_RT._sapphire_array_map, _SP_RT._sapphire_array_filter, _SP_RT._sapphire_array_reduce, _SP_RT._sapphire_array_contains, _SP_RT._sapphire_array_reverse, _SP_RT._sapphire_array_sort, _SP_RT._sapphire_array_join, _SP_RT._sapphire_array_push, _SP_RT._sapphire_array_pop, _SP_RT._sapphire_array_insert, _SP_RT._sapphire_array_remove, _SP_RT._sapphire_array_clear, _SP_RT._sapphire_array_swap, _SP_RT._sapphire_array_get, _SP_RT._sapphire_array_idx
 local _sapphire_map_size, _sapphire_map_empty, _sapphire_map_contains, _sapphire_map_get, _sapphire_map_keys, _sapphire_map_values, _sapphire_map_insert, _sapphire_map_remove, _sapphire_map_clear = _SP_RT._sapphire_map_size, _SP_RT._sapphire_map_empty, _SP_RT._sapphire_map_contains, _SP_RT._sapphire_map_get, _SP_RT._sapphire_map_keys, _SP_RT._sapphire_map_values, _SP_RT._sapphire_map_insert, _SP_RT._sapphire_map_remove, _SP_RT._sapphire_map_clear
 local _sapphire_iter_array, _sapphire_range, _sapphire_del, _Ref, Ref, _SharedRef, _WeakRef, SharedRef, WeakRef = _SP_RT._sapphire_iter_array, _SP_RT._sapphire_range, _SP_RT._sapphire_del, _SP_RT._Ref, _SP_RT.Ref, _SP_RT._SharedRef, _SP_RT._WeakRef, _SP_RT.SharedRef, _SP_RT.WeakRef
@@ -51,6 +51,7 @@ return {
   _create_cow_proxy = _create_cow_proxy,
   _create_proto_object = _create_proto_object,
   _sapphire_string_strip = _sapphire_string_strip,
+  _sapphire_string_slice = _sapphire_string_slice,
   _sapphire_string_split = _sapphire_string_split,
   _sapphire_string_find = _sapphire_string_find,
   _sapphire_string_to_int = _sapphire_string_to_int,
@@ -156,6 +157,27 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.variable_types: Dict[str, str] = {}
     self._identifier_map: Dict[str, str] = {}
     self._loop_stack: List[bool] = []
+
+  def _make_expr_transpiler(self) -> "LuaTranspiler":
+    """Creates a sub-transpiler inheriting module, struct, and rename state."""
+    temp = type(self)(
+        test_mode=self.test_mode,
+        dev_mode=self.dev_mode,
+        use_runtime_module=self.use_runtime_module,
+    )
+    temp.known_structs = self.known_structs
+    temp.imported_modules = self.imported_modules
+    temp._identifier_map = self._identifier_map
+    temp.proto_structs = self.proto_structs
+    temp.structs_with_destructor = self.structs_with_destructor
+    temp.struct_methods = self.struct_methods
+    temp.struct_parent_names = self.struct_parent_names
+    temp.struct_destructible_fields = self.struct_destructible_fields
+    temp.func_return_types = self.func_return_types
+    temp.method_return_types = self.method_return_types
+    temp.variable_types = self.variable_types
+    temp.moved_vars = self.moved_vars
+    return temp
 
   def emit(self, text: str) -> None:
     """Emits text on the current line and updates line/column numbers."""
@@ -420,8 +442,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
       if default_expr:
         self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
+        temp = self._make_expr_transpiler()
         temp.visit(default_expr)
         self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
     self.dedent()
@@ -477,11 +498,20 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       else:
         init_args = []
         for idx, p in enumerate(init_params):
-          init_args.append(f"(_arg1['{p.name}'] ~= nil and _arg1['{p.name}'] or _arg1[{idx + 1}])")
+          pname = self._mangle_name(p.name)
+          init_args.append(
+              f"(function() if _arg1['{pname}'] ~= nil then "
+              f"return _arg1['{pname}'] else return _arg1[{idx + 1}] end end)()"
+          )
         call_args = ["self"] + init_args
 
-        param_checks = " or ".join(f"_arg1['{p.name}'] ~= nil" for p in init_params)
-        self.emit(f"if type(_arg1) == \"table\" and ({param_checks} or _arg1[1] ~= nil) then")
+        param_checks = " or ".join(
+            f"_arg1['{self._mangle_name(p.name)}'] ~= nil" for p in init_params
+        )
+        self.emit(
+            f'if type(_arg1) == "table" and '
+            f"({param_checks} or _arg1[1] ~= nil or next(_arg1) == nil) then"
+        )
         self.indent()
         self.newline()
         self.emit(f"{struct_name}._init_sapphire({', '.join(call_args)})")
@@ -649,8 +679,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     for p in func.parameters:
       if p.default_expr:
         self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
+        temp = self._make_expr_transpiler()
         temp.visit(p.default_expr)
         pname = self._mangle_name(p.name)
         self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")
@@ -673,6 +702,38 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       if func.name == "__init__" and getattr(func, "base_initializers", None):
         for base_init in func.base_initializers:
           parent_name = base_init.callee.name
+          resolved = getattr(base_init, "_resolved_arguments", None)
+          if resolved is not None:
+            if getattr(base_init, "_requires_eval_order_temps", False):
+              temp_binds = []
+              for arg_idx, arg in enumerate(base_init.arguments):
+                temp = self._make_expr_transpiler()
+                temp.visit(arg.expr)
+                temp_binds.append(f"local _a{arg_idx} = {temp.get_output()}")
+              slot_to_temp = {
+                  slot: f"_a{arg_idx}"
+                  for arg_idx, slot in enumerate(
+                      getattr(base_init, "_eval_order_slots", [])
+                  )
+              }
+              call_args = ["self"] + [
+                  slot_to_temp.get(i, "nil") for i in range(len(resolved))
+              ]
+              self.newline()
+              self.emit(
+                  f"do {'; '.join(temp_binds)}; "
+                  f"{parent_name}._init_sapphire({', '.join(call_args)}) end"
+              )
+            else:
+              args_strs = ["self"]
+              for expr in resolved:
+                temp = self._make_expr_transpiler()
+                temp.visit(expr)
+                args_strs.append(temp.get_output())
+              self.newline()
+              self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
+            continue
+
           p_members = self.struct_methods.get(parent_name, [])
           p_init = next((m for m in p_members if getattr(m, "func_decl", None) and m.func_decl.name == "__init__"), None)
           param_names = [p.name for p in p_init.func_decl.parameters if p.name != "self"] if p_init else []
@@ -681,8 +742,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           if param_names:
             args_by_name = {}
             for idx, arg in enumerate(base_init.arguments):
-              temp = LuaTranspiler()
-              temp.known_structs = self.known_structs
+              temp = self._make_expr_transpiler()
               temp.visit(arg.expr)
               val = temp.get_output()
               if arg.name:
@@ -692,8 +752,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
             args_strs.extend(args_by_name.get(p_name, "nil") for p_name in param_names)
           else:
             for arg in base_init.arguments:
-              temp = LuaTranspiler()
-              temp.known_structs = self.known_structs
+              temp = self._make_expr_transpiler()
               temp.visit(arg.expr)
               args_strs.append(temp.get_output())
 
@@ -724,6 +783,15 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.dedent()
     self.newline()
     self.emit("end")
+    export_ann = next(
+        (a for a in getattr(func, "annotations", []) if a.name == "export"),
+        None,
+    )
+    if export_ann and export_ann.arg:
+      alias_name = self._mangle_name(export_ann.arg)
+      if alias_name != func_name:
+        self.newline()
+        self.emit(f"{struct_name}.{alias_name} = {struct_name}.{func_name}")
     self.newline()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
@@ -760,8 +828,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     for p in node.parameters:
       if p.default_expr:
         self.newline()
-        temp = LuaTranspiler()
-        temp.known_structs = self.known_structs
+        temp = self._make_expr_transpiler()
         temp.visit(p.default_expr)
         pname = self._mangle_name(p.name)
         self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")

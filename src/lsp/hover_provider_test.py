@@ -88,6 +88,45 @@ class TestHoverProvider(unittest.TestCase):
     self.assertIn("struct", res.contents.value)
     self.assertIn("Weapon", res.contents.value)
 
+  def test_hover_qualified_ancestor_dispatch(self):
+    """Verifies hover info on qualified ancestor method calls."""
+    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///hover_ancestor.sp"
+    code = (
+        "struct Base {\n"
+        "  var hp: int;\n"
+        "}\n"
+        "impl Base {\n"
+        "  func draw(): int {\n"
+        "    return self.hp;\n"
+        "  }\n"
+        "}\n"
+        "struct Child: Base {\n"
+        "  var extra: int;\n"
+        "}\n"
+        "impl Child {\n"
+        "  func draw(): int {\n"
+        "    return Base.draw(self) + self.extra;\n"
+        "  }\n"
+        "}\n"
+    )
+    validate_source(ls, doc_uri, code)
+    lines = code.splitlines()
+    call_line = 13
+    draw_col = lines[call_line].index("draw(self)")
+    res = HoverProvider.provide_hover(
+        ls,
+        HoverParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=call_line, character=draw_col),
+        ),
+    )
+    self.assertIsNotNone(res)
+    self.assertIn("method", res.contents.value)
+    self.assertIn("draw", res.contents.value)
+
 
 if __name__ == "__main__":
   unittest.main()

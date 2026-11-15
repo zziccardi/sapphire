@@ -23,9 +23,8 @@ func print(value: String)
 
 #### Description and behavior
 
-`print` emits the specified string followed by a newline character to standard output. When transpiling to backend target languages:
-* **Python target**: Transpiles to native Python `print(value)`.
-* **Lua 5.1 target**: Transpiles to native Lua `print(value)`.
+`print` emits the specified string followed by a newline character to standard
+output.
 
 #### Usage examples
 
@@ -38,6 +37,21 @@ let user = "Alice";
 let score = 100;
 print("Player " + user + " achieved a score of " + score);
 ```
+
+### The assert function
+
+The `assert` function verifies a runtime invariant and aborts execution with an error if the condition evaluates to `false`.
+
+#### Signature and definition
+
+```sapphire
+func assert(cond: bool, msg: String = "assertion failed"): void
+```
+
+* **Parameters**:
+  * `cond` – a `bool` condition expected to be `true`.
+  * `msg` – an optional failure message (defaults to `"assertion failed"`).
+* **Return type**: `void` (returns no value).
 
 ### The range function
 
@@ -64,9 +78,6 @@ func range(start: int, stop: int, step: int = 1): Range
 loops for count-based or step-based iteration.
 * **Positive step**: Iterates while `current < stop`.
 * **Negative step**: Iterates while `current > stop`.
-* **Transpilation**:
-  * **Python target**: Transpiles to native Python `range(...)`.
-  * **Lua 5.1 target**: Transpiles to `_sapphire_range(...)` utilizing a zero-allocation stateless iterator.
 
 #### Usage examples
 
@@ -115,6 +126,7 @@ Sapphire provides standard methods on `String` instances. Methods that do not fi
 | `split(sep: String? = none): [String]`  | Splits the string by `sep` delimiter into an array of substrings. |
 | `contains(sub: String): bool` | Returns `true` if `sub` is present within the string. |
 | `find(sub: String, start: int = 0, reverse: bool = false): int?` | Searches for `sub` and returns its index, or `none` if not found. |
+| `slice(start: int, end: int? = none): String` | Returns a 0-indexed half-open substring `[start, end)`, supporting negative indices. |
 | `to_int(radix: int = 10): int?` | Parses the string as an integer with optional `radix`. Returns `none` if parsing fails. |
 | `to_float(): float?` | Parses the string as a floating-point number. Returns `none` if parsing fails. |
 | `to_bool(): bool?` | Parses `"true"` or `"false"` (case-insensitive) as a boolean. Returns `none` if parsing fails. |
@@ -1067,6 +1079,7 @@ func main() {
 | Built-in | Category | Key syntax / signature | Primary use case |
 | :--- | :--- | :--- | :--- |
 | **`print`** | Function | `print(value: String): void` | Standard output logging |
+| **`assert`** | Function | `assert(cond: bool, msg: String = "assertion failed"): void` | Runtime invariant assertion |
 | **`range`** | Function | `range(...)` | Numeric iteration |
 | **`String`** | Reference type | `String` | Immutable UTF-8 text representation |
 | **`Array`** | Collection type | `[T]`, `[T; N]` | Sequential element collections with 0-based indexing |

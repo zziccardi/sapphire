@@ -4,8 +4,8 @@ Provides table-driven code emission for Sapphire built-in primitives and standar
 data structures (String, Array, Map, Range, and Enum) across Python and Lua backends.
 """
 
-from typing import Any, Callable, Dict, Tuple
-from src.parser.ast import CallNode, IdentifierNode, MemberAccessNode
+from typing import Any, Callable, Dict, List, Tuple
+from src.parser.ast import ASTNode, CallNode, IdentifierNode, LiteralNode, MemberAccessNode
 
 BUILTIN_MODULES = (
     "std.testing",
@@ -13,6 +13,7 @@ BUILTIN_MODULES = (
     "std.os",
     "std.fs",
     "std.time",
+    "std.utf8",
 )
 
 
@@ -48,9 +49,9 @@ class IntrinsicRegistry:
     category = None
     method = None
 
-    if isinstance(node.callee, IdentifierNode) and node.callee.name == "range":
+    if isinstance(node.callee, IdentifierNode) and node.callee.name in ("range", "assert"):
       category = "global"
-      method = "range"
+      method = node.callee.name
     elif isinstance(node.callee, MemberAccessNode):
       if getattr(node.callee, "is_string_from", False):
         category = "String"
@@ -82,45 +83,25 @@ class IntrinsicRegistry:
 # ==============================================================================
 
 
-@IntrinsicRegistry.register("global", "range", "python")
-def _emit_range_py(transpiler: Any, node: CallNode) -> None:
+def _resolve_range_args(node: CallNode) -> List[ASTNode]:
+  """Resolves range() arguments into canonical (stop) / (start, stop[, step])."""
   pos_args = [arg for arg in node.arguments if not arg.name]
   named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
 
-  if len(pos_args) == 1 and not named_args:
-    transpiler.emit("range(")
-    transpiler.visit(pos_args[0].expr)
-    transpiler.emit(")")
-    return
-  elif len(pos_args) == 2 and not named_args:
-    transpiler.emit("range(")
-    transpiler.visit(pos_args[0].expr)
-    transpiler.emit(", ")
-    transpiler.visit(pos_args[1].expr)
-    transpiler.emit(")")
-    return
-  elif len(pos_args) == 3 and not named_args:
-    transpiler.emit("range(")
-    transpiler.visit(pos_args[0].expr)
-    transpiler.emit(", ")
-    transpiler.visit(pos_args[1].expr)
-    transpiler.emit(", ")
-    transpiler.visit(pos_args[2].expr)
-    transpiler.emit(")")
-    return
+  if len(pos_args) <= 3 and not named_args:
+    return [arg.expr for arg in pos_args]
 
-  start_expr = None
-  stop_expr = None
-  step_expr = None
+  start_expr: Any = None
+  stop_expr: Any = None
+  step_expr: Any = None
   if len(pos_args) >= 1:
     if "stop" in named_args:
       start_expr = pos_args[0].expr
+    elif len(pos_args) == 1:
+      stop_expr = pos_args[0].expr
     else:
-      if len(pos_args) == 1:
-        stop_expr = pos_args[0].expr
-      else:
-        start_expr = pos_args[0].expr
-        stop_expr = pos_args[1].expr
+      start_expr = pos_args[0].expr
+      stop_expr = pos_args[1].expr
   if "start" in named_args:
     start_expr = named_args["start"]
   if "stop" in named_args:
@@ -130,32 +111,73 @@ def _emit_range_py(transpiler: Any, node: CallNode) -> None:
   elif len(pos_args) == 3:
     step_expr = pos_args[2].expr
 
-  transpiler.emit("range(")
   if step_expr is not None:
-    if start_expr is not None:
-      transpiler.visit(start_expr)
-    else:
-      transpiler.emit("0")
-    transpiler.emit(", ")
-    transpiler.visit(stop_expr)
-    transpiler.emit(", ")
-    transpiler.visit(step_expr)
-  elif start_expr is not None:
-    transpiler.visit(start_expr)
-    transpiler.emit(", ")
-    transpiler.visit(stop_expr)
-  else:
-    transpiler.visit(stop_expr)
+    if start_expr is None:
+      start_expr = LiteralNode(0, "int")
+    return [start_expr, stop_expr, step_expr]
+  if start_expr is not None:
+    return [start_expr, stop_expr]
+  return [stop_expr]
+
+
+@IntrinsicRegistry.register("global", "range", "python")
+def _emit_range_py(transpiler: Any, node: CallNode) -> None:
+  args = _resolve_range_args(node)
+  transpiler.emit("range(")
+  for idx, expr in enumerate(args):
+    if idx > 0:
+      transpiler.emit(", ")
+    transpiler.visit(expr)
   transpiler.emit(")")
 
 
 @IntrinsicRegistry.register("global", "range", "lua")
 def _emit_range_lua(transpiler: Any, node: CallNode) -> None:
+  args = _resolve_range_args(node)
   transpiler.emit("_sapphire_range(")
-  for idx, arg in enumerate(node.arguments):
+  for idx, expr in enumerate(args):
     if idx > 0:
       transpiler.emit(", ")
-    transpiler.visit(arg.expr)
+    transpiler.visit(expr)
+  transpiler.emit(")")
+
+
+def _resolve_assert_args(node: CallNode) -> Tuple[Any, Any]:
+  """Resolves assert(cond, msg?) arguments."""
+  pos_args = [arg.expr for arg in node.arguments if not arg.name]
+  named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
+  cond_expr = named_args.get("cond") if "cond" in named_args else pos_args[0]
+  if "msg" in named_args:
+    msg_expr = named_args["msg"]
+  elif len(pos_args) > 1:
+    msg_expr = pos_args[1]
+  else:
+    msg_expr = None
+  return cond_expr, msg_expr
+
+
+@IntrinsicRegistry.register("global", "assert", "python")
+def _emit_assert_py(transpiler: Any, node: CallNode) -> None:
+  cond_expr, msg_expr = _resolve_assert_args(node)
+  transpiler.emit("assert ")
+  transpiler.visit(cond_expr)
+  transpiler.emit(", ")
+  if msg_expr is not None:
+    transpiler.visit(msg_expr)
+  else:
+    transpiler.emit('"assertion failed"')
+
+
+@IntrinsicRegistry.register("global", "assert", "lua")
+def _emit_assert_lua(transpiler: Any, node: CallNode) -> None:
+  cond_expr, msg_expr = _resolve_assert_args(node)
+  transpiler.emit("assert(")
+  transpiler.visit(cond_expr)
+  transpiler.emit(", ")
+  if msg_expr is not None:
+    transpiler.visit(msg_expr)
+  else:
+    transpiler.emit('"assertion failed"')
   transpiler.emit(")")
 
 
@@ -271,6 +293,44 @@ def _emit_str_strip_lua(transpiler: Any, node: CallNode) -> None:
   if node.arguments:
     transpiler.emit(", ")
     transpiler.visit(node.arguments[0].expr)
+  transpiler.emit(")")
+
+
+def _resolve_slice_args(node: CallNode) -> Tuple[Any, Any]:
+  """Resolves String.slice(start, end?) arguments."""
+  pos_args = [arg.expr for arg in node.arguments if not arg.name]
+  named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
+  start_expr = named_args.get("start") if "start" in named_args else pos_args[0]
+  end_expr = None
+  if "end" in named_args:
+    end_expr = named_args["end"]
+  elif len(pos_args) > 1:
+    end_expr = pos_args[1]
+  return start_expr, end_expr
+
+
+@IntrinsicRegistry.register("String", "slice", "python")
+def _emit_str_slice_py(transpiler: Any, node: CallNode) -> None:
+  start_expr, end_expr = _resolve_slice_args(node)
+  transpiler.visit(node.callee.receiver)
+  transpiler.emit("[")
+  transpiler.visit(start_expr)
+  transpiler.emit(":")
+  if end_expr is not None:
+    transpiler.visit(end_expr)
+  transpiler.emit("]")
+
+
+@IntrinsicRegistry.register("String", "slice", "lua")
+def _emit_str_slice_lua(transpiler: Any, node: CallNode) -> None:
+  start_expr, end_expr = _resolve_slice_args(node)
+  transpiler.emit("_sapphire_string_slice(")
+  transpiler.visit(node.callee.receiver)
+  transpiler.emit(", ")
+  transpiler.visit(start_expr)
+  if end_expr is not None:
+    transpiler.emit(", ")
+    transpiler.visit(end_expr)
   transpiler.emit(")")
 
 

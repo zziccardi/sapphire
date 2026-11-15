@@ -46,3 +46,41 @@ func test_own_field(): int {
   let a = Ant();
   return a.colony;
 }
+
+struct EntityBase {
+  var hp: int = 10;
+}
+
+impl EntityBase {
+  var func step(dt: int, bonus: int = 5, mult: int = 2) {
+    self.hp = self.hp + dt * mult + bonus;
+  }
+}
+
+struct FlyerMixin {
+  var altitude: int = 1;
+}
+
+impl FlyerMixin {
+  var func lift(delta: int) {
+    self.altitude = self.altitude + delta;
+  }
+}
+
+struct WingedUnit: EntityBase, FlyerMixin {
+  var armor: int = 2;
+}
+
+impl WingedUnit {
+  var func step(dt: int, bonus: int = 5, mult: int = 2) {
+    EntityBase.step(self, mult = mult, dt = dt);
+    FlyerMixin.lift(self, self.armor + 1);
+  }
+}
+
+@test
+func test_qualified_ancestor_static_dispatch(): int {
+  var u = WingedUnit {};
+  u.step(4, mult = 3);
+  return u.hp * 10 + u.altitude;
+}

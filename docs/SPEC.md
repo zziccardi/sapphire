@@ -102,6 +102,8 @@ runtime execution or dynamic allocations:
   * Homogeneous array and map literals containing only constant expressions.
   * Plain data struct initializers (`Point { x = 0.0, y = 0.0 }`) where fields
     are constant expressions.
+  * Previously declared module-level `let` constants (same-file or imported),
+    which may also be used in struct field and parameter default expressions.
 * **Prohibited at module scope**:
   * Function and method calls (`compute()`).
   * Memory arena allocations (`in my_arena`).
@@ -150,7 +152,7 @@ string interpolation using the `f"..."` prefix and binary `+` concatenation:
   `{player.to_string()}`) must be called.
 * **Built-in methods**: Strings provide built-in methods including `.size()`,
   `.empty()`, `.lower()`, `.upper()`, `.strip()`, `.split()`, `.contains()`,
-  `.find()`, `.to_int()`, `.to_float()`, and `.to_bool()`. For full method
+  `.find()`, `.slice()`, `.to_int()`, `.to_float()`, and `.to_bool()`. For full method
   specifications, see
   [built-in string methods](builtins.md#built-in-methods) and
   [string operations](builtins.md#operations-and-capabilities).
@@ -364,10 +366,12 @@ if let active_target ?= target {
   the binding's scope.
 * **In-place mutable unwrap (`if var ?=` / `guard var ?=`)**: Requires a
   mutable source lvalue and binds an in-place mutable reference to the inner
-  payload. While the unwrapped `var` binding is in scope, the source optional
-  path (and any prefix lvalue) is statically frozen against direct reassignment
-  (`target = none;`), `move`, or conflicting borrows, preventing dangling
-  interior pointers.
+  payload. While the unwrapped `var` binding is live, the source optional
+  path (and any overlapping prefix lvalue) is statically frozen against direct
+  reassignment (`target = none;`), `move`, or conflicting borrows, preventing
+  dangling interior pointers. Field-disjoint mutations and `if var` mutations
+  occurring after the unwrapped binding's last use in the `then` block
+  (non-lexical lifetime unfreezing) are permitted.
 
 ### Optional chaining (`?.`)
 
@@ -599,8 +603,14 @@ func calculate_damage(attacker: Player, target: Enemy,
 
 * **Named parameters**: Callers may invoke functions using named arguments
   (e.g. `calculate_damage(attacker = p, target = e, is_critical = true)`).
+  Positional arguments must precede any named arguments at a call site;
+  unknown parameter names, duplicate bindings to the same parameter, and
+  omitted required parameters are rejected at compile time.
 * **Default parameters**: Parameters with default values must appear after
-  positional parameters without defaults.
+  positional parameters without defaults. Callers may omit trailing defaulted
+  parameters or skip intermediate defaulted parameters using named arguments;
+  reordered named arguments preserve strict left-to-right call-site
+  evaluation order across all backends.
 * **Void functions**: Functions returning nothing omit the return type or
   specify `: void`.
 
@@ -1033,6 +1043,46 @@ Sapphire **strictly disallows up-casting** for statically inherited structures
   time without vtables or dynamic lookups.
 * **Separates concerns**: Static inheritance is strictly for *layout and code
   reuse*. Behavioral polymorphism is offloaded to **traits**.
+
+#### Qualified ancestor static dispatch
+
+Inside an instance method of a child `impl` block, an overriding method can
+statically invoke an ancestor's implementation using qualified dispatch:
+`Ancestor.method(self, ...)` or `mod.Ancestor.method(self, ...)`, provided
+`Ancestor` is a transitive parent of the enclosing struct:
+
+```sapphire
+struct Base {
+  var hp: int;
+}
+
+impl Base {
+  var func take_damage(amount: int) {
+    self.hp = self.hp - amount;
+  }
+}
+
+struct Armored: Base {
+  var armor: int;
+}
+
+impl Armored {
+  var func take_damage(amount: int) {
+    let reduced = amount - self.armor;
+    if reduced > 0 {
+      Base.take_damage(self, reduced);
+    }
+  }
+}
+```
+
+* **Zero vtables**: The call resolves at compile time to the ancestor's `impl`
+  function with `self` passed as the first positional argument.
+* **No up-casting**: `let p: Base = self;` and `self as Base` remain rejected,
+  and unbound method values such as `let f = Base.take_damage;` are disallowed.
+* **Borrow & mutability safety**: Calling a `var func` ancestor method requires
+  an enclosing `var func` method and enforces standard call-site reference
+  exclusivity on `self`.
 
 #### Syntactic delegation (transparent forwarding)
 

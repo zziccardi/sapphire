@@ -1,6 +1,7 @@
 // Sapphire Love2D master binding header
 
 import lib.love2d.enums;
+import lib.love2d.event;
 import lib.love2d.graphics;
 import lib.love2d.keyboard;
 import lib.love2d.mouse;
@@ -12,6 +13,7 @@ export {
 }
 
 struct LoveEngine {
+  var event: event.Event;
   var graphics: graphics.Graphics;
   var keyboard: keyboard.Keyboard;
   var mouse: mouse.Mouse;

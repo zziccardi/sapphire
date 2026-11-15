@@ -9,6 +9,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from typing import Any
 from antlr4 import InputStream, CommonTokenStream
 
 from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode, YieldNode
@@ -2275,6 +2276,183 @@ class TestPythonTranspiler(unittest.TestCase):
     """
     res = self._transpile_and_run(code, "test_player()")
     self.assertEqual(res, 131.0)
+
+  def test_module_let_constants_in_defaults_and_base_init_python(self):
+    """Verifies module-level let constants in struct fields, method/fn defaults, and base initializers."""
+    code = """
+    let STANDING_FRAME: int = 1;
+    let BOOST: int = STANDING_FRAME + 4;
+
+    struct Base {
+      var val: int;
+    }
+    impl Base {
+      func __init__(val: int) {
+        self.val = val;
+      }
+    }
+
+    struct Character: Base {
+      var frame: int = STANDING_FRAME;
+      var extra = BOOST;
+    }
+    impl Character {
+      func __init__(v: int): Base(val = v + STANDING_FRAME) {}
+      func total(offset: int = BOOST): int {
+        return self.val + self.frame + self.extra + offset;
+      }
+    }
+
+    func global_step(step: int = STANDING_FRAME): int {
+      return step + 10;
+    }
+
+    func run_test(): int {
+      let c = Character(v = 2);
+      return c.total() + global_step();
+    }
+    """
+    res = self._transpile_and_run(code, "run_test()")
+    self.assertEqual(res, (3 + 1 + 5 + 5) + 11)
+
+  def test_make_expr_transpiler_preserves_state_python(self):
+    """Verifies PythonTranspiler._make_expr_transpiler inherits _identifier_map, extern_vars, and global_vars."""
+    pt = PythonTranspiler(test_mode=True)
+    pt._identifier_map["local_var"] = "_val_local_var"
+    pt.extern_vars["love"] = "love"
+    pt.global_vars.add("G_CONST")
+    sub = pt._make_expr_transpiler()
+    self.assertIsInstance(sub, PythonTranspiler)
+    self.assertTrue(sub.test_mode)
+    self.assertEqual(sub._identifier_map["local_var"], "_val_local_var")
+    self.assertEqual(sub.extern_vars["love"], "love")
+    self.assertIn("G_CONST", sub.global_vars)
+
+  def test_named_args_skipped_defaults_eval_order_and_false_bool_python(self):
+    """Verifies skipped defaults, reordered side-effect eval, base init, ?., and false bool."""
+    result = self._transpile_and_run(
+        """
+        var log: String = "";
+
+        func step(tag: String, val: int): int {
+          log = log + tag;
+          return val;
+        }
+
+        func create_enemy(id: int, hp: int = 10, unit_hp: int = 5): int {
+          return id * 100 + hp + unit_hp;
+        }
+
+        struct Flag {
+          var v: bool;
+        }
+
+        impl Flag {
+          func __init__(v: bool = true) {
+            self.v = v;
+          }
+        }
+
+        struct Base {
+          var a: int;
+          var b: int;
+          var c: int;
+        }
+
+        impl Base {
+          func __init__(a: int, b: int = 10, c: int = 20) {
+            self.a = a;
+            self.b = b;
+            self.c = c;
+          }
+
+          func calc(a: int, b: int = 10, c: int = 20): int {
+            return a * 100 + b * 10 + c;
+          }
+        }
+
+        struct Derived: Base {
+          var ok: bool;
+        }
+
+        impl Derived {
+          func __init__(z: int, x: int) : Base(c = step("C", z), a = step("A", x)) {
+            self.ok = true;
+          }
+        }
+
+        func run_test(): String {
+          let r1 = create_enemy(id = 1, unit_hp = 19);
+          let f = Flag(v = false);
+          let d = Derived(z = 7, x = 3);
+          let opt: Derived? = d;
+          let r2 = opt?.calc(c = step("Y", 5), a = step("X", 2));
+          let none_opt: Derived? = none;
+          let r3 = none_opt?.calc(c = step("N", 9), a = step("M", 8));
+          let has_r3 = r3 != none;
+          return f"{r1},{f.v},{d.a},{d.b},{d.c},{r2 ?? -1},{has_r3},{log}";
+        }
+        """,
+        "run_test()",
+    )
+    self.assertEqual(result, "129,false,3,10,7,305,false,CAYX")
+
+  def test_qualified_ancestor_static_dispatch_python(self):
+    """Verifies multi-parent, transitive, and named-arg ancestor dispatch in Python."""
+    result = self._transpile_and_run(
+        """
+        struct Entity {
+          var hp: int;
+        }
+
+        impl Entity {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            self.hp = self.hp + dt * mult + bonus;
+          }
+        }
+
+        struct Character: Entity {
+          var shield: int;
+        }
+
+        impl Character {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            Entity.update(self, mult = mult, dt = dt);
+            self.shield = self.shield + 1;
+          }
+        }
+
+        struct Flyer {
+          var alt: int;
+        }
+
+        impl Flyer {
+          var func glide(d: int) {
+            self.alt = self.alt + d;
+          }
+        }
+
+        struct Enemy: Character, Flyer {
+          var rage: int;
+        }
+
+        impl Enemy {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            Character.update(self, mult = mult, dt = dt);
+            Flyer.glide(self, 3);
+            self.rage = self.hp;
+          }
+        }
+
+        func run_test(): String {
+          var e = Enemy { hp = 5, shield = 0, alt = 2, rage = 0 };
+          e.update(4, mult = 3);
+          return f"{e.hp},{e.shield},{e.alt},{e.rage}";
+        }
+        """,
+        "run_test()",
+    )
+    self.assertEqual(result, "27,1,5,27")
 
 
 # ---------------------------------------------------------------------------

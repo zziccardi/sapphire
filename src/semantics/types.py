@@ -170,6 +170,7 @@ class FunctionType(Type):
     else:
       self.return_type = return_type
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
+    self.has_named_params: bool = param_names is not None
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
     self.has_self = (
         has_self or (bool(self.param_names) and self.param_names[0] == "self"))
@@ -296,6 +297,7 @@ class StructType(Type):
       self.parent_names = [parent_names]
     else:
       self.parent_names = list(parent_names)
+    self.parent_types: List["StructType"] = []
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.implemented_traits: Set[str] = set()
@@ -341,12 +343,47 @@ class StructType(Type):
     else:
       self.parent_names = [value]
 
+  def has_ancestor(
+      self,
+      target: "StructType",
+      symbol_table: Optional[Any] = None,
+      _seen: Optional[Set[Tuple[Optional[str], str]]] = None,
+  ) -> bool:
+    """Returns True if *target* is a strict transitive parent of this struct."""
+    seen = set() if _seen is None else set(_seen)
+    key = (self.defining_module, self.name)
+    if key in seen:
+      return False
+    seen.add(key)
+
+    parents: List[StructType] = list(self.parent_types)
+    if not parents and self.parent_names and symbol_table:
+      for p_name in self.parent_names:
+        parent = symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType):
+          parents.append(parent)
+
+    for parent in parents:
+      if parent is target or (
+          parent.defining_module == target.defining_module
+          and parent.name == target.name
+      ):
+        return True
+      if parent.has_ancestor(target, symbol_table, seen):
+        return True
+    return False
+
   def get_method(
       self, name: str,
       symbol_table: Optional[Any] = None) -> Optional["StructMethod"]:
     """Look up a method on this struct, falling back to parent structs if symbol_table is provided."""
     if name in self.methods:
       return self.methods[name]
+    if self.parent_types:
+      for parent in self.parent_types:
+        res = parent.get_method(name, symbol_table)
+        if res:
+          return res
     if self.parent_names and symbol_table:
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)
@@ -735,6 +772,13 @@ STRING_METHODS: Dict[str, FunctionType] = {
         OptionalType(PrimitiveType("bool")),
         param_names=["self"],
         has_self=True,
+    ),
+    "slice": FunctionType(
+        [StringType(), PrimitiveType("int"), OptionalType(PrimitiveType("int"))],
+        StringType(),
+        param_names=["self", "start", "end"],
+        has_self=True,
+        num_defaults=1,
     ),
 }
 

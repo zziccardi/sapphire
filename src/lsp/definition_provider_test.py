@@ -205,6 +205,50 @@ class TestDefinitionProvider(unittest.TestCase):
           res.range.start.character, lines[decl_line].index(decl_tok)
       )
 
+  def test_definition_qualified_ancestor_dispatch(self):
+    """Verifies go-to-definition resolves Parent.method and inherited ancestor methods."""
+    code = "\n".join([
+        "struct Grand {",
+        "  var x: int;",
+        "}",
+        "impl Grand {",
+        "  func ping(): int { return self.x; }",
+        "}",
+        "struct Parent: Grand {",
+        "  var y: int;",
+        "}",
+        "struct Child: Parent {",
+        "  var z: int;",
+        "}",
+        "impl Child {",
+        "  func ping(): int {",
+        "    return Parent.ping(self) + self.z;",
+        "  }",
+        "}",
+    ])
+    ls = SapphireLanguageServer("sapphire", "v0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///tmp/test_ancestor_def.sp"
+    doc = MagicMock()
+    doc.source = code
+    doc.uri = doc_uri
+    ls.workspace.get_text_document.return_value = doc
+    validate_source(ls, doc_uri, code)
+
+    lines = code.splitlines()
+    use_line = 14
+    use_col = lines[use_line].index("ping(self)")
+    res = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=use_line, character=use_col),
+        ),
+    )
+    self.assertIsNotNone(res)
+    self.assertEqual(res.range.start.line, 4)
+
 
 if __name__ == "__main__":
   unittest.main()

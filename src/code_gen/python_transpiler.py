@@ -67,6 +67,27 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._py_lineno = 1
     self._line_map: Dict[int, int] = {}
 
+  def _make_expr_transpiler(self) -> "PythonTranspiler":
+    """Creates a sub-transpiler inheriting module, struct, and rename state."""
+    temp = type(self)(
+        test_mode=self.test_mode,
+        use_runtime_module=self.use_runtime_module,
+    )
+    temp.struct_methods = self.struct_methods
+    temp.struct_traits = self.struct_traits
+    temp.structs_with_destructor = self.structs_with_destructor
+    temp.proto_structs = self.proto_structs
+    temp.struct_destructible_fields = self.struct_destructible_fields
+    temp.struct_parent_names = self.struct_parent_names
+    temp.func_return_types = self.func_return_types
+    temp.method_return_types = self.method_return_types
+    temp.variable_types = self.variable_types
+    temp._identifier_map = self._identifier_map
+    temp.extern_vars = self.extern_vars
+    temp.global_vars = self.global_vars
+    temp.moved_vars = self.moved_vars
+    return temp
+
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
     self._py_lineno += 1
@@ -80,7 +101,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
   def _format_param(self, p) -> str:
     pname = self._mangle_name(p.name)
     if p.default_expr:
-      temp = PythonTranspiler()
+      temp = self._make_expr_transpiler()
       temp.visit(p.default_expr)
       return f"{pname}={temp.get_output()}"
     return pname
@@ -255,7 +276,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
         if default_expr:
           self.newline()
-          temp = PythonTranspiler()
+          temp = self._make_expr_transpiler()
           temp.visit(default_expr)
           self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
       self.newline()
@@ -266,7 +287,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.dedent()
       if has_init:
         self.newline()
+        self.emit(f"if type(self)._init_sapphire is {node.name}._init_sapphire:")
+        self.indent()
+        self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
+        self.dedent()
       self.dedent()
       self.dedent()
     else:
@@ -280,7 +305,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
         if default_expr:
           self.newline()
-          temp = PythonTranspiler()
+          temp = self._make_expr_transpiler()
           temp.visit(default_expr)
           self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
       self.newline()
@@ -291,7 +316,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.dedent()
       if has_init:
         self.newline()
+        self.emit(f"if type(self)._init_sapphire is {node.name}._init_sapphire:")
+        self.indent()
+        self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
+        self.dedent()
       self.dedent()
 
     has_explicit_del = any(
@@ -430,11 +459,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           self.newline()
           args_list = ["self"]
           for arg in base_init.arguments:
-            temp = PythonTranspiler()
+            temp = self._make_expr_transpiler()
             temp.visit(arg.expr)
             val = temp.get_output()
             if arg.name:
-              args_list.append(f"{arg.name}={val}")
+              args_list.append(f"{self._mangle_name(arg.name)}={val}")
             else:
               args_list.append(val)
           self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
@@ -465,6 +494,15 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       else:
         self.visit(func.body)
       self.dedent()
+    export_ann = next(
+        (a for a in getattr(func, "annotations", []) if a.name == "export"),
+        None,
+    )
+    if export_ann and export_ann.arg:
+      alias_name = self._mangle_name(export_ann.arg)
+      if alias_name != func_name:
+        self.newline()
+        self.emit(f"{alias_name} = {func_name}")
 
   def _find_assigned_globals(
       self, node: Any, local_params: Optional[Set[str]] = None

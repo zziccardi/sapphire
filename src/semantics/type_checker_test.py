@@ -2507,7 +2507,7 @@ class TestTypeChecker(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       mod_a = os.path.join(tmpdir, "mod_a.sp")
       with open(mod_a, "w") as f:
-        f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n};\n")
+        f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n}\n")
 
       code = f"import mod_a;\n"
       input_stream = InputStream(code)
@@ -2543,7 +2543,7 @@ class TestTypeChecker(unittest.TestCase):
 
 
   def test_module_import_with_error(self):
-    """Verifies graceful handling when an imported module contains syntax or semantic errors."""
+    """Verifies imported module syntax and semantic errors propagate to importer."""
     import tempfile, os
     with tempfile.TemporaryDirectory() as tmpdir:
       invalid_sp = os.path.join(tmpdir, "invalid.sp")
@@ -2559,7 +2559,10 @@ class TestTypeChecker(unittest.TestCase):
       ast = ASTBuilder().visit(tree)
 
       checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
-      checker.check(ast)
+      with self.assertRaises(SemanticError) as ctx:
+        checker.check(ast)
+      self.assertIn("invalid.sp", str(ctx.exception))
+      self.assertIn("Cannot assign expression of type 'bool'", str(ctx.exception))
 
       syntax_err_sp = os.path.join(tmpdir, "syntax_err.sp")
       with open(syntax_err_sp, "w") as f:
@@ -2574,8 +2577,10 @@ class TestTypeChecker(unittest.TestCase):
       ast2 = ASTBuilder().visit(tree2)
 
       checker2 = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
-      with suppress_output():
+      with self.assertRaises(SemanticError) as ctx2:
         checker2.check(ast2)
+      self.assertIn("syntax_err.sp", str(ctx2.exception))
+      self.assertIn("Syntax Error:", str(ctx2.exception))
 
   def test_import_module_without_export_block(self):
     """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
@@ -4641,7 +4646,7 @@ class TestTypeChecker(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       char_sp = os.path.join(tmpdir, "character.sp")
       with open(char_sp, "w") as f:
-        f.write("export { Character }; struct Character {}\n")
+        f.write("export { Character }\nstruct Character {}\n")
 
       enemy_sp = os.path.join(tmpdir, "enemy.sp")
       code = "import game.entities.character;\n"
@@ -6458,6 +6463,7 @@ class TestTypeChecker(unittest.TestCase):
       var opt: int? = 10;
       if var x ?= opt {
         opt = 20;
+        let y = x;
       }
     }
     """
@@ -7202,6 +7208,724 @@ class TestTypeChecker(unittest.TestCase):
         "their module name directly",
         err,
     )
+
+  def test_module_let_constants_in_struct_and_param_defaults(self):
+    """Verifies same-file module let constants in struct field and parameter defaults."""
+    code = """
+    let STANDING_FRAME: int = 1;
+    let SCALED_FRAME = STANDING_FRAME + 2;
+
+    struct Point {
+      var x: int = STANDING_FRAME;
+      var y = SCALED_FRAME;
+    }
+
+    let ORIGIN = Point {};
+
+    struct Character {
+      var frame: int = STANDING_FRAME;
+      var inferred_frame = SCALED_FRAME;
+      var pos: Point = ORIGIN;
+    }
+
+    impl Character {
+      func reset(frame: int = STANDING_FRAME, y: int = SCALED_FRAME): int {
+        return frame + y;
+      }
+    }
+
+    trait Resettable {
+      func reset_to(frame: int = STANDING_FRAME);
+    }
+
+    func reset_global(frame: int = STANDING_FRAME): int {
+      return frame;
+    }
+    """
+    self._check(code)
+
+  def test_imported_let_constants_in_struct_and_param_defaults(self):
+    """Verifies imported module let constants in struct field and parameter defaults."""
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      consts_sp = os.path.join(tmpdir, "consts.sp")
+      with open(consts_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export {\n"
+            "  DEFAULT_SPEED,\n"
+            "}\n"
+            "let DEFAULT_SPEED: float = 120.0;\n"
+        )
+
+      code = """
+      import consts;
+
+      struct Mover {
+        var speed: float = consts.DEFAULT_SPEED;
+      }
+
+      impl Mover {
+        func boost(extra: float = consts.DEFAULT_SPEED): float {
+          return self.speed + extra;
+        }
+      }
+
+      func get_default_speed(speed: float = consts.DEFAULT_SPEED): float {
+        return speed;
+      }
+      """
+      lexer = SapphireLexer(InputStream(code))
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      ast = ASTBuilder().visit(parser.program())
+      checker = TypeChecker(source_file_path=os.path.join(tmpdir, "main.sp"))
+      checker.check(ast)
+      self.assertEqual(checker.errors, [])
+
+  def test_forward_ref_module_let_constants_rejected(self):
+    """Verifies forward references to later module let constants are rejected."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct BadStruct {
+        var x: int = LATER;
+      }
+      let LATER: int = 1;
+      """)
+    self.assertIn("Undefined identifier 'LATER'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      let EARLIER: int = LATER + 1;
+      let LATER: int = 1;
+      """)
+    self.assertIn("Undefined identifier 'LATER'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_fn(x: int = LATER): int {
+        return x;
+      }
+      let LATER: int = 1;
+      """)
+    self.assertIn("Undefined identifier 'LATER'", str(ctx.exception))
+
+  def test_parameter_default_type_and_scope_errors(self):
+    """Verifies parameter defaults enforce type compatibility and disallow sibling params."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_fn(x: int = "wrong") {}
+      """)
+    self.assertIn(
+        "Default expression of type 'String' is not compatible with parameter 'x' of type 'int'.",
+        str(ctx.exception),
+    )
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct S {}
+      impl S {
+        func bad_method(x: int = "wrong") {}
+      }
+      """)
+    self.assertIn(
+        "Default expression of type 'String' is not compatible with parameter 'x' of type 'int'.",
+        str(ctx.exception),
+    )
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func bad_ref(a: int, b: int = a): int {
+        return b;
+      }
+      """)
+    self.assertIn("Undefined identifier 'a'", str(ctx.exception))
+
+  def test_named_arguments_validation_errors(self):
+    """Verifies ordering, unknown, duplicate, missing, and unnamed fn errors."""
+    # Positional argument following a named argument.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(a = 1, 2);
+      }
+      """)
+    self.assertIn(
+        "Positional argument cannot follow a named argument.",
+        str(ctx.exception),
+    )
+
+    # Unknown named argument.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(a = 1, c = 2);
+      }
+      """)
+    self.assertIn("Unexpected named argument 'c'.", str(ctx.exception))
+
+    # Duplicate via positional + named.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(1, a = 2);
+      }
+      """)
+    self.assertIn(
+        "Multiple values provided for parameter 'a'.", str(ctx.exception)
+    )
+
+    # Duplicate via two named arguments.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func add(a: int, b: int = 10): int {
+        return a + b;
+      }
+      func main(): int {
+        return add(a = 1, a = 2);
+      }
+      """)
+    self.assertIn(
+        "Multiple values provided for parameter 'a'.", str(ctx.exception)
+    )
+
+    # Missing required parameter when optional named args satisfy raw count.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func calc(a: int, b: int = 10, c: int = 20): int {
+        return a + b + c;
+      }
+      func main(): int {
+        return calc(b = 1, c = 2);
+      }
+      """)
+    self.assertIn(
+        "Missing required argument for parameter 'a'.", str(ctx.exception)
+    )
+
+    # Reject named arguments when calling an unnamed FunctionType variable.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func apply_cb(cb: (int) -> int): int {
+        return cb(p0 = 5);
+      }
+      """)
+    self.assertIn(
+        "Named argument 'p0' is not supported when calling an unnamed function type.",
+        str(ctx.exception),
+    )
+
+  def test_named_arguments_accepted_across_call_targets_and_range(self):
+    """Verifies skipped defaults and reordered named args across call forms."""
+    self._check("""
+    trait Greeter {
+      func greet(a: int, b: int = 10, c: int = 20): int;
+    }
+
+    struct Base {
+      var x: int;
+      var y: int;
+      var z: int;
+    }
+
+    impl Base {
+      func __init__(a: int, b: int = 10, c: int = 20) {
+        self.x = a;
+        self.y = b;
+        self.z = c;
+      }
+
+      func compute(a: int, b: int = 10, c: int = 20): int {
+        return a + b + c;
+      }
+
+      static func create(a: int, b: int = 10, c: int = 20): Base {
+        return Base(c = c, a = a);
+      }
+    }
+
+    impl Greeter for Base {
+      func greet(a: int, b: int = 10, c: int = 20): int {
+        return a + b + c;
+      }
+    }
+
+    struct Derived: Base {
+      var w: int;
+    }
+
+    impl Derived {
+      func __init__(a: int, c: int) : Base(c = c, a = a) {
+        self.w = 1;
+      }
+    }
+
+    struct Pair<K, V> {
+      let key: K;
+      let val: V;
+    }
+
+    func make_pair<K, V>(k: K, v: V): Pair<K, V> {
+      return Pair<K, V> { key = k, val = v };
+    }
+
+    func create_enemy(id: int, hp: int = 10, unit_hp: int = 5): int {
+      return id + hp + unit_hp;
+    }
+
+    func use_greeter(g: Greeter): int {
+      return g.greet(c = 30, a = 5);
+    }
+
+    func run(): int {
+      let f = create_enemy(id = 1, unit_hp = 19);
+      let s = Base.create(c = 3, a = 1);
+      let m = s.compute(c = 4, a = 2);
+      let d = Derived(c = 7, a = 3);
+      let g = use_greeter(d);
+      let p = make_pair(v = "hi", k = 42);
+      var sum = f + m + g + p.key + d.y + s.z;
+      for i in range(stop = 10, step = 2) {
+        sum = sum + i;
+      }
+      return sum;
+    }
+    """)
+
+  def test_range_invalid_named_calls_rejected(self):
+    """Verifies invalid range() named calls fail semantic checking."""
+    for bad_call in [
+        "range(start = 2)",
+        "range(1, start = 2)",
+        "range(1, step = 2)",
+    ]:
+      with self.subTest(bad_call=bad_call):
+        with self.assertRaises(SemanticError):
+          self._check(f"""
+          func main(): int {{
+            var s = 0;
+            for i in {bad_call} {{
+              s = s + i;
+            }}
+            return s;
+          }}
+          """)
+
+  def test_reordered_named_arguments_detect_aliasing_conflict(self):
+    """Verifies borrow aliasing checks still trigger with reordered named args."""
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Counter {
+        var val: int;
+      }
+
+      func bump(src: Counter, var dst: Counter): int {
+        dst.val = dst.val + src.val;
+        return dst.val;
+      }
+
+      func main(): int {
+        var c = Counter { val = 1 };
+        return bump(dst = c, src = c);
+      }
+      """)
+    self.assertIn("Aliasing conflict", str(ctx.exception))
+
+  def test_qualified_ancestor_static_dispatch_accepted(self):
+    """Verifies single, multi-parent, named-arg, and coroutine ancestor calls."""
+    self._check("""
+    struct Flyer {
+      var alt: int;
+    }
+
+    impl Flyer {
+      var func ascend(delta: int, bonus: int = 2, extra: int = 5): int {
+        self.alt = self.alt + delta + bonus + extra;
+        return self.alt;
+      }
+    }
+
+    struct Echolocation {
+      var ping_count: int;
+    }
+
+    impl Echolocation {
+      func pulse(scale: int): int {
+        return self.ping_count * scale;
+      }
+
+      func scan_gen(): Coroutine<int> {
+        yield self.ping_count;
+      }
+    }
+
+    struct Bat: Flyer, Echolocation {
+      var energy: int;
+    }
+
+    impl Bat {
+      var func ascend(delta: int, bonus: int = 2, extra: int = 5): int {
+        return Flyer.ascend(self, extra = extra, delta = delta);
+      }
+
+      func probe(): int {
+        let p = Echolocation.pulse(self, 3);
+        var gen = Echolocation.scan_gen(self);
+        let y = gen.step() ?? 0;
+        return p + y;
+      }
+    }
+
+    func main(): int {
+      var b = Bat { alt = 0, ping_count = 4, energy = 10 };
+      return b.ascend(10) + b.probe();
+    }
+    """)
+
+  def test_qualified_ancestor_static_dispatch_errors(self):
+    """Verifies negative rules for qualified ancestor static dispatch."""
+    # 1. Up-casting remains disallowed.
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Base { var x: int; }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func bad(): int {
+          let p: Base = self;
+          return p.x;
+        }
+      }
+      """)
+
+    # 2. Non-self first argument rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func draw(a: int): int { return self.x + a; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func draw(a: int): int {
+          let other = Child { x = 1, y = 2 };
+          return Base.draw(other, a);
+        }
+      }
+      """)
+    self.assertIn("must pass 'self' as the first positional argument", str(ctx.exception))
+
+    # 3. Immutable func calling var func ancestor rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        var func bump(v: int) { self.x = self.x + v; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func inspect() {
+          Base.bump(self, 1);
+        }
+      }
+      """)
+    self.assertIn("Cannot call mutating ancestor method", str(ctx.exception))
+
+    # 4. Aliasing conflict on Parent.mut(self, self.x).
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Box { var v: int; }
+      struct Base { var box: Box; }
+      impl Base {
+        var func merge(other: Box): int {
+          self.box.v = self.box.v + other.v;
+          return self.box.v;
+        }
+      }
+      struct Child: Base { var z: int; }
+      impl Child {
+        var func merge(other: Box): int {
+          return Base.merge(self, self.box);
+        }
+      }
+      """)
+    self.assertIn("Aliasing conflict", str(ctx.exception))
+
+    # 5. Child.method(self) self-call rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func draw(): int { return Child.draw(self); }
+      }
+      """)
+    self.assertIn("on own struct 'Child'", str(ctx.exception))
+
+    # 6. Unbound Parent.method reference rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func draw(): int { return self.x; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func draw(): int {
+          let f = Base.draw;
+          return 0;
+        }
+      }
+      """)
+    self.assertIn("Cannot reference unbound instance method", str(ctx.exception))
+
+    # 7. Unrelated struct rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Other { var x: int; }
+      impl Other {
+        func draw(): int { return self.x; }
+      }
+      struct Child { var y: int; }
+      impl Child {
+        func draw(): int { return Other.draw(self); }
+      }
+      """)
+    self.assertIn("is not an ancestor of 'Child'", str(ctx.exception))
+
+    # 8. Outside impl method rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func draw(): int { return self.x; }
+      }
+      func main(): int {
+        let b = Base { x = 1 };
+        return Base.draw(b);
+      }
+      """)
+    self.assertIn("only allowed inside an instance method", str(ctx.exception))
+
+    # 9. Direct __init__ and field access on type receiver rejected.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      impl Base {
+        func __init__(x: int) { self.x = x; }
+      }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func reset() {
+          Base.__init__(self, 1);
+        }
+      }
+      """)
+    self.assertIn("Cannot call '__init__' directly", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Base { var x: int; }
+      struct Child: Base { var y: int; }
+      impl Child {
+        func read_base(): int { return Base.x; }
+      }
+      """)
+    self.assertIn("Cannot access instance field 'x' on type 'Base'", str(ctx.exception))
+
+  def test_semantic_errors_include_source_locations(self):
+    """Verifies that call/index semantic errors include line and column."""
+    code_non_callable = "func main() {\n  let x = 1;\n  x();\n}\n"
+    with self.assertRaises(SemanticError) as ctx:
+      self._check_with_file(code_non_callable, "sample.sp") if hasattr(self, "_check_with_file") else None
+      input_stream = InputStream(code_non_callable)
+      tree = SapphireParser(CommonTokenStream(SapphireLexer(input_stream))).program()
+      ast = ASTBuilder().visit(tree)
+      checker = TypeChecker(source_file_path="sample.sp", source_content=code_non_callable)
+      checker.check(ast)
+    self.assertIn("sample.sp:3:2 - Target is not callable.", str(ctx.exception))
+
+    code_arg_mismatch = "func foo(a: int) {}\nfunc main() {\n  foo(\"bad\");\n}\n"
+    with self.assertRaises(SemanticError) as ctx:
+      input_stream = InputStream(code_arg_mismatch)
+      tree = SapphireParser(CommonTokenStream(SapphireLexer(input_stream))).program()
+      ast = ASTBuilder().visit(tree)
+      checker = TypeChecker(source_file_path="sample.sp", source_content=code_arg_mismatch)
+      checker.check(ast)
+    self.assertIn("sample.sp:3:6 - Argument type mismatch at position 1.", str(ctx.exception))
+
+  def test_map_bracket_assignment(self):
+    """Verifies map[k] = v assignment, key type checks, and constness."""
+    self._check("""
+    func main() {
+      var counts: [String: int] = {};
+      counts["a"] = 1;
+      counts["a"] += 2;
+      var nested: [int: [int: bool]] = {};
+      nested[0] = { 1: true };
+      nested[0][2] = false;
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        let m: [String: int] = { "a": 1 };
+        m["b"] = 2;
+      }
+      """)
+    self.assertIn("Cannot assign to key of constant map 'm'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m: [String: int] = {};
+        m[123] = 2;
+      }
+      """)
+    self.assertIn("Map index type 'int' is not compatible with key type 'String'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func main() {
+        var m: [String: int] = {};
+        m["a"] = "wrong";
+      }
+      """)
+    self.assertIn("Cannot assign type 'String' to target of type 'int'", str(ctx.exception))
+
+  def test_guard_var_allows_disjoint_mutating_method(self):
+    """Verifies field-disjoint var func calls succeed during guard var unwrap."""
+    self._check("""
+    struct Enemy {
+      var x: int = 0;
+    }
+    impl Enemy {
+      var func step(nx: int) { self.x = nx; }
+    }
+    struct Controller {
+      var active_enemy: Enemy? = none;
+      var index: int = 0;
+      var in_progress: bool = false;
+    }
+    impl Controller {
+      var func clear_turn() {
+        self.index = 0;
+        self.in_progress = false;
+      }
+      var func set_enemy(e: Enemy?) {
+        self.active_enemy = e;
+        self.clear_turn();
+      }
+      var func advance_path() {
+        guard var e ?= self.active_enemy else { return; }
+        e.step(5);
+        self.clear_turn();
+      }
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Enemy { var x: int = 0; }
+      struct Controller {
+        var active_enemy: Enemy? = none;
+        var index: int = 0;
+      }
+      impl Controller {
+        var func clear_turn() { self.index = 0; }
+        var func set_enemy(e: Enemy?) {
+          self.active_enemy = e;
+          self.clear_turn();
+        }
+        var func advance_path() {
+          guard var e ?= self.active_enemy else { return; }
+          self.set_enemy(none);
+        }
+      }
+      """)
+    self.assertIn(
+        "Cannot invoke mutating method 'set_enemy' on 'self' while it is frozen",
+        str(ctx.exception),
+    )
+
+
+  def test_optional_chain_flattens_nested_optional(self):
+    code = """
+    struct Inner { var name: String? = none; }
+    func get_name(x: Inner?): String {
+      return x?.name ?? "default";
+    }
+    """
+    self._check(code)
+
+  def test_array_bounds_invalidated_after_mutation(self):
+    code_push = """
+    func main() {
+      var arr: [int] = [];
+      arr.push(42);
+      let x = arr[0];
+    }
+    """
+    self._check(code_push)
+
+    code_var_param = """
+    func fill(var a: [int]) {
+      a.push(1);
+    }
+    func main() {
+      var arr: [int] = [];
+      fill(arr);
+      let x = arr[0];
+    }
+    """
+    self._check(code_var_param)
+
+  def test_if_var_post_last_use_and_field_disjoint_unfreezing(self):
+    code_ok = """
+    struct Session { var step: int = 0; }
+    impl Session {
+      var func advance() { self.step = self.step + 1; }
+    }
+    struct Runner {
+      var session: Session? = none;
+      var done: bool = false;
+    }
+    impl Runner {
+      var func finish() {
+        self.session = none;
+        self.done = true;
+      }
+      var func update() {
+        if var s ?= self.session {
+          s.advance();
+          self.finish();
+        }
+      }
+    }
+    """
+    self._check(code_ok)
+
+  def test_builtin_assert_and_string_slice(self):
+    code = """
+    func main() {
+      assert(true);
+      assert(1 + 1 == 2, "math works");
+      let s: String = "hello world";
+      let a: String = s.slice(0, 5);
+      let b: String = s.slice(6);
+    }
+    """
+    self._check(code)
 
 
 if __name__ == "__main__":

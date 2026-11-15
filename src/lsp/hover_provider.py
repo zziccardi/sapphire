@@ -206,6 +206,12 @@ class HoverProvider:
       if isinstance(receiver_type, ModuleType):
         if isinstance(node_type, FunctionType):
           category = "function"
+        elif isinstance(node_type, StructType):
+          category = "struct"
+        elif isinstance(node_type, EnumType):
+          category = "enum"
+        elif isinstance(node_type, TraitType):
+          category = "trait"
         else:
           category = "variable"
       elif isinstance(receiver_type, EnumType):

@@ -1181,6 +1181,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn('local pos = _sapphire_string_find(clean, "o", nil, true)', lua_out)
     self.assertIn('local parts = _sapphire_string_split(clean, ",")', lua_out)
 
+  def test_string_slice_and_assert_lua(self):
+    code = """
+    func main() {
+      let s = "hello world";
+      let a = s.slice(0, 5);
+      let b = s.slice(6);
+      assert(a == "hello");
+      assert(b == "world", "expected world");
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("_sapphire_string_slice(s, 0, 5)", lua_out)
+    self.assertIn("_sapphire_string_slice(s, 6)", lua_out)
+    self.assertIn('assert((a == "hello"), "assertion failed")', lua_out)
+    self.assertIn('assert((b == "world"), "expected world")', lua_out)
+
   def test_transpile_with_explicit_args(self):
     """Verifies passing source_file and source_map_builder directly to transpile method."""
     input_stream = InputStream("let x = 10;")
@@ -2159,6 +2175,416 @@ class TestLuaTranspiler(unittest.TestCase):
       if lua_bin:
         proc = subprocess.run([lua_bin, lua_path], capture_output=True, text=True, check=True)
         self.assertEqual(proc.stdout.strip(), "2,4,6,8")
+
+  def test_defaults_and_base_init_preserve_module_context_lua(self):
+    """Verifies _make_expr_transpiler preserves imported_modules, _identifier_map, and constants in defaults/base_inits."""
+    code = """
+    let STANDING_FRAME: int = 1;
+
+    struct Base {
+      var val: int;
+    }
+    impl Base {
+      func __init__(val: int) {
+        self.val = val;
+      }
+    }
+
+    struct Child: Base {
+      var frame: int = STANDING_FRAME;
+    }
+    impl Child {
+      func __init__(v: int): Base(val = v + STANDING_FRAME) {}
+      func reset(frame: int = STANDING_FRAME): int {
+        return self.val + self.frame + frame;
+      }
+    }
+
+    func global_fn(frame: int = STANDING_FRAME): int {
+      return frame * 10;
+    }
+
+    func main() {
+      let c = Child(v = 5);
+      print(f"{c.reset()},{global_fn()}");
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      dep_sp = os.path.join(tmpdir, "helpers.sp")
+      with open(dep_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export {\n"
+            "  STEP,\n"
+            "  bonus,\n"
+            "}\n"
+            "let STEP: int = 3;\n"
+            "func bonus(): int {\n"
+            "  return 4;\n"
+            "}\n"
+        )
+
+      main_code = (
+          "import helpers;\n"
+          + code.replace("func global_fn(frame: int = STANDING_FRAME): int {\n",
+                         "struct HelperUser {\n"
+                         "  var s: int = helpers.STEP;\n"
+                         "}\n"
+                         "func global_fn(frame: int = helpers.STEP + helpers.bonus()): int {\n")
+      )
+      main_sp = os.path.join(tmpdir, "main.sp")
+      dep_lua = os.path.join(tmpdir, "helpers.lua")
+      main_lua = os.path.join(tmpdir, "main.lua")
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      transpile_file(dep_sp, dep_lua, target="lua", quiet=True)
+      transpile_file(main_sp, main_lua, target="lua", quiet=True)
+      with open(main_lua, "r", encoding="utf-8") as f:
+        main_lua_text = f.read()
+
+      self.assertIn("helpers.STEP", main_lua_text)
+      self.assertIn("helpers.bonus()", main_lua_text)
+      self.assertNotIn("helpers:bonus()", main_lua_text)
+
+      lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      if lua_bin:
+        env = os.environ.copy()
+        env["LUA_PATH"] = f"{tmpdir}/?.lua;;"
+        proc = subprocess.run([lua_bin, main_lua], capture_output=True, text=True, check=True, env=env)
+        self.assertEqual(proc.stdout.strip(), "8,70")
+
+  def test_make_expr_transpiler_preserves_identifier_map_lua(self):
+    """Verifies LuaTranspiler._make_expr_transpiler inherits _identifier_map and imported_modules."""
+    lt = LuaTranspiler()
+    lt.known_structs.add("MyStruct")
+    lt.imported_modules.add("mod")
+    lt._identifier_map["local_var"] = "_val_local_var"
+    sub = lt._make_expr_transpiler()
+    self.assertIsInstance(sub, LuaTranspiler)
+    self.assertIn("MyStruct", sub.known_structs)
+    self.assertIn("mod", sub.imported_modules)
+    self.assertEqual(sub._identifier_map["local_var"], "_val_local_var")
+    sub.visit(CallNode(MemberAccessNode(IdentifierNode("mod"), "fn", False), [ArgumentNode(None, IdentifierNode("local_var"))]))
+    self.assertEqual(sub.get_output(), "mod.fn(_val_local_var)")
+
+  def _run_lua_project(self, files: dict[str, str], entry: str = "main.sp") -> str:
+    """Transpiles and executes a multi-file Sapphire project via Lua."""
+    lua_bin = (
+        shutil.which("lua")
+        or shutil.which("luajit")
+        or shutil.which("lua5.1")
+        or shutil.which("lua5.4")
+    )
+    if not lua_bin:
+      self.skipTest("lua interpreter not found in PATH")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      tmp_path = pathlib.Path(tmp_dir)
+      for rel_path, content in files.items():
+        sp_file = tmp_path / rel_path
+        sp_file.parent.mkdir(parents=True, exist_ok=True)
+        sp_file.write_text(content, encoding="utf-8")
+      main_sp = tmp_path / entry
+      main_lua = main_sp.with_suffix(".lua")
+      for rel_path in files:
+        if rel_path != entry:
+          mod_sp = tmp_path / rel_path
+          transpile_file(
+              str(mod_sp),
+              output_file=str(mod_sp.with_suffix(".lua")),
+              target="lua",
+              quiet=True,
+          )
+      transpile_file(
+          str(main_sp),
+          output_file=str(main_lua),
+          target="lua",
+          quiet=True,
+      )
+      env = os.environ.copy()
+      env["LUA_PATH"] = f"{tmp_dir}/?.lua;{tmp_dir}/?/init.lua;" + env.get(
+          "LUA_PATH", ""
+      )
+      res = subprocess.run(
+          [lua_bin, str(main_lua)],
+          cwd=tmp_dir,
+          capture_output=True,
+          text=True,
+          check=True,
+          env=env,
+      )
+      return res.stdout.strip()
+
+  def test_named_args_skipped_middle_default_and_cross_module_private_lua(self):
+    """Verifies skipped middle defaults locally and across modules with private defaults."""
+    out = self._run_lua_project({
+        "defs.sp": """
+        let PRIVATE_DEFAULT_HP: int = 10;
+
+        func create_enemy(id: int, hp: int = PRIVATE_DEFAULT_HP, unit_hp: int = 5): int {
+          return id * 100 + hp + unit_hp;
+        }
+
+        struct Builder {
+          var prefix: int;
+        }
+
+        impl Builder {
+          func __init__(prefix: int = PRIVATE_DEFAULT_HP) {
+            self.prefix = prefix;
+          }
+
+          func make_score(a: int, b: int = PRIVATE_DEFAULT_HP, c: int = 1): int {
+            return self.prefix + a + b + c;
+          }
+        }
+
+        export {
+          create_enemy,
+          Builder,
+        }
+        """,
+        "main.sp": """
+        import defs;
+
+        func local_enemy(id: int, hp: int = 10, unit_hp: int = 5): int {
+          return id * 100 + hp + unit_hp;
+        }
+
+        func main() {
+          let r1 = local_enemy(id = 1, unit_hp = 19);
+          let r2 = defs.create_enemy(id = 1, unit_hp = 19);
+          let b = defs.Builder();
+          let r3 = b.make_score(c = 7, a = 2);
+          let r4 = defs.Builder(prefix = 3).make_score(a = 1);
+          print(f"{r1},{r2},{r3},{r4}");
+        }
+        """,
+    })
+    self.assertEqual(out, "129,129,29,15")
+
+  def test_reordered_named_args_preserve_left_to_right_eval_order_lua(self):
+    """Verifies left-to-right side effects across expr, multi-return, and stmt calls."""
+    out = self._run_lua_project({
+        "main.sp": """
+        var log: String = "";
+
+        func step(tag: String, val: int): int {
+          log = log + tag;
+          return val;
+        }
+
+        func pair_calc(a: int, b: int, c: int): int, int {
+          return a * 100 + b * 10 + c, a + b + c;
+        }
+
+        func record(a: int, b: int = 2, c: int = 3) {
+          log = f"{log}[{a},{b},{c}]";
+        }
+
+        func main() {
+          let x, y = pair_calc(c = step("C", 3), b = step("B", 2), a = step("A", 1));
+          record(c = step("Z", 9), a = step("X", 4));
+          print(f"{x},{y},{log}");
+        }
+        """,
+    })
+    self.assertEqual(out, "123,6,CBAZX[4,2,9]")
+
+  def test_optional_chaining_reordered_named_args_lua(self):
+    """Verifies obj?.compute(...) short-circuits on none and preserves eval order otherwise."""
+    out = self._run_lua_project({
+        "main.sp": """
+        var log: String = "";
+
+        func step(n: int): int {
+          log = f"{log}{n}";
+          return n;
+        }
+
+        struct Worker {
+          var base: int;
+        }
+
+        impl Worker {
+          func compute(a: int, b: int = 10, c: int = 20): int {
+            return self.base + a * 100 + b * 10 + c;
+          }
+        }
+
+        func run_none(w: Worker?): int? {
+          return w?.compute(c = step(1), a = step(2));
+        }
+
+        func main() {
+          let w1: Worker? = Worker { base = 1000 };
+          let w2: Worker? = none;
+          let r1 = w1?.compute(c = step(1), a = step(2));
+          w1?.compute(c = step(3), a = step(4));
+          let r2 = run_none(w2);
+          let has_r2 = r2 != none;
+          print(f"{r1 ?? -1},{has_r2},{log}");
+        }
+        """,
+    })
+    self.assertEqual(out, "1301,false,1234")
+
+  def test_constructors_base_init_cross_module_and_false_bool_lua(self):
+    """Verifies constructor skipped defaults, : Parent(...), cross-module, and false bool."""
+    out = self._run_lua_project({
+        "shapes.sp": """
+        struct Box {
+          var w: int;
+          var h: int;
+          var ok: bool;
+        }
+
+        impl Box {
+          func __init__(w: int, h: int = 10, ok: bool = true) {
+            self.w = w;
+            self.h = h;
+            self.ok = ok;
+          }
+        }
+
+        export {
+          Box,
+        }
+        """,
+        "main.sp": """
+        import shapes;
+
+        var log: String = "";
+
+        func step(tag: String, val: int): int {
+          log = log + tag;
+          return val;
+        }
+
+        struct Base {
+          var a: int;
+          var b: int;
+          var c: int;
+        }
+
+        impl Base {
+          func __init__(a: int, b: int = 10, c: int = 20) {
+            self.a = a;
+            self.b = b;
+            self.c = c;
+          }
+        }
+
+        struct Child: Base {
+          var d: int;
+        }
+
+        impl Child {
+          func __init__(x: int, z: int) : Base(c = step("C", z), a = step("A", x)) {
+            self.d = 1;
+          }
+        }
+
+        func main() {
+          let b = shapes.Box(ok = false, w = 5);
+          let c = Child(z = 7, x = 3);
+          print(f"{b.w},{b.h},{b.ok},{c.a},{c.b},{c.c},{log}");
+        }
+        """,
+    })
+    self.assertEqual(out, "5,10,false,3,10,7,CA")
+
+  def test_range_named_args_lua(self):
+    """Verifies range(stop = 10, step = 2) and range(start = 2, stop = 8) in Lua."""
+    out = self._run_lua_project({
+        "main.sp": """
+        func main() {
+          var s1 = "";
+          for i in range(stop = 10, step = 2) {
+            s1 = f"{s1}{i}";
+          }
+          var s2 = "";
+          for j in range(start = 2, stop = 8) {
+            s2 = f"{s2}{j}";
+          }
+          print(f"{s1}|{s2}");
+        }
+        """,
+    })
+    self.assertEqual(out, "02468|234567")
+
+  def test_qualified_ancestor_static_dispatch_cross_module_lua(self):
+    """Verifies 3-level cross-module, multi-parent, named-arg, and coroutine ancestor dispatch in Lua."""
+    out = self._run_lua_project({
+        "entity.sp": """
+        struct Entity {
+          var hp: int;
+        }
+
+        impl Entity {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            self.hp = self.hp + dt * mult + bonus;
+          }
+
+          func base_tag(): int {
+            return self.hp;
+          }
+        }
+
+        export {
+          Entity,
+        }
+        """,
+        "character.sp": """
+        import entity;
+
+        struct Character: entity.Entity {
+          var shield: int;
+        }
+
+        impl Character {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            entity.Entity.update(self, mult = mult, dt = dt);
+            self.shield = self.shield + 1;
+          }
+        }
+
+        export {
+          Character,
+        }
+        """,
+        "main.sp": """
+        import character;
+
+        struct Flyer {
+          var alt: int;
+        }
+
+        impl Flyer {
+          var func glide(d: int) {
+            self.alt = self.alt + d;
+          }
+        }
+
+        struct Enemy: character.Character, Flyer {
+          var rage: int;
+        }
+
+        impl Enemy {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            character.Character.update(self, mult = mult, dt = dt);
+            Flyer.glide(self, 3);
+            self.rage = character.Character.base_tag(self);
+          }
+        }
+
+        func main() {
+          var e = Enemy { hp = 5, shield = 0, alt = 2, rage = 0 };
+          e.update(4, mult = 3);
+          print(f"{e.hp},{e.shield},{e.alt},{e.rage}");
+        }
+        """,
+    })
+    self.assertEqual(out, "27,1,5,27")
 
 
 

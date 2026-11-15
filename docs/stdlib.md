@@ -18,6 +18,7 @@ import std.math;
 import std.os;
 import std.testing;
 import std.time;
+import std.utf8;
 ```
 
 By default, Sapphire binds the terminal component of the import path directly
@@ -225,6 +226,23 @@ func main() {
 }
 ```
 
+## UTF-8 module (`std.utf8`)
+
+The `std.utf8` module provides character-aware UTF-8 string length, byte offset,
+and slicing helpers.
+
+### Exported functions
+
+* `func size(s: String): int?`
+  Returns the number of UTF-8 characters (codepoints) in `s`, or `none` if `s`
+  is not valid UTF-8.
+* `func offset(s: String, n: int, i: int = 1): int?`
+  Returns the 1-based byte position where the `n`-th UTF-8 character encoding
+  begins (starting from byte index `i`), or `none` if out of range.
+* `func sub(s: String, start_char: int, end_char: int? = none): String`
+  Returns the 0-indexed half-open UTF-8 character slice `[start_char, end_char)`,
+  supporting negative character indices.
+
 ## Love2D game engine bindings (`lib.love2d`)
 
 Sapphire provides first-class bindings for the Love2D framework under
@@ -233,6 +251,7 @@ Lua 5.1 / Love2D game packages.
 
 ### Submodules
 
+* `lib.love2d.event`: Engine event triggers such as `quit`.
 * `lib.love2d.graphics`: Canvas, Color, Font, Graphics, Image, Quad.
 * `lib.love2d.keyboard`: Keyboard input handling and key repeat controls.
 * `lib.love2d.mouse`: Cursor and mouse position/button polling.

@@ -367,6 +367,13 @@ pipenv run sapphire run samples/overview.sp --dev
    * Python codebase: Follow the Google Python Style Guide rather than PEP 8,
      maintain 2-space or 4-space consistency with surrounding files, include
      explicit type annotations where appropriate.
+   * Compiler module size: Aim for a soft maximum of ~1,000 lines per non-test
+     implementation file in `src/` (excluding `src/parser/gen/`). Split larger
+     analyzers or transpilers into cohesive mixins/helpers (e.g.,
+     `*_visitor.py`, `*_emitter.py`, `*_runtime.py`), re-export public symbols
+     from the original module for backward compatibility, and use
+     `type(self)()` rather than hardcoding the concrete transpiler class inside
+     emitter mixins.
    * Sapphire code: Follow `docs/style_guide.md` (80 chars max line length,
      2-space indentation, semicolon terminated).
    * Markdown files: Lines should not exceed 80 characters (except when

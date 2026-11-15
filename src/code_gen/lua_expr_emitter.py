@@ -135,18 +135,42 @@ class LuaExprMixin:
     else:
       self.visit(node.expr)
 
+  def _emit_lua_call_args_list(self, exprs: List[ASTNode]) -> None:
+    """Emits comma-separated Lua argument expressions."""
+    for idx, expr in enumerate(exprs):
+      if idx > 0:
+        self.emit(", ")
+      self.visit(expr)
+
+  def _format_reordered_slot_temps(
+      self, node: CallNode, total_slots: int
+  ) -> List[str]:
+    """Binds side-effecting call args in source order and returns slot list."""
+    for arg_idx, arg in enumerate(node.arguments):
+      self.emit(f"local _a{arg_idx} = ")
+      self.visit(arg.expr)
+      self.emit("; ")
+    slot_to_temp = {
+        slot: f"_a{arg_idx}"
+        for arg_idx, slot in enumerate(getattr(node, "_eval_order_slots", []))
+    }
+    return [slot_to_temp.get(i, "nil") for i in range(total_slots)]
+
   def visit_CallNode(self, node: CallNode) -> None:
     if IntrinsicRegistry.try_emit("lua", self, node):
       return
 
     # Check if this call is calling a struct constructor, e.g. Weapon(...)
-    if (isinstance(node.callee, IdentifierNode) and
-        node.callee.name in self.known_structs):
-      struct_name = node.callee.name
+    is_local_struct = (
+        isinstance(node.callee, IdentifierNode)
+        and node.callee.name in self.known_structs
+    )
+    if getattr(node, "_is_struct_constructor", False) or is_local_struct:
       if node.arena_expr:
         self.visit(node.arena_expr)
         self.emit(":register(")
-      self.emit(f"{struct_name}.init({{")
+      self.visit(node.callee)
+      self.emit(".init({")
       for idx, arg in enumerate(node.arguments):
         if idx > 0:
           self.emit(", ")
@@ -160,45 +184,88 @@ class LuaExprMixin:
         self.emit(")")
       return
 
+    resolved_exprs = getattr(node, "_resolved_arguments", None)
+    if resolved_exprs is None:
+      resolved_exprs = [arg.expr for arg in node.arguments]
+    needs_temps = bool(getattr(node, "_requires_eval_order_temps", False))
+
+    if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+      member_name = (
+          getattr(node.callee, "target_name", None)
+          or self._mangle_name(node.callee.member)
+      )
+      sep = ":" if getattr(node.callee, "is_instance_method", False) else "."
+      self.emit("((function(_r) if _r ~= nil then ")
+      if needs_temps:
+        temp_args = self._format_reordered_slot_temps(node, len(resolved_exprs))
+        self.emit(f"return _r{sep}{member_name}({', '.join(temp_args)})")
+      else:
+        self.emit(f"return _r{sep}{member_name}(")
+        self._emit_lua_call_args_list(resolved_exprs)
+        self.emit(")")
+      self.emit(" else return nil end end)(")
+      self.visit(node.callee.receiver)
+      self.emit("))")
+      return
+
     if node.arena_expr:
       self.visit(node.arena_expr)
       self.emit(":register(")
 
     if isinstance(node.callee, MemberAccessNode):
-      member_name = getattr(node.callee, "target_name", None) or self._mangle_name(node.callee.member)
+      member_name = (
+          getattr(node.callee, "target_name", None)
+          or self._mangle_name(node.callee.member)
+      )
       receiver_name = getattr(node.callee.receiver, "name", None)
-      if node.callee.is_optional:
-        sep = ":" if getattr(node.callee, "is_instance_method", False) else "."
-        self.emit("((function(_r) if _r ~= nil then return _r")
-        self.emit(f"{sep}{member_name}(")
-        for idx, arg in enumerate(node.arguments):
-          if idx > 0:
-            self.emit(", ")
-          self.visit(arg.expr)
-        self.emit(") else return nil end end)(")
-        self.visit(node.callee.receiver)
-        self.emit("))")
+      use_colon = (
+          getattr(node.callee, "is_instance_method", False)
+          or not (
+              getattr(node.callee, "is_static_method", False)
+              or (
+                  receiver_name
+                  and (
+                      receiver_name in self.known_structs
+                      or receiver_name in self.imported_modules
+                  )
+              )
+              or isinstance(node.callee.receiver, MemberAccessNode)
+          )
+      )
+      if needs_temps:
+        self.emit("(function() ")
+        if use_colon:
+          self.emit("local _r = ")
+          self.visit(node.callee.receiver)
+          self.emit("; ")
+          temp_args = self._format_reordered_slot_temps(node, len(resolved_exprs))
+          self.emit(f"return _r:{member_name}({', '.join(temp_args)}) end)()")
+        else:
+          self.emit("local _f = ")
+          self.visit(node.callee.receiver)
+          self.emit(f".{member_name}; ")
+          temp_args = self._format_reordered_slot_temps(node, len(resolved_exprs))
+          self.emit(f"return _f({', '.join(temp_args)}) end)()")
+        if node.arena_expr:
+          self.emit(")")
         return
-      if getattr(node.callee, "is_instance_method", False):
-        self.visit(node.callee.receiver)
-        self.emit(f":{member_name}(")
-      elif getattr(node.callee, "is_static_method", False) or (receiver_name and (receiver_name in self.known_structs or receiver_name in self.imported_modules)):
-        self.visit(node.callee.receiver)
-        self.emit(f".{member_name}(")
-      elif isinstance(node.callee.receiver, MemberAccessNode):
-        self.visit(node.callee.receiver)
-        self.emit(f".{member_name}(")
-      else:
-        self.visit(node.callee.receiver)
-        self.emit(f":{member_name}(")
+      sep = ":" if use_colon else "."
+      self.visit(node.callee.receiver)
+      self.emit(f"{sep}{member_name}(")
+    elif needs_temps:
+      self.emit("(function() local _f = ")
+      self.visit(node.callee)
+      self.emit("; ")
+      temp_args = self._format_reordered_slot_temps(node, len(resolved_exprs))
+      self.emit(f"return _f({', '.join(temp_args)}) end)()")
+      if node.arena_expr:
+        self.emit(")")
+      return
     else:
       self.visit(node.callee)
       self.emit("(")
 
-    for idx, arg in enumerate(node.arguments):
-      if idx > 0:
-        self.emit(", ")
-      self.visit(arg.expr)
+    self._emit_lua_call_args_list(resolved_exprs)
     self.emit(")")
     if node.arena_expr:
       self.emit(")")

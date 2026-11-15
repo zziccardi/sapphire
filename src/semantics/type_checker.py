@@ -5,7 +5,7 @@ checking and type inference, and validates all semantic constraints of the
 Sapphire language.
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import *
 from src.semantics.symbol_table import (
@@ -86,6 +86,13 @@ class TypeChecker(
     self._init_assigned_arena_fields: Set[str] = set()
     self._init_used_arena_fields: Set[str] = set()
     self._temporary_frozen_lvalues: List[Tuple[str, List[str], str]] = []
+    self._checked_import_results: Dict[
+        str, Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]
+    ] = {}
+    self._active_import_stack: Set[str] = set()
+    self._reported_import_errors: Set[str] = set()
+    self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
+    self._current_node: Optional[ASTNode] = None
 
   def get_frozen_lvalue_reason(
       self, root: str, path: List[str]
@@ -135,19 +142,25 @@ class TypeChecker(
       return self._get_target_symbol(target.receiver)
     return None
 
-  def _ast_references_self(self, ast_node: Any) -> bool:
-    """Returns True if *ast_node* contains an IdentifierNode('self')."""
+  def _ast_references_ident(self, ast_node: Any, name: str) -> bool:
+    """Returns True if *ast_node* contains an IdentifierNode with *name*."""
     if ast_node is None:
       return False
-    if isinstance(ast_node, IdentifierNode) and ast_node.name == "self":
+    if isinstance(ast_node, IdentifierNode) and ast_node.name == name:
       return True
     if isinstance(ast_node, list):
-      return any(self._ast_references_self(item) for item in ast_node)
+      return any(self._ast_references_ident(item, name) for item in ast_node)
     if isinstance(ast_node, ASTNode):
       for val in ast_node.__dict__.values():
-        if isinstance(val, (ASTNode, list)) and self._ast_references_self(val):
+        if isinstance(val, (ASTNode, list)) and self._ast_references_ident(
+            val, name
+        ):
           return True
     return False
+
+  def _ast_references_self(self, ast_node: Any) -> bool:
+    """Returns True if *ast_node* contains an IdentifierNode('self')."""
+    return self._ast_references_ident(ast_node, "self")
 
   def _check_value_ownership_transfer(
       self,
@@ -246,9 +259,10 @@ class TypeChecker(
 
   def error(self, message: str, node: Optional[ASTNode] = None) -> None:
     """Logs a semantic error."""
-    line = getattr(node, "start_line", None) if node else None
-    column = getattr(node, "start_column", None) if node else None
-    length = getattr(node, "length", None) if node else None
+    diag_node = node if node is not None else getattr(self, "_current_node", None)
+    line = getattr(diag_node, "start_line", None) if diag_node else None
+    column = getattr(diag_node, "start_column", None) if diag_node else None
+    length = getattr(diag_node, "length", None) if diag_node else None
 
     if line or self.source_file_path or self.source_content:
       diag = format_diagnostic(
@@ -273,14 +287,15 @@ class TypeChecker(
     # Pass 1: Declare global symbols (Structs, Traits, Functions)
     self._declare_globals(program)
 
-    # Pass 2: Copy inheritance layouts and resolve struct fields
-    self._resolve_struct_layouts(program)
-
-    # Pass 3: Register impl block method signatures
+    # Pass 2: Register impl block method signatures
     self._register_impl_signatures(program)
+
+    # Pass 3: Resolve struct layouts and module-level let constants in source order
+    self._resolve_struct_layouts(program)
 
     # Pass 3.5: Pre-analyze module-level var globals and call graph accesses
     self._analyze_global_accesses(program)
+    self._analyze_method_self_fields(program)
 
     # Pass 4: Type-check top-level statements, functions, and structs
     self.visit_ProgramNode(program)
@@ -326,7 +341,12 @@ class TypeChecker(
     """Visit a node by dynamically calling its corresponding visit method."""
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
-    res = visitor(node)
+    prev_node = self._current_node
+    self._current_node = node
+    try:
+      res = visitor(node)
+    finally:
+      self._current_node = prev_node
     if res is not None and isinstance(res, Type):
       self.context.record_type(node, res)
     if isinstance(node, ExprNode) and isinstance(res, Type):

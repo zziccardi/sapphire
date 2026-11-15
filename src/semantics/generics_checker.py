@@ -129,7 +129,16 @@ class GenericsChecker:
               p_types = [checker._resolve_type_node(p.param_type) for p in func_decl.parameters]
               ret_t = checker._resolve_return_types(func_decl)
               num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
-              sig = FunctionType(p_types, ret_t, [p.is_mutable for p in func_decl.parameters], [p.name for p in func_decl.parameters], num_defaults=num_defaults)
+              param_defaults = [getattr(p, "default_expr", None) for p in func_decl.parameters]
+              sig = FunctionType(
+                  p_types,
+                  ret_t,
+                  [p.is_mutable for p in func_decl.parameters],
+                  [p.name for p in func_decl.parameters],
+                  num_defaults=num_defaults,
+                  param_defaults=param_defaults,
+                  ast_decl=func_decl,
+              )
               mono_struct_type.methods[func_decl.name] = StructMethod(func_decl.name, sig, member.modifier)
             checker.program.declarations.append(cloned_impl)
 
@@ -168,12 +177,15 @@ class GenericsChecker:
       p_types = [checker._resolve_type_node(p.param_type) for p in cloned_func.parameters]
       ret_t = checker._resolve_return_types(cloned_func)
       num_defaults = sum(1 for p in cloned_func.parameters if getattr(p, "default_expr", None) is not None)
+      param_defaults = [getattr(p, "default_expr", None) for p in cloned_func.parameters]
       mono_func_type = FunctionType(
           p_types,
           ret_t,
           [p.is_mutable for p in cloned_func.parameters],
           [p.name for p in cloned_func.parameters],
           num_defaults=num_defaults,
+          param_defaults=param_defaults,
+          ast_decl=cloned_func,
       )
       mono_func_sym = FunctionSymbol(mangled_name, mono_func_type, ast_decl=cloned_func)
       root_scope = checker.symbol_table.current_scope

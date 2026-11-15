@@ -52,6 +52,16 @@ trait Graphics {
   static func setBackgroundColor(r: float, g: float, b: float, a: float = 1.0);
   static func present();
 
+  @export("draw")
+  static func drawImage(image: Image, quad: Quad? = none,
+                        x: float = 0.0, y: float = 0.0, r: float = 0.0,
+                        sx: float = 1.0, sy: float = 1.0);
+
+  @export("draw")
+  static func drawCanvas(canvas: Canvas, quad: Quad? = none,
+                         x: float = 0.0, y: float = 0.0, r: float = 0.0,
+                         sx: float = 1.0, sy: float = 1.0);
+
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 
@@ -66,6 +76,8 @@ trait Graphics {
   static func circle(mode: enums.DrawMode, x: float, y: float, radius: float);
   static func line(x1: float, y1: float, x2: float, y2: float);
   static func print(text: String, x: float, y: float);
+  static func printf(text: String, x: float, y: float, limit: float,
+                     align: String = "left");
 
   static func newImage(path: String): Image;
   static func newCanvas(width: float = 0.0, height: float = 0.0): Canvas;
@@ -74,5 +86,12 @@ trait Graphics {
                       sw: float, sh: float): Quad;
 
   static func setCanvas(canvas: Canvas? = none);
+  static func setDefaultFilter(min_filter: enums.FilterMode,
+                               mag_filter: enums.FilterMode);
+  static func getFont(): Font;
   static func setFont(font: Font);
+
+  static func getDimensions(): float, float;
+  static func getWidth(): float;
+  static func getHeight(): float;
 }

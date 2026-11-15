@@ -192,6 +192,18 @@ class SymbolTable:
         "print",
         FunctionSymbol("print", FunctionType([StringType()],
                                              NoneType())))
+    self.current_scope.define(
+        "assert",
+        FunctionSymbol(
+            "assert",
+            FunctionType(
+                param_types=[PrimitiveType("bool"), StringType()],
+                return_type=NoneType(),
+                param_names=["cond", "msg"],
+                num_defaults=1,
+            ),
+        ),
+    )
     range_t = RangeType()
     self.current_scope.define_type("Range", range_t)
     self.current_scope.define(

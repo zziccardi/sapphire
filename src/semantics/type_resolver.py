@@ -52,7 +52,12 @@ class TypeResolverMixin:
     if f.field_type:
       ftype = self._resolve_type_node(f.field_type)
       if f.default_expr:
-        expr_type = self.visit(f.default_expr)
+        old_expected = self.expected_type
+        self.expected_type = ftype
+        try:
+          expr_type = self.visit(f.default_expr)
+        finally:
+          self.expected_type = old_expected
         if not expr_type.is_compatible(ftype):
           self.error(
               f"Default expression of type '{expr_type}' is not compatible with field '{f.name}' of type '{ftype}'.",
@@ -115,9 +120,14 @@ class TypeResolverMixin:
           [self._substitute_type_params(p, type_map) for p in t.param_types],
           self._substitute_type_params(t.return_type, type_map),
           param_mutabilities=t.param_mutabilities,
-          param_names=t.param_names,
+          param_names=(
+              t.param_names if getattr(t, "has_named_params", True) else None
+          ),
           has_self=t.has_self,
+          extern_name=t.extern_name,
           num_defaults=t.num_defaults,
+          param_defaults=t.param_defaults,
+          ast_decl=t.ast_decl,
       )
     return t
 
@@ -161,12 +171,15 @@ class TypeResolverMixin:
             param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_return_types(func_decl)
           num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
+          param_defaults = [getattr(p, "default_expr", None) for p in func_decl.parameters]
           signature = FunctionType(
               param_types,
               ret_type,
               param_mutabilities,
               param_names=[p.name for p in func_decl.parameters],
               num_defaults=num_defaults,
+              param_defaults=param_defaults,
+              ast_decl=func_decl,
           )
 
           method = StructMethod(func_decl.name, signature, member.modifier)
@@ -350,6 +363,87 @@ class TypeResolverMixin:
               self.func_transitive_dynamic.add(f_id)
               changed = True
 
+  def _analyze_method_self_fields(self, program: ProgramNode) -> None:
+    """Computes bounded self.<field> access sets for struct methods."""
+    self._method_self_field_accesses: Dict[
+        Tuple[str, str], Optional[Set[str]]
+    ] = {}
+    direct_calls: Dict[Tuple[str, str], Set[str]] = {}
+
+    def _scan_method(struct_name: str, fdecl: FuncDeclNode) -> None:
+      key = (struct_name, fdecl.name)
+      if fdecl.body is None:
+        self._method_self_field_accesses[key] = None
+        return
+
+      fields: Set[str] = set()
+      calls: Set[str] = set()
+      unknown = False
+
+      def _walk(node: Any, parent: Any = None) -> None:
+        nonlocal unknown
+        if unknown or node is None:
+          return
+        if isinstance(node, MemberAccessNode):
+          if (
+              isinstance(node.receiver, IdentifierNode)
+              and node.receiver.name == "self"
+          ):
+            if isinstance(parent, CallNode) and parent.callee is node:
+              calls.add(node.member)
+            else:
+              fields.add(node.member)
+            return
+        elif isinstance(node, IdentifierNode) and node.name == "self":
+          unknown = True
+          return
+
+        if isinstance(node, list):
+          for item in node:
+            _walk(item, parent)
+        elif isinstance(node, ASTNode):
+          for attr_val in vars(node).values():
+            if isinstance(attr_val, (ASTNode, list)):
+              _walk(attr_val, node)
+
+      _walk(fdecl.body)
+      if unknown:
+        self._method_self_field_accesses[key] = None
+      else:
+        self._method_self_field_accesses[key] = fields
+        direct_calls[key] = calls
+
+    for decl in program.declarations:
+      if isinstance(decl, ImplBlockNode):
+        for member in decl.members:
+          fdecl = getattr(member, "func_decl", member)
+          if isinstance(fdecl, FuncDeclNode):
+            _scan_method(decl.struct_name, fdecl)
+
+    changed = True
+    while changed:
+      changed = False
+      for key, called_names in direct_calls.items():
+        cur = self._method_self_field_accesses.get(key)
+        if cur is None:
+          continue
+        struct_name, _ = key
+        for callee_name in called_names:
+          callee_key = (struct_name, callee_name)
+          if callee_key not in self._method_self_field_accesses:
+            self._method_self_field_accesses[key] = None
+            changed = True
+            break
+          callee_fields = self._method_self_field_accesses[callee_key]
+          if callee_fields is None:
+            self._method_self_field_accesses[key] = None
+            changed = True
+            break
+          before = len(cur)
+          cur.update(callee_fields)
+          if len(cur) > before:
+            changed = True
+
   def _scan_func_global_accesses(
       self,
       func_id: str,
@@ -403,6 +497,9 @@ class TypeResolverMixin:
               and struct_name
           ):
             direct_calls.add(f"{struct_name}.{node.callee.member}")
+          elif isinstance(node.callee.receiver, IdentifierNode):
+            direct_calls.add(f"{node.callee.receiver.name}.{node.callee.member}")
+            direct_calls.add(node.callee.member)
           else:
             direct_calls.add(node.callee.member)
         else:

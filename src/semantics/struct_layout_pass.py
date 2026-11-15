@@ -4,8 +4,8 @@ Handles Pass 2: resolves static struct inheritance, copies parent fields,
 detects circular inheritance, and validates shadowing or duplicate field layouts.
 """
 
-from typing import Any, Iterator, List, Optional, Set
-from src.parser.ast import ProgramNode, StructDeclNode
+from typing import Any, Iterator, List, Optional, Set, Tuple
+from src.parser.ast import ProgramNode, StructDeclNode, VarDeclNode
 from src.semantics.symbol_table import ArenaType, ArrayType, MapType, OptionalType, StructField, StructType, Type
 
 
@@ -57,8 +57,14 @@ class StructLayoutPass:
 
   @staticmethod
   def resolve_struct_layouts(checker: Any, program: ProgramNode) -> None:
-    """Pre-pass to resolve static inheritance field copying and layout sizing."""
-    structs_to_process = [d for d in program.declarations if isinstance(d, StructDeclNode) and not d.type_params]
+    """Resolves struct layouts and module-level let constants in source order."""
+    structs_to_process = [
+        d
+        for d in program.declarations
+        if isinstance(d, StructDeclNode)
+        and not d.type_params
+        and not getattr(d, "is_monomorphized", False)
+    ]
     processed = set()
     visiting = set()
 
@@ -76,6 +82,7 @@ class StructLayoutPass:
         return
 
       if node.parent_names:
+        struct_type.parent_types = []
         for parent_name in node.parent_names:
           parent_type = checker.symbol_table.lookup_type(parent_name)
           if not parent_type:
@@ -83,6 +90,8 @@ class StructLayoutPass:
           elif not isinstance(parent_type, StructType):
             checker.error(f"Parent '{parent_name}' of '{node.name}' is not a struct type.")
           else:
+            if parent_type not in struct_type.parent_types:
+              struct_type.parent_types.append(parent_type)
             parent_node = next((s for s in structs_to_process if s.name == parent_name), None)
             if parent_node:
               process_struct(parent_node)
@@ -104,8 +113,39 @@ class StructLayoutPass:
       visiting.remove(node.name)
       processed.add(node.name)
 
-    for s in structs_to_process:
-      process_struct(s)
+    prechecked_restores: List[Tuple[str, Any]] = []
+    for decl in program.declarations:
+      if (
+          isinstance(decl, StructDeclNode)
+          and not decl.type_params
+          and not getattr(decl, "is_monomorphized", False)
+      ):
+        process_struct(decl)
+      elif (
+          isinstance(decl, VarDeclNode)
+          and not decl.is_mutable
+          and not any(a.name == "extern" for a in getattr(decl, "annotations", []))
+      ):
+        prior_map = {
+            name: checker.symbol_table.lookup_current_scope(name)
+            for name in decl.names
+        }
+        checker.visit(decl)
+        decl._prechecked_module_const = True
+        decl._prechecked_symbols = {
+            name: checker.symbol_table.lookup_current_scope(name)
+            for name in decl.names
+        }
+        for name, prior_sym in prior_map.items():
+          prechecked_restores.append((name, prior_sym))
+
+    # Restore top-level scope bindings so Pass 4 enforces lexical source order
+    # while re-exposing each pre-checked let constant at its declaration point.
+    for name, prior_sym in reversed(prechecked_restores):
+      if prior_sym is None:
+        checker.symbol_table.current_scope.symbols.pop(name, None)
+      else:
+        checker.symbol_table.current_scope.symbols[name] = prior_sym
 
     resolved_types = [
         checker.symbol_table.lookup_type(s.name) for s in structs_to_process

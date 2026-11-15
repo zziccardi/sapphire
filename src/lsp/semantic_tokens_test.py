@@ -4,9 +4,10 @@ This module validates that positioning coordinates are correctly extracted from 
 nodes and delta-encoded into standard LSP 5-integer arrays.
 """
 
-import unittest
-import sys
 import os
+import sys
+import tempfile
+import unittest
 
 # Insert workspace src directory into python path to allow direct imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -553,6 +554,115 @@ class TestSemanticTokens(unittest.TestCase):
         )
         checker.check(ast)
         self.assertEqual(checker.lsp_errors, [])
+
+  def test_imported_module_error_anchored_on_import_line(self):
+    """Ensures imported-module diagnostics anchor to the import statement in LSP."""
+    import os
+    import tempfile
+    from src.common.errors import SemanticError
+    from src.semantics.declaration_pass import DeclarationPass
+
+    DeclarationPass.clear_cache()
+    with tempfile.TemporaryDirectory() as tmpdir:
+      dep_sp = os.path.join(tmpdir, "broken_dep.sp")
+      with open(dep_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "\n\n\n\n"
+            "func fail_on_line_5() {\n"
+            "  let bad: int = \"nope\";\n"
+            "}\n"
+        )
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      code = "import broken_dep;\nfunc ok() {}\n"
+      lexer = SapphireLexer(InputStream(code))
+      stream = CommonTokenStream(lexer)
+      parser = SapphireParser(stream)
+      ast = ASTBuilder().visit(parser.program())
+
+      checker = SemanticTokensTypeChecker(
+          doc_text=code, source_file_path=main_sp
+      )
+      with self.assertRaises(SemanticError):
+        checker.check(ast)
+
+      self.assertEqual(len(checker.lsp_errors), 1)
+      self.assertEqual(checker.lsp_errors[0]["range"]["start"]["line"], 0)
+      self.assertIn(
+          "Imported module 'broken_dep' contains syntax or semantic errors.",
+          checker.lsp_errors[0]["message"],
+      )
+      self.assertNotIn(
+          os.path.abspath(dep_sp), DeclarationPass._module_cache
+      )
+
+  def test_module_let_constant_tokens_in_defaults_not_duplicated(self):
+    """Verifies module let constant tokens highlight once and resolve inside struct and param defaults."""
+    code = (
+        "let STANDING_FRAME: int = 1;\n"
+        "struct Character {\n"
+        "  var frame: int = STANDING_FRAME;\n"
+        "}\n"
+        "func reset(frame: int = STANDING_FRAME) {}\n"
+    )
+    lexer = SapphireLexer(InputStream(code))
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    ast = ASTBuilder().visit(parser.program())
+
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+    self.assertEqual(checker.lsp_errors, [])
+
+    decl_tok = (1, 4, len("STANDING_FRAME"), "variable", 5)
+    self.assertEqual(checker.raw_tokens.count(decl_tok), 1)
+
+    struct_default_tok = (3, 19, len("STANDING_FRAME"), "variable", 4)
+    param_default_tok = (5, 24, len("STANDING_FRAME"), "variable", 4)
+    self.assertEqual(checker.raw_tokens.count(struct_default_tok), 1)
+    self.assertEqual(checker.raw_tokens.count(param_default_tok), 1)
+
+  def test_qualified_ancestor_dispatch_tokens(self):
+    """Verifies semantic tokens for Base.method(self) and mod.Base.method(self)."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      base_sp = os.path.join(tmp_dir, "base_mod.sp")
+      main_sp = os.path.join(tmp_dir, "main.sp")
+      with open(base_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "struct Base {\n"
+            "  var x: int;\n"
+            "}\n"
+            "impl Base {\n"
+            "  func draw(): int {\n"
+            "    return self.x;\n"
+            "  }\n"
+            "}\n"
+            "export { Base, }\n"
+        )
+      code = (
+          "import base_mod;\n"
+          "struct Child: base_mod.Base {\n"
+          "  var y: int;\n"
+          "}\n"
+          "impl Child {\n"
+          "  func draw(): int {\n"
+          "    return base_mod.Base.draw(self) + self.y;\n"
+          "  }\n"
+          "}\n"
+      )
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(code)
+
+      parser = SapphireParser(CommonTokenStream(SapphireLexer(InputStream(code))))
+      ast = ASTBuilder().visit(parser.program())
+      checker = SemanticTokensTypeChecker(doc_text=code, source_file_path=main_sp)
+      checker.check(ast)
+      self.assertEqual(checker.lsp_errors, [])
+
+      # Line 7: '    return base_mod.Base.draw(self) + self.y;'
+      line_7_tokens = [t for t in checker.raw_tokens if t[0] == 7]
+      self.assertIn((7, 20, 4, "struct", 0), line_7_tokens)
+      self.assertIn((7, 25, 4, "method", 0), line_7_tokens)
 
 
 

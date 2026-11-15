@@ -479,6 +479,7 @@ class SemanticTokensTypeChecker(TypeChecker):
         OptionalType,
         RefType,
         SharedRefType,
+        StructType,
     )
 
     res = super().visit_MemberAccessNode(node)
@@ -491,7 +492,11 @@ class SemanticTokensTypeChecker(TypeChecker):
 
     token_type = "property"
     mods = 0
-    if unwrapped_recv:
+    if getattr(node, "is_qualified_ancestor_call", False):
+      token_type = "method"
+    elif isinstance(unwrapped_recv, ModuleType) and isinstance(res, StructType):
+      token_type = "struct"
+    elif unwrapped_recv:
       if hasattr(unwrapped_recv, "methods") and node.member in unwrapped_recv.methods:
         token_type = "method"
       elif hasattr(unwrapped_recv, "fields") and node.member in unwrapped_recv.fields:

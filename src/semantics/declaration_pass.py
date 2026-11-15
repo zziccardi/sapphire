@@ -6,10 +6,12 @@ for structs, enums, traits, externs, and functions).
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from antlr4 import InputStream, CommonTokenStream
 from pygls.uris import from_fs_path
 
+from src.cli.diagnostics import format_diagnostic
+from src.common.errors import SemanticError
 from src.parser.ast import (
     ASTNode,
     EnumDeclNode,
@@ -24,6 +26,7 @@ from src.parser.ast import (
     VarDeclNode,
 )
 from src.parser.ast_builder import ASTBuilder
+from src.parser.error_listener import CustomErrorListener
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.code_gen.intrinsics import is_builtin_module
@@ -49,8 +52,8 @@ from src.semantics.symbol_table import (
 class DeclarationPass:
   """Executes preliminary module imports and top-level global symbol registration."""
 
-  # Cache of parsed and typechecked modules on disk:
-  # abs_file_path -> (mtime, file_size, exports_dict)
+  # Cache of clean, cycle-free parsed and typechecked modules on disk:
+  # abs_file_path -> (mtime, file_size, exports_dict, dep_stats)
   _module_cache: Dict[str, Any] = {}
 
   @classmethod
@@ -85,127 +88,341 @@ class DeclarationPass:
         )
 
   @staticmethod
-  def declare_imports(checker: Any, program: ProgramNode) -> None:
-    """Pass 0: Register imported module symbols."""
-    for imp in getattr(program, "imports", []):
-      module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
-      existing = checker.symbol_table.lookup_current_scope(module_name)
-      is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
-      if not is_predefined:
-        mod_sym = ModuleSymbol(module_name, imp.path)
-        checker.symbol_table.define(module_name, mod_sym)
-        checker.symbol_table.define_type(module_name, ModuleType(imp.path))
-      else:
-        mod_sym = existing
+  def _is_cache_entry_valid(
+      cached_entry: Any, mtime: Optional[int], fsize: Optional[int]
+  ) -> bool:
+    """Returns True if a cached module and all transitive deps match disk."""
+    if (
+        cached_entry is None
+        or mtime is None
+        or fsize is None
+        or cached_entry[0] != mtime
+        or cached_entry[1] != fsize
+    ):
+      return False
+    dep_stats = cached_entry[3] if len(cached_entry) > 3 else {}
+    for dep_path, (dep_mtime, dep_fsize) in dep_stats.items():
+      try:
+        dep_stat = os.stat(dep_path)
+      except OSError:
+        return False
+      if dep_stat.st_mtime_ns != dep_mtime or dep_stat.st_size != dep_fsize:
+        return False
+    return True
 
+  @staticmethod
+  def _propagate_import_errors(
+      checker: Any, imp: Any, mod_errors: List[str], reported_errors: Set[str]
+  ) -> None:
+    """Propagates imported module diagnostics to the importing checker."""
+    if not mod_errors:
+      return
+    if hasattr(checker, "lsp_errors"):
+      reported_sites = getattr(checker, "_reported_lsp_import_sites", None)
+      if reported_sites is None:
+        reported_sites = set()
+        checker._reported_lsp_import_sites = reported_sites
+      site_key = (
+          imp.path,
+          getattr(imp, "start_line", None),
+          getattr(imp, "start_column", None),
+      )
+      if site_key not in reported_sites:
+        reported_sites.add(site_key)
+        checker.error(
+            f"Imported module '{imp.path}' contains syntax or semantic errors.",
+            node=imp,
+        )
+      return
+
+    for err in mod_errors:
+      if err not in reported_errors:
+        reported_errors.add(err)
+        checker.errors.append(err)
+
+  @staticmethod
+  def _mark_file_uri(node: Any, mod_file_uri: str) -> None:
+    """Tags AST nodes recursively with their defining file URI."""
+    if not isinstance(node, ASTNode):
+      return
+    node.file_uri = mod_file_uri
+    for val in node.__dict__.values():
+      if isinstance(val, list):
+        for item in val:
+          if isinstance(item, ASTNode):
+            DeclarationPass._mark_file_uri(item, mod_file_uri)
+      elif isinstance(val, ASTNode):
+        DeclarationPass._mark_file_uri(val, mod_file_uri)
+
+  @staticmethod
+  def _extract_module_exports(
+      sub_checker: Any, sub_ast: Any, mod_sym: ModuleSymbol
+  ) -> Dict[str, Any]:
+    """Collects exported symbols and types from a checked imported module."""
+    computed_exports: Dict[str, Any] = {}
+    defining_mod = mod_sym.file_path or mod_sym.module_path
+    if getattr(sub_ast, "export_block", None):
+      for spec in sub_ast.export_block.specifiers:
+        export_name = spec.alias or spec.symbol
+        if spec.module_prefix:
+          prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
+          if isinstance(prefix_sym, ModuleSymbol):
+            exp = prefix_sym.lookup_export(spec.symbol)
+            if exp:
+              computed_exports[export_name] = exp
+        else:
+          exp = (
+              sub_checker.symbol_table.lookup_type(spec.symbol)
+              or sub_checker.symbol_table.lookup(spec.symbol)
+          )
+          if exp:
+            if isinstance(exp, StructType):
+              exp.is_imported = True
+              exp.defining_module = defining_mod
+            elif hasattr(exp, "struct_type"):
+              exp.struct_type.is_imported = True
+              exp.struct_type.defining_module = defining_mod
+            computed_exports[export_name] = exp
+    else:
+      sub_root = sub_checker.symbol_table.current_scope
+      while sub_root.parent:
+        sub_root = sub_root.parent
+      for name, sym in sub_root.symbols.items():
+        if hasattr(sym, "struct_type"):
+          sym.struct_type.is_imported = True
+          sym.struct_type.defining_module = defining_mod
+        computed_exports[name] = sym
+      for name, t in sub_root.types.items():
+        if name not in ("int", "float", "bool", "String", "none", "Arena"):
+          if isinstance(t, StructType):
+            t.is_imported = True
+            t.defining_module = defining_mod
+          computed_exports[name] = t
+    return computed_exports
+
+  @staticmethod
+  def _check_imported_file(
+      checker: Any,
+      imp: Any,
+      target_file: str,
+      mod_sym: ModuleSymbol,
+      is_builtin: bool,
+      checked_results: Dict[str, Any],
+      active_stack: Set[str],
+      reported_errors: Set[str],
+      resolved_dep_stats: Dict[str, Tuple[int, int]],
+  ) -> None:
+    """Parses, typechecks, caches, and extracts exports for *target_file*."""
+    mod_file_path = os.path.abspath(target_file)
+    mod_sym.file_path = mod_file_path
+    try:
+      stat_res = os.stat(mod_file_path)
+      mtime: Optional[int] = stat_res.st_mtime_ns
+      fsize: Optional[int] = stat_res.st_size
+    except OSError:
+      mtime = None
+      fsize = None
+
+    cached_entry = DeclarationPass._module_cache.get(mod_file_path)
+    if DeclarationPass._is_cache_entry_valid(cached_entry, mtime, fsize):
+      mod_sym.exports.update(cached_entry[2])
+      resolved_dep_stats[mod_file_path] = (mtime, fsize)
+      if len(cached_entry) > 3:
+        resolved_dep_stats.update(cached_entry[3])
       if imp.path == "std.testing" or imp.path.startswith("std.testing"):
         mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+      return
+    if cached_entry is not None:
+      DeclarationPass._module_cache.pop(mod_file_path, None)
 
-      # Resolve imported module file path on disk
-      target_file = resolve_module_path(imp.path, source_file_path=getattr(checker, "source_file_path", None))
+    if mod_file_path in checked_results:
+      cached_exports, mod_errors, sub_deps, sub_cycle = checked_results[
+          mod_file_path
+      ]
+      mod_sym.exports.update(cached_exports)
+      if is_builtin:
+        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+      if mtime is not None and fsize is not None:
+        resolved_dep_stats[mod_file_path] = (mtime, fsize)
+        resolved_dep_stats.update(sub_deps)
+      if sub_cycle:
+        checker._hit_import_cycle = True
+      DeclarationPass._propagate_import_errors(
+          checker, imp, mod_errors, reported_errors
+      )
+      return
 
-      is_builtin = is_builtin_module(imp.path)
-      if not target_file and not is_builtin and not is_predefined:
-        checker.error(f"Cannot resolve imported module '{imp.path}'. Module file not found.", node=imp)
+    if mod_file_path in active_stack:
+      checker._hit_import_cycle = True
+      if is_builtin:
+        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+      return
 
-      if target_file:
+    try:
+      with open(target_file, "r", encoding="utf-8") as f:
+        sub_code = f.read()
+    except OSError as os_err:
+      checker.error(
+          f"Failed to read imported module '{imp.path}': {os_err}",
+          node=imp,
+      )
+      return
+
+    err_listener = CustomErrorListener(
+        file_path=target_file, source_content=sub_code, quiet=True
+    )
+    sub_lexer = SapphireLexer(InputStream(sub_code))
+    sub_lexer.removeErrorListeners()
+    sub_lexer.addErrorListener(err_listener)
+    sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
+    sub_parser.removeErrorListeners()
+    sub_parser.addErrorListener(err_listener)
+    sub_tree = sub_parser.program()
+
+    mod_errors: List[str] = list(err_listener.error_messages)
+    computed_exports: Dict[str, Any] = {}
+    sub_deps: Dict[str, Tuple[int, int]] = {}
+    sub_hit_cycle = False
+
+    if err_listener.errors == 0:
+      sub_ast = None
+      try:
+        sub_ast = ASTBuilder().visit(sub_tree)
+      except SyntaxError as syn_err:
+        mod_errors.append(
+            format_diagnostic(
+                error_type="Syntax Error",
+                message=str(syn_err),
+                file_path=target_file,
+                source_content=sub_code,
+            )
+        )
+
+      if sub_ast is not None:
+        DeclarationPass._mark_file_uri(sub_ast, from_fs_path(mod_file_path))
+
+        from src.semantics.type_checker import TypeChecker
+        sub_checker = TypeChecker(
+            source_file_path=target_file, source_content=sub_code
+        )
+        sub_checker._checked_import_results = checked_results
+        sub_checker._active_import_stack = active_stack
+
+        active_stack.add(mod_file_path)
         try:
-          mod_file_path = os.path.abspath(target_file)
-          mod_sym.file_path = mod_file_path
-          try:
-            stat_res = os.stat(mod_file_path)
-            mtime = stat_res.st_mtime_ns
-            fsize = stat_res.st_size
-          except OSError:
-            mtime = None
-            fsize = None
+          sub_checker.check(sub_ast)
+        except SemanticError as sem_err:
+          if not sub_checker.errors and str(sem_err):
+            mod_errors.append(str(sem_err))
+        finally:
+          active_stack.discard(mod_file_path)
 
-          cached_entry = DeclarationPass._module_cache.get(mod_file_path)
-          if cached_entry is not None and mtime is not None and cached_entry[0] == mtime and cached_entry[1] == fsize:
-            mod_sym.exports.update(cached_entry[2])
-            if imp.path == "std.testing" or imp.path.startswith("std.testing"):
-              mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
-            continue
+        for err in sub_checker.errors:
+          if err not in mod_errors:
+            mod_errors.append(err)
+        sub_deps = dict(sub_checker._resolved_dep_stats)
+        sub_hit_cycle = bool(getattr(sub_checker, "_hit_import_cycle", False))
+        computed_exports = DeclarationPass._extract_module_exports(
+            sub_checker, sub_ast, mod_sym
+        )
 
-          with open(target_file, "r", encoding="utf-8") as f:
-            sub_code = f.read()
+    checked_results[mod_file_path] = (
+        dict(computed_exports),
+        list(mod_errors),
+        dict(sub_deps),
+        sub_hit_cycle,
+    )
+    if sub_hit_cycle:
+      checker._hit_import_cycle = True
+    if mtime is not None and fsize is not None:
+      resolved_dep_stats[mod_file_path] = (mtime, fsize)
+      resolved_dep_stats.update(sub_deps)
+      if not mod_errors and not sub_hit_cycle:
+        DeclarationPass._module_cache[mod_file_path] = (
+            mtime,
+            fsize,
+            dict(computed_exports),
+            dict(sub_deps),
+        )
 
-          try:
-            sub_lexer = SapphireLexer(InputStream(sub_code))
-            sub_lexer.removeErrorListeners()
-            sub_parser = SapphireParser(CommonTokenStream(sub_lexer))
-            sub_parser.removeErrorListeners()
-            sub_ast = ASTBuilder().visit(sub_parser.program())
-            mod_file_uri = from_fs_path(mod_file_path)
+    mod_sym.exports.update(computed_exports)
+    if is_builtin:
+      mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+    DeclarationPass._propagate_import_errors(
+        checker, imp, mod_errors, reported_errors
+    )
 
-            def _mark_file_uri(node):
-              if isinstance(node, ASTNode):
-                node.file_uri = mod_file_uri
-                for v in node.__dict__.values():
-                  if isinstance(v, list):
-                    for item in v:
-                      if isinstance(item, ASTNode):
-                        _mark_file_uri(item)
-                  elif isinstance(v, ASTNode):
-                    _mark_file_uri(v)
+  @staticmethod
+  def declare_imports(checker: Any, program: ProgramNode) -> None:
+    """Pass 0: Register imported module symbols."""
+    checked_results = getattr(checker, "_checked_import_results", None)
+    if checked_results is None:
+      checked_results = {}
+      checker._checked_import_results = checked_results
+    active_stack = getattr(checker, "_active_import_stack", None)
+    if active_stack is None:
+      active_stack = set()
+      checker._active_import_stack = active_stack
+    reported_errors = getattr(checker, "_reported_import_errors", None)
+    if reported_errors is None:
+      reported_errors = set()
+      checker._reported_import_errors = reported_errors
+    resolved_dep_stats = getattr(checker, "_resolved_dep_stats", None)
+    if resolved_dep_stats is None:
+      resolved_dep_stats = {}
+      checker._resolved_dep_stats = resolved_dep_stats
+    if not hasattr(checker, "_hit_import_cycle"):
+      checker._hit_import_cycle = False
 
-            if sub_ast:
-              _mark_file_uri(sub_ast)
+    src_path = getattr(checker, "source_file_path", None)
+    abs_src_path = os.path.abspath(src_path) if src_path else None
+    added_self = False
+    if abs_src_path and abs_src_path not in active_stack:
+      active_stack.add(abs_src_path)
+      added_self = True
 
-            from src.semantics.type_checker import TypeChecker
-            sub_checker = TypeChecker(source_file_path=target_file, source_content=sub_code)
-            try:
-              sub_checker.check(sub_ast)
-            except Exception:
-              pass
+    try:
+      for imp in getattr(program, "imports", []):
+        module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
+        existing = checker.symbol_table.lookup_current_scope(module_name)
+        is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
+        if not is_predefined:
+          mod_sym = ModuleSymbol(module_name, imp.path)
+          checker.symbol_table.define(module_name, mod_sym)
+          checker.symbol_table.define_type(module_name, ModuleType(imp.path))
+        else:
+          mod_sym = existing
 
-            computed_exports: Dict[str, Any] = {}
-            # Populate mod_sym exports from sub_checker
-            if getattr(sub_ast, "export_block", None):
-              for spec in sub_ast.export_block.specifiers:
-                export_name = spec.alias or spec.symbol
-                if spec.module_prefix:
-                  prefix_sym = sub_checker.symbol_table.lookup(spec.module_prefix)
-                  if isinstance(prefix_sym, ModuleSymbol):
-                    exp = prefix_sym.lookup_export(spec.symbol)
-                    if exp:
-                      computed_exports[export_name] = exp
-                else:
-                  exp = sub_checker.symbol_table.lookup_type(spec.symbol) or sub_checker.symbol_table.lookup(spec.symbol)
-                  if exp:
-                    if isinstance(exp, StructType):
-                      exp.is_imported = True
-                      exp.defining_module = mod_sym.file_path or mod_sym.module_path
-                    elif hasattr(exp, "struct_type"):
-                      exp.struct_type.is_imported = True
-                      exp.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
-                    computed_exports[export_name] = exp
-            else:
-              sub_root = sub_checker.symbol_table.current_scope
-              while sub_root.parent:
-                sub_root = sub_root.parent
-              for name, sym in sub_root.symbols.items():
-                if hasattr(sym, "struct_type"):
-                  sym.struct_type.is_imported = True
-                  sym.struct_type.defining_module = mod_sym.file_path or mod_sym.module_path
-                computed_exports[name] = sym
-              for name, t in sub_root.types.items():
-                if name not in ("int", "float", "bool", "String", "none", "Arena"):
-                  if isinstance(t, StructType):
-                    t.is_imported = True
-                    t.defining_module = mod_sym.file_path or mod_sym.module_path
-                  computed_exports[name] = t
+        if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+          mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
 
-            if mtime is not None:
-              DeclarationPass._module_cache[mod_file_path] = (mtime, fsize, dict(computed_exports))
+        # Resolve imported module file path on disk
+        target_file = resolve_module_path(
+            imp.path, source_file_path=getattr(checker, "source_file_path", None)
+        )
 
-            mod_sym.exports.update(computed_exports)
-            if is_builtin:
-              mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
-          except Exception:  # pragma: no cover
-            pass
-        except Exception:  # pragma: no cover
-          pass
+        is_builtin = is_builtin_module(imp.path)
+        if not target_file and not is_builtin and not is_predefined:
+          checker.error(
+              f"Cannot resolve imported module '{imp.path}'. Module file not found.",
+              node=imp,
+          )
+
+        if target_file:
+          DeclarationPass._check_imported_file(
+              checker,
+              imp,
+              target_file,
+              mod_sym,
+              is_builtin,
+              checked_results,
+              active_stack,
+              reported_errors,
+              resolved_dep_stats,
+          )
+    finally:
+      if added_self and abs_src_path:
+        active_stack.discard(abs_src_path)
 
   @staticmethod
   def declare_globals(checker: Any, program: ProgramNode) -> None:
