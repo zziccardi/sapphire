@@ -307,7 +307,7 @@ class CallVisitorMixin:
     else:
       # Standard function/method resolution
       if not isinstance(callee_type, FunctionType):
-        self.error("Target is not callable.")
+        self.error("Target is not callable.", node=node.callee)
         return PrimitiveType("none")
       if node.arena_expr:
         self.error("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.")
@@ -574,7 +574,8 @@ class CallVisitorMixin:
     if not effective_arg_type.is_compatible(param_type):
       self.error(
           f"Argument type mismatch at position {idx+1}. "
-          f"Expected '{param_type}', got '{arg_type}'."
+          f"Expected '{param_type}', got '{arg_type}'.",
+          node=arg,
       )
 
   def _check_range_arguments(
@@ -621,7 +622,8 @@ class CallVisitorMixin:
       if not arg_type.is_compatible(int_t):
         self.error(
             f"Argument type mismatch at position {idx+1}. "
-            f"Expected 'int', got '{arg_type}'."
+            f"Expected 'int', got '{arg_type}'.",
+            node=arg,
         )
 
     if len(arguments) > 3:

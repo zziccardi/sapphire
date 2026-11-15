@@ -595,7 +595,7 @@ class ExprVisitorMixin:
         self._check_map_literal_key(node)
       return container_type.value_type
     else:
-      self.error("Cannot index non-array type.")
+      self.error("Cannot index non-array type.", node=node)
       return PrimitiveType("none")
 
   def visit_StructInitializerNode(self, node: StructInitializerNode) -> Type:

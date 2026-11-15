@@ -92,6 +92,7 @@ class TypeChecker(
     self._active_import_stack: Set[str] = set()
     self._reported_import_errors: Set[str] = set()
     self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
+    self._current_node: Optional[ASTNode] = None
 
   def get_frozen_lvalue_reason(
       self, root: str, path: List[str]
@@ -252,9 +253,10 @@ class TypeChecker(
 
   def error(self, message: str, node: Optional[ASTNode] = None) -> None:
     """Logs a semantic error."""
-    line = getattr(node, "start_line", None) if node else None
-    column = getattr(node, "start_column", None) if node else None
-    length = getattr(node, "length", None) if node else None
+    diag_node = node if node is not None else getattr(self, "_current_node", None)
+    line = getattr(diag_node, "start_line", None) if diag_node else None
+    column = getattr(diag_node, "start_column", None) if diag_node else None
+    length = getattr(diag_node, "length", None) if diag_node else None
 
     if line or self.source_file_path or self.source_content:
       diag = format_diagnostic(
@@ -332,7 +334,12 @@ class TypeChecker(
     """Visit a node by dynamically calling its corresponding visit method."""
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
-    res = visitor(node)
+    prev_node = self._current_node
+    self._current_node = node
+    try:
+      res = visitor(node)
+    finally:
+      self._current_node = prev_node
     if res is not None and isinstance(res, Type):
       self.context.record_type(node, res)
     if isinstance(node, ExprNode) and isinstance(res, Type):

@@ -7741,6 +7741,27 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot access instance field 'x' on type 'Base'", str(ctx.exception))
 
+  def test_semantic_errors_include_source_locations(self):
+    """Verifies that call/index semantic errors include line and column."""
+    code_non_callable = "func main() {\n  let x = 1;\n  x();\n}\n"
+    with self.assertRaises(SemanticError) as ctx:
+      self._check_with_file(code_non_callable, "sample.sp") if hasattr(self, "_check_with_file") else None
+      input_stream = InputStream(code_non_callable)
+      tree = SapphireParser(CommonTokenStream(SapphireLexer(input_stream))).program()
+      ast = ASTBuilder().visit(tree)
+      checker = TypeChecker(source_file_path="sample.sp", source_content=code_non_callable)
+      checker.check(ast)
+    self.assertIn("sample.sp:3:2 - Target is not callable.", str(ctx.exception))
+
+    code_arg_mismatch = "func foo(a: int) {}\nfunc main() {\n  foo(\"bad\");\n}\n"
+    with self.assertRaises(SemanticError) as ctx:
+      input_stream = InputStream(code_arg_mismatch)
+      tree = SapphireParser(CommonTokenStream(SapphireLexer(input_stream))).program()
+      ast = ASTBuilder().visit(tree)
+      checker = TypeChecker(source_file_path="sample.sp", source_content=code_arg_mismatch)
+      checker.check(ast)
+    self.assertIn("sample.sp:3:6 - Argument type mismatch at position 1.", str(ctx.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
