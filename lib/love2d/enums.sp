@@ -7,6 +7,8 @@ export {
   AlignMode,
   ArcMode,
   KeyCode,
+  GamepadButton,
+  GamepadAxis,
 }
 
 enum DrawMode {
@@ -53,4 +55,31 @@ enum KeyCode {
   A = "a",
   S = "s",
   D = "d",
+}
+
+enum GamepadButton {
+  A = "a",
+  B = "b",
+  X = "x",
+  Y = "y",
+  Back = "back",
+  Guide = "guide",
+  Start = "start",
+  LeftStick = "leftstick",
+  RightStick = "rightstick",
+  LeftShoulder = "leftshoulder",
+  RightShoulder = "rightshoulder",
+  DPadUp = "dpup",
+  DPadDown = "dpdown",
+  DPadLeft = "dpleft",
+  DPadRight = "dpright",
+}
+
+enum GamepadAxis {
+  LeftX = "leftx",
+  LeftY = "lefty",
+  RightX = "rightx",
+  RightY = "righty",
+  TriggerLeft = "triggerleft",
+  TriggerRight = "triggerright",
 }
