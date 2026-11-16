@@ -91,8 +91,11 @@ sapphire build samples/overview.sp -t lua [-o custom_output.lua]
 ```
 
 Note: The high-level compilation driver function `transpile_file()` is
-exported by `src/code_gen/transpiler.py`. Additional CLI inspection
-commands include:
+exported by `src/code_gen/transpiler.py`. When `-o` targets an output path
+outside the input file's directory tree, transitive project dependencies are
+isolated under the target output directory and prebuilt `lib/` bindings are
+reused without modifying files in-place. Additional CLI inspection commands
+include:
 
 ```bash
 # Parse source and print concrete parse tree

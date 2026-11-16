@@ -369,9 +369,11 @@ if let active_target ?= target {
   payload. While the unwrapped `var` binding is live, the source optional
   path (and any overlapping prefix lvalue) is statically frozen against direct
   reassignment (`target = none;`), `move`, or conflicting borrows, preventing
-  dangling interior pointers. Field-disjoint mutations and `if var` mutations
+  dangling interior pointers. Field-disjoint mutations, `if var` mutations
   occurring after the unwrapped binding's last use in the `then` block
-  (non-lexical lifetime unfreezing) are permitted.
+  (non-lexical lifetime unfreezing), and mutations inside terminating
+  early-return branches that do not reference the unwrapped binding are
+  permitted.
 
 ### Optional chaining (`?.`)
 
@@ -490,6 +492,9 @@ supporting both safe value transformation (expressions) and side-effect
 control flow (statements).
 
 * **Syntax**: `match subject { pattern -> body, ... }`
+* **Multi-pattern arms**: Multiple comma-separated patterns can share a single
+  arm body (`Pattern1, Pattern2 -> body,`). Every pattern in a multi-pattern arm
+  is type-checked against the subject and contributes to exhaustiveness.
 * **Single-expression cases**: Cases with a single expression implicitly
   evaluate to that expression's value.
 * **Multi-statement blocks**: In a value-producing `match` expression, cases

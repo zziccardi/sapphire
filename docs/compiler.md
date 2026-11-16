@@ -125,6 +125,8 @@ detection of built-in standard library modules is provided via
 - **Centralized ANTLR Error Listener**: Defined in [error_listener.py](src/parser/error_listener.py), `CustomErrorListener` captures ANTLR syntax errors and formats detailed diagnostics with source code snippets.
 - **Domain Exception Hierarchy**: Defined in [errors.py](src/common/errors.py), standard exceptions (`SapphireSyntaxError`, `SapphireTypeError`, `SapphireTranspileError`, `SapphireLSPError`) extend `SapphireError` for uniform error reporting.
 - **Compiler Driver (`transpile_file`)**: The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True)` in [transpiler.py](src/code_gen/transpiler.py) orchestrates parsing, semantic analysis, and target backend resolution via `TranspilerRegistry.get(target)`. Both the `sapphire` CLI (`src/cli/sapphire.py`) and test runner (`src/cli/test_runner.py`) invoke `transpile_file` directly.
+  - **Stdlib Stub Protection**: `is_stdlib_stub` skips transpiling `std.*` modules and any `.sp` signature stubs under `lib/std/` that have sibling `.lua`/`.py` runtime files, ensuring hand-written runtime implementations are never overwritten.
+  - **Isolated `-o` Build Output**: When `output_file` is explicitly passed outside `input_file`'s directory tree, transitive project dependencies are emitted relative to the target output directory while prebuilt `lib/` bindings are reused in place without dirtying library directories.
 
 ## Stage 4: Source Map Generation & Love2D Debugging
 

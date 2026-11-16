@@ -253,11 +253,14 @@ Lua 5.1 / Love2D game packages.
 
 * `lib.love2d.event`: Engine event triggers such as `quit`.
 * `lib.love2d.graphics`: Canvas, Color, Font, Graphics, Image, Quad.
+* `lib.love2d.joystick`: `Joystick` trait (`getName`, `isGamepad`) for
+  joystick and gamepad callbacks.
 * `lib.love2d.keyboard`: Keyboard input handling and key repeat controls.
 * `lib.love2d.mouse`: Cursor and mouse position/button polling.
 * `lib.love2d.timer`: Frame delta time, FPS reporting, and timer sleeping.
 * `lib.love2d.enums`: Typed string enums for draw modes, filter modes, key
-  codes, and alignment.
+  codes, gamepad buttons (`GamepadButton`), gamepad axes (`GamepadAxis`), and
+  alignment.
 * `lib.love2d.love2d`: Master engine binding providing the `@extern var love`
   runtime context.
 
