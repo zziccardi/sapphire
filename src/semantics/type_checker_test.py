@@ -6478,6 +6478,7 @@ class TestTypeChecker(unittest.TestCase):
       var opt: int? = 10;
       guard var x ?= opt else { return; }
       opt = 20;
+      let y = x;
     }
     """
     with self.assertRaises(SemanticError) as ctx:
@@ -6485,6 +6486,16 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn(
         "while it is frozen (active 'guard var' unwrap)", str(ctx.exception)
     )
+
+    guard_var_nll_ok = """
+    func main() {
+      var opt: int? = 10;
+      guard var x ?= opt else { return; }
+      x = 15;
+      opt = 20;
+    }
+    """
+    self._check(guard_var_nll_ok)
 
     let_unwrap_ok = """
     func main() {
@@ -7850,6 +7861,7 @@ class TestTypeChecker(unittest.TestCase):
         var func advance_path() {
           guard var e ?= self.active_enemy else { return; }
           self.set_enemy(none);
+          e.step(5);
         }
       }
       """)
@@ -7857,6 +7869,27 @@ class TestTypeChecker(unittest.TestCase):
         "Cannot invoke mutating method 'set_enemy' on 'self' while it is frozen",
         str(ctx.exception),
     )
+
+    # After the last use of `e`, non-lexical lifetime unfreezes `self`.
+    self._check("""
+    struct Enemy { var x: int = 0; }
+    impl Enemy {
+      var func step(nx: int) { self.x = nx; }
+    }
+    struct Controller {
+      var active_enemy: Enemy? = none;
+    }
+    impl Controller {
+      var func set_enemy(e: Enemy?) {
+        self.active_enemy = e;
+      }
+      var func advance_path() {
+        guard var e ?= self.active_enemy else { return; }
+        e.step(5);
+        self.set_enemy(none);
+      }
+    }
+    """)
 
 
   def test_optional_chain_flattens_nested_optional(self):

@@ -724,12 +724,11 @@ class StmtVisitorMixin:
               checker=self,
           )
 
-        if binding.is_unwrap and binding.is_mutable:
-          b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
-          if b_res:
-            freeze_entry = (b_res[0], b_res[1], "active 'if var' unwrap")
-            self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
-            unwrap_freezes.append((binding.let_name, freeze_entry))
+        unwrap_entry = self._register_unwrap_binding_freeze(
+            binding, "active 'if var' unwrap"
+        )
+        if unwrap_entry:
+          unwrap_freezes.append(unwrap_entry)
 
       if node.condition:
         cond_type = self.visit(node.condition)
@@ -745,38 +744,14 @@ class StmtVisitorMixin:
       try:
         if unwrap_freezes and isinstance(node.then_block, BlockNode):
           if_scope = self.symbol_table.current_scope
-          stmts = node.then_block.statements
-          last_use_idx: Dict[str, int] = {}
-          for var_name, freeze_entry in unwrap_freezes:
-            last_idx = -1
-            for s_idx, stmt in enumerate(stmts):
-              if self._ast_references_ident(stmt, var_name):
-                last_idx = s_idx
-            last_use_idx[var_name] = last_idx
-            if last_idx == -1 and freeze_entry in if_scope.frozen_lvalues:
-              if_scope.frozen_lvalues.remove(freeze_entry)
-
-          if not hasattr(self, "_active_unwrap_freezes"):
-            self._active_unwrap_freezes = []
-          pushed_freezes = [
-              (if_scope, var_name, freeze_entry)
-              for var_name, freeze_entry in unwrap_freezes
-          ]
-          self._active_unwrap_freezes.extend(pushed_freezes)
           self.symbol_table.enter_scope()
           try:
-            for s_idx, stmt in enumerate(stmts):
-              self.visit(stmt)
-              for var_name, freeze_entry in unwrap_freezes:
-                if (
-                    last_use_idx.get(var_name) == s_idx
-                    and freeze_entry in if_scope.frozen_lvalues
-                ):
-                  if_scope.frozen_lvalues.remove(freeze_entry)
+            self._visit_stmts_with_unwrap_nll(
+                node.then_block.statements,
+                initial_freezes=unwrap_freezes,
+                freeze_scope=if_scope,
+            )
           finally:
-            del self._active_unwrap_freezes[
-                len(self._active_unwrap_freezes) - len(pushed_freezes) :
-            ]
             cur_scope = self.symbol_table.current_scope
             self.moved_symbols = {
                 s for s in self.moved_symbols if s.scope_defined != cur_scope
@@ -986,7 +961,83 @@ class StmtVisitorMixin:
         return True
     return False
 
+  def _register_unwrap_binding_freeze(
+      self, binding: HeaderBindingNode, freeze_label: str
+  ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
+    """Registers a mutable optional-unwrap freeze on the source lvalue."""
+    if not (binding.is_unwrap and binding.is_mutable):
+      return None
+    b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
+    if not b_res:
+      return None
+    freeze_entry = (b_res[0], b_res[1], freeze_label)
+    self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
+    return (binding.let_name, freeze_entry)
+
+  def _visit_stmts_with_unwrap_nll(
+      self,
+      stmts: List[ASTNode],
+      initial_freezes: Optional[
+          List[Tuple[str, Tuple[str, List[str], str]]]
+      ] = None,
+      freeze_scope: Any = None,
+  ) -> None:
+    """Visits statements with non-lexical lifetime unfreezing for `if var` and `guard var`."""
+    active_scope = freeze_scope or self.symbol_table.current_scope
+    if not hasattr(self, "_active_unwrap_freezes"):
+      self._active_unwrap_freezes = []
+    pushed_count = 0
+    tracked: List[Tuple[str, Tuple[str, List[str], str], int]] = []
+
+    def register_freezes(
+        freezes: List[Tuple[str, Tuple[str, List[str], str]]], start_idx: int
+    ) -> None:
+      nonlocal pushed_count
+      for var_name, freeze_entry in freezes:
+        last_idx = -1
+        for s_idx in range(start_idx, len(stmts)):
+          if self._ast_references_ident(stmts[s_idx], var_name):
+            last_idx = s_idx
+        if last_idx == -1:
+          if freeze_entry in active_scope.frozen_lvalues:
+            active_scope.frozen_lvalues.remove(freeze_entry)
+        else:
+          self._active_unwrap_freezes.append(
+              (active_scope, var_name, freeze_entry)
+          )
+          pushed_count += 1
+          tracked.append((var_name, freeze_entry, last_idx))
+
+    if initial_freezes:
+      register_freezes(initial_freezes, 0)
+
+    try:
+      for s_idx, stmt in enumerate(stmts):
+        prev_pending = getattr(self, "_pending_guard_unwrap_freezes", None)
+        self._pending_guard_unwrap_freezes = []
+        try:
+          self.visit(stmt)
+          new_guard_freezes = self._pending_guard_unwrap_freezes
+        finally:
+          self._pending_guard_unwrap_freezes = prev_pending
+
+        if new_guard_freezes:
+          register_freezes(new_guard_freezes, s_idx + 1)
+
+        for var_name, freeze_entry, last_idx in tracked:
+          if (
+              last_idx == s_idx
+              and freeze_entry in active_scope.frozen_lvalues
+          ):
+            active_scope.frozen_lvalues.remove(freeze_entry)
+    finally:
+      if pushed_count > 0:
+        del self._active_unwrap_freezes[
+            len(self._active_unwrap_freezes) - pushed_count :
+        ]
+
   def visit_GuardStmtNode(self, node: GuardStmtNode) -> Type:
+    guard_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
     for clause in node.clauses:
       if clause.binding:
         binding = clause.binding
@@ -1034,16 +1085,20 @@ class StmtVisitorMixin:
               checker=self,
           )
 
-        if binding.is_unwrap and binding.is_mutable:
-          b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
-          if b_res:
-            self.symbol_table.current_scope.frozen_lvalues.append(
-                (b_res[0], b_res[1], "active 'guard var' unwrap")
-            )
+        unwrap_entry = self._register_unwrap_binding_freeze(
+            binding, "active 'guard var' unwrap"
+        )
+        if unwrap_entry:
+          guard_freezes.append(unwrap_entry)
       elif clause.condition:
         cond_t = self.visit(clause.condition)
         if cond_t != PrimitiveType("bool"):
           self.error(f"Guard condition must be of type 'bool', got '{cond_t}'.")
+
+    if guard_freezes:
+      for _, freeze_entry in guard_freezes:
+        if freeze_entry in self.symbol_table.current_scope.frozen_lvalues:
+          self.symbol_table.current_scope.frozen_lvalues.remove(freeze_entry)
 
     self.symbol_table.enter_scope()
     self.visit(node.else_block)
@@ -1051,6 +1106,13 @@ class StmtVisitorMixin:
 
     if not self._block_terminates(node.else_block):
       self.error("Guard else block must terminate control flow (via return, break, or continue).")
+
+    if guard_freezes:
+      for _, freeze_entry in guard_freezes:
+        self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
+      pending = getattr(self, "_pending_guard_unwrap_freezes", None)
+      if pending is not None:
+        pending.extend(guard_freezes)
 
     return PrimitiveType("none")
 
