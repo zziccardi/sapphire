@@ -178,7 +178,7 @@ matchCase
 
 matchPattern
     : ELLIPSIS
-    | expression
+    | expression (COMMA expression)*
     ;
 
 block

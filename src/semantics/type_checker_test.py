@@ -7927,6 +7927,68 @@ class TestTypeChecker(unittest.TestCase):
     """
     self._check(code)
 
+  def test_if_var_terminating_early_return_branch_unfreezing(self):
+    code_ok = """
+    struct Session { var choices: [int] = [1, 2]; }
+    struct Dialogue { var session: Session? = none; var active: bool = true; }
+    impl Dialogue {
+      var func choose(idx: int): int {
+        if var s ?= self.session {
+          if idx < 0 || idx >= s.choices.size() {
+            self.session = none;
+            self.active = false;
+            return -1;
+          }
+          return s.choices[idx];
+        }
+        return -1;
+      }
+    }
+    """
+    self._check(code_ok)
+
+    code_non_terminating = """
+    struct Session { var choices: [int] = [1, 2]; }
+    struct Dialogue { var session: Session? = none; }
+    impl Dialogue {
+      var func choose(idx: int): int {
+        if var s ?= self.session {
+          if idx < 0 {
+            self.session = none;
+          }
+          return s.choices[0];
+        }
+        return -1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError):
+      self._check(code_non_terminating)
+
+  def test_multi_pattern_match_arm_semantics(self):
+    code_ok = """
+    enum Dir { Up, Down, Left, Right }
+    func axis(d: Dir): String {
+      return match d {
+        Dir.Up, Dir.Down -> "vertical",
+        Dir.Left, Dir.Right -> "horizontal",
+      };
+    }
+    """
+    self._check(code_ok)
+
+    code_non_exhaustive = """
+    enum Dir { Up, Down, Left, Right }
+    func axis(d: Dir): String {
+      return match d {
+        Dir.Up, Dir.Down -> "vertical",
+        Dir.Left -> "horizontal",
+      };
+    }
+    """
+    with self.assertRaises(SemanticError):
+      self._check(code_non_exhaustive)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -303,11 +303,17 @@ class PythonStmtMixin:
 
     for case in node.cases:
       self.newline()
-      if isinstance(case.pattern, EllipsisPatternNode):
+      if len(case.patterns) == 1 and isinstance(case.patterns[0], EllipsisPatternNode):
         self.emit("case _:")
       else:
         self.emit("case ")
-        self.visit(case.pattern)
+        for p_idx, pat in enumerate(case.patterns):
+          if p_idx > 0:
+            self.emit(" | ")
+          if isinstance(pat, EllipsisPatternNode):
+            self.emit("_")
+          else:
+            self.visit(pat)
         self.emit(":")
 
       self.indent()

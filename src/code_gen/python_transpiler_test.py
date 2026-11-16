@@ -1136,6 +1136,21 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("None", py)
 
 
+  def test_python_multi_pattern_match_and_execution(self):
+    """Verifies Python transpilation and execution for multi-pattern match arms."""
+    code = """
+    func map_key(k: String): String {
+      return match k {
+        "up", "w" -> "up",
+        "down", "s" -> "down",
+        ... -> "other",
+      };
+    }
+    """
+    self.assertEqual(self._transpile_and_run(code, 'map_key("w")'), "up")
+    self.assertEqual(self._transpile_and_run(code, 'map_key("down")'), "down")
+    self.assertEqual(self._transpile_and_run(code, 'map_key("x")'), "other")
+
   def test_match_expression_transpilation_and_execution(self):
     """Verifies Python transpilation and execution of match expressions."""
     code = """

@@ -486,6 +486,21 @@ class TestASTBuilder(unittest.TestCase):
     # Case 2: ellipsis pattern
     self.assertIsInstance(match_expr.cases[2].pattern, EllipsisPatternNode)
 
+  def test_multi_pattern_match_expression_ast(self):
+    """Verifies AST construction for comma-separated multi-pattern match arms."""
+    ast = self._get_ast("""
+    let res = match key {
+      "up", "w" -> 1,
+      "down", "s" -> -1,
+      ... -> 0,
+    };
+    """)
+    match_expr = ast.declarations[0].expr
+    self.assertEqual(len(match_expr.cases), 3)
+    self.assertEqual(len(match_expr.cases[0].patterns), 2)
+    self.assertEqual(len(match_expr.cases[1].patterns), 2)
+    self.assertEqual(len(match_expr.cases[2].patterns), 1)
+
   def test_map_literal_parsing(self):
     """Verifies AST construction for map literals with colons, commas, and trailing commas."""
     from src.parser.ast import MapLiteralNode, MapEntryNode, LiteralNode

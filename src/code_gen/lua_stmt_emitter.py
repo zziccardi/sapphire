@@ -303,20 +303,23 @@ class LuaStmtMixin:
 
     for idx, case in enumerate(node.cases):
       self.newline()
-      if isinstance(case.pattern, EllipsisPatternNode):
+      if len(case.patterns) == 1 and isinstance(case.patterns[0], EllipsisPatternNode):
         if idx == 0:
           self.emit("if true then")
         else:
           self.emit("else")
       else:
-        if idx == 0:
-          self.emit(f"if {subj_var} == ")
-          self.visit(case.pattern)
-          self.emit(" then")
-        else:
-          self.emit(f"elseif {subj_var} == ")
-          self.visit(case.pattern)
-          self.emit(" then")
+        kw = "if" if idx == 0 else "elseif"
+        self.emit(f"{kw} ")
+        for p_idx, pat in enumerate(case.patterns):
+          if p_idx > 0:
+            self.emit(" or ")
+          if isinstance(pat, EllipsisPatternNode):
+            self.emit("true")
+          else:
+            self.emit(f"{subj_var} == ")
+            self.visit(pat)
+        self.emit(" then")
 
       self.indent()
       self._branch_depth += 1

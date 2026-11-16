@@ -562,50 +562,51 @@ class StmtVisitorMixin:
 
     for case in node.cases:
       self.moved_symbols = set(pre_match_moved)
-      if isinstance(case.pattern, EllipsisPatternNode):
-        has_ellipsis = True
-      elif isinstance(subject_type, EnumType):
-        if isinstance(case.pattern, MemberAccessNode):
-          pat_type = self.visit(case.pattern)
-          if isinstance(pat_type, EnumType) and pat_type.name == subject_type.name:
-            seen_enum_variants.add(case.pattern.member)
-          else:
-            self.error(f"Pattern '{case.pattern}' is not a valid variant of enum '{subject_type.name}'.")
-        elif isinstance(case.pattern, IdentifierNode):
-          if case.pattern.name in subject_type.variants:
-            seen_enum_variants.add(case.pattern.name)
-          else:
-            sym = self.symbol_table.lookup(case.pattern.name)
-            if isinstance(sym, EnumSymbol) and sym.name == subject_type.name:
-              pass
+      for pattern in case.patterns:
+        if isinstance(pattern, EllipsisPatternNode):
+          has_ellipsis = True
+        elif isinstance(subject_type, EnumType):
+          if isinstance(pattern, MemberAccessNode):
+            pat_type = self.visit(pattern)
+            if isinstance(pat_type, EnumType) and pat_type.name == subject_type.name:
+              seen_enum_variants.add(pattern.member)
             else:
-              self.error(f"Undefined identifier '{case.pattern.name}'.")
+              self.error(f"Pattern '{pattern}' is not a valid variant of enum '{subject_type.name}'.")
+          elif isinstance(pattern, IdentifierNode):
+            if pattern.name in subject_type.variants:
+              seen_enum_variants.add(pattern.name)
+            else:
+              sym = self.symbol_table.lookup(pattern.name)
+              if isinstance(sym, EnumSymbol) and sym.name == subject_type.name:
+                pass
+              else:
+                self.error(f"Undefined identifier '{pattern.name}'.")
+          else:
+            pat_type = self.visit(pattern)
+            if not (isinstance(pat_type, EnumType) and pat_type.name == subject_type.name):
+              self.error(f"Pattern '{pattern}' is not a valid variant of enum '{subject_type.name}'.")
+        elif isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
+          pat_type = self.visit(pattern)
+          if isinstance(pattern, LiteralNode) and pattern.lit_type == "bool":
+            if pattern.value is True or pattern.value == "true":
+              seen_bool_true = True
+            elif pattern.value is False or pattern.value == "false":
+              seen_bool_false = True
+          else:
+            self.error("Bool match pattern must be 'true' or 'false'.")
+        elif isinstance(subject_type, OptionalType):
+          pat_type = self.visit(pattern)
+          if isinstance(pat_type, NoneType) or (isinstance(pat_type, PrimitiveType) and pat_type.name == "none"):
+            seen_optional_none = True
+          elif pat_type.is_compatible(subject_type.base_type) or subject_type.base_type.is_compatible(pat_type):
+            seen_optional_some = True
+          else:
+            self.error(f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'.")
         else:
-          pat_type = self.visit(case.pattern)
-          if not (isinstance(pat_type, EnumType) and pat_type.name == subject_type.name):
-            self.error(f"Pattern '{case.pattern}' is not a valid variant of enum '{subject_type.name}'.")
-      elif isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
-        pat_type = self.visit(case.pattern)
-        if isinstance(case.pattern, LiteralNode) and case.pattern.lit_type == "bool":
-          if case.pattern.value is True or case.pattern.value == "true":
-            seen_bool_true = True
-          elif case.pattern.value is False or case.pattern.value == "false":
-            seen_bool_false = True
-        else:
-          self.error("Bool match pattern must be 'true' or 'false'.")
-      elif isinstance(subject_type, OptionalType):
-        pat_type = self.visit(case.pattern)
-        if isinstance(pat_type, NoneType) or (isinstance(pat_type, PrimitiveType) and pat_type.name == "none"):
-          seen_optional_none = True
-        elif pat_type.is_compatible(subject_type.base_type) or subject_type.base_type.is_compatible(pat_type):
-          seen_optional_some = True
-        else:
-          self.error(f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'.")
-      else:
-        pat_type = self.visit(case.pattern)  # pragma: no cover
-        if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):  # pragma: no cover
-          self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")  # pragma: no cover
-        seen_optional_some = True  # pragma: no cover
+          pat_type = self.visit(pattern)  # pragma: no cover
+          if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):  # pragma: no cover
+            self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")  # pragma: no cover
+          seen_optional_some = True  # pragma: no cover
 
       if is_stmt:
         self.visit(case.body)
@@ -755,20 +756,32 @@ class StmtVisitorMixin:
             if last_idx == -1 and freeze_entry in if_scope.frozen_lvalues:
               if_scope.frozen_lvalues.remove(freeze_entry)
 
+          if not hasattr(self, "_active_unwrap_freezes"):
+            self._active_unwrap_freezes = []
+          pushed_freezes = [
+              (if_scope, var_name, freeze_entry)
+              for var_name, freeze_entry in unwrap_freezes
+          ]
+          self._active_unwrap_freezes.extend(pushed_freezes)
           self.symbol_table.enter_scope()
-          for s_idx, stmt in enumerate(stmts):
-            self.visit(stmt)
-            for var_name, freeze_entry in unwrap_freezes:
-              if (
-                  last_use_idx.get(var_name) == s_idx
-                  and freeze_entry in if_scope.frozen_lvalues
-              ):
-                if_scope.frozen_lvalues.remove(freeze_entry)
-          cur_scope = self.symbol_table.current_scope
-          self.moved_symbols = {
-              s for s in self.moved_symbols if s.scope_defined != cur_scope
-          }
-          self.symbol_table.exit_scope()
+          try:
+            for s_idx, stmt in enumerate(stmts):
+              self.visit(stmt)
+              for var_name, freeze_entry in unwrap_freezes:
+                if (
+                    last_use_idx.get(var_name) == s_idx
+                    and freeze_entry in if_scope.frozen_lvalues
+                ):
+                  if_scope.frozen_lvalues.remove(freeze_entry)
+          finally:
+            del self._active_unwrap_freezes[
+                len(self._active_unwrap_freezes) - len(pushed_freezes) :
+            ]
+            cur_scope = self.symbol_table.current_scope
+            self.moved_symbols = {
+                s for s in self.moved_symbols if s.scope_defined != cur_scope
+            }
+            self.symbol_table.exit_scope()
         else:
           self.visit(node.then_block)
         then_moved = set(self.moved_symbols)
@@ -798,7 +811,7 @@ class StmtVisitorMixin:
       pre_branch_moved = set(self.moved_symbols)
       self._branch_depth += 1
       try:
-        self.visit(node.then_block)
+        self._visit_block_with_terminating_unfreeze(node.then_block)
         then_moved = set(self.moved_symbols)
 
         if node.else_block:
@@ -941,6 +954,31 @@ class StmtVisitorMixin:
     if isinstance(stmt, BlockNode):
       return self._block_terminates(stmt)
     return False
+
+  def _visit_block_with_terminating_unfreeze(self, block: BlockNode) -> None:
+    """Temporarily unfreezes active `if var` bindings on terminating branches.
+
+    Under control-flow-aware non-lexical lifetime analysis, a terminating branch
+    (such as an early `return`) that does not reference an outer `if var`
+    binding cannot observe or fall through to later uses of that binding, so
+    mutating the unwrapped source inside that branch is memory-safe.
+    """
+    active = getattr(self, "_active_unwrap_freezes", [])
+    temporarily_unfrozen = []
+    if active and isinstance(block, BlockNode) and self._block_terminates(block):
+      for unwrap_scope, var_name, freeze_entry in active:
+        if (
+            freeze_entry in unwrap_scope.frozen_lvalues
+            and not self._ast_references_ident(block, var_name)
+        ):
+          unwrap_scope.frozen_lvalues.remove(freeze_entry)
+          temporarily_unfrozen.append((unwrap_scope, freeze_entry))
+    try:
+      self.visit(block)
+    finally:
+      for unwrap_scope, freeze_entry in temporarily_unfrozen:
+        if freeze_entry not in unwrap_scope.frozen_lvalues:
+          unwrap_scope.frozen_lvalues.append(freeze_entry)
 
   def _block_terminates(self, block: BlockNode) -> bool:
     for stmt in getattr(block, "statements", []):
