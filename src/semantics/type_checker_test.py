@@ -7891,6 +7891,40 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_mutable_unwrap_requires_mutable_lvalue(self):
+    """Verifies if var / guard var reject non-lvalue and immutable sources."""
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      func get_opt(): int? { return 1; }
+      func main() {
+        if var v ?= get_opt() {
+          v = 2;
+        }
+      }
+      """)
+    self.assertIn("requires a mutable lvalue", str(ctx1.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      func main() {
+        var m: [String: int] = {"a": 1};
+        guard var v ?= m.get("a") else { return; }
+        v = 2;
+      }
+      """)
+    self.assertIn("requires a mutable lvalue", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func main() {
+        let opt: int? = 1;
+        if var v ?= opt {
+          v = 2;
+        }
+      }
+      """)
+    self.assertIn("requires a mutable source lvalue", str(ctx3.exception))
+
 
   def test_optional_chain_flattens_nested_optional(self):
     code = """

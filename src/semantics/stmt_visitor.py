@@ -964,11 +964,24 @@ class StmtVisitorMixin:
   def _register_unwrap_binding_freeze(
       self, binding: HeaderBindingNode, freeze_label: str
   ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
-    """Registers a mutable optional-unwrap freeze on the source lvalue."""
+    """Validates and registers a mutable optional-unwrap freeze on an lvalue."""
     if not (binding.is_unwrap and binding.is_mutable):
       return None
     b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
     if not b_res:
+      self.error(
+          "Mutable optional unwrap ('if var' / 'guard var') requires a mutable "
+          "lvalue; use 'if let' / 'guard let' for temporary or '.get()' values.",
+          node=binding.expr,
+      )
+      return None
+    root_sym = self.symbol_table.lookup(b_res[0])
+    if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+      self.error(
+          f"Mutable optional unwrap ('if var' / 'guard var') requires a mutable "
+          f"source lvalue, but '{b_res[0]}' is immutable.",
+          node=binding.expr,
+      )
       return None
     freeze_entry = (b_res[0], b_res[1], freeze_label)
     self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
