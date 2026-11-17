@@ -961,6 +961,29 @@ class StmtVisitorMixin:
         return True
     return False
 
+  def _resolve_container_get_unwrap(
+      self, expr: ASTNode
+  ) -> Optional[Tuple[Tuple[str, List[str]], ASTNode, ASTNode, bool]]:
+    """Resolves `container.get(key)` on a Map or Array lvalue."""
+    if not (
+        isinstance(expr, CallNode)
+        and isinstance(expr.callee, MemberAccessNode)
+        and expr.callee.member == "get"
+        and not expr.callee.is_optional
+        and len(expr.arguments) == 1
+    ):
+      return None
+    recv = expr.callee.receiver
+    recv_t = self.node_types.get(recv)
+    if not isinstance(recv_t, (MapType, ArrayType)):
+      return None
+    recv_res = ArenaChecker.get_lvalue_path(self.symbol_table, recv)
+    if not recv_res:
+      return None
+    arg = expr.arguments[0]
+    key_expr = arg.expr if hasattr(arg, "expr") else arg
+    return (recv_res, recv, key_expr, isinstance(recv_t, ArrayType))
+
   def _register_unwrap_binding_freeze(
       self, binding: HeaderBindingNode, freeze_label: str
   ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
@@ -968,13 +991,16 @@ class StmtVisitorMixin:
     if not (binding.is_unwrap and binding.is_mutable):
       return None
     b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
+    container_info = None
+    if not b_res:
+      container_info = self._resolve_container_get_unwrap(binding.expr)
+      if container_info:
+        b_res = container_info[0]
     if not b_res:
       self.error(
           "Mutable optional unwrap ('if var' / 'guard var') binds an in-place "
-          "reference and requires a mutable lvalue (temporaries like '.get()' "
-          "return values, not references). Use 'if let' / 'guard let' to read "
-          "temporaries, or 'if container.contains(k) { container[k]... }' to "
-          "mutate container entries in-place.",
+          "reference and requires a mutable lvalue. Use 'if let' / 'guard let' "
+          "for non-lvalue temporaries.",
           node=binding.expr,
       )
       return None
@@ -986,6 +1012,9 @@ class StmtVisitorMixin:
           node=binding.expr,
       )
       return None
+    if container_info:
+      _, recv, key_expr, is_array = container_info
+      binding._writeback_container = (recv, key_expr, is_array)
     freeze_entry = (b_res[0], b_res[1], freeze_label)
     self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
     return (binding.let_name, freeze_entry)

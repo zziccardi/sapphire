@@ -366,6 +366,38 @@ class SemanticParityTest(unittest.TestCase):
     self.assertEqual(py_val, 7)
     self.assertEqual(lua_val, 7)
 
+  def test_container_get_mutable_unwrap_writeback_parity(self):
+    """Verifies if var / guard var on map.get() and arr.get() mutate in-place."""
+    code = """
+    @test
+    func test_container_get_unwrap(): int {
+      var counts: [String: int] = {"hits": 4};
+      if var count ?= counts.get("hits") {
+        count += 3;
+      }
+
+      var grid: [int: [int: bool]] = {2: {3: true, 4: true}};
+      guard var row ?= grid.get(2) else {
+        return -1;
+      }
+      row.remove(3);
+
+      var nums: [int] = [10, 20];
+      if var n ?= nums.get(1) {
+        n = 25;
+      }
+
+      let has_3 = grid[2].contains(3);
+      if !has_3 {
+        return counts["hits"] + nums[1];
+      }
+      return -2;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_container_get_unwrap")
+    self.assertEqual(py_val, 32)
+    self.assertEqual(lua_val, 32)
+
 
 if __name__ == "__main__":
   unittest.main()

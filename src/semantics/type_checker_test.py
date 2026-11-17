@@ -7962,7 +7962,7 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
   def test_mutable_unwrap_requires_mutable_lvalue(self):
-    """Verifies if var / guard var reject non-lvalue and immutable sources."""
+    """Verifies if var / guard var lvalue rules and container .get() borrows."""
     with self.assertRaises(SemanticError) as ctx1:
       self._check("""
       func get_opt(): int? { return 1; }
@@ -7974,17 +7974,47 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("requires a mutable lvalue", str(ctx1.exception))
 
+    # Mutable map.get(k) and arr.get(i) are allowed, freeze the container while
+    # live, and unfreeze via NLL after the unwrapped binding's last use.
+    self._check("""
+    func main() {
+      var m: [String: int] = {"a": 1};
+      guard var v ?= m.get("a") else { return; }
+      v += 1;
+      m.remove("b");
+
+      var arr: [int] = [10, 20];
+      if var elem ?= arr.get(0) {
+        elem += 5;
+      }
+      arr.push(30);
+    }
+    """)
+
     with self.assertRaises(SemanticError) as ctx2:
       self._check("""
       func main() {
         var m: [String: int] = {"a": 1};
-        guard var v ?= m.get("a") else { return; }
-        v = 2;
+        if var v ?= m.get("a") {
+          m.remove("a");
+          let y = v;
+        }
       }
       """)
-    self.assertIn("requires a mutable lvalue", str(ctx2.exception))
+    self.assertIn("while it is frozen (active 'if var' unwrap)", str(ctx2.exception))
 
     with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func main() {
+        let immut_m: [String: int] = {"a": 1};
+        if var v ?= immut_m.get("a") {
+          v = 2;
+        }
+      }
+      """)
+    self.assertIn("requires a mutable source lvalue", str(ctx3.exception))
+
+    with self.assertRaises(SemanticError) as ctx4:
       self._check("""
       func main() {
         let opt: int? = 1;
@@ -7993,7 +8023,7 @@ class TestTypeChecker(unittest.TestCase):
         }
       }
       """)
-    self.assertIn("requires a mutable source lvalue", str(ctx3.exception))
+    self.assertIn("requires a mutable source lvalue", str(ctx4.exception))
 
 
   def test_optional_chain_flattens_nested_optional(self):
