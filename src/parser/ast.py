@@ -770,9 +770,20 @@ class EllipsisPatternNode(ASTNode):
 class MatchCaseNode(ASTNode):
   """Represents a single case branch in a match expression."""
 
-  def __init__(self, pattern: ASTNode, body: Union[BlockNode, ASTNode]):
-    self.pattern = pattern
+  def __init__(
+      self,
+      pattern: Union[ASTNode, List[ASTNode]],
+      body: Union[BlockNode, ASTNode],
+  ):
+    self.patterns: List[ASTNode] = (
+        pattern if isinstance(pattern, list) else [pattern]
+    )
     self.body = body  # BlockNode or single ExprNode
+
+  @property
+  def pattern(self) -> ASTNode:
+    """Compatibility accessor returning the first pattern in this arm."""
+    return self.patterns[0]
 
 
 class MatchExprNode(ExprNode):

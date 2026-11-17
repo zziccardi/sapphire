@@ -807,7 +807,7 @@ end
 
 
 def run_tests(
-    path: str,
+    path: Any,
     target: str = "python",
     filter_pattern: Optional[str] = None,
     sourcemap: bool = True,
@@ -817,9 +817,18 @@ def run_tests(
   Returns:
     Exit code (0 for success, 1 for failure).
   """
-  sp_files = find_sp_files(path)
+  paths = [path] if isinstance(path, str) else list(path or ["."])
+  sp_files: List[str] = []
+  seen_files = set()
+  for p in paths:
+    for f in find_sp_files(p):
+      norm = os.path.abspath(f)
+      if norm not in seen_files:
+        seen_files.add(norm)
+        sp_files.append(f)
   if not sp_files:  # pragma: no cover
-    print(f"No Sapphire (.sp) source files found in '{path}'.", file=sys.stderr)
+    joined = ", ".join(paths)
+    print(f"No Sapphire (.sp) source files found in '{joined}'.", file=sys.stderr)
     return 1
 
   total_passed = 0

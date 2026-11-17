@@ -395,9 +395,10 @@ class DeclVisitorMixin:
 
   def visit_BlockNode(self, node: BlockNode) -> None:
     self.symbol_table.enter_scope()
-    for stmt in node.statements:
-      self.visit(stmt)
-    cur_scope = self.symbol_table.current_scope
-    self.moved_symbols = {s for s in self.moved_symbols if s.scope_defined != cur_scope}
-    self.symbol_table.exit_scope()
+    try:
+      self._visit_stmts_with_unwrap_nll(node.statements)
+    finally:
+      cur_scope = self.symbol_table.current_scope
+      self.moved_symbols = {s for s in self.moved_symbols if s.scope_defined != cur_scope}
+      self.symbol_table.exit_scope()
 

@@ -170,10 +170,18 @@ class BorrowChecker:
         ):
           kind = "Closure" if is_closure else "Coroutine"
           action = "capturing" if is_closure else "borrowing"
-          error_callback(
-              f"{kind} {action} local variable '{name}' cannot escape to outer "
-              f"or earlier-declared variable '{target_sym.name}'."
-          )
+          if target_sym.scope_defined == b_sym.scope_defined:
+            error_callback(
+                f"{kind} {action} local variable '{name}' cannot escape to "
+                f"earlier-declared variable '{target_sym.name}' (declare "
+                f"'{name}' before '{target_sym.name}' so '{name}' outlives "
+                f"'{target_sym.name}' in LIFO drop order)."
+            )
+          else:
+            error_callback(
+                f"{kind} {action} local variable '{name}' cannot escape to "
+                f"outer-scope variable '{target_sym.name}'."
+            )
           return
     target_sym.stack_borrow_symbols.update(stack_borrows)
 

@@ -365,13 +365,19 @@ if let active_target ?= target {
   freezes the source lvalue against reassignment or `move` for the duration of
   the binding's scope.
 * **In-place mutable unwrap (`if var ?=` / `guard var ?=`)**: Requires a
-  mutable source lvalue and binds an in-place mutable reference to the inner
-  payload. While the unwrapped `var` binding is live, the source optional
-  path (and any overlapping prefix lvalue) is statically frozen against direct
-  reassignment (`target = none;`), `move`, or conflicting borrows, preventing
-  dangling interior pointers. Field-disjoint mutations and `if var` mutations
-  occurring after the unwrapped binding's last use in the `then` block
-  (non-lexical lifetime unfreezing) are permitted.
+  mutable source lvalue (a variable, field, direct index expression, or
+  `container.get(k)` on a mutable `Map` or `Array` lvalue) and binds an
+  in-place mutable reference to the inner payload. While the unwrapped `var`
+  binding is live, the source path or container is statically frozen against
+  direct reassignment (`target = none;`), `move`, structural mutation
+  (`remove`/`clear`), or conflicting borrows, preventing dangling interior
+  pointers. Field-disjoint mutations, `if var` / `guard var` mutations occurring
+  after the unwrapped binding's last use in the block (non-lexical lifetime
+  unfreezing), and mutations inside terminating early-return branches that do
+  not reference the unwrapped binding are permitted.
+  - Arbitrary rvalue temporaries (such as general function call results) and
+    immutable `let` sources remain rejected at compile time; use `if let` /
+    `guard let` to read them.
 
 ### Optional chaining (`?.`)
 
@@ -490,6 +496,9 @@ supporting both safe value transformation (expressions) and side-effect
 control flow (statements).
 
 * **Syntax**: `match subject { pattern -> body, ... }`
+* **Multi-pattern arms**: Multiple comma-separated patterns can share a single
+  arm body (`Pattern1, Pattern2 -> body,`). Every pattern in a multi-pattern arm
+  is type-checked against the subject and contributes to exhaustiveness.
 * **Single-expression cases**: Cases with a single expression implicitly
   evaluate to that expression's value.
 * **Multi-statement blocks**: In a value-producing `match` expression, cases

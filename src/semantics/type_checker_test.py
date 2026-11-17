@@ -6478,6 +6478,7 @@ class TestTypeChecker(unittest.TestCase):
       var opt: int? = 10;
       guard var x ?= opt else { return; }
       opt = 20;
+      let y = x;
     }
     """
     with self.assertRaises(SemanticError) as ctx:
@@ -6485,6 +6486,16 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn(
         "while it is frozen (active 'guard var' unwrap)", str(ctx.exception)
     )
+
+    guard_var_nll_ok = """
+    func main() {
+      var opt: int? = 10;
+      guard var x ?= opt else { return; }
+      x = 15;
+      opt = 20;
+    }
+    """
+    self._check(guard_var_nll_ok)
 
     let_unwrap_ok = """
     func main() {
@@ -7742,6 +7753,76 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot access instance field 'x' on type 'Base'", str(ctx.exception))
 
+  def test_module_exported_struct_constant_field_access(self):
+    """Verifies chained field access on exported module struct values."""
+    from src.semantics.symbol_table import ModuleSymbol, Symbol, StructSymbol
+
+    stats_struct = StructType("Stats")
+    stats_struct.fields["hp"] = StructField(
+        "hp", PrimitiveType("int"), is_mutable=False
+    )
+    unit_struct = StructType("Unit")
+    unit_struct.fields["stats"] = StructField(
+        "stats", stats_struct, is_mutable=False
+    )
+    mod_sym = ModuleSymbol("units", "units.sp")
+    mod_sym.exports["Unit"] = StructSymbol("Unit", unit_struct)
+    mod_sym.exports["ELENA_UNIT"] = Symbol("ELENA_UNIT", unit_struct)
+
+    code = """
+    func read_hp(): int {
+      return units.ELENA_UNIT.stats.hp;
+    }
+    """
+    stream = CommonTokenStream(SapphireLexer(InputStream(code)))
+    ast = ASTBuilder().visit(SapphireParser(stream).program())
+    checker = TypeChecker()
+    checker.symbol_table.define("units", mod_sym)
+    checker.check(ast)
+
+    bad_code = """
+    func bad(): Stats {
+      return units.Unit.stats;
+    }
+    """
+    bad_stream = CommonTokenStream(SapphireLexer(InputStream(bad_code)))
+    bad_ast = ASTBuilder().visit(SapphireParser(bad_stream).program())
+    bad_checker = TypeChecker()
+    bad_checker.symbol_table.define("units", mod_sym)
+    with self.assertRaises(SemanticError) as ctx:
+      bad_checker.check(bad_ast)
+    self.assertIn("Cannot access instance field 'stats' on type 'Unit'",
+                  str(ctx.exception))
+
+  def test_coroutine_lifo_drop_order_diagnostic(self):
+    """Verifies distinct same-scope LIFO vs outer-scope escape diagnostics."""
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      struct Holder { var co: Coroutine<int>? = none; }
+      func gen(items: [int]): Coroutine<int> { yield items[0]; }
+      func main() {
+        var h = Holder {};
+        let items = [1, 2];
+        h.co = gen(items);
+      }
+      """)
+    self.assertIn("LIFO drop order", str(ctx1.exception))
+    self.assertIn("declare 'items' before 'h'", str(ctx1.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Holder { var co: Coroutine<int>? = none; }
+      func gen(items: [int]): Coroutine<int> { yield items[0]; }
+      func main() {
+        var h = Holder {};
+        if true {
+          let items = [1, 2];
+          h.co = gen(items);
+        }
+      }
+      """)
+    self.assertIn("outer-scope variable 'h'", str(ctx2.exception))
+
   def test_semantic_errors_include_source_locations(self):
     """Verifies that call/index semantic errors include line and column."""
     code_non_callable = "func main() {\n  let x = 1;\n  x();\n}\n"
@@ -7850,6 +7931,7 @@ class TestTypeChecker(unittest.TestCase):
         var func advance_path() {
           guard var e ?= self.active_enemy else { return; }
           self.set_enemy(none);
+          e.step(5);
         }
       }
       """)
@@ -7857,6 +7939,91 @@ class TestTypeChecker(unittest.TestCase):
         "Cannot invoke mutating method 'set_enemy' on 'self' while it is frozen",
         str(ctx.exception),
     )
+
+    # After the last use of `e`, non-lexical lifetime unfreezes `self`.
+    self._check("""
+    struct Enemy { var x: int = 0; }
+    impl Enemy {
+      var func step(nx: int) { self.x = nx; }
+    }
+    struct Controller {
+      var active_enemy: Enemy? = none;
+    }
+    impl Controller {
+      var func set_enemy(e: Enemy?) {
+        self.active_enemy = e;
+      }
+      var func advance_path() {
+        guard var e ?= self.active_enemy else { return; }
+        e.step(5);
+        self.set_enemy(none);
+      }
+    }
+    """)
+
+  def test_mutable_unwrap_requires_mutable_lvalue(self):
+    """Verifies if var / guard var lvalue rules and container .get() borrows."""
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      func get_opt(): int? { return 1; }
+      func main() {
+        if var v ?= get_opt() {
+          v = 2;
+        }
+      }
+      """)
+    self.assertIn("requires a mutable lvalue", str(ctx1.exception))
+
+    # Mutable map.get(k) and arr.get(i) are allowed, freeze the container while
+    # live, and unfreeze via NLL after the unwrapped binding's last use.
+    self._check("""
+    func main() {
+      var m: [String: int] = {"a": 1};
+      guard var v ?= m.get("a") else { return; }
+      v += 1;
+      m.remove("b");
+
+      var arr: [int] = [10, 20];
+      if var elem ?= arr.get(0) {
+        elem += 5;
+      }
+      arr.push(30);
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      func main() {
+        var m: [String: int] = {"a": 1};
+        if var v ?= m.get("a") {
+          m.remove("a");
+          let y = v;
+        }
+      }
+      """)
+    self.assertIn("while it is frozen (active 'if var' unwrap)", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func main() {
+        let immut_m: [String: int] = {"a": 1};
+        if var v ?= immut_m.get("a") {
+          v = 2;
+        }
+      }
+      """)
+    self.assertIn("requires a mutable source lvalue", str(ctx3.exception))
+
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check("""
+      func main() {
+        let opt: int? = 1;
+        if var v ?= opt {
+          v = 2;
+        }
+      }
+      """)
+    self.assertIn("requires a mutable source lvalue", str(ctx4.exception))
 
 
   def test_optional_chain_flattens_nested_optional(self):
@@ -7926,6 +8093,169 @@ class TestTypeChecker(unittest.TestCase):
     }
     """
     self._check(code)
+
+  def test_if_var_terminating_early_return_branch_unfreezing(self):
+    code_ok = """
+    struct Session { var choices: [int] = [1, 2]; }
+    struct Dialogue { var session: Session? = none; var active: bool = true; }
+    impl Dialogue {
+      var func choose(idx: int): int {
+        if var s ?= self.session {
+          if idx < 0 || idx >= s.choices.size() {
+            self.session = none;
+            self.active = false;
+            return -1;
+          }
+          return s.choices[idx];
+        }
+        return -1;
+      }
+    }
+    """
+    self._check(code_ok)
+
+    code_non_terminating = """
+    struct Session { var choices: [int] = [1, 2]; }
+    struct Dialogue { var session: Session? = none; }
+    impl Dialogue {
+      var func choose(idx: int): int {
+        if var s ?= self.session {
+          if idx < 0 {
+            self.session = none;
+          }
+          return s.choices[0];
+        }
+        return -1;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError):
+      self._check(code_non_terminating)
+
+  def test_multi_pattern_match_arm_semantics(self):
+    code_ok = """
+    enum Dir { Up, Down, Left, Right }
+    func axis(d: Dir): String {
+      return match d {
+        Dir.Up, Dir.Down -> "vertical",
+        Dir.Left, Dir.Right -> "horizontal",
+      };
+    }
+    """
+    self._check(code_ok)
+
+    code_non_exhaustive = """
+    enum Dir { Up, Down, Left, Right }
+    func axis(d: Dir): String {
+      return match d {
+        Dir.Up, Dir.Down -> "vertical",
+        Dir.Left -> "horizontal",
+      };
+    }
+    """
+    with self.assertRaises(SemanticError):
+      self._check(code_non_exhaustive)
+
+  def test_semantic_warning_does_not_raise(self):
+    checker = self._check("func main() {}")
+    checker.warning("Test warning message")
+    self.assertEqual(len(checker.warnings), 1)
+    self.assertIn("Test warning message", checker.warnings[0])
+    self.assertEqual(checker.errors, [])
+
+  def test_contains_and_access_map_warnings(self):
+    # 1. Immutable read via if map.contains(k) { ... map[k] ... } -> suggests 'if let'
+    c1 = self._check("""
+    func lookup(m: [String: int], k: String): int {
+      if m.contains(k) {
+        return m[k];
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(len(c1.warnings), 1)
+    self.assertIn("if let v ?= <map>.get(<key>)", c1.warnings[0])
+
+    # 2. Short-circuit && in if condition: if m.contains(k) && m[k] > 0
+    c2 = self._check("""
+    func positive(m: [String: int], k: String): bool {
+      if m.contains(k) && m[k] > 0 {
+        return true;
+      }
+      return false;
+    }
+    """)
+    self.assertEqual(len(c2.warnings), 1)
+    self.assertIn("if let v ?= <map>.get(<key>)", c2.warnings[0])
+
+    # 3. Mutable in-place mutation via if m.contains(k) { m[k].push(1); } -> suggests 'if var'
+    c3 = self._check("""
+    func append_val(var m: [String: [int]], k: String) {
+      if m.contains(k) {
+        m[k].push(1);
+      }
+    }
+    """)
+    self.assertEqual(len(c3.warnings), 1)
+    self.assertIn("if var v ?= <map>.get(<key>)", c3.warnings[0])
+
+    # 4. Guard statement: guard m.contains(k) else { return; } followed by m[k].push(1)
+    c4 = self._check("""
+    func guard_append(var m: [String: [int]], k: String) {
+      guard m.contains(k) else { return; }
+      m[k].push(1);
+    }
+    """)
+    self.assertEqual(len(c4.warnings), 1)
+    self.assertIn("guard var v ?= <map>.get(<key>) else { ... }", c4.warnings[0])
+
+    # 5. Negative: Array.contains(val) + arr[i] must NOT warn
+    c5 = self._check("""
+    func arr_check(arr: [int], v: int, i: int): int {
+      if arr.contains(v) {
+        return arr[i];
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(c5.warnings, [])
+
+    # 6. Negative: Direct overwrite m[k] = val must NOT warn
+    c6 = self._check("""
+    func overwrite(var m: [String: int], k: String) {
+      if m.contains(k) {
+        m[k] = 42;
+      }
+    }
+    """)
+    self.assertEqual(c6.warnings, [])
+
+    # 7. Negative: Structural mutation on map (m.remove(k)) in same block must NOT warn
+    c7 = self._check("""
+    func pop_entry(var m: [String: int], k: String): int {
+      if m.contains(k) {
+        let val = m[k];
+        m.remove(k);
+        return val;
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(c7.warnings, [])
+
+    # 8. Negative: Single-lookup if let / if var .get(k) must NOT warn
+    c8 = self._check("""
+    func single_lookup(var m: [String: [int]], k: String): int {
+      if var arr ?= m.get(k) {
+        arr.push(1);
+      }
+      if let arr ?= m.get(k) {
+        return arr.size();
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(c8.warnings, [])
 
 
 if __name__ == "__main__":

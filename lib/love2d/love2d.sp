@@ -3,6 +3,7 @@
 import lib.love2d.enums;
 import lib.love2d.event;
 import lib.love2d.graphics;
+import lib.love2d.joystick;
 import lib.love2d.keyboard;
 import lib.love2d.mouse;
 import lib.love2d.timer;

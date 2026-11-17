@@ -316,6 +316,88 @@ class SemanticParityTest(unittest.TestCase):
     self.assertEqual(py_val, 23)
     self.assertEqual(lua_val, 23)
 
+  def test_guard_var_in_place_mutation_and_nll_unfreeze(self):
+    """Verifies guard var mutates in-place and unfreezes after last use."""
+    code = """
+    struct Enemy {
+      var x: int = 0;
+    }
+    impl Enemy {
+      var func step(nx: int) {
+        self.x = nx;
+      }
+    }
+    struct Controller {
+      var active_enemy: Enemy? = none;
+      var turn_cleared: bool = false;
+    }
+    impl Controller {
+      var func clear_turn() {
+        self.turn_cleared = true;
+      }
+      var func set_enemy(target: Enemy?) {
+        self.active_enemy = target;
+      }
+      var func advance_and_read(): int {
+        guard var e ?= self.active_enemy else {
+          return -1;
+        }
+        e.step(7);
+        self.clear_turn();
+        if let updated ?= self.active_enemy {
+          let res = updated.x;
+          self.set_enemy(none);
+          return res;
+        }
+        return -2;
+      }
+    }
+    @test
+    func test_guard_var_nll(): int {
+      var ctrl = Controller { active_enemy = Enemy { x = 1 } };
+      let res = ctrl.advance_and_read();
+      if ctrl.turn_cleared && ctrl.active_enemy == none {
+        return res;
+      }
+      return -3;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_guard_var_nll")
+    self.assertEqual(py_val, 7)
+    self.assertEqual(lua_val, 7)
+
+  def test_container_get_mutable_unwrap_writeback_parity(self):
+    """Verifies if var / guard var on map.get() and arr.get() mutate in-place."""
+    code = """
+    @test
+    func test_container_get_unwrap(): int {
+      var counts: [String: int] = {"hits": 4};
+      if var count ?= counts.get("hits") {
+        count += 3;
+      }
+
+      var grid: [int: [int: bool]] = {2: {3: true, 4: true}};
+      guard var row ?= grid.get(2) else {
+        return -1;
+      }
+      row.remove(3);
+
+      var nums: [int] = [10, 20];
+      if var n ?= nums.get(1) {
+        n = 25;
+      }
+
+      let has_3 = grid[2].contains(3);
+      if !has_3 {
+        return counts["hits"] + nums[1];
+      }
+      return -2;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_container_get_unwrap")
+    self.assertEqual(py_val, 32)
+    self.assertEqual(lua_val, 32)
+
 
 if __name__ == "__main__":
   unittest.main()

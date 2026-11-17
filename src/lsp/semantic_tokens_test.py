@@ -441,7 +441,7 @@ class TestSemanticTokens(unittest.TestCase):
       return none;
     }
 
-    func check_headers(opt_int: int?) {
+    func check_headers(var opt_int: int?) {
       let root = SharedRef(DagNode { label = "root", parent = none });
       let leaf = SharedRef(DagNode {
         label = "leaf",

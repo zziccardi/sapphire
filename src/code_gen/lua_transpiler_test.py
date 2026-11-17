@@ -1018,6 +1018,22 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("else", output)
     self.assertIn("_match_res_", output)
 
+  def test_lua_multi_pattern_match(self):
+    """Verifies Lua transpilation for comma-separated multi-pattern match arms."""
+    code = """
+    func map_key(k: String): String {
+      return match k {
+        "up", "w" -> "up",
+        "down", "s" -> "down",
+        ... -> "other",
+      };
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('or _subj_', output)
+    self.assertIn('== "w"', output)
+    self.assertIn('elseif _subj_', output)
+
     # Match in assignment statement
     assign_code = """
     func test_assign(n: int): int {

@@ -909,14 +909,16 @@ class ASTBuilder(SapphireVisitor):
     return MatchExprNode(subject, cases)
 
   def visitMatchCase(self, ctx: SapphireParser.MatchCaseContext) -> MatchCaseNode:
-    pattern = self.visit(ctx.matchPattern())
+    patterns = self.visit(ctx.matchPattern())
     if ctx.block():
       body = self.visit(ctx.block())
     else:
       body = self.visit(ctx.expression())
-    return MatchCaseNode(pattern, body)
+    return MatchCaseNode(patterns, body)
 
-  def visitMatchPattern(self, ctx: SapphireParser.MatchPatternContext) -> ASTNode:
+  def visitMatchPattern(
+      self, ctx: SapphireParser.MatchPatternContext
+  ) -> List[ASTNode]:
     if ctx.ELLIPSIS():
-      return EllipsisPatternNode()
-    return self.visit(ctx.expression())
+      return [EllipsisPatternNode()]
+    return [self.visit(expr_ctx) for expr_ctx in ctx.expression()]

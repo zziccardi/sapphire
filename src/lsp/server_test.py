@@ -2271,7 +2271,7 @@ func run() {
       self.assertIsNotNone(def_enum_type)
       self.assertTrue(def_enum_type.uri.startswith("file:///"))
       self.assertEqual(def_enum_type.uri, enums_uri)
-      self.assertEqual(def_enum_type.range.start.line, 11)  # line 12 in enums.sp: 'enum DrawMode {'
+      self.assertEqual(def_enum_type.range.start.line, 13)  # line 14 in enums.sp: 'enum DrawMode {'
 
   def test_hover_parameter_default_values(self):
     """Verifies that hover on functions/methods displays default values for parameters."""
@@ -2604,6 +2604,27 @@ func run_draw(x: float) {
       call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
       self.assertTrue(len(call_arg.diagnostics) > 0)
       self.assertIn("Cannot assign expression of type 'String' to variable 'x' of type 'int'", call_arg.diagnostics[0].message)
+
+  def test_lsp_publishes_semantic_warnings(self):
+    from lsprotocol.types import DiagnosticSeverity
+    from src.lsp.semantic_tokens import SemanticTokensTypeChecker
+
+    code = "func main() {}\n"
+    doc_uri = "file:///tmp/warn_test.sp"
+
+    orig_check = SemanticTokensTypeChecker.check
+
+    def check_with_warning(checker_self, program):
+      orig_check(checker_self, program)
+      checker_self.warning("Sample semantic warning", node=program.declarations[0])
+
+    with patch.object(SemanticTokensTypeChecker, "check", check_with_warning):
+      self.ls.text_document_publish_diagnostics.reset_mock()
+      validate_source(self.ls, doc_uri, code)
+      call_arg = self.ls.text_document_publish_diagnostics.call_args[0][0]
+      self.assertEqual(len(call_arg.diagnostics), 1)
+      self.assertEqual(call_arg.diagnostics[0].severity, DiagnosticSeverity.Warning)
+      self.assertEqual(call_arg.diagnostics[0].message, "Sample semantic warning")
 
 
 if __name__ == "__main__":

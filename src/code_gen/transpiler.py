@@ -49,6 +49,47 @@ def emit_runtime_module(output_dir: str, target: str = "python") -> str:
   return rt_path
 
 
+def _is_path_under(path: str, parent_dir: str) -> bool:
+  """Returns True if path is equal to or nested inside parent_dir."""
+  abs_path = os.path.abspath(path)
+  abs_parent = os.path.abspath(parent_dir)
+  try:
+    return os.path.commonpath([abs_parent, abs_path]) == abs_parent
+  except ValueError:
+    return False
+
+
+def is_stdlib_stub(
+    import_path: str, resolved_path: Optional[str] = None
+) -> bool:
+  """Returns True if an import refers to a hand-written stdlib runtime stub."""
+  if is_builtin_module(import_path) or import_path.startswith("std."):
+    return True
+  if not resolved_path:
+    return False
+  from src.semantics.module_resolver import find_sapphire_lib_dir
+
+  lib_dir = find_sapphire_lib_dir()
+  if not lib_dir:
+    return False
+  std_dir = os.path.join(lib_dir, "std")
+  if not _is_path_under(resolved_path, std_dir):
+    return False
+  stem = os.path.splitext(os.path.abspath(resolved_path))[0]
+  return os.path.exists(stem + ".lua") or os.path.exists(stem + ".py")
+
+
+def _is_prebuilt_lib_module(resolved_path: str, ext: str) -> bool:
+  """Returns True if resolved_path is under Sapphire lib/ with a prebuilt output."""
+  from src.semantics.module_resolver import find_sapphire_lib_dir
+
+  lib_dir = find_sapphire_lib_dir()
+  if not lib_dir or not _is_path_under(resolved_path, lib_dir):
+    return False
+  stem = os.path.splitext(os.path.abspath(resolved_path))[0]
+  return os.path.exists(stem + ext)
+
+
 def transpile_file(
     input_file: str,
     output_file: Optional[str] = None,
@@ -60,6 +101,7 @@ def transpile_file(
     quiet: bool = False,
     raise_on_error: bool = True,
     use_runtime_module: bool = False,
+    _output_root: Optional[str] = None,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).
 
@@ -86,6 +128,13 @@ def transpile_file(
 
   target_info = TranspilerRegistry.get(target)
   ext = target_info.default_extension
+
+  isolated_root = _output_root
+  if isolated_root is None and output_file is not None:
+    input_dir = os.path.dirname(abs_input_file)
+    output_dir = os.path.dirname(os.path.abspath(output_file))
+    if not _is_path_under(output_dir, input_dir):
+      isolated_root = output_dir
 
   if not output_file:
     base_name = os.path.splitext(input_file)[0]
@@ -141,7 +190,11 @@ def transpile_file(
   checker = TypeChecker(source_file_path=input_file, source_content=str(input_stream))
   try:
     checker.check(ast)
+    if checker.warnings and not quiet:
+      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
   except SemanticError as e:
+    if checker.warnings and not quiet:
+      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
     if raise_on_error:
       raise e
     if not quiet:  # pragma: no cover
@@ -152,12 +205,30 @@ def transpile_file(
   from src.semantics.module_resolver import resolve_module_path
 
   for imp in getattr(ast, "imports", []):
-    if is_builtin_module(imp.path):
-      continue
     sub_source = resolve_module_path(imp.path, source_file_path=input_file)
+    if is_stdlib_stub(imp.path, sub_source):
+      continue
     if sub_source:
-      sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(sub_source, sub_output, target=target, visited=visited, sourcemap=sourcemap, test_mode=test_mode, dev_mode=dev_mode, quiet=quiet, raise_on_error=raise_on_error, use_runtime_module=use_runtime_module)
+      if isolated_root is not None:
+        if _is_prebuilt_lib_module(sub_source, ext):
+          continue
+        sub_output = os.path.join(isolated_root, *imp.path.split(".")) + ext
+        os.makedirs(os.path.dirname(sub_output), exist_ok=True)
+      else:
+        sub_output = os.path.splitext(sub_source)[0] + ext
+      transpile_file(
+          sub_source,
+          sub_output,
+          target=target,
+          visited=visited,
+          sourcemap=sourcemap,
+          test_mode=test_mode,
+          dev_mode=dev_mode,
+          quiet=quiet,
+          raise_on_error=raise_on_error,
+          use_runtime_module=use_runtime_module,
+          _output_root=isolated_root,
+      )
 
   # 6. Transpile via TranspilerRegistry
   sm_builder = None

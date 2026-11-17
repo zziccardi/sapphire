@@ -58,9 +58,19 @@ trait Graphics {
                         sx: float = 1.0, sy: float = 1.0);
 
   @export("draw")
+  static func drawImageAt(image: Image,
+                          x: float = 0.0, y: float = 0.0, r: float = 0.0,
+                          sx: float = 1.0, sy: float = 1.0);
+
+  @export("draw")
   static func drawCanvas(canvas: Canvas, quad: Quad? = none,
                          x: float = 0.0, y: float = 0.0, r: float = 0.0,
                          sx: float = 1.0, sy: float = 1.0);
+
+  @export("draw")
+  static func drawCanvasAt(canvas: Canvas,
+                           x: float = 0.0, y: float = 0.0, r: float = 0.0,
+                           sx: float = 1.0, sy: float = 1.0);
 
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);

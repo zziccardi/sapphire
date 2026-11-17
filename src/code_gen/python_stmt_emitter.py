@@ -11,6 +11,8 @@ class PythonStmtMixin:
   """Provides statement and control-flow AST emission for Python."""
 
   def visit_BlockNode(self, node: BlockNode) -> None:
+    prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+    self._unwrap_writebacks = dict(prev_wb)
     self.destructor_stack.append([])
     if getattr(node, "_block_destructibles", None):
       for d_var in node._block_destructibles:
@@ -31,6 +33,7 @@ class PythonStmtMixin:
     for var_name in current_destructors:
       self.moved_vars.discard(var_name)
       self._var_branch_depth.pop(var_name, None)
+    self._unwrap_writebacks = prev_wb
 
   def _emit_lifted_lambda(self, node: LambdaNode) -> str:
     self._temp_lambda_count = getattr(self, "_temp_lambda_count", 0) + 1
@@ -213,6 +216,12 @@ class PythonStmtMixin:
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+      wb_map = getattr(self, "_unwrap_writebacks", {})
+      for target in node.targets:
+        if isinstance(target, IdentifierNode) and target.name in wb_map:
+          wb_recv, wb_key, _ = wb_map[target.name]
+          self.newline()
+          self.emit(f"{wb_recv}[{wb_key}] = {self._mangle_name(target.name)}")
     else:
       if isinstance(node.target, IdentifierNode):
         self.moved_vars.discard(self._mangle_name(node.target.name))
@@ -225,6 +234,13 @@ class PythonStmtMixin:
         self.visit(node.target)
       self.emit(f" {node.op} ")
       self.visit(node.expr)
+      wb_map = getattr(self, "_unwrap_writebacks", {})
+      if isinstance(node.target, IdentifierNode) and node.target.name in wb_map:
+        wb_recv, wb_key, _ = wb_map[node.target.name]
+        self.newline()
+        self.emit(
+            f"{wb_recv}[{wb_key}] = {self._mangle_name(node.target.name)}"
+        )
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
@@ -303,11 +319,17 @@ class PythonStmtMixin:
 
     for case in node.cases:
       self.newline()
-      if isinstance(case.pattern, EllipsisPatternNode):
+      if len(case.patterns) == 1 and isinstance(case.patterns[0], EllipsisPatternNode):
         self.emit("case _:")
       else:
         self.emit("case ")
-        self.visit(case.pattern)
+        for p_idx, pat in enumerate(case.patterns):
+          if p_idx > 0:
+            self.emit(" | ")
+          if isinstance(pat, EllipsisPatternNode):
+            self.emit("_")
+          else:
+            self.visit(pat)
         self.emit(":")
 
       self.indent()
@@ -406,8 +428,28 @@ class PythonStmtMixin:
       self.newline()
       if binding.is_unwrap:
         val_var = f"_val_{let_name}"
-        self.emit(f"{val_var} = ")
-        self.visit(binding.expr)
+        wb_entry = None
+        if hasattr(binding, "_writeback_container"):
+          recv_expr, key_expr, is_arr = binding._writeback_container
+          self._temp_wb_count = getattr(self, "_temp_wb_count", 0) + 1
+          wb_recv = f"_wb_recv_{self._temp_wb_count}"
+          wb_key = f"_wb_key_{self._temp_wb_count}"
+          self.emit(f"{wb_recv} = ")
+          self.visit(recv_expr)
+          self.newline()
+          self.emit(f"{wb_key} = ")
+          self.visit(key_expr)
+          self.newline()
+          slot_expr = (
+              f"_sapphire_array_get({wb_recv}, {wb_key})"
+              if is_arr
+              else f"{wb_recv}.get({wb_key})"
+          )
+          self.emit(f"{val_var} = {slot_expr}")
+          wb_entry = (wb_recv, wb_key, is_arr)
+        else:
+          self.emit(f"{val_var} = ")
+          self.visit(binding.expr)
         self.newline()
 
         # Map identifier to temporary variable during condition check
@@ -444,7 +486,17 @@ class PythonStmtMixin:
             if not hasattr(node.then_block, "_block_destructibles"):
               node.then_block._block_destructibles = []
             node.then_block._block_destructibles.append(name)
-        self._visit_in_branch(node.then_block)
+        if wb_entry:
+          if not hasattr(self, "_unwrap_writebacks"):
+            self._unwrap_writebacks = {}
+          prev_wb = self._unwrap_writebacks.copy()
+          self._unwrap_writebacks[let_name] = wb_entry
+          try:
+            self._visit_in_branch(node.then_block)
+          finally:
+            self._unwrap_writebacks = prev_wb
+        else:
+          self._visit_in_branch(node.then_block)
         self.dedent()
       else:
         # Standard bind + condition
@@ -635,8 +687,28 @@ class PythonStmtMixin:
         self._temp_guard_count = getattr(self, "_temp_guard_count", 0) + 1
         tmp_var = f"_guard_val_{self._temp_guard_count}"
 
-        self.emit(f"{tmp_var} = ")
-        self.visit(binding.expr)
+        wb_entry = None
+        if hasattr(binding, "_writeback_container"):
+          recv_expr, key_expr, is_arr = binding._writeback_container
+          self._temp_wb_count = getattr(self, "_temp_wb_count", 0) + 1
+          wb_recv = f"_wb_recv_{self._temp_wb_count}"
+          wb_key = f"_wb_key_{self._temp_wb_count}"
+          self.emit(f"{wb_recv} = ")
+          self.visit(recv_expr)
+          self.newline()
+          self.emit(f"{wb_key} = ")
+          self.visit(key_expr)
+          self.newline()
+          slot_expr = (
+              f"_sapphire_array_get({wb_recv}, {wb_key})"
+              if is_arr
+              else f"{wb_recv}.get({wb_key})"
+          )
+          self.emit(f"{tmp_var} = {slot_expr}")
+          wb_entry = (wb_recv, wb_key, is_arr)
+        else:
+          self.emit(f"{tmp_var} = ")
+          self.visit(binding.expr)
         self.newline()
 
         if binding.is_unwrap:
@@ -653,6 +725,10 @@ class PythonStmtMixin:
               self.newline()
         else:
           self.emit(f"{self._mangle_name(binding.let_name)} = {tmp_var}")
+        if wb_entry:
+          if not hasattr(self, "_unwrap_writebacks"):
+            self._unwrap_writebacks = {}
+          self._unwrap_writebacks[binding.let_name] = wb_entry
       elif clause.condition:
         self._lift_match_expressions(clause.condition)
         self.emit("if not (")
