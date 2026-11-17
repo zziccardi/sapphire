@@ -1104,13 +1104,7 @@ class CallVisitorMixin:
       mod_sym = self.symbol_table.lookup(expr.receiver.name)
       if isinstance(mod_sym, ModuleSymbol):
         exp_sym = mod_sym.lookup_export(expr.member)
-        if isinstance(exp_sym, StructSymbol):
-          return True
-        return (
-            exp_sym is not None
-            and not isinstance(exp_sym, VariableSymbol)
-            and isinstance(getattr(exp_sym, "symbol_type", exp_sym), StructType)
-        )
+        return isinstance(exp_sym, (StructSymbol, StructType))
     return False
 
   def _resolve_struct_type_member_access(

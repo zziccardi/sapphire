@@ -7753,6 +7753,47 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Cannot access instance field 'x' on type 'Base'", str(ctx.exception))
 
+  def test_module_exported_struct_constant_field_access(self):
+    """Verifies chained field access on exported module struct values."""
+    from src.semantics.symbol_table import ModuleSymbol, Symbol, StructSymbol
+
+    stats_struct = StructType("Stats")
+    stats_struct.fields["hp"] = StructField(
+        "hp", PrimitiveType("int"), is_mutable=False
+    )
+    unit_struct = StructType("Unit")
+    unit_struct.fields["stats"] = StructField(
+        "stats", stats_struct, is_mutable=False
+    )
+    mod_sym = ModuleSymbol("units", "units.sp")
+    mod_sym.exports["Unit"] = StructSymbol("Unit", unit_struct)
+    mod_sym.exports["ELENA_UNIT"] = Symbol("ELENA_UNIT", unit_struct)
+
+    code = """
+    func read_hp(): int {
+      return units.ELENA_UNIT.stats.hp;
+    }
+    """
+    stream = CommonTokenStream(SapphireLexer(InputStream(code)))
+    ast = ASTBuilder().visit(SapphireParser(stream).program())
+    checker = TypeChecker()
+    checker.symbol_table.define("units", mod_sym)
+    checker.check(ast)
+
+    bad_code = """
+    func bad(): Stats {
+      return units.Unit.stats;
+    }
+    """
+    bad_stream = CommonTokenStream(SapphireLexer(InputStream(bad_code)))
+    bad_ast = ASTBuilder().visit(SapphireParser(bad_stream).program())
+    bad_checker = TypeChecker()
+    bad_checker.symbol_table.define("units", mod_sym)
+    with self.assertRaises(SemanticError) as ctx:
+      bad_checker.check(bad_ast)
+    self.assertIn("Cannot access instance field 'stats' on type 'Unit'",
+                  str(ctx.exception))
+
   def test_semantic_errors_include_source_locations(self):
     """Verifies that call/index semantic errors include line and column."""
     code_non_callable = "func main() {\n  let x = 1;\n  x();\n}\n"
