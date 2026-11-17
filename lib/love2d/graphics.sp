@@ -72,6 +72,8 @@ trait Graphics {
                            x: float = 0.0, y: float = 0.0, r: float = 0.0,
                            sx: float = 1.0, sy: float = 1.0);
 
+  static func getColor(): float, float, float, float;
+
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);
 

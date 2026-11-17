@@ -8326,5 +8326,23 @@ class TestTypeChecker(unittest.TestCase):
     """)
     self.assertEqual(c2.warnings, [])
 
+  def test_subscript_mutating_method_call(self):
+    self._check("""
+    struct Item {
+      var x: int = 0;
+    }
+    impl Item {
+      var func inc() {
+        self.x += 1;
+      }
+    }
+    func main() {
+      var arr = [Item { x = 1 }];
+      arr[0].inc();
+      var m = {"a": Item { x = 1 }};
+      m["a"].inc();
+    }
+    """)
+
 if __name__ == "__main__":
   unittest.main()
