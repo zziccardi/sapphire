@@ -508,6 +508,7 @@ class SapphireCLITest(unittest.TestCase):
     self.assertTrue(any("lib" in p for p in pythonpath.split(os.pathsep)))
     luapath = env["LUA_PATH"]
     self.assertTrue("?.lua" in luapath)
+    self.assertNotIn(os.path.join("std", "?.lua"), luapath)
 
   def test_prepare_exec_env_preserves_custom_paths(self):
     custom_py = "/custom/python/path"
