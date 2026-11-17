@@ -269,6 +269,23 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
             source="sapphire-semantics",
         )
     )
+  for warn in getattr(checker, "lsp_warnings", []):
+    start_pos = Position(
+        line=warn["range"]["start"]["line"],
+        character=warn["range"]["start"]["character"],
+    )
+    end_pos = Position(
+        line=warn["range"]["end"]["line"],
+        character=warn["range"]["end"]["character"],
+    )
+    diagnostics.append(
+        Diagnostic(
+            range=Range(start=start_pos, end=end_pos),
+            message=warn["message"],
+            severity=DiagnosticSeverity.Warning,
+            source="sapphire-semantics",
+        )
+    )
 
   ls.text_document_publish_diagnostics(
       PublishDiagnosticsParams(uri=doc_uri, diagnostics=diagnostics)

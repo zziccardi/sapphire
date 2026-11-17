@@ -190,7 +190,11 @@ def transpile_file(
   checker = TypeChecker(source_file_path=input_file, source_content=str(input_stream))
   try:
     checker.check(ast)
+    if checker.warnings and not quiet:
+      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
   except SemanticError as e:
+    if checker.warnings and not quiet:
+      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
     if raise_on_error:
       raise e
     if not quiet:  # pragma: no cover

@@ -108,6 +108,7 @@ class SemanticTokensTypeChecker(TypeChecker):
     self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
     self.current_node: Optional[ASTNode] = None
     self.lsp_errors: List[dict] = []
+    self.lsp_warnings: List[dict] = []
     self.node_types: dict = self.context.node_types
     self.current_trait: Optional[Any] = None
     self._in_monomorphization: bool = False
@@ -146,8 +147,9 @@ class SemanticTokensTypeChecker(TypeChecker):
       self.node_types[node] = res
     return res
 
-  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
-    # Use position from node or current_node if available
+  def _build_lsp_diagnostic(
+      self, message: str, severity: int, node: Optional[ASTNode] = None
+  ) -> Tuple[Optional[ASTNode], dict]:
     target_node = node or self.current_node
     line = 1
     col = 0
@@ -160,17 +162,25 @@ class SemanticTokensTypeChecker(TypeChecker):
       if getattr(target_node, "length", None) is not None:
         length = target_node.length
 
-    diagnostic = {
+    return target_node, {
         "range": {
             "start": {"line": line - 1, "character": col},
             "end": {"line": line - 1, "character": col + length},
         },
         "message": message,
-        "severity": 1,  # Error
+        "severity": severity,
         "source": "sapphire-semantic",
     }
+
+  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
+    target_node, diagnostic = self._build_lsp_diagnostic(message, 1, node)
     self.lsp_errors.append(diagnostic)
     super().error(message, node=target_node)
+
+  def warning(self, message: str, node: Optional[ASTNode] = None) -> None:
+    target_node, diagnostic = self._build_lsp_diagnostic(message, 2, node)
+    self.lsp_warnings.append(diagnostic)
+    super().warning(message, node=target_node)
 
   def add_token(self, line: Optional[int], col: Optional[int], length: Optional[int], token_type: str, modifiers: int = 0) -> None:
     """Adds a raw semantic token if the positioning info is valid."""
@@ -610,7 +620,7 @@ def find_node_at_position(node: ASTNode, line: int, col: int) -> Optional[ASTNod
 
     # Recursively check children for a tighter match
     for key, value in node.__dict__.items():
-      if key in ("current_node", "lsp_errors", "raw_tokens", "node_types"):
+      if key in ("current_node", "lsp_errors", "lsp_warnings", "raw_tokens", "node_types"):
         continue
       if isinstance(value, ASTNode):
         found = find_node_at_position(value, line, col)

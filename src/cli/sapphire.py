@@ -378,8 +378,12 @@ def check_command(args):
   checker = TypeChecker(source_file_path=source_file, source_content=str(input_stream))
   try:
     checker.check(ast)
+    if checker.warnings:
+      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
     print("\nSemantic Analysis completed successfully with 0 errors!")
   except SemanticError as e:
+    if checker.warnings:
+      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
     print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
     sys.exit(1)
 

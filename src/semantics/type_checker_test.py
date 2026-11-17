@@ -8156,6 +8156,13 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError):
       self._check(code_non_exhaustive)
 
+  def test_semantic_warning_does_not_raise(self):
+    checker = self._check("func main() {}")
+    checker.warning("Test warning message")
+    self.assertEqual(len(checker.warnings), 1)
+    self.assertIn("Test warning message", checker.warnings[0])
+    self.assertEqual(checker.errors, [])
+
 
 if __name__ == "__main__":
   unittest.main()

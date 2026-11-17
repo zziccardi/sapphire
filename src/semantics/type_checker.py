@@ -69,6 +69,7 @@ class TypeChecker(
     self.context = SemanticContext(symbol_table=self.symbol_table)
     self.node_types: Dict[ASTNode, Type] = self.context.node_types
     self.errors: List[str] = []
+    self.warnings: List[str] = []
     self.source_file_path: Optional[str] = source_file_path
     self.source_content: Optional[Any] = source_content
     self.current_function: Optional[FunctionType] = None
@@ -257,16 +258,18 @@ class TypeChecker(
       return
     self._check_value_ownership_transfer(ret_expr, ret_type, node=diag_node)
 
-  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
-    """Logs a semantic error."""
+  def _format_diagnostic_entry(
+      self, error_type: str, message: str, node: Optional[ASTNode] = None
+  ) -> str:
+    """Formats a diagnostic string for an error or warning."""
     diag_node = node if node is not None else getattr(self, "_current_node", None)
     line = getattr(diag_node, "start_line", None) if diag_node else None
     column = getattr(diag_node, "start_column", None) if diag_node else None
     length = getattr(diag_node, "length", None) if diag_node else None
 
     if line or self.source_file_path or self.source_content:
-      diag = format_diagnostic(
-          error_type="Semantic Error",
+      return format_diagnostic(
+          error_type=error_type,
           message=message,
           file_path=self.source_file_path,
           line=line,
@@ -274,9 +277,15 @@ class TypeChecker(
           length=length,
           source_content=self.source_content,
       )
-      self.errors.append(diag)
-    else:
-      self.errors.append(message)
+    return message
+
+  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
+    """Logs a semantic error."""
+    self.errors.append(self._format_diagnostic_entry("Semantic Error", message, node))
+
+  def warning(self, message: str, node: Optional[ASTNode] = None) -> None:
+    """Logs a non-fatal semantic warning."""
+    self.warnings.append(self._format_diagnostic_entry("Warning", message, node))
 
   def check(self, program: ProgramNode) -> None:
     """Executes semantic analysis on the program."""
