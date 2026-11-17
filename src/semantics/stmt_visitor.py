@@ -40,6 +40,7 @@ from src.semantics.arena_checker import ArenaChecker
 from src.semantics.collection_checker import CollectionChecker
 from src.semantics.declaration_pass import DeclarationPass
 from src.semantics.generics_checker import GenericsChecker
+from src.semantics.lints import check_guard_contains_access, check_if_contains_access
 from src.semantics.semantic_context import SemanticContext
 from src.semantics.struct_layout_pass import StructLayoutPass
 
@@ -759,6 +760,7 @@ class StmtVisitorMixin:
             self.symbol_table.exit_scope()
         else:
           self.visit(node.then_block)
+        check_if_contains_access(self, node)
         then_moved = set(self.moved_symbols)
 
         if node.else_block:
@@ -787,6 +789,7 @@ class StmtVisitorMixin:
       self._branch_depth += 1
       try:
         self._visit_block_with_terminating_unfreeze(node.then_block)
+        check_if_contains_access(self, node)
         then_moved = set(self.moved_symbols)
 
         if node.else_block:
@@ -1075,6 +1078,9 @@ class StmtVisitorMixin:
               and freeze_entry in active_scope.frozen_lvalues
           ):
             active_scope.frozen_lvalues.remove(freeze_entry)
+      for s_idx, stmt in enumerate(stmts):
+        if isinstance(stmt, GuardStmtNode):
+          check_guard_contains_access(self, stmt, stmts[s_idx + 1 :])
     finally:
       if pushed_count > 0:
         del self._active_unwrap_freezes[

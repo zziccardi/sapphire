@@ -8163,6 +8163,100 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Test warning message", checker.warnings[0])
     self.assertEqual(checker.errors, [])
 
+  def test_contains_and_access_map_warnings(self):
+    # 1. Immutable read via if map.contains(k) { ... map[k] ... } -> suggests 'if let'
+    c1 = self._check("""
+    func lookup(m: [String: int], k: String): int {
+      if m.contains(k) {
+        return m[k];
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(len(c1.warnings), 1)
+    self.assertIn("if let v ?= <map>.get(<key>)", c1.warnings[0])
+
+    # 2. Short-circuit && in if condition: if m.contains(k) && m[k] > 0
+    c2 = self._check("""
+    func positive(m: [String: int], k: String): bool {
+      if m.contains(k) && m[k] > 0 {
+        return true;
+      }
+      return false;
+    }
+    """)
+    self.assertEqual(len(c2.warnings), 1)
+    self.assertIn("if let v ?= <map>.get(<key>)", c2.warnings[0])
+
+    # 3. Mutable in-place mutation via if m.contains(k) { m[k].push(1); } -> suggests 'if var'
+    c3 = self._check("""
+    func append_val(var m: [String: [int]], k: String) {
+      if m.contains(k) {
+        m[k].push(1);
+      }
+    }
+    """)
+    self.assertEqual(len(c3.warnings), 1)
+    self.assertIn("if var v ?= <map>.get(<key>)", c3.warnings[0])
+
+    # 4. Guard statement: guard m.contains(k) else { return; } followed by m[k].push(1)
+    c4 = self._check("""
+    func guard_append(var m: [String: [int]], k: String) {
+      guard m.contains(k) else { return; }
+      m[k].push(1);
+    }
+    """)
+    self.assertEqual(len(c4.warnings), 1)
+    self.assertIn("guard var v ?= <map>.get(<key>) else { ... }", c4.warnings[0])
+
+    # 5. Negative: Array.contains(val) + arr[i] must NOT warn
+    c5 = self._check("""
+    func arr_check(arr: [int], v: int, i: int): int {
+      if arr.contains(v) {
+        return arr[i];
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(c5.warnings, [])
+
+    # 6. Negative: Direct overwrite m[k] = val must NOT warn
+    c6 = self._check("""
+    func overwrite(var m: [String: int], k: String) {
+      if m.contains(k) {
+        m[k] = 42;
+      }
+    }
+    """)
+    self.assertEqual(c6.warnings, [])
+
+    # 7. Negative: Structural mutation on map (m.remove(k)) in same block must NOT warn
+    c7 = self._check("""
+    func pop_entry(var m: [String: int], k: String): int {
+      if m.contains(k) {
+        let val = m[k];
+        m.remove(k);
+        return val;
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(c7.warnings, [])
+
+    # 8. Negative: Single-lookup if let / if var .get(k) must NOT warn
+    c8 = self._check("""
+    func single_lookup(var m: [String: [int]], k: String): int {
+      if var arr ?= m.get(k) {
+        arr.push(1);
+      }
+      if let arr ?= m.get(k) {
+        return arr.size();
+      }
+      return 0;
+    }
+    """)
+    self.assertEqual(c8.warnings, [])
+
 
 if __name__ == "__main__":
   unittest.main()
