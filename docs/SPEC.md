@@ -365,15 +365,22 @@ if let active_target ?= target {
   freezes the source lvalue against reassignment or `move` for the duration of
   the binding's scope.
 * **In-place mutable unwrap (`if var ?=` / `guard var ?=`)**: Requires a
-  mutable source lvalue and binds an in-place mutable reference to the inner
+  mutable source lvalue (a variable, field, or direct index expression such as
+  `self.active_enemy`) and binds an in-place mutable reference to the inner
   payload. While the unwrapped `var` binding is live, the source optional
   path (and any overlapping prefix lvalue) is statically frozen against direct
   reassignment (`target = none;`), `move`, or conflicting borrows, preventing
-  dangling interior pointers. Field-disjoint mutations, `if var` mutations
-  occurring after the unwrapped binding's last use in the `then` block
+  dangling interior pointers. Field-disjoint mutations, `if var` / `guard var`
+  mutations occurring after the unwrapped binding's last use in the block
   (non-lexical lifetime unfreezing), and mutations inside terminating
   early-return branches that do not reference the unwrapped binding are
   permitted.
+  - Because `if var` / `guard var` bind in-place references, temporary rvalues
+    such as function calls or `map.get(k)` / `arr.get(i)` are rejected at
+    compile time (mutating a returned temporary would neither update the
+    container nor allow the borrow checker to freeze it). Use `if let` /
+    `guard let` for read-only `.get()` access, or `if map.contains(k) {
+    map[k].mutate(); }` for in-place container mutation.
 
 ### Optional chaining (`?.`)
 

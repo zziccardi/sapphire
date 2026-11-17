@@ -970,8 +970,11 @@ class StmtVisitorMixin:
     b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
     if not b_res:
       self.error(
-          "Mutable optional unwrap ('if var' / 'guard var') requires a mutable "
-          "lvalue; use 'if let' / 'guard let' for temporary or '.get()' values.",
+          "Mutable optional unwrap ('if var' / 'guard var') binds an in-place "
+          "reference and requires a mutable lvalue (temporaries like '.get()' "
+          "return values, not references). Use 'if let' / 'guard let' to read "
+          "temporaries, or 'if container.contains(k) { container[k]... }' to "
+          "mutate container entries in-place.",
           node=binding.expr,
       )
       return None
