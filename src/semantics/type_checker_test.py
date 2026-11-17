@@ -8257,6 +8257,43 @@ class TestTypeChecker(unittest.TestCase):
     """)
     self.assertEqual(c8.warnings, [])
 
+  def test_diagnostic_fix_it_hints(self):
+    """Verifies structured diagnostic codes and fix-it hints for common pitfalls."""
+    # 1. Struct up-casting
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct Parent { var x: int; }
+      struct Child: Parent { var y: int; }
+      func main() {
+        let c = Child { x = 1, y = 2 };
+        let p = c as Parent;
+      }
+      """)
+    self.assertIn("Hint: Struct up-casting is prohibited", str(ctx.exception))
+
+    # 2. Borrow escape
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Box { var x: int; }
+      func make_cb(): () -> int {
+        let b = Box { x = 5 };
+        return () -> int { return b.x; };
+      }
+      """)
+    self.assertIn("Hint: Escaping closures", str(ctx2.exception))
+
+    # 3. Frozen lvalue mutation
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func bad(var opt: [int]?) {
+        if var arr ?= opt {
+          opt = none;
+          arr.push(1);
+        }
+      }
+      """)
+    self.assertIn("Hint: Capture any needed state", str(ctx3.exception))
+
 
 if __name__ == "__main__":
   unittest.main()

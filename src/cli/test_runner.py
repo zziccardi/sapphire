@@ -1,13 +1,16 @@
 """Test discovery and execution engine for Sapphire (`sapphire test`)."""
 
+import contextlib
 import importlib.util
+import io
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 from antlr4 import FileStream, CommonTokenStream
 
@@ -806,11 +809,38 @@ end
 
 
 
+def _parse_test_output_lines(
+    output: str, sp_file: str
+) -> List[Dict[str, Any]]:
+  """Parses [ PASS ] / [ FAIL ] lines from captured test runner output."""
+  records: List[Dict[str, Any]] = []
+  current: Optional[Dict[str, Any]] = None
+  for raw_line in output.splitlines():
+    stripped = raw_line.strip()
+    if stripped.startswith("[ PASS ] "):
+      name = stripped[len("[ PASS ] "):]
+      current = {"status": "pass", "name": name, "file": sp_file}
+      records.append(current)
+    elif stripped.startswith("[ FAIL ] "):
+      name = stripped[len("[ FAIL ] "):]
+      current = {
+          "status": "fail",
+          "name": name,
+          "file": sp_file,
+          "details": [],
+      }
+      records.append(current)
+    elif current is not None and current["status"] == "fail" and stripped:
+      current["details"].append(stripped)
+  return records
+
+
 def run_tests(
     path: Any,
     target: str = "python",
     filter_pattern: Optional[str] = None,
     sourcemap: bool = True,
+    json_output: bool = False,
 ) -> int:
   """Main entry point for `sapphire test` command.
 
@@ -821,6 +851,22 @@ def run_tests(
   sp_files: List[str] = []
   seen_files = set()
   for p in paths:
+    if json_output and not os.path.exists(p):
+      print(
+          json.dumps(
+              {
+                  "ok": False,
+                  "target": target,
+                  "passed": 0,
+                  "failed": 1,
+                  "duration_sec": 0.0,
+                  "tests": [],
+                  "errors": [{"file": p, "message": f"Path '{p}' not found."}],
+              },
+              indent=2,
+          )
+      )
+      return 1
     for f in find_sp_files(p):
       norm = os.path.abspath(f)
       if norm not in seen_files:
@@ -828,49 +874,115 @@ def run_tests(
         sp_files.append(f)
   if not sp_files:  # pragma: no cover
     joined = ", ".join(paths)
-    print(f"No Sapphire (.sp) source files found in '{joined}'.", file=sys.stderr)
+    if json_output:
+      print(
+          json.dumps(
+              {
+                  "ok": False,
+                  "target": target,
+                  "passed": 0,
+                  "failed": 1,
+                  "duration_sec": 0.0,
+                  "tests": [],
+                  "errors": [
+                      {
+                          "file": joined,
+                          "message": f"No Sapphire (.sp) source files found in '{joined}'.",
+                      }
+                  ],
+              },
+              indent=2,
+          )
+      )
+    else:
+      print(f"No Sapphire (.sp) source files found in '{joined}'.", file=sys.stderr)
     return 1
 
   total_passed = 0
   total_failed = 0
   tests_found = 0
+  test_records: List[Dict[str, Any]] = []
+  file_errors: List[Dict[str, Any]] = []
   start_time = time.time()
 
-  print(f"Running Sapphire tests in target '{target}'...\n")
+  if not json_output:
+    print(f"Running Sapphire tests in target '{target}'...\n")
 
   for sp_file in sp_files:
     try:
       ast = parse_ast(sp_file)
       disc_warnings: List[str] = []
       standalone_tests, suite_tests = discover_tests(ast, warnings=disc_warnings)
-      for w in disc_warnings:
-        print(f"[ WARNING ] {os.path.basename(sp_file)}: {w}")
+      if not json_output:
+        for w in disc_warnings:
+          print(f"[ WARNING ] {os.path.basename(sp_file)}: {w}")
     except BaseException as e:  # pragma: no cover
-      print(f"[ FAIL ] {os.path.basename(sp_file)} (parsing failed)")
-      for line in str(e).splitlines():
-        print(f"  {line}")
+      if json_output:
+        file_errors.append({"file": sp_file, "message": str(e)})
+      else:
+        print(f"[ FAIL ] {os.path.basename(sp_file)} (parsing failed)")
+        for line in str(e).splitlines():
+          print(f"  {line}")
       total_failed += 1
       continue
 
     if not standalone_tests and not suite_tests:
-      if len(sp_files) == 1:
+      if len(sp_files) == 1 and not json_output:
         print(f"No tests found in '{sp_file}'.")
       continue
 
     tests_found += len(standalone_tests) + sum(len(m) for m in suite_tests.values())
 
-    if target.lower() in ("lua", "lua5.1"):
-      passed, failed, _ = run_tests_lua(sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap)
+    if json_output:
+      out_buf = io.StringIO()
+      err_buf = io.StringIO()
+      with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+        if target.lower() in ("lua", "lua5.1"):
+          passed, failed, errs = run_tests_lua(
+              sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap
+          )
+        else:
+          passed, failed, errs = run_tests_python(
+              sp_file, standalone_tests, suite_tests, filter_pattern
+          )
       total_passed += passed
       total_failed += failed
+      test_records.extend(_parse_test_output_lines(out_buf.getvalue(), sp_file))
+      for err_msg in errs:
+        file_errors.append({"file": sp_file, "message": err_msg})
     else:
-      passed, failed, _ = run_tests_python(sp_file, standalone_tests, suite_tests, filter_pattern)
-      total_passed += passed
-      total_failed += failed
+      if target.lower() in ("lua", "lua5.1"):
+        passed, failed, _ = run_tests_lua(
+            sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap
+        )
+        total_passed += passed
+        total_failed += failed
+      else:
+        passed, failed, _ = run_tests_python(
+            sp_file, standalone_tests, suite_tests, filter_pattern
+        )
+        total_passed += passed
+        total_failed += failed
 
-  if len(sp_files) > 1 and tests_found == 0 and total_failed == 0:
+  if len(sp_files) > 1 and tests_found == 0 and total_failed == 0 and not json_output:
     print(f"No tests found in '{path}'.")
 
   duration = time.time() - start_time
-  print(f"\nTest Result: {total_passed} passed, {total_failed} failed in {duration:.2f}s")
+  if json_output:
+    print(
+        json.dumps(
+            {
+                "ok": total_failed == 0,
+                "target": target,
+                "passed": total_passed,
+                "failed": total_failed,
+                "duration_sec": round(duration, 3),
+                "tests": test_records,
+                "errors": file_errors,
+            },
+            indent=2,
+        )
+    )
+  else:
+    print(f"\nTest Result: {total_passed} passed, {total_failed} failed in {duration:.2f}s")
   return 1 if total_failed > 0 else 0

@@ -519,6 +519,53 @@ class SapphireCLITest(unittest.TestCase):
       self.assertIn(custom_py, env["PYTHONPATH"])
       self.assertIn(custom_lua, env["LUA_PATH"])
 
+  def test_check_subcommand_json_success_and_error(self):
+    from contextlib import redirect_stderr, redirect_stdout
+    import io
+    import json
+    test_args = ["sapphire", "check", self.sp_file, "--json"]
+    stdout_buf = io.StringIO()
+    with patch.object(sys, "argv", test_args):
+      with redirect_stdout(stdout_buf), redirect_stderr(io.StringIO()):
+        main()
+    data = json.loads(stdout_buf.getvalue())
+    self.assertTrue(data["ok"])
+    self.assertEqual(data["errors"], [])
+    self.assertIn(self.sp_file, data["files_checked"])
+
+    bad_sem = os.path.join(self.temp_dir.name, "bad_json_check.sp")
+    with open(bad_sem, "w", encoding="utf-8") as f:
+      f.write('let x: int = "hello";\n')
+    test_args_err = ["sapphire", "check", bad_sem, "--json"]
+    stdout_err = io.StringIO()
+    with patch.object(sys, "argv", test_args_err):
+      with redirect_stdout(stdout_err), redirect_stderr(io.StringIO()):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+    err_data = json.loads(stdout_err.getvalue())
+    self.assertFalse(err_data["ok"])
+    self.assertEqual(len(err_data["errors"]), 1)
+    self.assertEqual(err_data["errors"][0]["severity"], "error")
+    self.assertEqual(err_data["errors"][0]["file"], bad_sem)
+
+  def test_check_subcommand_target_lua_no_disk_emit(self):
+    from contextlib import redirect_stderr, redirect_stdout
+    import io
+    import json
+    lua_out = os.path.splitext(self.sp_file)[0] + ".lua"
+    if os.path.exists(lua_out):
+      os.remove(lua_out)
+    test_args = ["sapphire", "check", self.sp_file, "-t", "lua", "--json"]
+    stdout_buf = io.StringIO()
+    with patch.object(sys, "argv", test_args):
+      with redirect_stdout(stdout_buf), redirect_stderr(io.StringIO()):
+        main()
+    data = json.loads(stdout_buf.getvalue())
+    self.assertTrue(data["ok"])
+    self.assertFalse(os.path.exists(lua_out))
+
+
 
 if __name__ == "__main__":
   unittest.main()

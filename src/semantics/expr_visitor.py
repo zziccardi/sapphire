@@ -216,7 +216,19 @@ class ExprVisitorMixin:
         self.error(f"Cannot cast 'String' to '{target_type.name}' using 'as'. Use '.to_{target_type.name}()' instance method instead.")
         return target_type
 
-    self.error(f"Cannot cast type '{expr_type}' to '{target_type}'.")
+    if isinstance(expr_type, StructType) and isinstance(target_type, StructType):
+      self.error(
+          f"Cannot cast struct '{expr_type}' to '{target_type}'.",
+          node=node,
+          code="E_NO_STRUCT_UPCAST",
+          hint=(
+              "Struct up-casting is prohibited in Sapphire. Define a "
+              "behavioral 'trait' implemented by both structs for polymorphism."
+          ),
+      )
+      return target_type
+
+    self.error(f"Cannot cast type '{expr_type}' to '{target_type}'.", node=node)
     return target_type
 
   def visit_CloneNode(self, node: CloneNode) -> Type:

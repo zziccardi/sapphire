@@ -104,8 +104,14 @@ pipenv run sapphire parse samples/overview.sp
 # Parse source and dump AST in JSON format
 pipenv run sapphire dump-ast samples/overview.sp
 
-# Run semantic analysis and type checking without code generation
+# Run semantic analysis and type checking (including transitive imports):
 pipenv run sapphire check samples/overview.sp
+
+# Also validate target lowering (e.g. Lua) and emit structured JSON:
+pipenv run sapphire check samples/overview.sp -t lua --json
+
+# Check only the single file without traversing imported modules:
+pipenv run sapphire check samples/overview.sp --no-transitive
 ```
 
 ## Testing and verification

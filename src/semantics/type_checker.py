@@ -39,7 +39,7 @@ from src.semantics.symbol_table import (
     COROUTINE_METHODS,
     STRING_METHODS,
 )
-from src.cli.diagnostics import format_diagnostic
+from src.cli.diagnostics import Diagnostic, format_diagnostic
 from src.common.errors import SemanticError
 from src.semantics.arena_checker import ArenaChecker
 from src.semantics.collection_checker import CollectionChecker
@@ -70,6 +70,7 @@ class TypeChecker(
     self.node_types: Dict[ASTNode, Type] = self.context.node_types
     self.errors: List[str] = []
     self.warnings: List[str] = []
+    self.diagnostics: List[Diagnostic] = []
     self.source_file_path: Optional[str] = source_file_path
     self.source_content: Optional[Any] = source_content
     self.current_function: Optional[FunctionType] = None
@@ -258,8 +259,56 @@ class TypeChecker(
       return
     self._check_value_ownership_transfer(ret_expr, ret_type, node=diag_node)
 
+  def _infer_diagnostic_metadata(
+      self, message: str
+  ) -> Tuple[Optional[str], Optional[str]]:
+    """Infers default error code and fix-it hint for known error patterns."""
+    if (
+        "cannot escape to" in message
+        or "Cannot return closure" in message
+        or "Cannot return coroutine" in message
+        or "capturing local stack borrow" in message
+    ):
+      return (
+          "E_BORROW_ESCAPE",
+          "Escaping closures and stored coroutines cannot borrow local "
+          "non-primitives or 'var' bindings. Pass a behavioral 'trait' "
+          "adapter or yield data instead of borrowing 'var' state.",
+      )
+    return None, None
+
+  def _make_diagnostic(
+      self,
+      severity: str,
+      message: str,
+      node: Optional[ASTNode] = None,
+      hint: Optional[str] = None,
+      code: Optional[str] = None,
+  ) -> Diagnostic:
+    """Constructs a structured Diagnostic for an error or warning."""
+    diag_node = node if node is not None else getattr(self, "_current_node", None)
+    line = getattr(diag_node, "start_line", None) if diag_node else None
+    column = getattr(diag_node, "start_column", None) if diag_node else None
+    length = getattr(diag_node, "length", None) if diag_node else None
+    if hint is None and code is None and severity == "error":
+      code, hint = self._infer_diagnostic_metadata(message)
+    return Diagnostic(
+        severity=severity,
+        message=message,
+        file_path=self.source_file_path,
+        line=line,
+        column=column,
+        length=length,
+        hint=hint,
+        code=code,
+    )
+
   def _format_diagnostic_entry(
-      self, error_type: str, message: str, node: Optional[ASTNode] = None
+      self,
+      error_type: str,
+      message: str,
+      node: Optional[ASTNode] = None,
+      hint: Optional[str] = None,
   ) -> str:
     """Formats a diagnostic string for an error or warning."""
     diag_node = node if node is not None else getattr(self, "_current_node", None)
@@ -276,16 +325,47 @@ class TypeChecker(
           column=column,
           length=length,
           source_content=self.source_content,
+          hint=hint,
       )
+    if hint:
+      return f"{message}\n  Hint: {hint}"
     return message
 
-  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
+  def error(
+      self,
+      message: str,
+      node: Optional[ASTNode] = None,
+      hint: Optional[str] = None,
+      code: Optional[str] = None,
+  ) -> None:
     """Logs a semantic error."""
-    self.errors.append(self._format_diagnostic_entry("Semantic Error", message, node))
+    diag = self._make_diagnostic(
+        "error", message, node=node, hint=hint, code=code
+    )
+    self.diagnostics.append(diag)
+    self.errors.append(
+        self._format_diagnostic_entry(
+            "Semantic Error", message, node, hint=diag.hint
+        )
+    )
 
-  def warning(self, message: str, node: Optional[ASTNode] = None) -> None:
+  def warning(
+      self,
+      message: str,
+      node: Optional[ASTNode] = None,
+      hint: Optional[str] = None,
+      code: Optional[str] = None,
+  ) -> None:
     """Logs a non-fatal semantic warning."""
-    self.warnings.append(self._format_diagnostic_entry("Warning", message, node))
+    diag = self._make_diagnostic(
+        "warning", message, node=node, hint=hint, code=code
+    )
+    self.diagnostics.append(diag)
+    self.warnings.append(
+        self._format_diagnostic_entry(
+            "Warning", message, node, hint=diag.hint
+        )
+    )
 
   def check(self, program: ProgramNode) -> None:
     """Executes semantic analysis on the program."""

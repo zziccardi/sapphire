@@ -1,10 +1,10 @@
 """Centralized ANTLR error listener and syntax diagnostic formatter for Sapphire."""
 
 import sys
-from typing import Any, Optional
+from typing import Any, List, Optional
 from antlr4.error.ErrorListener import ErrorListener
 
-from src.cli.diagnostics import format_diagnostic
+from src.cli.diagnostics import Diagnostic, format_diagnostic
 
 
 def format_syntax_error_message(recognizer: Any, offendingSymbol: Any, msg: str) -> str:
@@ -58,6 +58,7 @@ class CustomErrorListener(ErrorListener):
     self.source_content = source_content
     self.quiet = quiet
     self.error_messages = []
+    self.diagnostics: List[Diagnostic] = []
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1
@@ -69,6 +70,17 @@ class CustomErrorListener(ErrorListener):
     )
     source_content = (
         str(self.source_content) if self.source_content is not None else None
+    )
+    self.diagnostics.append(
+        Diagnostic(
+            severity="error",
+            code="E_SYNTAX",
+            message=custom_msg,
+            file_path=self.file_path,
+            line=line,
+            column=column,
+            length=length,
+        )
     )
     diag = format_diagnostic(
         error_type="Syntax Error",

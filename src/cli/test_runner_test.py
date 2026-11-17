@@ -717,6 +717,36 @@ func test_env() {
         'path\\"with\\"quotes',
     )
 
+  def test_run_tests_json_output(self):
+    """Verifies run_tests(..., json_output=True) emits valid JSON."""
+    import io
+    import json
+    from contextlib import redirect_stdout
+    from src.cli.test_runner import run_tests
+
+    sp_path = os.path.join(self.temp_dir, "json_sample_test.sp")
+    with open(sp_path, "w", encoding="utf-8") as f:
+      f.write("""import std.testing;
+@test
+func test_pass_case() {
+  testing.expect_eq(2 + 2, 4);
+}
+@test
+func test_fail_case() {
+  testing.expect_eq(2 + 2, 5);
+}
+""")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+      exit_code = run_tests(sp_path, target="python", json_output=True)
+    self.assertEqual(exit_code, 1)
+    payload = json.loads(buf.getvalue())
+    self.assertFalse(payload["ok"])
+    self.assertEqual(payload["target"], "python")
+    self.assertEqual(payload["passed"], 1)
+    self.assertEqual(payload["failed"], 1)
+    self.assertEqual(len(payload["tests"]), 2)
+
 
 if __name__ == "__main__":
   unittest.main()
