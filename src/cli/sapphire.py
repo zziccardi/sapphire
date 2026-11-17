@@ -5,12 +5,13 @@ step (`run`).
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
 import subprocess
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 root_dir = os.path.abspath(os.path.join(src_dir, ".."))
@@ -20,13 +21,15 @@ if src_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, src_dir)
 
 from antlr4 import FileStream, CommonTokenStream
-from src.code_gen.transpiler import transpile_file
+from src.cli.diagnostics import Diagnostic
+from src.code_gen.transpiler import is_stdlib_stub, transpile_file
+from src.code_gen.transpiler_registry import TranspilerRegistry
 from src.common.errors import SapphireError
 from src.parser.ast_builder import ASTBuilder
 from src.parser.error_listener import CustomErrorListener
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.semantics.module_resolver import find_sapphire_lib_dir
+from src.semantics.module_resolver import find_sapphire_lib_dir, resolve_module_path
 from src.semantics.type_checker import TypeChecker, SemanticError
 
 TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
@@ -338,21 +341,42 @@ def dump_ast_command(args):
     print(ast_json)
 
 
-def check_command(args):
-  """Handles `check` subcommand: runs semantic analysis and type checking."""
-  source_file = args.source
-  if not os.path.exists(source_file):
-    print(f"Error: File '{source_file}' not found.", file=sys.stderr)
-    sys.exit(1)
+def _check_file_recursive(
+    file_path: str,
+    visited: Set[str],
+    files_checked: List[str],
+    error_diags: List[Diagnostic],
+    warning_diags: List[Diagnostic],
+    formatted_errors: List[str],
+    formatted_warnings: List[str],
+    target: Optional[str],
+    quiet: bool,
+    check_transitive: bool,
+    is_root: bool = False,
+) -> None:
+  """Checks a Sapphire file and optionally its transitive non-stdlib imports."""
+  abs_path = os.path.abspath(file_path)
+  if abs_path in visited:
+    return
+  visited.add(abs_path)
+  files_checked.append(file_path)
 
-  print(f"Reading source file: {source_file}...")
+  if is_root and not quiet:
+    print(f"Reading source file: {file_path}...")
+
   try:
-    input_stream = FileStream(source_file, encoding="utf-8")
+    input_stream = FileStream(file_path, encoding="utf-8")
   except Exception as e:  # pragma: no cover
-    print(f"Failed to read file: {e}", file=sys.stderr)
-    sys.exit(1)
+    msg = f"Failed to read file: {e}"
+    error_diags.append(
+        Diagnostic(severity="error", code="E_IO", message=msg, file_path=file_path)
+    )
+    formatted_errors.append(msg)
+    return
 
-  error_listener = CustomErrorListener(file_path=source_file, source_content=input_stream)
+  error_listener = CustomErrorListener(
+      file_path=file_path, source_content=input_stream, quiet=quiet
+  )
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
   lexer.addErrorListener(error_listener)
@@ -362,29 +386,165 @@ def check_command(args):
   parser.removeErrorListeners()
   parser.addErrorListener(error_listener)
 
-  print("Parsing program to Parse Tree...")
+  if is_root and not quiet:
+    print("Parsing program to Parse Tree...")
   tree = parser.program()
 
   if error_listener.errors > 0:
-    print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
-    sys.exit(1)
+    error_diags.extend(error_listener.diagnostics)
+    formatted_errors.extend(error_listener.error_messages)
+    return
 
-  print("Building AST...")
+  if is_root and not quiet:
+    print("Building AST...")
   builder = ASTBuilder()
   ast = builder.visit(tree)
 
-  print("Running Semantic Analysis & Type Checker...")
-  checker = TypeChecker(source_file_path=source_file, source_content=str(input_stream))
+  if check_transitive:
+    for imp in getattr(ast, "imports", []):
+      sub_source = resolve_module_path(imp.path, source_file_path=file_path)
+      if is_stdlib_stub(imp.path, sub_source):
+        continue
+      if sub_source:
+        _check_file_recursive(
+            sub_source,
+            visited,
+            files_checked,
+            error_diags,
+            warning_diags,
+            formatted_errors,
+            formatted_warnings,
+            target=target,
+            quiet=True,
+            check_transitive=True,
+            is_root=False,
+        )
+
+  if is_root and not quiet:
+    print("Running Semantic Analysis & Type Checker...")
+  checker = TypeChecker(
+      source_file_path=file_path, source_content=str(input_stream)
+  )
+  has_semantic_errors = False
   try:
     checker.check(ast)
-    if checker.warnings:
-      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
-    print("\nSemantic Analysis completed successfully with 0 errors!")
-  except SemanticError as e:
-    if checker.warnings:
-      print("\nWarnings:\n" + "\n".join(checker.warnings), file=sys.stderr)
-    print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
+  except SemanticError:
+    has_semantic_errors = True
+
+  for d in checker.diagnostics:
+    if d.severity == "warning":
+      warning_diags.append(d)
+    else:
+      error_diags.append(d)
+  formatted_warnings.extend(checker.warnings)
+  formatted_errors.extend(checker.errors)
+
+  if has_semantic_errors or not target:
+    return
+
+  # Optional in-memory target lowering validation (e.g. -t lua)
+  target_info = TranspilerRegistry.get(target)
+  src_filename = os.path.basename(file_path)
+  if target_info.name in ("lua", "love2d", "love"):
+    transpiler = target_info.factory(
+        source_file=src_filename,
+        source_map_builder=None,
+        test_mode=False,
+        dev_mode=False,
+        use_runtime_module=False,
+    )
+  else:
+    transpiler = target_info.factory(test_mode=False)
+
+  try:
+    transpiler.transpile(ast)
+  except Exception as e:
+    msg = f"Target '{target}' lowering failed: {e}"
+    error_diags.append(
+        Diagnostic(
+            severity="error",
+            code="E_TRANSPILE",
+            message=msg,
+            file_path=file_path,
+        )
+    )
+    formatted_errors.append(msg)
+
+
+def check_command(args):
+  """Handles `check` subcommand: runs semantic analysis and type checking."""
+  source_file = args.source
+  json_output = getattr(args, "json", False)
+  target = getattr(args, "target", None)
+  check_transitive = not getattr(args, "no_transitive", False)
+
+  if not os.path.exists(source_file):
+    msg = f"Error: File '{source_file}' not found."
+    if json_output:
+      diag = Diagnostic(
+          severity="error", code="E_FILE_NOT_FOUND", message=msg, file_path=source_file
+      )
+      print(
+          json.dumps(
+              {
+                  "ok": False,
+                  "files_checked": [],
+                  "errors": [diag.to_dict()],
+                  "warnings": [],
+              },
+              indent=2,
+          )
+      )
+    else:
+      print(msg, file=sys.stderr)
     sys.exit(1)
+
+  visited: Set[str] = set()
+  files_checked: List[str] = []
+  error_diags: List[Diagnostic] = []
+  warning_diags: List[Diagnostic] = []
+  formatted_errors: List[str] = []
+  formatted_warnings: List[str] = []
+
+  _check_file_recursive(
+      source_file,
+      visited=visited,
+      files_checked=files_checked,
+      error_diags=error_diags,
+      warning_diags=warning_diags,
+      formatted_errors=formatted_errors,
+      formatted_warnings=formatted_warnings,
+      target=target,
+      quiet=json_output,
+      check_transitive=check_transitive,
+      is_root=True,
+  )
+
+  if json_output:
+    payload = {
+        "ok": len(error_diags) == 0,
+        "files_checked": files_checked,
+        "errors": [d.to_dict() for d in error_diags],
+        "warnings": [d.to_dict() for d in warning_diags],
+    }
+    print(json.dumps(payload, indent=2))
+    if error_diags:
+      sys.exit(1)
+    return
+
+  if formatted_warnings:
+    print("\nWarnings:\n" + "\n".join(formatted_warnings), file=sys.stderr)
+
+  if error_diags:
+    if formatted_errors:
+      print(
+          "\nSemantic Analysis failed with errors:\n"
+          + "\n".join(formatted_errors),
+          file=sys.stderr,
+      )
+    sys.exit(1)
+
+  print("\nSemantic Analysis completed successfully with 0 errors!")
 
 
 def test_command(args):
@@ -395,7 +555,14 @@ def test_command(args):
   source_paths = getattr(args, "source", ["."]) or ["."]
   filter_pattern = getattr(args, "filter", None)
   sourcemap = not getattr(args, "no_sourcemap", False)
-  exit_code = run_tests(source_paths, target=target, filter_pattern=filter_pattern, sourcemap=sourcemap)
+  json_output = getattr(args, "json", False)
+  exit_code = run_tests(
+      source_paths,
+      target=target,
+      filter_pattern=filter_pattern,
+      sourcemap=sourcemap,
+      json_output=json_output,
+  )
   sys.exit(exit_code)
 
 
@@ -460,6 +627,9 @@ def main():
   test_parser.add_argument(
       "--no_sourcemap", action="store_true",
       help="Disable source map generation (.lua.map) for Lua targets")
+  test_parser.add_argument(
+      "--json", action="store_true",
+      help="Emit machine-readable JSON test summary")
   test_parser.set_defaults(func=test_command)
 
   # `lsp` subcommand
@@ -483,6 +653,15 @@ def main():
   check_parser = subparsers.add_parser(
       "check", help="Run semantic analysis and type checking without generating code")
   check_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
+  check_parser.add_argument(
+      "-t", "--target", choices=TARGET_CHOICES, default=None,
+      help="Optional target backend to validate in-memory lowering")
+  check_parser.add_argument(
+      "--no-transitive", action="store_true",
+      help="Skip checking transitive non-stdlib imported modules")
+  check_parser.add_argument(
+      "--json", action="store_true",
+      help="Emit machine-readable JSON diagnostic report")
   check_parser.set_defaults(func=check_command)
 
   # Handle shortcut invocation: if first argument is a file (e.g.

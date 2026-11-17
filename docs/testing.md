@@ -213,6 +213,9 @@ sapphire test --filter user_retrieval
 
 # Select target backend (Python or Lua 5.1)
 sapphire test -t lua
+
+# Emit machine-readable JSON summary (for CI, tooling, and AI agents)
+sapphire test -t lua --json
 ```
 
 ### 7.2 Source-map stack-demangling output

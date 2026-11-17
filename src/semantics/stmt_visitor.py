@@ -1,6 +1,6 @@
 """Statement and control-flow AST visitor methods for TypeChecker."""
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import *
 from src.semantics.symbol_table import (
@@ -272,6 +272,12 @@ class StmtVisitorMixin:
             f"Cannot mutate or reassign '{root_name}' while it is frozen "
             f"({reason}).",
             node=node,
+            code="E_FROZEN_LVALUE",
+            hint=(
+                "Capture any needed state before the last use of the "
+                "unwrapped/iterated binding, or mutate after the unwrap/loop "
+                "block ends."
+            ),
         )
 
     if isinstance(node, IdentifierNode):
@@ -320,6 +326,12 @@ class StmtVisitorMixin:
           self.error(
               f"Cannot mutate field '{node.member}' of encapsulated struct '{receiver_type.name}' outside its defining module; mutate via methods instead.",
               node=node,
+              code="E_ENCAPSULATED_FIELD_MUTATION",
+              hint=(
+                  "Structs with '__init__' lock fields from external mutation. "
+                  "Add a 'var func' mutator method or omit '__init__' and use "
+                  "a plain data struct with a factory function."
+              ),
           )
           return field.field_type
 

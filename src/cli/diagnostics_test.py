@@ -1,7 +1,7 @@
 """Unit tests for the diagnostic error formatting module (diagnostics.py)."""
 
 import unittest
-from src.cli.diagnostics import get_source_line, format_diagnostic
+from src.cli.diagnostics import Diagnostic, get_source_line, format_diagnostic
 
 
 
@@ -98,6 +98,45 @@ class TestDiagnostics(unittest.TestCase):
         message="Global failure",
     )
     self.assertEqual(diag, "Error: Global failure")
+
+  def test_format_diagnostic_with_hint(self):
+    source = "let x = enemy as Character;"
+    diag = format_diagnostic(
+        error_type="Semantic Error",
+        file_path="main.sp",
+        line=1,
+        column=8,
+        length=18,
+        message="Cannot cast struct 'Enemy' to 'Character'.",
+        source_content=source,
+        hint="Define a behavioral 'trait' instead.",
+    )
+    self.assertIn("  Hint: Define a behavioral 'trait' instead.", diag)
+
+  def test_diagnostic_to_dict(self):
+    d = Diagnostic(
+        severity="error",
+        code="E_NO_STRUCT_UPCAST",
+        message="Cannot cast struct 'Enemy' to 'Character'.",
+        hint="Define a trait.",
+        file_path="main.sp",
+        line=3,
+        column=4,
+        length=10,
+    )
+    self.assertEqual(
+        d.to_dict(),
+        {
+            "severity": "error",
+            "code": "E_NO_STRUCT_UPCAST",
+            "message": "Cannot cast struct 'Enemy' to 'Character'.",
+            "hint": "Define a trait.",
+            "file": "main.sp",
+            "line": 3,
+            "column": 4,
+            "length": 10,
+        },
+    )
 
 
 if __name__ == "__main__":

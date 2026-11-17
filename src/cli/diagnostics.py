@@ -4,8 +4,36 @@ Provides standardized formatting for syntax, semantic, and runtime errors by
 including file location, line numbers, source snippets, and caret pointers (^).
 """
 
+from dataclasses import dataclass
 import os
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
+
+
+@dataclass
+class Diagnostic:
+  """Structured compiler or tooling diagnostic."""
+
+  severity: str
+  message: str
+  file_path: Optional[str] = None
+  line: Optional[int] = None
+  column: Optional[int] = None
+  length: Optional[int] = None
+  hint: Optional[str] = None
+  code: Optional[str] = None
+
+  def to_dict(self) -> Dict[str, Any]:
+    """Serializes the diagnostic to a JSON-compatible dictionary."""
+    return {
+        "severity": self.severity,
+        "code": self.code,
+        "message": self.message,
+        "hint": self.hint,
+        "file": self.file_path,
+        "line": self.line,
+        "column": self.column,
+        "length": self.length,
+    }
 
 
 def get_source_line(
@@ -48,6 +76,7 @@ def format_diagnostic(
     column: Optional[int] = None,
     length: Optional[int] = None,
     source_content: Optional[Union[str, List[str]]] = None,
+    hint: Optional[str] = None,
 ) -> str:
   """Formats a diagnostic error message with source line snippet, line numbers, and caret pointers (^).
 
@@ -61,6 +90,7 @@ def format_diagnostic(
     length: Optional token/expression character length for caret span.
     source_content: Optional source file path, multi-line string, or list of
       lines.
+    hint: Optional actionable fix-it hint displayed after the caret underline.
 
   Returns:
     Formatted multi-line diagnostic string.
@@ -116,5 +146,8 @@ def format_diagnostic(
           caret_line = f"  {indent_pad}{' ' * indent_len}{'^' * stripped_len}"
 
         lines_out.append(caret_line)
+
+  if hint:
+    lines_out.append(f"  Hint: {hint}")
 
   return "\n".join(lines_out)

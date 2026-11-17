@@ -306,8 +306,12 @@ pipenv run coverage
 pipenv run python -m unittest src/code_gen/python_transpiler_test.py
 pipenv run python -m unittest src/code_gen/lua_transpiler_test.py
 
-# 4. Run native Sapphire language test runner
+# 4. Run native Sapphire language test runner (add --json for structured output)
 pipenv run sapphire test
+pipenv run sapphire test --json
+
+# 5. Type-check a file and its transitive imports (add -t lua / --json as needed)
+pipenv run sapphire check samples/overview.sp -t lua --json
 ```
 
 ### 6.4 Building & Executing Sapphire Programs
