@@ -110,7 +110,22 @@ class DeclVisitorMixin:
     # Members already verified in pre-pass
     pass
 
+  def _check_no_explicit_self(
+      self, parameters: List[ParameterNode], node: ASTNode
+  ) -> None:
+    """Rejects explicit 'self' parameters in functions, methods, and traits."""
+    for p in parameters:
+      if p.name == "self":
+        self.error(
+            "Explicit 'self' parameter is not permitted; 'self' is always "
+            "implicit in methods and traits.",
+            node=node,
+        )
+        return
+
   def visit_ImplBlockNode(self, node: ImplBlockNode) -> None:
+    for member in node.members:
+      self._check_no_explicit_self(member.func_decl.parameters, member.func_decl)
     if self._get_impl_type_params(node):
       return
     struct_type = self.symbol_table.lookup_type(node.struct_name)
@@ -118,11 +133,13 @@ class DeclVisitorMixin:
       return
 
     self.current_struct = struct_type
+    self._current_impl_trait = None
 
     # If implementing a trait, verify contract is fully satisfied
     if node.trait_name:
       trait_type = self.symbol_table.lookup_type(node.trait_name)
       if isinstance(trait_type, TraitType):
+        self._current_impl_trait = trait_type
         is_test_case = trait_type is self.symbol_table.testcase_trait or node.trait_name.endswith(".TestCase")
         if is_test_case:
           # Inject TestCase assertion methods onto struct methods if not defined explicitly
@@ -160,6 +177,7 @@ class DeclVisitorMixin:
     for member in node.members:
       self.visit(member)
 
+    self._current_impl_trait = None
     self.current_struct = None
 
   def _expr_references_self(self, expr: ASTNode) -> bool:
@@ -342,6 +360,8 @@ class DeclVisitorMixin:
     self.symbol_table.exit_scope()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
+    for member in node.members:
+      self._check_no_explicit_self(member.parameters, member)
     if node.type_params:
       return
     trait_type = self.symbol_table.lookup_type(node.name)
@@ -353,6 +373,7 @@ class DeclVisitorMixin:
         self._check_parameter_defaults(member.parameters, fn_type.param_types)
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    self._check_no_explicit_self(node.parameters, node)
     if hasattr(node, "annotations") and node.annotations:
       DeclarationPass.validate_annotations(self, node.annotations, node=node)
     if node.base_initializers:

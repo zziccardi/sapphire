@@ -858,7 +858,7 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies that @export("host.callback") safely binds to host object properties."""
     code = """
     trait HostServer {
-      func start(self);
+      func start();
     }
 
     @extern
@@ -886,7 +886,7 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies that @extern("module.name") generates import statements for host modules."""
     code = """
     trait JsonModule {
-      func dumps(self, obj: String): String;
+      func dumps(obj: String): String;
     }
 
     @extern("json")
@@ -905,11 +905,11 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies end-to-end Python stdlib interop with wsgiref using @extern and @export."""
     code = """
     trait WsgiServer {
-      func server_close(self);
+      func server_close();
     }
 
     trait WsgiModule {
-      func make_server(self, host: String, port: int, app: (Map<String, String>, (String, [[String]]) -> void) -> [String]): WsgiServer;
+      func make_server(host: String, port: int, app: (Map<String, String>, (String, [[String]]) -> void) -> [String]): WsgiServer;
     }
 
     @extern("wsgiref.simple_server")
@@ -990,7 +990,7 @@ class TestPythonTranspiler(unittest.TestCase):
     """Verifies Python transpilation for resource handles."""
     code = """
     trait ImageHandle {
-      func draw(self, x: float, y: float);
+      func draw(x: float, y: float);
     }
     @extern("hero")
     var hero_img: ImageHandle;
@@ -1910,7 +1910,7 @@ class TestPythonTranspiler(unittest.TestCase):
     }
 
     impl GenHolder {
-      func inst_gen(self): Coroutine<int> {
+      func inst_gen(): Coroutine<int> {
         yield self.val;
       }
 

@@ -1456,12 +1456,12 @@ var love: LoveEngine;
 External host APIs are defined cleanly using traits:
 
 ```sapphire
-// Instance methods take explicit `self` (transpiles to Lua colon syntax)
+// Instance methods omit `static` (transpiles to Lua colon syntax)
 trait Image {
-  func getWidth(self): float;
+  func getWidth(): float;
 }
 
-// Module functions omit `self` (transpiles to Lua dot syntax)
+// Module functions use `static func` (transpiles to Lua dot syntax)
 trait Graphics {
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);

@@ -102,7 +102,7 @@ class TestGenerics(unittest.TestCase):
     """Verifies generic trait declarations and impl syntax variations."""
     code = """
     trait Container<T> {
-      func get(self): T;
+      func get(): T;
     }
 
     struct Item<T> {
@@ -114,19 +114,19 @@ class TestGenerics(unittest.TestCase):
     }
 
     impl Container<T> for Item<T> {
-      func get(self): T {
+      func get(): T {
         return self.val;
       }
     }
 
     impl Container<T> for Simple {
-      func get(self): T {
+      func get(): T {
         return 0;
       }
     }
 
     impl Container for Item<T> {
-      func get(self): int {
+      func get(): int {
         return 1;
       }
     }

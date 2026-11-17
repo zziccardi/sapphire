@@ -19,32 +19,32 @@ struct Color {
 }
 
 trait Image {
-  func draw(self, x: float, y: float);
+  func draw(x: float, y: float);
 
   @export("draw")
-  func drawTransformed(self, x: float, y: float, r: float = 0.0,
+  func drawTransformed(x: float, y: float, r: float = 0.0,
                        sx: float = 1.0, sy: float = 1.0);
 
-  func getWidth(self): float;
-  func getHeight(self): float;
-  func getDimensions(self): float, float;
-  func setFilter(self, min: enums.FilterMode, mag: enums.FilterMode);
+  func getWidth(): float;
+  func getHeight(): float;
+  func getDimensions(): float, float;
+  func setFilter(min: enums.FilterMode, mag: enums.FilterMode);
 }
 
 trait Canvas {
-  func getWidth(self): float;
-  func getHeight(self): float;
-  func getDimensions(self): float, float;
+  func getWidth(): float;
+  func getHeight(): float;
+  func getDimensions(): float, float;
 }
 
 trait Font {
-  func getHeight(self): float;
-  func getWidth(self, text: String): float;
+  func getHeight(): float;
+  func getWidth(text: String): float;
 }
 
 trait Quad {
-  func getViewport(self): float, float, float, float;
-  func setViewport(self, x: float, y: float, w: float, h: float);
+  func getViewport(): float, float, float, float;
+  func setViewport(x: float, y: float, w: float, h: float);
 }
 
 trait Graphics {
@@ -71,6 +71,8 @@ trait Graphics {
   static func drawCanvasAt(canvas: Canvas,
                            x: float = 0.0, y: float = 0.0, r: float = 0.0,
                            sx: float = 1.0, sy: float = 1.0);
+
+  static func getColor(): float, float, float, float;
 
   @export("setColor")
   static func setColorRgba(r: float, g: float, b: float, a: float = 1.0);

@@ -6,7 +6,7 @@ export {
 }
 
 trait Cursor {
-  func getType(self): String;
+  func getType(): String;
 }
 
 trait Mouse {

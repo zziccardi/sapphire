@@ -5,6 +5,6 @@ export {
 }
 
 trait Joystick {
-  func getName(self): String;
-  func isGamepad(self): bool;
+  func getName(): String;
+  func isGamepad(): bool;
 }
