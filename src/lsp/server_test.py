@@ -1456,7 +1456,7 @@ let res = calculate(10, 3.14, "hello");"""
   var y: float;
 }
 impl Point {
-  func translate(var self, dx: float, dy: float) {
+  var func translate(dx: float, dy: float) {
     self.x = self.x + dx;
   }
 }
@@ -1526,9 +1526,9 @@ let p = Point(1.0, 2.0);"""
 
     doc_uri = "file:///def_branches.sp"
     doc_text = """struct Item { var id: int; }
-trait Action { func do_it(self); }
+trait Action { func do_it(); }
 impl Action for Item {
-  func do_it(self) {
+  func do_it() {
     let internal_val = 100;
     let copy_val = internal_val;
     let opt_val: Item? = self;
@@ -2371,7 +2371,7 @@ func main() {
       mod_file = os.path.join(temp_dir, "graphics.sp")
       mod_code = """export { Graphics }
 trait Graphics {
-  func draw(self, x: float, y: float);
+  func draw(x: float, y: float);
 }
 """
       with open(mod_file, "w", encoding="utf-8") as f:

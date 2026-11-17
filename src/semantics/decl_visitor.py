@@ -110,7 +110,22 @@ class DeclVisitorMixin:
     # Members already verified in pre-pass
     pass
 
+  def _check_no_explicit_self(
+      self, parameters: List[ParameterNode], node: ASTNode
+  ) -> None:
+    """Rejects explicit 'self' parameters in functions, methods, and traits."""
+    for p in parameters:
+      if p.name == "self":
+        self.error(
+            "Explicit 'self' parameter is not permitted; 'self' is always "
+            "implicit in methods and traits.",
+            node=node,
+        )
+        return
+
   def visit_ImplBlockNode(self, node: ImplBlockNode) -> None:
+    for member in node.members:
+      self._check_no_explicit_self(member.func_decl.parameters, member.func_decl)
     if self._get_impl_type_params(node):
       return
     struct_type = self.symbol_table.lookup_type(node.struct_name)
@@ -213,20 +228,6 @@ class DeclVisitorMixin:
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func_decl = node.func_decl
     struct_type = self.current_struct
-
-    if any(p.name == "self" for p in func_decl.parameters):
-      impl_trait = getattr(self, "_current_impl_trait", None)
-      trait_sig = (
-          impl_trait.methods.get(func_decl.name)
-          if isinstance(impl_trait, TraitType)
-          else None
-      )
-      if not (trait_sig and trait_sig.has_self):
-        self.warning(
-            f"Redundant explicit 'self' parameter in method '{func_decl.name}'; "
-            "'self' is implicit in 'impl' blocks.",
-            node=func_decl,
-        )
 
     # Enter scope of method
     self.symbol_table.enter_scope()
@@ -359,6 +360,8 @@ class DeclVisitorMixin:
     self.symbol_table.exit_scope()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
+    for member in node.members:
+      self._check_no_explicit_self(member.parameters, member)
     if node.type_params:
       return
     trait_type = self.symbol_table.lookup_type(node.name)
@@ -370,6 +373,7 @@ class DeclVisitorMixin:
         self._check_parameter_defaults(member.parameters, fn_type.param_types)
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
+    self._check_no_explicit_self(node.parameters, node)
     if hasattr(node, "annotations") and node.annotations:
       DeclarationPass.validate_annotations(self, node.annotations, node=node)
     if node.base_initializers:

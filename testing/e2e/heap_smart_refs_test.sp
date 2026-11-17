@@ -8,7 +8,7 @@ struct Node {
 }
 
 impl Node {
-  func double_val(self): int {
+  func double_val(): int {
     return self.val * 2;
   }
 }

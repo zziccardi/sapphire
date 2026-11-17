@@ -7,11 +7,11 @@
 
 // 1. Opaque resource handles for Python binary data and server instances
 trait BytesHandle {
-  func decode(self): String;
+  func decode(): String;
 }
 
 trait WsgiServer {
-  func server_close(self);
+  func server_close();
 }
 
 // 2. Trait method aliasing: maps Sapphire method call to Python's `str.encode`
@@ -23,7 +23,7 @@ trait StrEncoder {
 // 3. Module interface for Python's `wsgiref.simple_server`
 trait WsgiModule {
   func make_server(
-      self, host: String, port: int,
+      host: String, port: int,
       app: ([String: String],
             (String, [[String]]) -> void) -> [BytesHandle]): WsgiServer;
 }

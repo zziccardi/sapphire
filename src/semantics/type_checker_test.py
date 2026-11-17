@@ -2294,11 +2294,11 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Argument type mismatch at position 1. Expected 'Mode', got 'String'.", str(context.exception))
 
   def test_trait_self_parameter_type_checking(self):
-    """Verifies argument checking for trait methods with explicit self parameters."""
+    """Verifies argument checking for trait methods without explicit self."""
     code = """
     trait ImageHandle {
-      func draw(self, x: float, y: float);
-      func getWidth(var self): float;
+      func draw(x: float, y: float);
+      var func getWidth(): float;
     }
 
     @extern
@@ -4759,7 +4759,7 @@ class TestTypeChecker(unittest.TestCase):
       var speed: int = 10;
     }
     impl Agent {
-      func tick(var self): Coroutine<int> {
+      var func tick(): Coroutine<int> {
         yield self.speed;
       }
     }
@@ -4932,7 +4932,7 @@ class TestTypeChecker(unittest.TestCase):
     with self.assertRaises(SemanticError) as ctx:
       self._check("""
       trait BadTrait {
-        func bad_method(self, opt: int = 0, req: int);
+        func bad_method(opt: int = 0, req: int);
       }
       """)
     self.assertIn("Parameter without a default value 'req' cannot follow a parameter with a default value.", str(ctx.exception))
@@ -4945,7 +4945,7 @@ class TestTypeChecker(unittest.TestCase):
         var x: int;
       }
       impl Point {
-        func bad_method(self, opt: int = 0, req: int) {
+        func bad_method(opt: int = 0, req: int) {
           self.x = opt + req;
         }
       }
@@ -4960,14 +4960,14 @@ class TestTypeChecker(unittest.TestCase):
     }
 
     trait GoodTrait {
-      var func good_method(self, req: int, opt: int = 0);
+      var func good_method(req: int, opt: int = 0);
     }
 
     struct GoodStruct {
       var x: int;
     }
     impl GoodStruct {
-      var func good_method(self, req: int, opt: int = 0) {
+      var func good_method(req: int, opt: int = 0) {
         self.x = req + opt;
       }
     }
@@ -8294,37 +8294,33 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Hint: Capture any needed state", str(ctx3.exception))
 
-  def test_redundant_explicit_self_warning_in_impl(self):
-    c1 = self._check("""
-    struct Counter {
-      var value: int = 0;
-    }
-    impl Counter {
-      var func inc(self) {
-        self.value += 1;
+  def test_explicit_self_parameter_rejected(self):
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      struct Counter {
+        var value: int = 0;
       }
-      func get(self): int {
-        return self.value;
+      impl Counter {
+        var func inc(self) {
+          self.value += 1;
+        }
       }
-    }
-    """)
-    self.assertEqual(len(c1.warnings), 2)
-    self.assertIn("Redundant explicit 'self'", c1.warnings[0])
-    self.assertIn("Redundant explicit 'self'", c1.warnings[1])
+      """)
+    self.assertIn("Explicit 'self' parameter is not permitted", str(ctx1.exception))
 
-    # Negative: host-handle trait with explicit self requires matching self in impl.
-    c2 = self._check("""
-    trait HostHandle {
-      func decode(self): String;
-    }
-    struct MockHandle {}
-    impl HostHandle for MockHandle {
-      func decode(self): String {
-        return "ok";
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      trait HostHandle {
+        func decode(self): String;
       }
-    }
-    """)
-    self.assertEqual(c2.warnings, [])
+      """)
+    self.assertIn("Explicit 'self' parameter is not permitted", str(ctx2.exception))
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func standalone(self) {}
+      """)
+    self.assertIn("Explicit 'self' parameter is not permitted", str(ctx3.exception))
 
   def test_subscript_mutating_method_call(self):
     self._check("""

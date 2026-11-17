@@ -672,7 +672,7 @@ class TestLuaTranspiler(unittest.TestCase):
     """Verifies Lua transpilation for resource handles with colon vs dot calls."""
     code = """
     trait ImageHandle {
-      func draw(self, x: float, y: float);
+      func draw(x: float, y: float);
     }
     trait Graphics {
       static func rectangle(mode: String, x: float, y: float, w: float, h: float);
@@ -828,7 +828,7 @@ class TestLuaTranspiler(unittest.TestCase):
       var val: int;
     }
     impl Node {
-      func double_val(self): int {
+      func double_val(): int {
         return self.val * 2;
       }
     }
@@ -880,7 +880,7 @@ class TestLuaTranspiler(unittest.TestCase):
       var name: String;
     }
     impl Player {
-      func get_speed(self): int {
+      func get_speed(): int {
         return 10;
       }
     }
@@ -915,7 +915,7 @@ class TestLuaTranspiler(unittest.TestCase):
       var name: String;
     }
     impl Player {
-      func get_speed(self): int {
+      func get_speed(): int {
         return 50;
       }
     }
@@ -1660,7 +1660,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
 
     impl GenHolder {
-      func inst_gen(self): Coroutine<int> {
+      func inst_gen(): Coroutine<int> {
         yield self.val;
       }
 
