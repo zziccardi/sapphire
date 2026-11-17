@@ -54,7 +54,8 @@ class TranspilerHygieneTest(unittest.TestCase):
     lib_dir = find_sapphire_lib_dir()
     self.assertIsNotNone(lib_dir)
     enums_lua = os.path.join(lib_dir, "love2d", "enums.lua")
-    mtime_before = os.path.getmtime(enums_lua)
+    had_enums_lua = os.path.exists(enums_lua)
+    mtime_before = os.path.getmtime(enums_lua) if had_enums_lua else None
 
     with tempfile.TemporaryDirectory() as root:
       src_dir = os.path.join(root, "src")
@@ -83,7 +84,13 @@ class TranspilerHygieneTest(unittest.TestCase):
       self.assertTrue(os.path.exists(out_lua))
       self.assertTrue(os.path.exists(os.path.join(out_dir, "helper.lua")))
       self.assertFalse(os.path.exists(os.path.join(src_dir, "helper.lua")))
-      self.assertEqual(mtime_before, os.path.getmtime(enums_lua))
+      if had_enums_lua:
+        self.assertEqual(mtime_before, os.path.getmtime(enums_lua))
+      else:
+        self.assertFalse(os.path.exists(enums_lua))
+        self.assertTrue(
+            os.path.exists(os.path.join(out_dir, "lib", "love2d", "enums.lua"))
+        )
 
 
 if __name__ == "__main__":
