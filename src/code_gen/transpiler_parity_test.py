@@ -134,7 +134,11 @@ class SemanticParityTest(unittest.TestCase):
     py_result = ctx[fn_name]()
 
     # 2. Lua execution
-    lua_bin = shutil.which("lua") or shutil.which("lua5.1")
+    lua_bin = (
+        shutil.which("lua")
+        or shutil.which("luajit")
+        or shutil.which("lua5.1")
+    )
     if not lua_bin:
       self.skipTest("Lua interpreter not found in PATH.")
 

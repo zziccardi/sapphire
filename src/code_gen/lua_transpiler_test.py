@@ -2717,7 +2717,12 @@ class TestSharedFixtures(unittest.TestCase):
       self.assertGreater(len(lua_code), 0)
 
       # Level 2: optional execution via a Lua binary
-      lua_bin = shutil.which("lua") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      lua_bin = (
+          shutil.which("lua")
+          or shutil.which("luajit")
+          or shutil.which("lua5.1")
+          or shutil.which("lua5.4")
+      )
       if not lua_bin:
         return  # Lua not available — transpilation check is sufficient
 

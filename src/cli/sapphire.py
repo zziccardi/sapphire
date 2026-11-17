@@ -69,7 +69,6 @@ def _prepare_exec_env() -> Dict[str, str]:
   lua_paths = [
       f"{lib_dir}/?.lua",
       f"{lib_dir}/?/init.lua",
-      f"{lib_dir}/std/?.lua",
       f"{lib_dir}/love2d/?.lua",
       f"{lib_parent}/?.lua",
   ]
