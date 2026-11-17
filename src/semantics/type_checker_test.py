@@ -8294,6 +8294,37 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Hint: Capture any needed state", str(ctx3.exception))
 
+  def test_redundant_explicit_self_warning_in_impl(self):
+    c1 = self._check("""
+    struct Counter {
+      var value: int = 0;
+    }
+    impl Counter {
+      var func inc(self) {
+        self.value += 1;
+      }
+      func get(self): int {
+        return self.value;
+      }
+    }
+    """)
+    self.assertEqual(len(c1.warnings), 2)
+    self.assertIn("Redundant explicit 'self'", c1.warnings[0])
+    self.assertIn("Redundant explicit 'self'", c1.warnings[1])
+
+    # Negative: host-handle trait with explicit self requires matching self in impl.
+    c2 = self._check("""
+    trait HostHandle {
+      func decode(self): String;
+    }
+    struct MockHandle {}
+    impl HostHandle for MockHandle {
+      func decode(self): String {
+        return "ok";
+      }
+    }
+    """)
+    self.assertEqual(c2.warnings, [])
 
 if __name__ == "__main__":
   unittest.main()

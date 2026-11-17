@@ -118,11 +118,13 @@ class DeclVisitorMixin:
       return
 
     self.current_struct = struct_type
+    self._current_impl_trait = None
 
     # If implementing a trait, verify contract is fully satisfied
     if node.trait_name:
       trait_type = self.symbol_table.lookup_type(node.trait_name)
       if isinstance(trait_type, TraitType):
+        self._current_impl_trait = trait_type
         is_test_case = trait_type is self.symbol_table.testcase_trait or node.trait_name.endswith(".TestCase")
         if is_test_case:
           # Inject TestCase assertion methods onto struct methods if not defined explicitly
@@ -160,6 +162,7 @@ class DeclVisitorMixin:
     for member in node.members:
       self.visit(member)
 
+    self._current_impl_trait = None
     self.current_struct = None
 
   def _expr_references_self(self, expr: ASTNode) -> bool:
@@ -210,6 +213,20 @@ class DeclVisitorMixin:
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func_decl = node.func_decl
     struct_type = self.current_struct
+
+    if any(p.name == "self" for p in func_decl.parameters):
+      impl_trait = getattr(self, "_current_impl_trait", None)
+      trait_sig = (
+          impl_trait.methods.get(func_decl.name)
+          if isinstance(impl_trait, TraitType)
+          else None
+      )
+      if not (trait_sig and trait_sig.has_self):
+        self.warning(
+            f"Redundant explicit 'self' parameter in method '{func_decl.name}'; "
+            "'self' is implicit in 'impl' blocks.",
+            node=func_decl,
+        )
 
     # Enter scope of method
     self.symbol_table.enter_scope()

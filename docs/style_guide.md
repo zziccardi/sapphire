@@ -390,8 +390,9 @@ modules, samples, and Sapphire source files should adhere to these guidelines.
     decorate, at the same indentation level, with no blank line between them.
   * Write explicit `self` in parameter lists **only** on `@extern` host-handle
     trait methods (`func decode(self): String;`), where it distinguishes
-    instance dispatch from stateless module functions (`static func`).
-    Everywhere else in Sapphire, `self` is implicit.
+    instance dispatch from stateless module functions (`static func`), and on
+    `impl` blocks implementing those traits. Everywhere else in Sapphire,
+    `self` is implicit.
   * Use `@export("hostName")` on host trait methods to expose idiomatic
     `snake_case` names in Sapphire while emitting the target host symbol.
 * **Program entry points & prohibition of top-level procedural statements**:
