@@ -7794,6 +7794,35 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Cannot access instance field 'stats' on type 'Unit'",
                   str(ctx.exception))
 
+  def test_coroutine_lifo_drop_order_diagnostic(self):
+    """Verifies distinct same-scope LIFO vs outer-scope escape diagnostics."""
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      struct Holder { var co: Coroutine<int>? = none; }
+      func gen(items: [int]): Coroutine<int> { yield items[0]; }
+      func main() {
+        var h = Holder {};
+        let items = [1, 2];
+        h.co = gen(items);
+      }
+      """)
+    self.assertIn("LIFO drop order", str(ctx1.exception))
+    self.assertIn("declare 'items' before 'h'", str(ctx1.exception))
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Holder { var co: Coroutine<int>? = none; }
+      func gen(items: [int]): Coroutine<int> { yield items[0]; }
+      func main() {
+        var h = Holder {};
+        if true {
+          let items = [1, 2];
+          h.co = gen(items);
+        }
+      }
+      """)
+    self.assertIn("outer-scope variable 'h'", str(ctx2.exception))
+
   def test_semantic_errors_include_source_locations(self):
     """Verifies that call/index semantic errors include line and column."""
     code_non_callable = "func main() {\n  let x = 1;\n  x();\n}\n"

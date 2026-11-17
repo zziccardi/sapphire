@@ -172,8 +172,8 @@ class DeclarationPass:
               computed_exports[export_name] = exp
         else:
           exp = (
-              sub_checker.symbol_table.lookup_type(spec.symbol)
-              or sub_checker.symbol_table.lookup(spec.symbol)
+              sub_checker.symbol_table.lookup(spec.symbol)
+              or sub_checker.symbol_table.lookup_type(spec.symbol)
           )
           if exp:
             if isinstance(exp, StructType):

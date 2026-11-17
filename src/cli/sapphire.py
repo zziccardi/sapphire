@@ -389,10 +389,10 @@ def test_command(args):
   from src.cli.test_runner import run_tests
 
   target = getattr(args, "target", "python").lower()
-  source_path = getattr(args, "source", ".")
+  source_paths = getattr(args, "source", ["."]) or ["."]
   filter_pattern = getattr(args, "filter", None)
   sourcemap = not getattr(args, "no_sourcemap", False)
-  exit_code = run_tests(source_path, target=target, filter_pattern=filter_pattern, sourcemap=sourcemap)
+  exit_code = run_tests(source_paths, target=target, filter_pattern=filter_pattern, sourcemap=sourcemap)
   sys.exit(exit_code)
 
 
@@ -447,7 +447,8 @@ def main():
   test_parser = subparsers.add_parser(
       "test", help="Discover and execute Sapphire tests")
   test_parser.add_argument(
-      "source", nargs="?", default=".", help="Path to Sapphire source file (.sp) or directory (default: .)")
+      "source", nargs="*", default=["."],
+      help="Path(s) to Sapphire source file(s) (.sp) or directories (default: .)")
   test_parser.add_argument(
       "-t", "--target", choices=TARGET_CHOICES, default="python",
       help="Code generation target (default: python)")
