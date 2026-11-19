@@ -209,293 +209,109 @@ class DefinitionProvider:
   """Resolves Go to Definition locations for Sapphire AST nodes."""
 
   @classmethod
-  def provide_definition(
-      cls,
-      ls: Any,
-      params: DefinitionParams,
-      find_node_fn: Optional[Any] = None,
-  ) -> Optional[Location]:
-    """Triggered when user requests Go to Definition."""
-    uri = params.text_document.uri
-    if uri not in ls.ast_cache or uri not in ls.symbol_table_cache:
+  def _extract_decl_ast(cls, sym: Any) -> Optional[Any]:
+    """Extracts the underlying AST declaration node from a symbol or type."""
+    if not sym:
       return None
+    if hasattr(sym, "ast_decl") and sym.ast_decl:
+      return sym.ast_decl
+    sym_t = getattr(sym, "symbol_type", None)
+    if sym_t and hasattr(sym_t, "ast_decl") and sym_t.ast_decl:
+      return sym_t.ast_decl
+    return None
 
-    ast = ls.ast_cache[uri]
-    sym_table = ls.symbol_table_cache[uri]
-    node_types = ls.node_types_cache.get(uri, {})
+  @classmethod
+  def _resolve_module_export_ast(
+      cls, ls: Any, mod_sym: Any, member_name: str
+  ) -> Optional[Any]:
+    """Resolves an exported symbol from a ModuleSymbol, falling back to cached symbol tables."""
+    target_sym = mod_sym.lookup_export(member_name)
+    target_ast = cls._extract_decl_ast(target_sym)
 
-    line = params.position.line + 1
-    col = params.position.character
-
-    if find_node_fn is None:
-      find_node_fn = find_node_at_position
-    node = find_node_fn(ast, line, col)
-    if not node:
-      return None
-
-    target_ast = None
-
-    if isinstance(node, CallNode):  # pragma: no cover
-      node = node.callee
-
-    if isinstance(node, ImportStmtNode):
-      path_line = getattr(node, "path_line", getattr(node, "start_line", None))
-      path_col = getattr(
-          node, "path_column", getattr(node, "start_column", None)
-      )
-      path_len = getattr(node, "path_length", getattr(node, "length", None))
-      if (
-          path_line is not None
-          and path_col is not None
-          and path_len is not None
-      ):
-        if path_line == line and path_col <= col < path_col + path_len:
-          ws_root = getattr(getattr(ls, "workspace", None), "root_uri", None)
-          target_fs = resolve_module_path(uri, node.path, ws_root)
-          if target_fs:
-            target_uri = from_fs_path(os.path.abspath(target_fs))
-            return Location(
-                uri=target_uri,
-                range=Range(
-                    start=Position(line=0, character=0),
-                    end=Position(line=0, character=0),
-                ),
-            )
-
-    elif isinstance(node, IdentifierNode):
-      sym = sym_table.lookup(node.name)
-      if (
-          sym
-          and type(sym).__name__ == "ModuleSymbol"
-          and getattr(sym, "file_path", None)
-      ):
-        mod_uri = from_fs_path(os.path.abspath(sym.file_path))
-        return Location(
-            uri=mod_uri,
-            range=Range(
-                start=Position(line=0, character=0),
-                end=Position(line=0, character=0),
-            ),
+    mod_file_path = getattr(mod_sym, "file_path", None)
+    if mod_file_path:
+      mod_uri = from_fs_path(os.path.abspath(mod_file_path))
+      if not target_ast and mod_uri in ls.symbol_table_cache:  # pragma: no cover
+        sub_sym_table = ls.symbol_table_cache[mod_uri]
+        exp_sym = sub_sym_table.lookup(member_name) or sub_sym_table.lookup_type(
+            member_name
         )
+        target_ast = cls._extract_decl_ast(exp_sym)
+      if target_ast:
+        target_ast.file_uri = mod_uri
+    return target_ast
 
-      if sym and hasattr(sym, "ast_decl") and sym.ast_decl:
-        target_ast = sym.ast_decl
-      elif (
-          sym
-          and hasattr(sym, "symbol_type")
-          and hasattr(sym.symbol_type, "ast_decl")
-          and sym.symbol_type.ast_decl
-      ):
-        target_ast = sym.symbol_type.ast_decl
-      else:
-        type_obj = sym_table.lookup_type(node.name)
-        if (
-            type_obj
-            and hasattr(type_obj, "ast_decl")
-            and type_obj.ast_decl
-        ):  # pragma: no cover
-          target_ast = type_obj.ast_decl
+  @classmethod
+  def _resolve_member_definition(
+      cls, ls: Any, node: MemberAccessNode, sym_table: Any, node_types: Any
+  ) -> Optional[Any]:
+    """Resolves Go to Definition for a MemberAccessNode (module, field, method, enum)."""
+    target_ast = None
+    if isinstance(node.receiver, IdentifierNode):
+      sym = sym_table.lookup(node.receiver.name)
+      if sym and type(sym).__name__ == "ModuleSymbol":
+        target_ast = cls._resolve_module_export_ast(ls, sym, node.member)
 
-      if not target_ast:
-        target_ast = find_local_decl(ast, node.name, line)
+    receiver_type = node_types.get(node.receiver)
+    if (
+        not target_ast
+        and not receiver_type
+        and isinstance(node.receiver, IdentifierNode)
+    ):  # pragma: no cover
+      sym = sym_table.lookup(node.receiver.name)
+      if sym:  # pragma: no cover
+        receiver_type = getattr(sym, "symbol_type", None)
+      if not receiver_type:  # pragma: no cover
+        receiver_type = sym_table.lookup_type(node.receiver.name)
 
-    elif isinstance(node, MemberAccessNode):
-      if isinstance(node.receiver, IdentifierNode):
-        sym = sym_table.lookup(node.receiver.name)
-        if sym and type(sym).__name__ == "ModuleSymbol":
-          target_sym = sym.lookup_export(node.member)
-          if target_sym:
-            if hasattr(target_sym, "ast_decl") and target_sym.ast_decl:
-              target_ast = target_sym.ast_decl
-            elif (
-                hasattr(target_sym, "symbol_type")
-                and hasattr(target_sym.symbol_type, "ast_decl")
-                and target_sym.symbol_type.ast_decl
-            ):
-              target_ast = target_sym.symbol_type.ast_decl
+    if not receiver_type:
+      return target_ast
 
-          mod_file_path = getattr(sym, "file_path", None)
-          if mod_file_path:
-            mod_uri = from_fs_path(os.path.abspath(mod_file_path))
-            if (
-                not target_ast and mod_uri in ls.symbol_table_cache
-            ):  # pragma: no cover
-              sub_sym_table = ls.symbol_table_cache[mod_uri]
-              exp_sym = sub_sym_table.lookup(
-                  node.member
-              ) or sub_sym_table.lookup_type(node.member)
-              if exp_sym:
-                if hasattr(exp_sym, "ast_decl") and exp_sym.ast_decl:
-                  target_ast = exp_sym.ast_decl
-                elif (
-                    hasattr(exp_sym, "symbol_type")
-                    and hasattr(exp_sym.symbol_type, "ast_decl")
-                    and exp_sym.symbol_type.ast_decl
-                ):
-                  target_ast = exp_sym.symbol_type.ast_decl
-            if target_ast:
-              target_ast.file_uri = mod_uri
+    if isinstance(receiver_type, OptionalType):
+      receiver_type = receiver_type.base_type
+    if isinstance(receiver_type, (SharedRefType, RefType)):
+      receiver_type = receiver_type.inner_type
 
-      receiver_type = node_types.get(node.receiver)
-      if (
-          not target_ast
-          and not receiver_type
-          and isinstance(node.receiver, IdentifierNode)
-      ):  # pragma: no cover
-        sym = sym_table.lookup(node.receiver.name)
-        if sym:  # pragma: no cover
-          receiver_type = getattr(sym, "symbol_type", None)
-        if not receiver_type:  # pragma: no cover
-          receiver_type = sym_table.lookup_type(node.receiver.name)
+    if hasattr(receiver_type, "ast_decl") and receiver_type.ast_decl:
+      for field in getattr(receiver_type.ast_decl, "fields", []):
+        if getattr(field, "name", None) == node.member:
+          target_ast = field
+          break
 
-      if receiver_type:
-        if isinstance(receiver_type, OptionalType):
-          receiver_type = receiver_type.base_type
-        if isinstance(receiver_type, (SharedRefType, RefType)):
-          receiver_type = receiver_type.inner_type
-        if hasattr(receiver_type, "ast_decl") and receiver_type.ast_decl:
-          struct_decl = receiver_type.ast_decl
-          if hasattr(struct_decl, "fields"):
-            for field in struct_decl.fields:
-              if getattr(field, "name", None) == node.member:
-                target_ast = field
-                break
-        if (
-            not target_ast
-            and hasattr(receiver_type, "parent_names")
-            and receiver_type.parent_names
-        ):
-          for p_name in receiver_type.parent_names:
-            p_type = sym_table.lookup_type(p_name)
-            if p_type and hasattr(p_type, "ast_decl") and p_type.ast_decl:
-              p_decl = p_type.ast_decl
-              if hasattr(p_decl, "fields"):
-                for field in p_decl.fields:
-                  if getattr(field, "name", None) == node.member:
-                    target_ast = field
-                    break
-              if target_ast:
-                break
-
-        if not target_ast and hasattr(receiver_type, "methods"):
-          method = (
-              receiver_type.get_method(node.member, sym_table)
-              if hasattr(receiver_type, "get_method")
-              else receiver_type.methods.get(node.member)
-          )
-          if method and hasattr(method, "ast_decl") and method.ast_decl:
-            target_ast = method.ast_decl
-        if (
-            not target_ast
-            and hasattr(receiver_type, "ast_decl")
-            and receiver_type.ast_decl
-        ):
-          enum_decl = receiver_type.ast_decl
-          if hasattr(enum_decl, "members"):
-            for member in enum_decl.members:
-              if getattr(member, "name", None) == node.member:
-                target_ast = member
-                break
-
-    elif isinstance(node, BasicTypeNode):
-      if "." in node.name:
-        parts = node.name.split(".", 1)
-        sym = sym_table.lookup(parts[0])
-        if sym and type(sym).__name__ == "ModuleSymbol":
-          exp = sym.lookup_export(parts[1])
-          if exp:
-            if hasattr(exp, "ast_decl") and exp.ast_decl:
-              target_ast = exp.ast_decl
-            elif (
-                hasattr(exp, "symbol_type")
-                and hasattr(exp.symbol_type, "ast_decl")
-                and exp.symbol_type.ast_decl
-            ):  # pragma: no cover
-              target_ast = exp.symbol_type.ast_decl
-
-          mod_file_path = getattr(sym, "file_path", None)
-          if mod_file_path:
-            mod_uri = from_fs_path(os.path.abspath(mod_file_path))
-            if (
-                not target_ast and mod_uri in ls.symbol_table_cache
-            ):  # pragma: no cover
-              exp_sym = ls.symbol_table_cache[mod_uri].lookup_type(
-                  parts[1]
-              ) or ls.symbol_table_cache[mod_uri].lookup(parts[1])
-              if exp_sym:
-                if hasattr(exp_sym, "ast_decl") and exp_sym.ast_decl:
-                  target_ast = exp_sym.ast_decl
-                elif (
-                    hasattr(exp_sym, "symbol_type")
-                    and hasattr(exp_sym.symbol_type, "ast_decl")
-                    and exp_sym.symbol_type.ast_decl
-                ):
-                  target_ast = exp_sym.symbol_type.ast_decl
-            if target_ast:
-              target_ast.file_uri = mod_uri
-
-      if not target_ast:
-        type_obj = sym_table.lookup_type(node.name)
-        if type_obj and hasattr(type_obj, "ast_decl") and type_obj.ast_decl:
-          target_ast = type_obj.ast_decl
-
-    elif isinstance(node, StructDeclNode):
-      for info in getattr(node, "parent_names_info", []):
-        p_line = info.get("line")
-        p_col = info.get("column")
-        p_len = info.get("length")
-        if p_line == line and p_col <= col < p_col + p_len:
-          parent_type = sym_table.lookup_type(info["name"])
-          if (
-              parent_type
-              and hasattr(parent_type, "ast_decl")
-              and parent_type.ast_decl
-          ):
-            target_ast = parent_type.ast_decl
+    # Fall back to inherited parent struct fields when not found on child.
+    if not target_ast and getattr(receiver_type, "parent_names", None):
+      for p_name in receiver_type.parent_names:
+        p_type = sym_table.lookup_type(p_name)
+        if p_type and getattr(p_type, "ast_decl", None):
+          for field in getattr(p_type.ast_decl, "fields", []):
+            if getattr(field, "name", None) == node.member:
+              target_ast = field
+              break
+          if target_ast:
             break
-      if not target_ast:
-        target_ast = node
 
-    elif isinstance(node, ImplBlockNode):
-      t_line = getattr(node, "trait_name_line", None)
-      t_col = getattr(node, "trait_name_column", None)
-      t_len = getattr(node, "trait_name_length", None)
-      if node.trait_name and t_line == line and t_col <= col < t_col + t_len:
-        trait_type = sym_table.lookup_type(node.trait_name)
-        if (
-            trait_type
-            and hasattr(trait_type, "ast_decl")
-            and trait_type.ast_decl
-        ):
-          target_ast = trait_type.ast_decl
-      if not target_ast:
-        struct_type = sym_table.lookup_type(node.struct_name)
-        if (
-            struct_type
-            and hasattr(struct_type, "ast_decl")
-            and struct_type.ast_decl
-        ):
-          target_ast = struct_type.ast_decl
+    if not target_ast and hasattr(receiver_type, "methods"):
+      method = (
+          receiver_type.get_method(node.member, sym_table)
+          if hasattr(receiver_type, "get_method")
+          else receiver_type.methods.get(node.member)
+      )
+      if method and getattr(method, "ast_decl", None):
+        target_ast = method.ast_decl
 
-    elif isinstance(
-        node,
-        (
-            FuncDeclNode,
-            VarDeclNode,
-            HeaderBindingNode,
-            ParameterNode,
-            EnumDeclNode,
-            EnumMemberNode,
-            TraitDeclNode,
-            StructFieldNode,
-        ),
-    ):
-      target_ast = node
+    if not target_ast and getattr(receiver_type, "ast_decl", None):
+      for member in getattr(receiver_type.ast_decl, "members", []):
+        if getattr(member, "name", None) == node.member:
+          target_ast = member
+          break
 
-    if not target_ast:  # pragma: no cover
-      return None
+    return target_ast
 
-    # Extract positioning from target AST node
+  @classmethod
+  def _extract_node_range(
+      cls, target_ast: Any, node: Any
+  ) -> Optional[Range]:
+    """Computes the LSP Range for a target AST declaration or binding."""
     target_decl = getattr(target_ast, "func_decl", target_ast)
     name_line = getattr(target_decl, "name_line", None)
     name_col = getattr(target_decl, "name_column", None)
@@ -522,9 +338,11 @@ class DefinitionProvider:
         name_len = getattr(target_decl, "let_name_length", None)
 
     if name_line is not None and name_col is not None and name_len is not None:
-      start_pos = Position(line=name_line - 1, character=name_col)
-      end_pos = Position(line=name_line - 1, character=name_col + name_len)
-    elif getattr(target_ast, "start_line", None) is not None:
+      return Range(
+          start=Position(line=name_line - 1, character=name_col),
+          end=Position(line=name_line - 1, character=name_col + name_len),
+      )
+    if getattr(target_ast, "start_line", None) is not None:
       s_line = target_ast.start_line - 1
       s_col = target_ast.start_column or 0
       e_line = (target_ast.end_line - 1) if target_ast.end_line else s_line
@@ -533,75 +351,198 @@ class DefinitionProvider:
           if target_ast.end_column is not None
           else s_col + 1
       )
-      start_pos = Position(line=s_line, character=s_col)
-      end_pos = Position(line=e_line, character=e_col)
-    else:  # pragma: no cover
+      return Range(
+          start=Position(line=s_line, character=s_col),
+          end=Position(line=e_line, character=e_col),
+      )
+    return None  # pragma: no cover
+
+  @classmethod
+  def _locate_in_ast_cache(
+      cls, ls: Any, target_decl: Any
+  ) -> Optional[Tuple[str, Range]]:
+    """Searches cached ASTs when `target_ast.file_uri` is not directly populated."""
+    target_name = getattr(target_decl, "name", None)
+    if not target_name:
+      return None
+
+    def _search_ast(ast_node: Any) -> Optional[Any]:
+      for c_decl in getattr(ast_node, "declarations", []):
+        if (
+            c_decl is target_decl
+            or getattr(c_decl, "name", None) == target_name
+        ):  # pragma: no cover
+          return c_decl
+        if isinstance(c_decl, (TraitDeclNode, EnumDeclNode)):
+          for m in getattr(c_decl, "members", []):
+            if m is target_decl or getattr(m, "name", None) == target_name:
+              return m
+        elif isinstance(c_decl, StructDeclNode):
+          for f in getattr(c_decl, "fields", []):
+            if f is target_decl or getattr(f, "name", None) == target_name:
+              return f
+        elif isinstance(c_decl, ImplBlockNode):
+          for m in getattr(c_decl, "members", []):
+            fn = getattr(m, "func_decl", m)
+            if (
+                fn is target_decl
+                or getattr(fn, "name", None) == target_name
+            ):  # pragma: no cover
+              return fn
+      return None
+
+    for c_uri, c_ast in ls.ast_cache.items():
+      matched_node = _search_ast(c_ast)
+      if not matched_node:
+        continue
+      target_uri = getattr(c_ast, "file_uri", c_uri)
+      matched_range = cls._extract_node_range(matched_node, matched_node)
+      if matched_range is not None:
+        return target_uri, matched_range
+    return None
+
+  @classmethod
+  def provide_definition(
+      cls,
+      ls: Any,
+      params: DefinitionParams,
+      find_node_fn: Optional[Any] = None,
+  ) -> Optional[Location]:
+    """Triggered when user requests Go to Definition."""
+    uri = params.text_document.uri
+    if uri not in ls.ast_cache or uri not in ls.symbol_table_cache:
+      return None
+
+    ast = ls.ast_cache[uri]
+    sym_table = ls.symbol_table_cache[uri]
+    node_types = ls.node_types_cache.get(uri, {})
+
+    line = params.position.line + 1
+    col = params.position.character
+
+    if find_node_fn is None:
+      find_node_fn = find_node_at_position
+    node = find_node_fn(ast, line, col)
+    if not node:
+      return None
+
+    if isinstance(node, CallNode):  # pragma: no cover
+      node = node.callee
+
+    target_ast = None
+    if isinstance(node, ImportStmtNode):
+      path_line = getattr(node, "path_line", getattr(node, "start_line", None))
+      path_col = getattr(
+          node, "path_column", getattr(node, "start_column", None)
+      )
+      path_len = getattr(node, "path_length", getattr(node, "length", None))
+      if (
+          path_line is not None
+          and path_col is not None
+          and path_len is not None
+          and path_line == line
+          and path_col <= col < path_col + path_len
+      ):
+        ws_root = getattr(getattr(ls, "workspace", None), "root_uri", None)
+        target_fs = resolve_module_path(uri, node.path, ws_root)
+        if target_fs:
+          target_uri = from_fs_path(os.path.abspath(target_fs))
+          return Location(
+              uri=target_uri,
+              range=Range(
+                  start=Position(line=0, character=0),
+                  end=Position(line=0, character=0),
+              ),
+          )
+    elif isinstance(node, IdentifierNode):
+      sym = sym_table.lookup(node.name)
+      if (
+          sym
+          and type(sym).__name__ == "ModuleSymbol"
+          and getattr(sym, "file_path", None)
+      ):
+        mod_uri = from_fs_path(os.path.abspath(sym.file_path))
+        return Location(
+            uri=mod_uri,
+            range=Range(
+                start=Position(line=0, character=0),
+                end=Position(line=0, character=0),
+            ),
+        )
+      target_ast = cls._extract_decl_ast(sym)
+      if not target_ast:
+        type_obj = sym_table.lookup_type(node.name)
+        if getattr(type_obj, "ast_decl", None):  # pragma: no cover
+          target_ast = type_obj.ast_decl
+      if not target_ast:
+        target_ast = find_local_decl(ast, node.name, line)
+    elif isinstance(node, MemberAccessNode):
+      target_ast = cls._resolve_member_definition(
+          ls, node, sym_table, node_types
+      )
+    elif isinstance(node, BasicTypeNode):
+      if "." in node.name:
+        parts = node.name.split(".", 1)
+        sym = sym_table.lookup(parts[0])
+        if sym and type(sym).__name__ == "ModuleSymbol":
+          target_ast = cls._resolve_module_export_ast(ls, sym, parts[1])
+      if not target_ast:
+        type_obj = sym_table.lookup_type(node.name)
+        if getattr(type_obj, "ast_decl", None):
+          target_ast = type_obj.ast_decl
+    elif isinstance(node, StructDeclNode):
+      for info in getattr(node, "parent_names_info", []):
+        if (
+            info.get("line") == line
+            and info.get("column") <= col < info.get("column") + info.get("length")
+        ):
+          parent_type = sym_table.lookup_type(info["name"])
+          if getattr(parent_type, "ast_decl", None):
+            target_ast = parent_type.ast_decl
+            break
+      if not target_ast:
+        target_ast = node
+    elif isinstance(node, ImplBlockNode):
+      t_line = getattr(node, "trait_name_line", None)
+      t_col = getattr(node, "trait_name_column", None)
+      t_len = getattr(node, "trait_name_length", None)
+      if node.trait_name and t_line == line and t_col <= col < t_col + t_len:
+        trait_type = sym_table.lookup_type(node.trait_name)
+        if getattr(trait_type, "ast_decl", None):
+          target_ast = trait_type.ast_decl
+      if not target_ast:
+        struct_type = sym_table.lookup_type(node.struct_name)
+        if getattr(struct_type, "ast_decl", None):
+          target_ast = struct_type.ast_decl
+    elif isinstance(
+        node,
+        (
+            FuncDeclNode,
+            VarDeclNode,
+            HeaderBindingNode,
+            ParameterNode,
+            EnumDeclNode,
+            EnumMemberNode,
+            TraitDeclNode,
+            StructFieldNode,
+        ),
+    ):
+      target_ast = node
+
+    if not target_ast:  # pragma: no cover
+      return None
+
+    loc_range = cls._extract_node_range(target_ast, node)
+    if loc_range is None:  # pragma: no cover
       return None
 
     target_uri = getattr(target_ast, "file_uri", None)
-    if not target_uri and hasattr(target_decl, "name"):
-      target_name = target_decl.name
-      for c_uri, c_ast in ls.ast_cache.items():
-
-        def _search_ast(ast_node):
-          for c_decl in getattr(ast_node, "declarations", []):
-            if (
-                c_decl is target_decl
-                or getattr(c_decl, "name", None) == target_name
-            ):  # pragma: no cover
-              return c_decl
-            if isinstance(c_decl, TraitDeclNode):
-              for m in getattr(c_decl, "members", []):
-                if m is target_decl or getattr(m, "name", None) == target_name:
-                  return m
-            elif isinstance(c_decl, StructDeclNode):
-              for f in getattr(c_decl, "fields", []):
-                if f is target_decl or getattr(f, "name", None) == target_name:
-                  return f
-            elif isinstance(c_decl, ImplBlockNode):
-              for m in getattr(c_decl, "members", []):
-                fn = getattr(m, "func_decl", m)
-                if (
-                    fn is target_decl
-                    or getattr(fn, "name", None) == target_name
-                ):  # pragma: no cover
-                  return fn
-            elif isinstance(c_decl, EnumDeclNode):
-              for m in getattr(c_decl, "members", []):
-                if m is target_decl or getattr(m, "name", None) == target_name:
-                  return m
-          return None
-
-        matched_node = _search_ast(c_ast)
-        if matched_node:
-          target_uri = getattr(c_ast, "file_uri", c_uri)
-          matched_decl = getattr(matched_node, "func_decl", matched_node)
-          n_line = getattr(matched_decl, "name_line", None)
-          n_col = getattr(matched_decl, "name_column", None)
-          n_len = getattr(matched_decl, "name_length", None)
-          if n_line is not None and n_col is not None and n_len is not None:
-            start_pos = Position(line=n_line - 1, character=n_col)
-            end_pos = Position(line=n_line - 1, character=n_col + n_len)
-          elif (
-              getattr(matched_node, "start_line", None) is not None
-          ):  # pragma: no cover
-            s_line = matched_node.start_line - 1
-            s_col = matched_node.start_column or 0
-            e_line = (
-                (matched_node.end_line - 1)
-                if matched_node.end_line
-                else s_line
-            )
-            e_col = (
-                matched_node.end_column
-                if matched_node.end_column is not None
-                else s_col + 1
-            )
-            start_pos = Position(line=s_line, character=s_col)
-            end_pos = Position(line=e_line, character=e_col)
-          break
-
+    if not target_uri:
+      target_decl = getattr(target_ast, "func_decl", target_ast)
+      cached = cls._locate_in_ast_cache(ls, target_decl)
+      if cached:
+        target_uri, loc_range = cached
     if not target_uri:
       target_uri = uri
 
-    return Location(uri=target_uri, range=Range(start=start_pos, end=end_pos))
+    return Location(uri=target_uri, range=loc_range)

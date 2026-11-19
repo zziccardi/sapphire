@@ -100,6 +100,203 @@ def _format_func_signature(parameters: list, return_types: list) -> str:
   return f"({params_str}){ret_str}"
 
 
+def _decl_ranges(decl: Any, name: str) -> tuple[Any, Any]:
+  """Builds full and selection LSP Ranges for a named AST declaration."""
+  full_range = _create_range(
+      decl.start_line, decl.start_column, decl.end_line, decl.end_column
+  )
+  name_line, name_col, name_len = _get_name_position(decl, name)
+  sel_range = _create_range(
+      name_line, name_col, name_line, name_col + name_len
+  )
+  _ensure_contained(full_range, sel_range)
+  return full_range, sel_range
+
+
+def _build_struct_symbol(decl: StructDeclNode) -> DocumentSymbol:
+  kind = SymbolKind.Class if decl.is_prototype else SymbolKind.Struct
+  details = []
+  if getattr(decl, "type_params", None):
+    details.append(f"<{', '.join(decl.type_params)}>")
+  if getattr(decl, "parent_names", None):
+    details.append(f": {', '.join(decl.parent_names)}")
+  detail_str = "".join(details) or ("proto" if decl.is_prototype else "struct")
+  full_range, sel_range = _decl_ranges(decl, decl.name)
+
+  field_symbols: List[DocumentSymbol] = []
+  for field in decl.fields:
+    f_range, f_sel_range = _decl_ranges(field, field.name)
+    field_symbols.append(
+        DocumentSymbol(
+            name=field.name,
+            kind=SymbolKind.Property if field.is_mutable else SymbolKind.Field,
+            range=f_range,
+            selection_range=f_sel_range,
+            detail=_format_type_node(field.field_type) or None,
+        )
+    )
+
+  return DocumentSymbol(
+      name=decl.name,
+      kind=kind,
+      range=full_range,
+      selection_range=sel_range,
+      detail=detail_str,
+      children=field_symbols or None,
+  )
+
+
+def _build_enum_symbol(decl: EnumDeclNode) -> DocumentSymbol:
+  full_range, sel_range = _decl_ranges(decl, decl.name)
+  member_symbols: List[DocumentSymbol] = []
+  for m in decl.members:
+    m_range, m_sel = _decl_ranges(m, m.name)
+    member_symbols.append(
+        DocumentSymbol(
+            name=m.name,
+            kind=SymbolKind.EnumMember,
+            range=m_range,
+            selection_range=m_sel,
+            detail=f"= {m.value}" if m.value is not None else None,
+        )
+    )
+  return DocumentSymbol(
+      name=decl.name,
+      kind=SymbolKind.Enum,
+      range=full_range,
+      selection_range=sel_range,
+      detail="enum",
+      children=member_symbols or None,
+  )
+
+
+def _build_trait_symbol(decl: TraitDeclNode) -> DocumentSymbol:
+  full_range, sel_range = _decl_ranges(decl, decl.name)
+  method_symbols: List[DocumentSymbol] = []
+  for tm in decl.members:
+    tm_range, tm_sel = _decl_ranges(tm, tm.name)
+    method_symbols.append(
+        DocumentSymbol(
+            name=tm.name,
+            kind=SymbolKind.Method,
+            range=tm_range,
+            selection_range=tm_sel,
+            detail=_format_func_signature(tm.parameters, tm.return_types),
+        )
+    )
+  detail_trait = (
+      f"<{', '.join(decl.type_params)}>"
+      if getattr(decl, "type_params", None)
+      else "trait"
+  )
+  return DocumentSymbol(
+      name=decl.name,
+      kind=SymbolKind.Interface,
+      range=full_range,
+      selection_range=sel_range,
+      detail=detail_trait,
+      children=method_symbols or None,
+  )
+
+
+def _build_impl_symbol(decl: ImplBlockNode) -> DocumentSymbol:
+  impl_name = (
+      f"impl {decl.trait_name} for {decl.struct_name}"
+      if getattr(decl, "trait_name", None)
+      else f"impl {decl.struct_name}"
+  )
+  full_range = _create_range(
+      decl.start_line, decl.start_column, decl.end_line, decl.end_column
+  )
+  sel_line = (
+      getattr(decl, "struct_name_line", None)
+      or getattr(decl, "trait_name_line", None)
+      or getattr(decl, "start_line", 1)
+  )
+  sel_col = getattr(decl, "struct_name_column", None)
+  if sel_col is None:
+    sel_col = getattr(decl, "trait_name_column", None)
+  if sel_col is None:
+    sel_col = getattr(decl, "start_column", 0) or 0
+  sel_len = (
+      getattr(decl, "struct_name_length", None)
+      or getattr(decl, "trait_name_length", None)
+      or len(decl.struct_name)
+  )
+  sel_range = _create_range(sel_line, sel_col, sel_line, sel_col + sel_len)
+  _ensure_contained(full_range, sel_range)
+
+  methods: List[DocumentSymbol] = []
+  for m in decl.members:
+    fn = m.func_decl
+    fn_range, fn_sel = _decl_ranges(fn, fn.name)
+    methods.append(
+        DocumentSymbol(
+            name=fn.name,
+            kind=(
+                SymbolKind.Constructor
+                if fn.name == "__init__"
+                else SymbolKind.Method
+            ),
+            range=fn_range,
+            selection_range=fn_sel,
+            detail=_format_func_signature(fn.parameters, fn.return_types),
+        )
+    )
+
+  return DocumentSymbol(
+      name=impl_name,
+      kind=SymbolKind.Namespace,
+      range=full_range,
+      selection_range=sel_range,
+      children=methods or None,
+  )
+
+
+def _build_var_symbols(decl: VarDeclNode) -> List[DocumentSymbol]:
+  kind = SymbolKind.Variable if decl.is_mutable else SymbolKind.Constant
+  full_range = _create_range(
+      decl.start_line, decl.start_column, decl.end_line, decl.end_column
+  )
+  out: List[DocumentSymbol] = []
+  bindings_info = getattr(decl, "bindings_info", None)
+  if bindings_info:
+    for b in bindings_info:
+      b_name = b["name"]
+      b_line = b.get("line", decl.start_line)
+      b_col = b.get("column", decl.start_column)
+      b_len = b.get("length", len(b_name))
+      b_sel = _create_range(b_line, b_col, b_line, (b_col or 0) + b_len)
+      _ensure_contained(full_range, b_sel)
+      out.append(
+          DocumentSymbol(
+              name=b_name,
+              kind=kind,
+              range=full_range,
+              selection_range=b_sel,
+              detail=_format_type_node(b.get("val_type")) or None,
+          )
+      )
+    return out
+
+  for idx, name in enumerate(decl.names):
+    v_type = (
+        _format_type_node(decl.val_types[idx])
+        if idx < len(decl.val_types)
+        else None
+    )
+    out.append(
+        DocumentSymbol(
+            name=name,
+            kind=kind,
+            range=full_range,
+            selection_range=full_range,
+            detail=v_type or None,
+        )
+    )
+  return out
+
+
 def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
   """Extracts all symbols defined in the given ProgramNode AST, ordered by position."""
   symbols: List[DocumentSymbol] = []
@@ -107,238 +304,34 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
     return symbols
 
   for decl in ast.declarations:
-    # 1. Struct and Proto Declarations
     if isinstance(decl, StructDeclNode):
-      kind = SymbolKind.Class if decl.is_prototype else SymbolKind.Struct
-      details = []
-      if getattr(decl, "type_params", None):
-        details.append(f"<{', '.join(decl.type_params)}>")
-      if getattr(decl, "parent_names", None):
-        details.append(f": {', '.join(decl.parent_names)}")
-      detail_str = "".join(details) or ("proto" if decl.is_prototype else "struct")
-
-      full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line, name_col, name_len = _get_name_position(decl, decl.name)
-      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
-      _ensure_contained(full_range, sel_range)
-
-      field_symbols: List[DocumentSymbol] = []
-      for field in decl.fields:
-        f_type_str = _format_type_node(field.field_type)
-        f_range = _create_range(field.start_line, field.start_column, field.end_line, field.end_column)
-        fn_line, fn_col, fn_len = _get_name_position(field, field.name)
-        f_sel_range = _create_range(fn_line, fn_col, fn_line, fn_col + fn_len)
-        _ensure_contained(f_range, f_sel_range)
-
-        field_symbols.append(
-            DocumentSymbol(
-                name=field.name,
-                kind=SymbolKind.Property if field.is_mutable else SymbolKind.Field,
-                range=f_range,
-                selection_range=f_sel_range,
-                detail=f_type_str or None,
-            )
-        )
-
-      symbols.append(
-          DocumentSymbol(
-              name=decl.name,
-              kind=kind,
-              range=full_range,
-              selection_range=sel_range,
-              detail=detail_str,
-              children=field_symbols or None,
-          )
-      )
-
-    # 2. Enum Declarations
+      symbols.append(_build_struct_symbol(decl))
     elif isinstance(decl, EnumDeclNode):
-      full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line, name_col, name_len = _get_name_position(decl, decl.name)
-      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
-      _ensure_contained(full_range, sel_range)
-
-      member_symbols: List[DocumentSymbol] = []
-      for m in decl.members:
-        m_range = _create_range(m.start_line, m.start_column, m.end_line, m.end_column)
-        mn_line, mn_col, mn_len = _get_name_position(m, m.name)
-        m_sel = _create_range(mn_line, mn_col, mn_line, mn_col + mn_len)
-        _ensure_contained(m_range, m_sel)
-
-        detail = f"= {m.value}" if m.value is not None else None
-        member_symbols.append(
-            DocumentSymbol(
-                name=m.name,
-                kind=SymbolKind.EnumMember,
-                range=m_range,
-                selection_range=m_sel,
-                detail=detail,
-            )
-        )
-
-      symbols.append(
-          DocumentSymbol(
-              name=decl.name,
-              kind=SymbolKind.Enum,
-              range=full_range,
-              selection_range=sel_range,
-              detail="enum",
-              children=member_symbols or None,
-          )
-      )
-
-    # 3. Trait Declarations
+      symbols.append(_build_enum_symbol(decl))
     elif isinstance(decl, TraitDeclNode):
-      full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line, name_col, name_len = _get_name_position(decl, decl.name)
-      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
-      _ensure_contained(full_range, sel_range)
-
-      method_symbols: List[DocumentSymbol] = []
-      for tm in decl.members:
-        tm_range = _create_range(tm.start_line, tm.start_column, tm.end_line, tm.end_column)
-        tmn_line, tmn_col, tmn_len = _get_name_position(tm, tm.name)
-        tm_sel = _create_range(tmn_line, tmn_col, tmn_line, tmn_col + tmn_len)
-        _ensure_contained(tm_range, tm_sel)
-
-        detail_sig = _format_func_signature(tm.parameters, tm.return_types)
-        method_symbols.append(
-            DocumentSymbol(
-                name=tm.name,
-                kind=SymbolKind.Method,
-                range=tm_range,
-                selection_range=tm_sel,
-                detail=detail_sig,
-            )
-        )
-
-      detail_trait = f"<{', '.join(decl.type_params)}>" if getattr(decl, "type_params", None) else "trait"
-      symbols.append(
-          DocumentSymbol(
-              name=decl.name,
-              kind=SymbolKind.Interface,
-              range=full_range,
-              selection_range=sel_range,
-              detail=detail_trait,
-              children=method_symbols or None,
-          )
-      )
-
-    # 4. Impl Blocks
+      symbols.append(_build_trait_symbol(decl))
     elif isinstance(decl, ImplBlockNode):
-      impl_name = (
-          f"impl {decl.trait_name} for {decl.struct_name}"
-          if getattr(decl, "trait_name", None)
-          else f"impl {decl.struct_name}"
-      )
-      full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      sel_line = (
-          getattr(decl, "struct_name_line", None)
-          or getattr(decl, "trait_name_line", None)
-          or getattr(decl, "start_line", 1)
-      )
-      sel_col = getattr(decl, "struct_name_column", None)
-      if sel_col is None:
-        sel_col = getattr(decl, "trait_name_column", None)
-      if sel_col is None:
-        sel_col = getattr(decl, "start_column", 0) or 0
-      sel_len = (
-          getattr(decl, "struct_name_length", None)
-          or getattr(decl, "trait_name_length", None)
-          or len(decl.struct_name)
-      )
-      sel_range = _create_range(sel_line, sel_col, sel_line, sel_col + sel_len)
-      _ensure_contained(full_range, sel_range)
-
-      methods: List[DocumentSymbol] = []
-      for m in decl.members:
-        fn = m.func_decl
-        fn_range = _create_range(fn.start_line, fn.start_column, fn.end_line, fn.end_column)
-        fnn_line, fnn_col, fnn_len = _get_name_position(fn, fn.name)
-        fn_sel = _create_range(fnn_line, fnn_col, fnn_line, fnn_col + fnn_len)
-        _ensure_contained(fn_range, fn_sel)
-
-        detail_sig = _format_func_signature(fn.parameters, fn.return_types)
-        kind = SymbolKind.Constructor if fn.name == "__init__" else SymbolKind.Method
-        methods.append(
-            DocumentSymbol(
-                name=fn.name,
-                kind=kind,
-                range=fn_range,
-                selection_range=fn_sel,
-                detail=detail_sig,
-            )
-        )
-
-      symbols.append(
-          DocumentSymbol(
-              name=impl_name,
-              kind=SymbolKind.Namespace,
-              range=full_range,
-              selection_range=sel_range,
-              children=methods or None,
-          )
-      )
-
-    # 5. Top-level Functions
+      symbols.append(_build_impl_symbol(decl))
     elif isinstance(decl, FuncDeclNode):
-      full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
-      name_line, name_col, name_len = _get_name_position(decl, decl.name)
-      sel_range = _create_range(name_line, name_col, name_line, name_col + name_len)
-      _ensure_contained(full_range, sel_range)
-
-      detail_sig = _format_func_signature(decl.parameters, decl.return_types)
+      full_range, sel_range = _decl_ranges(decl, decl.name)
       symbols.append(
           DocumentSymbol(
               name=decl.name,
               kind=SymbolKind.Function,
               range=full_range,
               selection_range=sel_range,
-              detail=detail_sig,
+              detail=_format_func_signature(decl.parameters, decl.return_types),
           )
       )
-
-    # 6. Top-level Variables and Constants
     elif isinstance(decl, VarDeclNode):
-      kind = SymbolKind.Variable if decl.is_mutable else SymbolKind.Constant
-      full_range = _create_range(decl.start_line, decl.start_column, decl.end_line, decl.end_column)
+      symbols.extend(_build_var_symbols(decl))
 
-      bindings_info = getattr(decl, "bindings_info", None)
-      if bindings_info:
-        for b in bindings_info:
-          b_name = b["name"]
-          b_line = b.get("line", decl.start_line)
-          b_col = b.get("column", decl.start_column)
-          b_len = b.get("length", len(b_name))
-          b_sel = _create_range(b_line, b_col, b_line, (b_col or 0) + b_len)
-          _ensure_contained(full_range, b_sel)
-          b_type = _format_type_node(b.get("val_type"))
-          symbols.append(
-              DocumentSymbol(
-                  name=b_name,
-                  kind=kind,
-                  range=full_range,
-                  selection_range=b_sel,
-                  detail=b_type or None,
-              )
-          )
-      else:
-        for idx, name in enumerate(decl.names):
-          v_type = _format_type_node(decl.val_types[idx]) if idx < len(decl.val_types) else None
-          symbols.append(
-              DocumentSymbol(
-                  name=name,
-                  kind=kind,
-                  range=full_range,
-                  selection_range=full_range,
-                  detail=v_type or None,
-              )
-          )
-
-  # Sort all symbols and their children strictly by start position in document
+  # Sort all symbols and their children strictly by start position in document.
   symbols.sort(key=lambda s: (s.range.start.line, s.range.start.character))
   for s in symbols:
     if s.children:
-      s.children.sort(key=lambda c: (c.range.start.line, c.range.start.character))
+      s.children.sort(
+          key=lambda c: (c.range.start.line, c.range.start.character)
+      )
 
   return symbols
