@@ -1,51 +1,52 @@
-"""Call, argument, aliasing, and member-access visitors for TypeChecker."""
+"""Call, argument, and aliasing visitors for TypeChecker."""
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from src.parser.ast import *
-from src.semantics.symbol_table import (
-    SymbolTable,
-    Type,
-    PrimitiveType,
-    StringType,
-    OptionalType,
-    FunctionType,
-    MultiReturnType,
-    StructMethod,
-    StructType,
-    TraitType,
-    EnumType,
-    NoneType,
-    InferredType,
-    ArrayType,
-    MapType,
-    ArenaType,
-    RangeType,
-    ModuleType,
-    GenericTypeParameter,
-    VariableSymbol,
-    FunctionSymbol,
-    StructSymbol,
-    EnumSymbol,
-    ModuleSymbol,
-    CoroutineType,
-    RefType,
-    SharedRefType,
-    WeakRefType,
-    COROUTINE_METHODS,
-    STRING_METHODS,
+from src.parser.ast import (
+    ASTNode,
+    ArgumentNode,
+    BasicTypeNode,
+    BinaryOpNode,
+    CallNode,
+    CastExprNode,
+    IdentifierNode,
+    IndexExprNode,
+    InterpolatedStringNode,
+    ArrayLiteralNode,
+    LiteralNode,
+    MapLiteralNode,
+    MemberAccessNode,
+    MoveNode,
+    TernaryExprNode,
+    UnaryOpNode,
 )
-from src.cli.diagnostics import format_diagnostic
-from src.common.errors import SemanticError
 from src.semantics.arena_checker import ArenaChecker
 from src.semantics.collection_checker import CollectionChecker
-from src.semantics.declaration_pass import DeclarationPass
-from src.semantics.generics_checker import GenericsChecker
-from src.semantics.semantic_context import SemanticContext
-from src.semantics.struct_layout_pass import StructLayoutPass
+from src.semantics.member_access_visitor import MemberAccessVisitorMixin
+from src.semantics.symbol_table import (
+    ArenaType,
+    ArrayType,
+    CoroutineType,
+    EnumType,
+    FunctionSymbol,
+    FunctionType,
+    GenericTypeParameter,
+    ModuleSymbol,
+    MultiReturnType,
+    OptionalType,
+    PrimitiveType,
+    RangeType,
+    RefType,
+    SharedRefType,
+    StringType,
+    StructType,
+    Type,
+    VariableSymbol,
+    WeakRefType,
+)
 
 
-class CallVisitorMixin:
+class CallVisitorMixin(MemberAccessVisitorMixin):
   """Provides AST visitor methods for calls, arguments, and member access."""
 
   def _get_lvalue_path(self, node: ASTNode) -> Optional[tuple[str, List[str]]]:
@@ -56,109 +57,73 @@ class CallVisitorMixin:
     """Returns True if the type is passed by reference (non-primitive)."""
     return ArenaChecker.is_reference_type(type_obj)
 
-  def _check_aliasing(self, node: CallNode, signature: FunctionType, is_constructor: bool) -> None:
+  def _check_aliasing(
+      self, node: CallNode, signature: FunctionType, is_constructor: bool
+  ) -> None:
     """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
     ArenaChecker.check_aliasing(self, node, signature, is_constructor)
 
-  def _get_dotted_path(self, expr: Any) -> Optional[List[str]]:
-    """Returns the dotted identifier path components of an expression."""
-    if isinstance(expr, IdentifierNode):
-      return [expr.name]
-    if isinstance(expr, MemberAccessNode) and not expr.is_optional:
-      recv = self._get_dotted_path(expr.receiver)
-      if recv is not None:
-        return recv + [expr.member]
-    return None
-
-  def _find_imported_module_by_path(self, path: str) -> Optional[ModuleSymbol]:
-    """Finds an imported ModuleSymbol by its full import path."""
-    root_scope = self.symbol_table.current_scope
-    while root_scope.parent:
-      root_scope = root_scope.parent
-    for sym in root_scope.symbols.values():
-      if isinstance(sym, ModuleSymbol) and sym.module_path == path:
-        return sym
-    return None
-
-  def _find_imported_modules_with_prefix(
-      self, prefix: str
-  ) -> List[ModuleSymbol]:
-    """Returns all imported ModuleSymbols starting with prefix."""
-    root_scope = self.symbol_table.current_scope
-    while root_scope.parent:
-      root_scope = root_scope.parent
-    res: List[ModuleSymbol] = []
-    prefix_dot = prefix + "."
-    for sym in root_scope.symbols.values():
-      if (
-          isinstance(sym, ModuleSymbol)
-          and sym.module_path.startswith(prefix_dot)
-      ):
-        res.append(sym)
-    return res
-
-  def visit_CallNode(self, node: CallNode) -> Type:
-    # Generic function resolution & monomorphization
+  def _try_monomorphize_generic_call(self, node: CallNode) -> None:
+    """Resolves and monomorphizes calls to generic functions when applicable."""
     sym = None
     mod_sym = None
     if isinstance(node.callee, IdentifierNode):
       sym = self.symbol_table.lookup(node.callee.name)
-    elif isinstance(node.callee, MemberAccessNode) and isinstance(node.callee.receiver, IdentifierNode):
+    elif isinstance(node.callee, MemberAccessNode) and isinstance(
+        node.callee.receiver, IdentifierNode
+    ):
       mod_sym = self.symbol_table.lookup(node.callee.receiver.name)
       if isinstance(mod_sym, ModuleSymbol):
         sym = mod_sym.lookup_export(node.callee.member)
 
-    if sym and isinstance(sym, FunctionSymbol) and sym.type_params:
-      if node.type_args:
-        resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
-        mangled_name = self._monomorphize_function(sym, node.type_args, resolved_type_args)
-        if isinstance(node.callee, IdentifierNode):
-          node.callee.name = mangled_name
+    if not (sym and isinstance(sym, FunctionSymbol) and sym.type_params):
+      return
+
+    if node.type_args:
+      resolved_type_args = [
+          self._resolve_type_node(t) for t in node.type_args
+      ]
+      type_arg_nodes = node.type_args
+    else:
+      # Infer generic type parameters from call arguments when omitted.
+      inferred_map: Dict[str, Type] = {}
+      param_names = sym.symbol_type.param_names or []
+      for idx, arg in enumerate(node.arguments):
+        if arg.name:
+          param_idx = (
+              param_names.index(arg.name) if arg.name in param_names else None
+          )
         else:
-          node.callee.member = mangled_name
-        if mod_sym:
-          mono_sym = self.symbol_table.lookup(mangled_name)
-          if mono_sym:
-            mod_sym.exports[mangled_name] = mono_sym
-      else:
-        inferred_map = {}
-        param_names = sym.symbol_type.param_names or []
-        for idx, arg in enumerate(node.arguments):
-          if arg.name:
-            param_idx = (
-                param_names.index(arg.name)
-                if arg.name in param_names
-                else None
-            )
-          else:
-            param_idx = idx
-          if param_idx is not None and param_idx < len(sym.symbol_type.param_types):
-            param_t = sym.symbol_type.param_types[param_idx]
-            arg_t = self.visit(arg.expr)
-            if isinstance(param_t, GenericTypeParameter):
-              inferred_map[param_t.name] = arg_t
+          param_idx = idx
+        if param_idx is not None and param_idx < len(
+            sym.symbol_type.param_types
+        ):
+          param_t = sym.symbol_type.param_types[param_idx]
+          arg_t = self.visit(arg.expr)
+          if isinstance(param_t, GenericTypeParameter):
+            inferred_map[param_t.name] = arg_t
 
-        type_arg_nodes = []
-        resolved_type_args = []
-        for p_name in sym.type_params:
-          inf_t = inferred_map.get(p_name, PrimitiveType("int"))
-          resolved_type_args.append(inf_t)
-          type_arg_nodes.append(BasicTypeNode(str(inf_t)))
-        mangled_name = self._monomorphize_function(sym, type_arg_nodes, resolved_type_args)
-        if isinstance(node.callee, IdentifierNode):
-          node.callee.name = mangled_name
-        else:
-          node.callee.member = mangled_name
-        if mod_sym:
-          mono_sym = self.symbol_table.lookup(mangled_name)
-          if mono_sym:
-            mod_sym.exports[mangled_name] = mono_sym
+      type_arg_nodes = []
+      resolved_type_args = []
+      for p_name in sym.type_params:
+        inf_t = inferred_map.get(p_name, PrimitiveType("int"))
+        resolved_type_args.append(inf_t)
+        type_arg_nodes.append(BasicTypeNode(str(inf_t)))
 
-    # 1. Resolve callee
-    if isinstance(node.callee, MemberAccessNode):
-      node.callee.is_call = True
-    callee_type = self.visit(node.callee)
+    mangled_name = self._monomorphize_function(
+        sym, type_arg_nodes, resolved_type_args
+    )
+    if isinstance(node.callee, IdentifierNode):
+      node.callee.name = mangled_name
+    else:
+      node.callee.member = mangled_name
+    if mod_sym:
+      mono_sym = self.symbol_table.lookup(mangled_name)
+      if mono_sym:
+        mod_sym.exports[mangled_name] = mono_sym
 
+  def _try_check_builtin_call(self, node: CallNode) -> Optional[Type]:
+    """Handles special-cased builtin calls (String.from, Enum.from, Ref, etc.)."""
     if getattr(node.callee, "is_string_from", False):
       if len(node.arguments) != 1:
         self.error("String.from() requires exactly 1 argument.")
@@ -166,155 +131,340 @@ class CallVisitorMixin:
       arg_t = self.visit(node.arguments[0].expr)
       is_valid = (
           isinstance(arg_t, StringType)
-          or (isinstance(arg_t, PrimitiveType) and arg_t.name in ("int", "float", "bool"))
+          or (
+              isinstance(arg_t, PrimitiveType)
+              and arg_t.name in ("int", "float", "bool")
+          )
           or isinstance(arg_t, EnumType)
       )
       if not is_valid:
-        self.error(f"Cannot convert type '{arg_t}' to String using String.from().")
+        self.error(
+            f"Cannot convert type '{arg_t}' to String using String.from()."
+        )
       return StringType()
 
     if getattr(node.callee, "is_enum_from", False):
       enum_t = getattr(node.callee, "enum_type", PrimitiveType("none"))
       if len(node.arguments) != 1:
-        self.error(f"{getattr(enum_t, 'name', 'Enum')}.from() requires exactly 1 argument.")
+        self.error(
+            f"{getattr(enum_t, 'name', 'Enum')}.from() requires exactly 1 argument."
+        )
         return OptionalType(enum_t)
       arg_t = self.visit(node.arguments[0].expr)
-      is_valid = (
-          isinstance(arg_t, StringType)
-          or (isinstance(arg_t, PrimitiveType) and arg_t.name == "int")
+      is_valid = isinstance(arg_t, StringType) or (
+          isinstance(arg_t, PrimitiveType) and arg_t.name == "int"
       )
       if not is_valid:
-        self.error(f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or String.")
+        self.error(
+            f"Cannot convert type '{arg_t}' to Enum '{getattr(enum_t, 'name', 'Enum')}' using .from(). Requires int or String."
+        )
       return OptionalType(enum_t)
 
-    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_array_method", False):
+    if isinstance(node.callee, MemberAccessNode) and getattr(
+        node.callee, "is_array_method", False
+    ):
       res = CollectionChecker.check_array_method_call(self, node)
       if res is not None:
         return res
 
-    if isinstance(node.callee, MemberAccessNode) and getattr(node.callee, "is_map_method", False):
+    if isinstance(node.callee, MemberAccessNode) and getattr(
+        node.callee, "is_map_method", False
+    ):
       res = CollectionChecker.check_map_method_call(self, node)
       if res is not None:
         return res
 
     if isinstance(node.callee, IdentifierNode) and node.callee.name == "Ref":
-      if node.arena_expr:
-        self.error("Ref() allocations cannot specify an 'in <arena>' clause.", node=node)
-      if len(node.arguments) != 1:
-        self.error(f"Ref() constructor expects 1 argument, got {len(node.arguments)}.", node=node)
-        return RefType(PrimitiveType("none"))
-      arg_expr = node.arguments[0].expr
-      arg_type = self.visit(arg_expr)
-      self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
-      ArenaChecker.validate_heap_box_escape(
-          self.symbol_table, "Ref", arg_expr,
-          lambda msg: self.error(msg, node=node), checker=self
-      )
-      node.is_ref_constructor = True
-      if node.type_args:
-        expected_inner = self._resolve_type_node(node.type_args[0])
-        if ArenaChecker.type_can_hold_arena_ref(expected_inner, is_box_check=True):
-          self.error(
-              f"Cannot store arena-referencing type '{expected_inner}' inside 'Ref'.",
-              node=node,
-          )
-        if not arg_type.is_compatible(expected_inner):
-          self.error(f"Ref<{expected_inner}> expected argument of type '{expected_inner}', got '{arg_type}'.", node=node)
-        return RefType(expected_inner)
-      return RefType(arg_type)
+      return self._check_heap_box_constructor(node, is_shared=False)
 
-    if isinstance(node.callee, IdentifierNode) and node.callee.name == "SharedRef":
-      if node.arena_expr:
-        self.error("SharedRef() allocations cannot specify an 'in <arena>' clause.", node=node)
-      if len(node.arguments) != 1:
-        self.error(f"SharedRef() constructor expects 1 argument, got {len(node.arguments)}.", node=node)
-        return SharedRefType(PrimitiveType("none"))
-      arg_expr = node.arguments[0].expr
-      arg_type = self.visit(arg_expr)
-      self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
-      ArenaChecker.validate_heap_box_escape(
-          self.symbol_table, "SharedRef", arg_expr,
-          lambda msg: self.error(msg, node=node), checker=self
-      )
-      node.is_shared_ref_constructor = True
-      if isinstance(arg_type, RefType):
-        inner_t = arg_type.inner_type
-      else:
-        inner_t = arg_type
-      if node.type_args:
-        expected_inner = self._resolve_type_node(node.type_args[0])
-        if ArenaChecker.type_can_hold_arena_ref(expected_inner, is_box_check=True):
-          self.error(
-              f"Cannot store arena-referencing type '{expected_inner}' inside 'SharedRef'.",
-              node=node,
-          )
-        if not inner_t.is_compatible(expected_inner):
-          self.error(f"SharedRef<{expected_inner}> expected argument of type '{expected_inner}', got '{inner_t}'.", node=node)
-        return SharedRefType(expected_inner)
-      return SharedRefType(inner_t)
+    if (
+        isinstance(node.callee, IdentifierNode)
+        and node.callee.name == "SharedRef"
+    ):
+      return self._check_heap_box_constructor(node, is_shared=True)
 
     if isinstance(node.callee, IdentifierNode) and node.callee.name == "WeakRef":
-      self.error("WeakRef cannot be constructed directly; use 'shared_ref.downgrade()'.", node=node)
+      self.error(
+          "WeakRef cannot be constructed directly; use 'shared_ref.downgrade()'.",
+          node=node,
+      )
       return WeakRefType(PrimitiveType("none"))
 
-    signature = None
+    return None
+
+  def _check_heap_box_constructor(
+      self, node: CallNode, is_shared: bool
+  ) -> Type:
+    """Validates Ref() and SharedRef() heap-box constructors."""
+    box_name = "SharedRef" if is_shared else "Ref"
+    box_cls = SharedRefType if is_shared else RefType
+
+    if node.arena_expr:
+      self.error(
+          f"{box_name}() allocations cannot specify an 'in <arena>' clause.",
+          node=node,
+      )
+    if len(node.arguments) != 1:
+      self.error(
+          f"{box_name}() constructor expects 1 argument, got {len(node.arguments)}.",
+          node=node,
+      )
+      return box_cls(PrimitiveType("none"))
+
+    arg_expr = node.arguments[0].expr
+    arg_type = self.visit(arg_expr)
+    self._check_value_ownership_transfer(arg_expr, arg_type, node=node)
+    ArenaChecker.validate_heap_box_escape(
+        self.symbol_table,
+        box_name,
+        arg_expr,
+        lambda msg: self.error(msg, node=node),
+        checker=self,
+    )
+    if is_shared:
+      node.is_shared_ref_constructor = True
+      inner_t = (
+          arg_type.inner_type if isinstance(arg_type, RefType) else arg_type
+      )
+    else:
+      node.is_ref_constructor = True
+      inner_t = arg_type
+
+    if node.type_args:
+      expected_inner = self._resolve_type_node(node.type_args[0])
+      if ArenaChecker.type_can_hold_arena_ref(
+          expected_inner, is_box_check=True
+      ):
+        self.error(
+            f"Cannot store arena-referencing type '{expected_inner}' inside '{box_name}'.",
+            node=node,
+        )
+      if not inner_t.is_compatible(expected_inner):
+        self.error(
+            f"{box_name}<{expected_inner}> expected argument of type '{expected_inner}', got '{inner_t}'.",
+            node=node,
+        )
+      return box_cls(expected_inner)
+    return box_cls(inner_t)
+
+  def _check_constructor_call(
+      self, node: CallNode, callee_type: StructType
+  ) -> Tuple[StructType, Optional[FunctionType]]:
+    """Validates struct/proto constructor calls and `in <arena>` clauses."""
+    if callee_type.type_params:
+      if node.type_args:
+        resolved_type_args = [
+            self._resolve_type_node(t) for t in node.type_args
+        ]
+        callee_type = self._monomorphize_struct(
+            callee_type, node.type_args, resolved_type_args
+        )
+        if isinstance(node.callee, IdentifierNode):
+          node.callee.name = callee_type.name
+      else:
+        self.error(
+            f"Generic struct '{callee_type.name}' requires explicit type arguments."
+        )
+        return callee_type, None
+
+    node._is_struct_constructor = True
+    init_method = callee_type.methods.get("__init__")
+    if not init_method:
+      self.error(
+          f"Struct '{callee_type.name}' has no '__init__' constructor defined."
+      )
+      return callee_type, None
+
+    signature = init_method.method_type
+    self._check_arguments(
+        node.arguments, signature, is_constructor=True, call_node=node
+    )
+    if callee_type.is_prototype and not node.arena_expr:
+      self.error(
+          f"Proto constructor call for '{callee_type.name}' requires an explicit arena via 'in <arena>'."
+      )
+    if node.arena_expr:
+      arena_type = self.visit(node.arena_expr)
+      if not isinstance(arena_type, ArenaType):
+        self.error("Explicit arena target must be an instance of Arena.")
+      else:
+        ArenaChecker.validate_arena_mutability(
+            self.symbol_table,
+            node.arena_expr,
+            lambda msg: self.error(msg, node=node),
+            checker=self,
+        )
+        if (
+            self.is_in_init
+            and isinstance(node.arena_expr, MemberAccessNode)
+            and isinstance(node.arena_expr.receiver, IdentifierNode)
+            and node.arena_expr.receiver.name == "self"
+        ):
+          self._init_used_arena_fields.add(node.arena_expr.member)
+    return callee_type, signature
+
+  def _check_module_var_reentrancy(self, node: CallNode) -> None:
+    """Rejects passing mutable non-primitive globals that the callee also touches."""
+    callee_id = None
+    is_known_func = False
+    if isinstance(node.callee, IdentifierNode):
+      callee_id = node.callee.name
+      callee_sym = self.symbol_table.lookup(callee_id)
+      if isinstance(callee_sym, FunctionSymbol):
+        is_known_func = True
+    elif isinstance(node.callee, MemberAccessNode):
+      recv_t = self.node_types.get(node.callee.receiver)
+      if isinstance(recv_t, StructType):
+        callee_id = f"{recv_t.name}.{node.callee.member}"
+      else:
+        callee_id = node.callee.member
+      is_known_func = True
+
+    callee_transitive = getattr(self, "func_transitive_globals", {})
+    callee_dynamic = getattr(self, "func_transitive_dynamic", set())
+    matching_keys = (
+        [
+            k
+            for k in callee_transitive
+            if k == callee_id or k.endswith(f".{callee_id}")
+        ]
+        if callee_id
+        else []
+    )
+
+    for arg in node.arguments:
+      arg_path = ArenaChecker.get_lvalue_path(self.symbol_table, arg.expr)
+      if not arg_path:
+        continue
+      root, _ = arg_path
+      if root not in getattr(self, "module_var_globals", set()):
+        continue
+      root_sym = self.symbol_table.lookup(root)
+      if not (
+          isinstance(root_sym, VariableSymbol)
+          and ArenaChecker.is_reference_type(root_sym.symbol_type)
+      ):
+        continue
+      if root in getattr(self, "exported_var_globals", set()):
+        self.error(
+            f"Cannot pass exported mutable global '{root}' by reference.",
+            node=node,
+        )
+      elif not is_known_func or any(
+          k in callee_dynamic for k in matching_keys
+      ):
+        self.error(
+            f"Cannot pass mutable global '{root}' by reference to "
+            "dynamic or higher-order callee.",
+            node=node,
+        )
+      elif any(root in callee_transitive.get(k, set()) for k in matching_keys):
+        self.error(
+            f"Cannot pass mutable global '{root}' by reference: callee "
+            f"accesses '{root}' in its call graph (reentrant global "
+            "aliasing hazard).",
+            node=node,
+        )
+
+    if isinstance(node.callee, MemberAccessNode):
+      recv_path = ArenaChecker.get_lvalue_path(
+          self.symbol_table, node.callee.receiver
+      )
+      if recv_path:
+        root, _ = recv_path
+        if root in getattr(self, "module_var_globals", set()):
+          root_sym = self.symbol_table.lookup(root)
+          if (
+              isinstance(root_sym, VariableSymbol)
+              and ArenaChecker.is_reference_type(root_sym.symbol_type)
+          ):
+            if any(
+                root in callee_transitive.get(k, set()) for k in matching_keys
+            ):
+              self.error(
+                  f"Cannot invoke method '{node.callee.member}' on mutable "
+                  f"global '{root}': method accesses '{root}' in its call "
+                  "graph (reentrant global aliasing hazard).",
+                  node=node,
+              )
+
+  def _collect_coroutine_call_borrows(self, node: CallNode) -> None:
+    """Records local stack variables borrowed by a returned Coroutine<T>."""
+    coro_borrows: Set[str] = set()
+    if isinstance(node.callee, MemberAccessNode):
+      r_path = ArenaChecker.get_lvalue_path(
+          self.symbol_table, node.callee.receiver
+      )
+      if r_path:
+        root, _ = r_path
+        r_sym = self.symbol_table.lookup(root)
+        if (
+            isinstance(r_sym, VariableSymbol)
+            and r_sym.scope_defined is not None
+            and r_sym.scope_defined.parent is not None
+        ):
+          coro_borrows.add(r_sym.name)
+          coro_borrows.update(r_sym.stack_borrow_symbols)
+      coro_borrows.update(
+          ArenaChecker.collect_stack_borrow_symbols(
+              self.symbol_table, node.callee.receiver, self
+          )
+      )
+    for arg in node.arguments:
+      a_path = ArenaChecker.get_lvalue_path(self.symbol_table, arg.expr)
+      if a_path:
+        root, _ = a_path
+        a_sym = self.symbol_table.lookup(root)
+        if (
+            isinstance(a_sym, VariableSymbol)
+            and a_sym.scope_defined is not None
+            and a_sym.scope_defined.parent is not None
+            and (
+                ArenaChecker.is_reference_type(a_sym.symbol_type)
+                or a_sym.is_mutable
+            )
+        ):
+          coro_borrows.add(a_sym.name)
+          coro_borrows.update(a_sym.stack_borrow_symbols)
+      coro_borrows.update(
+          ArenaChecker.collect_stack_borrow_symbols(
+              self.symbol_table, arg.expr, self
+          )
+      )
+    node.stack_borrow_symbols = coro_borrows
+
+  def visit_CallNode(self, node: CallNode) -> Type:
+    """Type-checks function, method, constructor, and builtin calls."""
+    self._try_monomorphize_generic_call(node)
+
+    # Mark MemberAccessNode as a call target so qualified ancestor checks pass.
+    if isinstance(node.callee, MemberAccessNode):
+      node.callee.is_call = True
+    callee_type = self.visit(node.callee)
+
+    builtin_res = self._try_check_builtin_call(node)
+    if builtin_res is not None:
+      return builtin_res
+
+    signature: Optional[FunctionType] = None
     is_constructor = False
 
-    # Constructor resolution
     if isinstance(callee_type, StructType):
-      if callee_type.type_params:
-        if node.type_args:
-          resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
-          callee_type = self._monomorphize_struct(callee_type, node.type_args, resolved_type_args)
-          if isinstance(node.callee, IdentifierNode):
-            node.callee.name = callee_type.name
-        else:
-          self.error(f"Generic struct '{callee_type.name}' requires explicit type arguments.")
-          return callee_type
-
       is_constructor = True
-      node._is_struct_constructor = True
-      # Look up constructor
-      init_method = callee_type.methods.get("__init__")
-      if not init_method:
-        self.error(f"Struct '{callee_type.name}' has no '__init__' constructor defined.")
+      callee_type, signature = self._check_constructor_call(node, callee_type)
+      if signature is None:
         return callee_type
-      signature = init_method.method_type
-      # Match arguments
-      self._check_arguments(
-          node.arguments, signature, is_constructor=True, call_node=node
-      )
-      if callee_type.is_prototype and not node.arena_expr:
-        self.error(f"Proto constructor call for '{callee_type.name}' requires an explicit arena via 'in <arena>'.")
-      if node.arena_expr:
-        arena_type = self.visit(node.arena_expr)
-        if not isinstance(arena_type, ArenaType):
-          self.error("Explicit arena target must be an instance of Arena.")
-        else:
-          ArenaChecker.validate_arena_mutability(
-              self.symbol_table,
-              node.arena_expr,
-              lambda msg: self.error(msg, node=node),
-              checker=self,
-          )
-          if (
-              self.is_in_init
-              and isinstance(node.arena_expr, MemberAccessNode)
-              and isinstance(node.arena_expr.receiver, IdentifierNode)
-              and node.arena_expr.receiver.name == "self"
-          ):
-            self._init_used_arena_fields.add(node.arena_expr.member)
     else:
-      # Standard function/method resolution
       if not isinstance(callee_type, FunctionType):
         self.error("Target is not callable.", node=node.callee)
         return PrimitiveType("none")
       if node.arena_expr:
-        self.error("The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions.")
+        self.error(
+            "The 'in <arena>' clause can only be used on struct/proto instantiations and clone expressions."
+        )
       signature = callee_type
-      if (
-          isinstance(node.callee, MemberAccessNode)
-          and getattr(node.callee, "is_qualified_ancestor_call", False)
+      if isinstance(node.callee, MemberAccessNode) and getattr(
+          node.callee, "is_qualified_ancestor_call", False
       ):
         if (
             not node.arguments
@@ -342,140 +492,24 @@ class CallVisitorMixin:
           call_node=node,
       )
 
-    # Perform borrow checking / aliasing rules
     if signature:
       self._check_aliasing(node, signature, is_constructor)
-      ArenaChecker.check_call_var_sink_escape(self, node, signature, is_constructor)
-
-    # Check module-level var global reentrancy
-    callee_id = None
-    is_known_func = False
-    if isinstance(node.callee, IdentifierNode):
-      callee_id = node.callee.name
-      callee_sym = self.symbol_table.lookup(callee_id)
-      if isinstance(callee_sym, FunctionSymbol):
-        is_known_func = True
-    elif isinstance(node.callee, MemberAccessNode):
-      recv_t = self.node_types.get(node.callee.receiver)
-      if isinstance(recv_t, StructType):
-        callee_id = f"{recv_t.name}.{node.callee.member}"
-      else:
-        callee_id = node.callee.member
-      is_known_func = True
-
-    callee_transitive = getattr(self, "func_transitive_globals", {})
-    callee_dynamic = getattr(self, "func_transitive_dynamic", set())
-    matching_keys = [
-        k for k in callee_transitive
-        if k == callee_id or k.endswith(f".{callee_id}")
-    ] if callee_id else []
-
-    for arg in node.arguments:
-      arg_path = ArenaChecker.get_lvalue_path(self.symbol_table, arg.expr)
-      if arg_path:
-        root, _ = arg_path
-        if root in getattr(self, "module_var_globals", set()):
-          root_sym = self.symbol_table.lookup(root)
-          if (
-              isinstance(root_sym, VariableSymbol)
-              and ArenaChecker.is_reference_type(root_sym.symbol_type)
-          ):
-            if root in getattr(self, "exported_var_globals", set()):
-              self.error(
-                  f"Cannot pass exported mutable global '{root}' by reference.",
-                  node=node,
-              )
-            elif (
-                not is_known_func
-                or any(k in callee_dynamic for k in matching_keys)
-            ):
-              self.error(
-                  f"Cannot pass mutable global '{root}' by reference to "
-                  "dynamic or higher-order callee.",
-                  node=node,
-              )
-            elif any(
-                root in callee_transitive.get(k, set()) for k in matching_keys
-            ):
-              self.error(
-                  f"Cannot pass mutable global '{root}' by reference: callee "
-                  f"accesses '{root}' in its call graph (reentrant global "
-                  "aliasing hazard).",
-                  node=node,
-              )
-
-    if isinstance(node.callee, MemberAccessNode):
-      recv_path = ArenaChecker.get_lvalue_path(
-          self.symbol_table, node.callee.receiver
+      ArenaChecker.check_call_var_sink_escape(
+          self, node, signature, is_constructor
       )
-      if recv_path:
-        root, _ = recv_path
-        if root in getattr(self, "module_var_globals", set()):
-          root_sym = self.symbol_table.lookup(root)
-          if (
-              isinstance(root_sym, VariableSymbol)
-              and ArenaChecker.is_reference_type(root_sym.symbol_type)
-          ):
-            if any(
-                root in callee_transitive.get(k, set()) for k in matching_keys
-            ):
-              self.error(
-                  f"Cannot invoke method '{node.callee.member}' on mutable "
-                  f"global '{root}': method accesses '{root}' in its call "
-                  "graph (reentrant global aliasing hazard).",
-                  node=node,
-              )
+
+    self._check_module_var_reentrancy(node)
 
     if is_constructor:
       return callee_type
+
     ret_type = signature.return_type
     if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
       if not isinstance(ret_type, OptionalType):
         ret_type = OptionalType(ret_type)
 
     if isinstance(ret_type, CoroutineType):
-      coro_borrows: Set[str] = set()
-      if isinstance(node.callee, MemberAccessNode):
-        r_path = ArenaChecker.get_lvalue_path(
-            self.symbol_table, node.callee.receiver
-        )
-        if r_path:
-          root, _ = r_path
-          r_sym = self.symbol_table.lookup(root)
-          if (
-              isinstance(r_sym, VariableSymbol)
-              and r_sym.scope_defined is not None
-              and r_sym.scope_defined.parent is not None
-          ):
-            coro_borrows.add(r_sym.name)
-            coro_borrows.update(r_sym.stack_borrow_symbols)
-        coro_borrows.update(
-            ArenaChecker.collect_stack_borrow_symbols(
-                self.symbol_table, node.callee.receiver, self
-            )
-        )
-      for arg in node.arguments:
-        a_path = ArenaChecker.get_lvalue_path(self.symbol_table, arg.expr)
-        if a_path:
-          root, _ = a_path
-          a_sym = self.symbol_table.lookup(root)
-          if (
-              isinstance(a_sym, VariableSymbol)
-              and a_sym.scope_defined is not None
-              and a_sym.scope_defined.parent is not None
-              and (
-                  ArenaChecker.is_reference_type(a_sym.symbol_type)
-                  or a_sym.is_mutable
-              )
-          ):
-            coro_borrows.add(a_sym.name)
-            coro_borrows.update(a_sym.stack_borrow_symbols)
-        coro_borrows.update(
-            ArenaChecker.collect_stack_borrow_symbols(
-                self.symbol_table, arg.expr, self
-            )
-        )
-      node.stack_borrow_symbols = coro_borrows
+      self._collect_coroutine_call_borrows(node)
 
     return ret_type
 
@@ -518,7 +552,11 @@ class CallVisitorMixin:
       arg_type = self.visit(expr)
     finally:
       self.expected_type = old_expected
-    if self.is_in_del and isinstance(expr, IdentifierNode) and expr.name == "self":
+    if (
+        self.is_in_del
+        and isinstance(expr, IdentifierNode)
+        and expr.name == "self"
+    ):
       self.error(
           "Cannot pass 'self' as an argument from destructor '__del__'; "
           "'self' cannot escape destruction.",
@@ -544,11 +582,13 @@ class CallVisitorMixin:
     )
 
     effective_arg_type = arg_type
-    # Auto-borrowing
+    # Auto-borrow Ref<T>/SharedRef<T> when passing to an unboxed parameter.
     if isinstance(arg_type, RefType) and not isinstance(param_type, RefType):
       effective_arg_type = arg_type.inner_type
       arg.is_auto_borrow = True
-    elif isinstance(arg_type, SharedRefType) and not isinstance(param_type, SharedRefType):
+    elif isinstance(arg_type, SharedRefType) and not isinstance(
+        param_type, SharedRefType
+    ):
       if param_is_var:
         self.error(
             f"Cannot pass 'SharedRef<{arg_type.inner_type}>' as mutable "
@@ -558,9 +598,10 @@ class CallVisitorMixin:
         effective_arg_type = arg_type.inner_type
         arg.is_auto_borrow = True
 
-    # Explicit move check when passing to RefType parameter
     if isinstance(param_type, RefType):
-      if isinstance(arg.expr, IdentifierNode) and not isinstance(arg.expr, MoveNode):
+      if isinstance(arg.expr, IdentifierNode) and not isinstance(
+          arg.expr, MoveNode
+      ):
         self.error(
             f"Cannot pass move-only type '{arg_type}' by value; use "
             f"explicit 'move {arg.expr.name}' to transfer ownership."
@@ -655,12 +696,55 @@ class CallVisitorMixin:
         )
     if "stop" not in named_args and (
         pos_count == 0
-        or (pos_count == 1 and "start" not in named_args and "step" in named_args)
+        or (
+            pos_count == 1
+            and "start" not in named_args
+            and "step" in named_args
+        )
     ):
       self.error(
           "Missing required argument for parameter 'stop'.",
           node=call_node,
       )
+
+  def _finalize_call_eval_order(
+      self,
+      call_node: CallNode,
+      arguments: List[ArgumentNode],
+      callee_node: Optional[ASTNode],
+      bound_slots: Dict[int, ArgumentNode],
+      arg_param_indices: List[Optional[int]],
+  ) -> None:
+    """Attaches canonicalized argument order and eval-temp flags for codegen."""
+    if not bound_slots:
+      call_node._resolved_arguments = []
+      call_node._requires_eval_order_temps = False
+      call_node._eval_order_slots = []
+      return
+
+    max_idx = max(bound_slots.keys())
+    call_node._resolved_arguments = [
+        bound_slots[i].expr if i in bound_slots else LiteralNode(None, "none")
+        for i in range(max_idx + 1)
+    ]
+    valid_slots = [p for p in arg_param_indices if p is not None]
+    is_reordered = any(
+        valid_slots[k] > valid_slots[k + 1]
+        for k in range(len(valid_slots) - 1)
+    )
+    eval_exprs: List[Any] = [a.expr for a in arguments]
+    if isinstance(callee_node, MemberAccessNode):
+      eval_exprs.append(callee_node.receiver)
+    elif callee_node is not None and not isinstance(
+        callee_node, IdentifierNode
+    ):
+      eval_exprs.append(callee_node)
+    has_side_effects = any(not self._is_expr_pure(e) for e in eval_exprs)
+    # Only emit evaluation-order temporaries when named args reorder impure exprs.
+    call_node._requires_eval_order_temps = bool(
+        is_reordered and has_side_effects
+    )
+    call_node._eval_order_slots = valid_slots
 
   def _check_arguments(
       self,
@@ -671,8 +755,7 @@ class CallVisitorMixin:
       call_node: Optional[CallNode] = None,
   ) -> None:
     """Matches argument lists against signatures and canonicalizes call metadata."""
-    is_test_assert = getattr(signature, "is_testing_assertion", False)
-    if is_test_assert:
+    if getattr(signature, "is_testing_assertion", False):
       seen_named = False
       for arg in arguments:
         if arg.name:
@@ -807,399 +890,6 @@ class CallVisitorMixin:
           has_binding_error = True
 
     if call_node is not None and not has_binding_error:
-      if not bound_slots:
-        call_node._resolved_arguments = []
-        call_node._requires_eval_order_temps = False
-        call_node._eval_order_slots = []
-      else:
-        max_idx = max(bound_slots.keys())
-        call_node._resolved_arguments = [
-            bound_slots[i].expr if i in bound_slots else LiteralNode(None, "none")
-            for i in range(max_idx + 1)
-        ]
-        valid_slots = [p for p in arg_param_indices if p is not None]
-        is_reordered = any(
-            valid_slots[k] > valid_slots[k + 1]
-            for k in range(len(valid_slots) - 1)
-        )
-        eval_exprs = [a.expr for a in arguments]
-        if isinstance(callee_node, MemberAccessNode):
-          eval_exprs.append(callee_node.receiver)
-        elif callee_node is not None and not isinstance(callee_node, IdentifierNode):
-          eval_exprs.append(callee_node)
-        has_side_effects = any(not self._is_expr_pure(e) for e in eval_exprs)
-        call_node._requires_eval_order_temps = bool(
-            is_reordered and has_side_effects
-        )
-        call_node._eval_order_slots = valid_slots
-
-  def visit_MemberAccessNode(self, node: MemberAccessNode) -> Type:
-    if isinstance(node.receiver, MoveNode):
-      self.error(f"Cannot access member '{node.member}' on moved variable '{node.receiver.name}'.", node=node)
-      return PrimitiveType("none")
-
-    if getattr(node, "has_diagnosed_module_import", False):
-      return getattr(node, "diagnosed_module_type", PrimitiveType("none"))
-
-    # Check if receiver is a dotted path to an imported module (e.g.
-    # std.os.args)
-    dotted_recv = self._get_dotted_path(node.receiver)
-    if dotted_recv and len(dotted_recv) >= 2:
-      root_ident = dotted_recv[0]
-      if (
-          self.symbol_table.lookup(root_ident) is None
-          and self.symbol_table.lookup_type(root_ident) is None
-      ):
-        for i in range(len(dotted_recv), 1, -1):
-          sub_path = ".".join(dotted_recv[:i])
-          mod_sym = self._find_imported_module_by_path(sub_path)
-          if mod_sym:
-            remaining = dotted_recv[i:]
-            call_suffix = "()" if getattr(node, "is_call", False) else ""
-            if remaining:
-              sug = (
-                  f"{mod_sym.name}.{'.'.join(remaining)}.{node.member}"
-                  f"{call_suffix}"
-              )
-            else:
-              sug = f"{mod_sym.name}.{node.member}{call_suffix}"
-            self.error(
-                f"Undefined identifier '{root_ident}'. Module "
-                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
-                f"Did you mean '{sug}'?",
-                node=node.receiver,
-            )
-            node.receiver.has_diagnosed_module_import = True
-            node.receiver.diagnosed_module_type = ModuleType(
-                mod_sym.module_path
-            )
-            if not remaining:
-              exp_sym = mod_sym.lookup_export(node.member)
-              if exp_sym:
-                return (
-                    exp_sym.symbol_type
-                    if hasattr(exp_sym, "symbol_type")
-                    else exp_sym
-                )
-            return PrimitiveType("none")
-
-    dotted_self = self._get_dotted_path(node)
-    if dotted_self and len(dotted_self) >= 2:
-      root_ident = dotted_self[0]
-      if (
-          self.symbol_table.lookup(root_ident) is None
-          and self.symbol_table.lookup_type(root_ident) is None
-      ):
-        for i in range(len(dotted_self), 1, -1):
-          sub_path = ".".join(dotted_self[:i])
-          mod_sym = self._find_imported_module_by_path(sub_path)
-          if mod_sym:
-            remaining = dotted_self[i:]
-            if remaining:
-              sug = f"{mod_sym.name}.{'.'.join(remaining)}"
-            else:
-              sug = mod_sym.name
-            self.error(
-                f"Undefined identifier '{root_ident}'. Module "
-                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
-                f"Did you mean '{sug}'?",
-                node=node,
-            )
-            node.has_diagnosed_module_import = True
-            node.diagnosed_module_type = ModuleType(mod_sym.module_path)
-            return ModuleType(mod_sym.module_path)
-
-    receiver_type = self.visit(node.receiver)
-
-    # Optional chaining check
-    if node.is_optional:
-      if not isinstance(receiver_type, OptionalType):
-        self.error("Optional chaining '?.' requires an optional receiver.")
-        return PrimitiveType("none")
-      receiver_type = receiver_type.base_type
-    else:
-      if isinstance(receiver_type, OptionalType):
-        self.error("Must use optional chaining '?.' to access properties on an optional receiver.")
-        return PrimitiveType("none")
-
-    if isinstance(receiver_type, StringType):
-      if node.member == "from":
-        node.is_string_from = True
-        return FunctionType([StringType()], StringType())
-      method = STRING_METHODS.get(node.member)
-      if method:
-        node.is_string_method = True
-        return method
-      self.error(f"String has no method '{node.member}'.")
-      return PrimitiveType("none")
-
-    if isinstance(receiver_type, ArrayType):
-      if (
-          node.member in ("push", "pop", "insert", "remove", "clear")
-          and not receiver_type.is_fixed_size
-          and receiver_type.size is not None
-          and isinstance(node.receiver, IdentifierNode)
-      ):
-        sym = self.symbol_table.lookup(node.receiver.name)
-        if isinstance(sym, VariableSymbol) and isinstance(sym.symbol_type, ArrayType):
-          sym.symbol_type = ArrayType(
-              sym.symbol_type.element_type, size=None, is_fixed_size=False
-          )
-      return CollectionChecker.resolve_array_member(self, node, receiver_type)
-
-    if isinstance(receiver_type, MapType):
-      return CollectionChecker.resolve_map_member(self, node, receiver_type)
-
-    if isinstance(receiver_type, CoroutineType):
-      if node.member in COROUTINE_METHODS:
-        node.is_coroutine_method = True
-        node.coroutine_method = node.member
-        node.coroutine_receiver_type = receiver_type
-        y_type = receiver_type.yield_type
-        if node.member == "step":
-          ret_t = NoneType() if isinstance(y_type, NoneType) else OptionalType(y_type)
-          return FunctionType([receiver_type], ret_t, param_names=["self"], has_self=True)
-        elif node.member == "is_done":
-          return FunctionType([receiver_type], PrimitiveType("bool"), param_names=["self"], has_self=True)
-        elif node.member == "reset":
-          return FunctionType([receiver_type], PrimitiveType("none"), param_names=["self"], has_self=True)
-      self.error(f"Coroutine has no method '{node.member}'.")
-      return PrimitiveType("none")
-
-    assertion_names = (
-        "assert_true", "assert_false", "assert_eq", "assert_ne",
-        "assert_almost_eq", "assert_none", "assert_not_none",
-        "expect_true", "expect_false", "expect_eq", "expect_ne",
-        "expect_almost_eq", "expect_none", "expect_not_none"
-    )
-    if node.member in assertion_names:
-      fn_t = FunctionType([], PrimitiveType("none"))
-      fn_t.is_testing_assertion = True
-      return fn_t
-
-    if isinstance(receiver_type, ModuleType):
-      if isinstance(node.receiver, IdentifierNode):
-        mod_sym = self.symbol_table.lookup(node.receiver.name)
-        if isinstance(mod_sym, ModuleSymbol):
-          exp_sym = mod_sym.lookup_export(node.member)
-          if exp_sym:
-            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
-      return PrimitiveType("none")
-
-    if isinstance(receiver_type, EnumType):
-      if node.member == "from":
-        node.is_enum_from = True
-        node.enum_type = receiver_type
-        return FunctionType([StringType()], OptionalType(receiver_type))
-      if node.member in receiver_type.variants:
-        return receiver_type
-      self.error(f"Enum '{receiver_type.name}' has no member '{node.member}'.")
-      return PrimitiveType("none")
-
-    if isinstance(receiver_type, TraitType):
-      method = receiver_type.methods.get(node.member)
-      if method:
-        if getattr(method, "extern_name", None):
-          node.target_name = method.extern_name
-        is_static = getattr(method.ast_decl, "modifier", None) == "static"
-        node.is_static_method = is_static
-        node.is_instance_method = not is_static
-        return method
-      self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
-      return PrimitiveType("none")
-
-    if isinstance(receiver_type, SharedRefType):
-      if node.member == "share":
-        node.is_shared_ref_share = True
-        node.is_instance_method = True
-        return FunctionType([receiver_type], receiver_type, param_names=["self"], has_self=True)
-      elif node.member == "downgrade":
-        node.is_shared_ref_downgrade = True
-        node.is_instance_method = True
-        return FunctionType([receiver_type], WeakRefType(receiver_type.inner_type), param_names=["self"], has_self=True)
-      receiver_type = receiver_type.inner_type
-      node.is_auto_deref = True
-    elif isinstance(receiver_type, RefType):
-      receiver_type = receiver_type.inner_type
-      node.is_auto_deref = True
-    elif isinstance(receiver_type, WeakRefType):
-      if node.member == "upgrade":
-        node.is_weak_ref_upgrade = True
-        node.is_instance_method = True
-        return FunctionType([receiver_type], OptionalType(SharedRefType(receiver_type.inner_type)), param_names=["self"], has_self=True)
-      self.error(f"WeakRef has no member '{node.member}'; call '.upgrade()' to access the underlying value.", node=node)
-      return PrimitiveType("none")
-
-    if isinstance(receiver_type, ArrayType):
-      if (
-          node.member in ("push", "pop", "insert", "remove", "clear")
-          and not receiver_type.is_fixed_size
-          and receiver_type.size is not None
-          and isinstance(node.receiver, IdentifierNode)
-      ):
-        sym = self.symbol_table.lookup(node.receiver.name)
-        if isinstance(sym, VariableSymbol) and isinstance(sym.symbol_type, ArrayType):
-          sym.symbol_type = ArrayType(
-              sym.symbol_type.element_type, size=None, is_fixed_size=False
-          )
-      return CollectionChecker.resolve_array_member(self, node, receiver_type)
-
-    if isinstance(receiver_type, MapType):
-      return CollectionChecker.resolve_map_member(self, node, receiver_type)
-
-    if not isinstance(receiver_type, StructType):
-      self.error("Member access receiver is not a struct or trait.")
-      return PrimitiveType("none")
-
-    # Special member __proto__
-    if node.member == "__proto__":
-      if not receiver_type.is_prototype:
-        self.error(
-            f"Cannot access '__proto__' on standard struct '{receiver_type.name}'; '__proto__' is only available on 'proto' instances.",
-            node=node,
-        )
-        return PrimitiveType("none")
-      return OptionalType(receiver_type)
-
-    # Special member __del__
-    if node.member == "__del__":
-      self.error("Destructor '__del__' cannot be manually invoked.")
-      return PrimitiveType("none")
-
-    if self._is_struct_type_receiver(node.receiver):
-      return self._resolve_struct_type_member_access(node, receiver_type)
-
-    # Resolve field
-    field = receiver_type.fields.get(node.member)
-    if field:
-      # If optional chained, result type is optional (flatten T?? -> T?)
-      if node.is_optional:
-        if isinstance(field.field_type, OptionalType):
-          return field.field_type
-        return OptionalType(field.field_type)
-      return field.field_type
-
-    # Resolve method
-    method = receiver_type.get_method(node.member, self.symbol_table)
-    if method:
-      node.is_static_method = (method.modifier == "static")
-      node.is_instance_method = (method.modifier != "static")
-      return method.method_type
-
-    self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
-    return PrimitiveType("none")
-
-  def _is_struct_type_receiver(self, expr: ASTNode) -> bool:
-    """Returns True if *expr* refers to a struct type rather than a value."""
-    if isinstance(expr, IdentifierNode):
-      sym = self.symbol_table.lookup(expr.name)
-      if sym is not None:
-        return isinstance(sym, StructSymbol)
-      return isinstance(self.symbol_table.lookup_type(expr.name), StructType)
-    if (
-        isinstance(expr, MemberAccessNode)
-        and isinstance(expr.receiver, IdentifierNode)
-        and not expr.is_optional
-    ):
-      mod_sym = self.symbol_table.lookup(expr.receiver.name)
-      if isinstance(mod_sym, ModuleSymbol):
-        exp_sym = mod_sym.lookup_export(expr.member)
-        return isinstance(exp_sym, (StructSymbol, StructType))
-    return False
-
-  def _resolve_struct_type_member_access(
-      self, node: MemberAccessNode, receiver_type: StructType
-  ) -> Type:
-    """Resolves `StructType.member` for static methods or ancestor dispatch."""
-    if node.member == "__init__":
-      self.error(
-          f"Cannot call '__init__' directly on '{receiver_type.name}'; "
-          f"use ': {receiver_type.name}(...)' in a subclass '__init__' or "
-          f"'{receiver_type.name}(...)' to construct.",
-          node=node,
+      self._finalize_call_eval_order(
+          call_node, arguments, callee_node, bound_slots, arg_param_indices
       )
-      return PrimitiveType("none")
-
-    if node.member in receiver_type.fields:
-      self.error(
-          f"Cannot access instance field '{node.member}' on type "
-          f"'{receiver_type.name}'.",
-          node=node,
-      )
-      return PrimitiveType("none")
-
-    method = receiver_type.get_method(node.member, self.symbol_table)
-    if not method:
-      self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
-      return PrimitiveType("none")
-
-    if method.modifier == "static":
-      node.is_static_method = True
-      node.is_instance_method = False
-      return method.method_type
-
-    if not getattr(node, "is_call", False):
-      self.error(
-          f"Cannot reference unbound instance method "
-          f"'{receiver_type.name}.{node.member}' as a value; call it with "
-          "'(self, ...)' inside a subclass method.",
-          node=node,
-      )
-      return PrimitiveType("none")
-
-    self_sym = self.symbol_table.lookup("self")
-    if not self.current_struct or not isinstance(self_sym, VariableSymbol):
-      self.error(
-          f"Qualified method call '{receiver_type.name}.{node.member}(self, ...)' "
-          "is only allowed inside an instance method of a subclass.",
-          node=node,
-      )
-      return PrimitiveType("none")
-
-    if not self.current_struct.has_ancestor(receiver_type, self.symbol_table):
-      if self.current_struct == receiver_type:
-        self.error(
-            f"Cannot use qualified ancestor dispatch "
-            f"'{receiver_type.name}.{node.member}(self, ...)' on own struct "
-            f"'{self.current_struct.name}'; use 'self.{node.member}(...)' instead.",
-            node=node,
-        )
-      else:
-        self.error(
-            f"Struct '{receiver_type.name}' is not an ancestor of "
-            f"'{self.current_struct.name}'.",
-            node=node,
-        )
-      return PrimitiveType("none")
-
-    if method.modifier == "var" and not self_sym.is_mutable:
-      self.error(
-          f"Cannot call mutating ancestor method "
-          f"'{receiver_type.name}.{node.member}' from immutable method; "
-          "declare the enclosing method as 'var func'.",
-          node=node,
-      )
-      return PrimitiveType("none")
-
-    node.is_qualified_ancestor_call = True
-    node.qualified_ancestor_type = receiver_type
-    node.qualified_ancestor_method = method
-    node.is_static_method = True
-    node.is_instance_method = False
-
-    mt = method.method_type
-    self_mut = method.modifier == "var"
-    fn_t = FunctionType(
-        param_types=[self.current_struct] + list(mt.param_types),
-        return_type=mt.return_type,
-        param_names=["self"] + list(mt.param_names),
-        param_mutabilities=[self_mut] + list(mt.param_mutabilities),
-        has_self=False,
-        num_defaults=mt.num_defaults,
-        param_defaults=[None] + list(getattr(mt, "param_defaults", [])),
-        ast_decl=mt.ast_decl,
-    )
-    # Explicit `self` is passed as argument 0, so disable implicit-self slicing.
-    fn_t.has_self = False
-    return fn_t
-
