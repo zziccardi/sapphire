@@ -396,12 +396,113 @@ class PythonStmtMixin:
   def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
     self.emit("_")
 
-  def visit_IfNode(self, node: IfNode) -> None:
-    bindings = getattr(node, "bindings", [node.init_binding] if getattr(node, "init_binding", None) else [])
+  def _emit_simple_if(self, node: IfNode) -> None:
+    """Emits a standard `if cond: ... else: ...` statement."""
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+    self.newline()
+    self.emit("if ")
+    self.visit(node.condition)
+    self.emit(":")
+    self.indent()
+    self._visit_in_branch(node.then_block)
+    self.dedent()
+    if node.else_block:
+      self.newline()
+      self.emit("else:")
+      self.indent()
+      self._visit_in_branch(node.else_block)
+      self.dedent()
 
-    if not bindings:
+  def _emit_single_binding_if(self, node: IfNode, binding: Any) -> None:
+    """Emits a single `if let`/`if var` (optional unwrap or init) statement."""
+    self._lift_match_expressions(binding.expr)
+    if node.condition:
+      self._lift_match_expressions(node.condition)
+    let_names = getattr(binding, "let_names", [binding.let_name])
+    let_name = binding.let_name
+
+    self.newline()
+    if binding.is_unwrap:
+      val_var = f"_val_{let_name}"
+      wb_entry = None
+      if hasattr(binding, "_writeback_container"):
+        recv_expr, key_expr, is_arr = binding._writeback_container
+        self._temp_wb_count = getattr(self, "_temp_wb_count", 0) + 1
+        wb_recv = f"_wb_recv_{self._temp_wb_count}"
+        wb_key = f"_wb_key_{self._temp_wb_count}"
+        self.emit(f"{wb_recv} = ")
+        self.visit(recv_expr)
+        self.newline()
+        self.emit(f"{wb_key} = ")
+        self.visit(key_expr)
+        self.newline()
+        slot_expr = (
+            f"_sapphire_array_get({wb_recv}, {wb_key})"
+            if is_arr
+            else f"{wb_recv}.get({wb_key})"
+        )
+        self.emit(f"{val_var} = {slot_expr}")
+        wb_entry = (wb_recv, wb_key, is_arr)
+      else:
+        self.emit(f"{val_var} = ")
+        self.visit(binding.expr)
+      self.newline()
+
+      # Map unwrapped identifier(s) to the temporary during condition eval.
+      old_map = self._identifier_map.copy()
+      if len(let_names) == 1:
+        self._identifier_map[let_name] = val_var
+      else:
+        for idx, name in enumerate(let_names):
+          self._identifier_map[name] = f"{val_var}[{idx}]"
+
+      self.emit(f"if {val_var} is not None")
       if node.condition:
-        self._lift_match_expressions(node.condition)
+        self.emit(" and ")
+        self.visit(node.condition)
+      self.emit(":")
+      self._identifier_map = old_map
+
+      self.indent()
+      self.newline()
+      if len(let_names) > 1:
+        for idx, name in enumerate(let_names):
+          self.emit(f"{self._mangle_name(name)} = {val_var}[{idx}]")
+          if idx < len(let_names) - 1:
+            self.newline()
+      else:
+        self.emit(f"{self._mangle_name(let_name)} = {val_var}")
+
+      st_name = self._expr_destructible_struct(binding.expr)
+      if st_name and self._is_owned_unwrap_expr(binding.expr):
+        for name in let_names:
+          self.variable_types[name] = st_name
+          if not hasattr(node.then_block, "_block_destructibles"):
+            node.then_block._block_destructibles = []
+          node.then_block._block_destructibles.append(name)
+      if wb_entry:
+        if not hasattr(self, "_unwrap_writebacks"):
+          self._unwrap_writebacks = {}
+        prev_wb = self._unwrap_writebacks.copy()
+        self._unwrap_writebacks[let_name] = wb_entry
+        try:
+          self._visit_in_branch(node.then_block)
+        finally:
+          self._unwrap_writebacks = prev_wb
+      else:
+        self._visit_in_branch(node.then_block)
+      self.dedent()
+    else:
+      self.emit(f"{let_name} = ")
+      self.visit(binding.expr)
+      st_name = self._expr_destructible_struct(binding.expr)
+      if st_name:
+        for name in let_names:
+          self.variable_types[name] = st_name
+          if not hasattr(node.then_block, "_block_destructibles"):
+            node.then_block._block_destructibles = []
+          node.then_block._block_destructibles.append(name)
       self.newline()
       self.emit("if ")
       self.visit(node.condition)
@@ -409,123 +510,16 @@ class PythonStmtMixin:
       self.indent()
       self._visit_in_branch(node.then_block)
       self.dedent()
-      if node.else_block:
-        self.newline()
-        self.emit("else:")
-        self.indent()
-        self._visit_in_branch(node.else_block)
-        self.dedent()
-      return
 
-    if len(bindings) == 1:
-      binding = bindings[0]
-      self._lift_match_expressions(binding.expr)
-      if node.condition:
-        self._lift_match_expressions(node.condition)
-      let_names = getattr(binding, "let_names", [binding.let_name])
-      let_name = binding.let_name
-
+    if node.else_block:
       self.newline()
-      if binding.is_unwrap:
-        val_var = f"_val_{let_name}"
-        wb_entry = None
-        if hasattr(binding, "_writeback_container"):
-          recv_expr, key_expr, is_arr = binding._writeback_container
-          self._temp_wb_count = getattr(self, "_temp_wb_count", 0) + 1
-          wb_recv = f"_wb_recv_{self._temp_wb_count}"
-          wb_key = f"_wb_key_{self._temp_wb_count}"
-          self.emit(f"{wb_recv} = ")
-          self.visit(recv_expr)
-          self.newline()
-          self.emit(f"{wb_key} = ")
-          self.visit(key_expr)
-          self.newline()
-          slot_expr = (
-              f"_sapphire_array_get({wb_recv}, {wb_key})"
-              if is_arr
-              else f"{wb_recv}.get({wb_key})"
-          )
-          self.emit(f"{val_var} = {slot_expr}")
-          wb_entry = (wb_recv, wb_key, is_arr)
-        else:
-          self.emit(f"{val_var} = ")
-          self.visit(binding.expr)
-        self.newline()
+      self.emit("else:")
+      self.indent()
+      self._visit_in_branch(node.else_block)
+      self.dedent()
 
-        # Map identifier to temporary variable during condition check
-        old_map = self._identifier_map.copy()
-        if len(let_names) == 1:
-          self._identifier_map[let_name] = val_var
-        else:
-          for idx, name in enumerate(let_names):
-            self._identifier_map[name] = f"{val_var}[{idx}]"
-
-        self.emit(f"if {val_var} is not None")
-        if node.condition:
-          self.emit(" and ")
-          self.visit(node.condition)
-        self.emit(":")
-
-        # Restore identifier map
-        self._identifier_map = old_map
-
-        self.indent()
-        self.newline()
-        if len(let_names) > 1:
-          for idx, name in enumerate(let_names):
-            self.emit(f"{self._mangle_name(name)} = {val_var}[{idx}]")
-            if idx < len(let_names) - 1:
-              self.newline()
-        else:
-          self.emit(f"{self._mangle_name(let_name)} = {val_var}")
-
-        st_name = self._expr_destructible_struct(binding.expr)
-        if st_name and self._is_owned_unwrap_expr(binding.expr):
-          for name in let_names:
-            self.variable_types[name] = st_name
-            if not hasattr(node.then_block, "_block_destructibles"):
-              node.then_block._block_destructibles = []
-            node.then_block._block_destructibles.append(name)
-        if wb_entry:
-          if not hasattr(self, "_unwrap_writebacks"):
-            self._unwrap_writebacks = {}
-          prev_wb = self._unwrap_writebacks.copy()
-          self._unwrap_writebacks[let_name] = wb_entry
-          try:
-            self._visit_in_branch(node.then_block)
-          finally:
-            self._unwrap_writebacks = prev_wb
-        else:
-          self._visit_in_branch(node.then_block)
-        self.dedent()
-      else:
-        # Standard bind + condition
-        self.emit(f"{let_name} = ")
-        self.visit(binding.expr)
-        st_name = self._expr_destructible_struct(binding.expr)
-        if st_name:
-          for name in let_names:
-            self.variable_types[name] = st_name
-            if not hasattr(node.then_block, "_block_destructibles"):
-              node.then_block._block_destructibles = []
-            node.then_block._block_destructibles.append(name)
-        self.newline()
-        self.emit("if ")
-        self.visit(node.condition)
-        self.emit(":")
-        self.indent()
-        self._visit_in_branch(node.then_block)
-        self.dedent()
-
-      if node.else_block:
-        self.newline()
-        self.emit("else:")
-        self.indent()
-        self._visit_in_branch(node.else_block)
-        self.dedent()
-      return
-
-    # Multi-binding (len(bindings) > 1) with sequential short-circuiting and LIFO destructors
+  def _emit_multi_binding_if(self, node: IfNode, bindings: List[Any]) -> None:
+    """Emits multi-binding `if` with sequential short-circuiting and LIFO cleanup."""
     self._temp_if_count = getattr(self, "_temp_if_count", 0) + 1
     cond_flag = f"_if_ok_{self._temp_if_count}"
 
@@ -537,7 +531,7 @@ class PythonStmtMixin:
     self.newline()
     self.emit(f"{cond_flag} = False")
 
-    def emit_binding_level(idx: int, prior_destructibles: List[str]):
+    def emit_binding_level(idx: int, prior_destructibles: List[str]) -> None:
       if idx < len(bindings):
         b = bindings[idx]
         let_names = getattr(b, "let_names", [b.let_name])
@@ -587,7 +581,6 @@ class PythonStmtMixin:
           self.visit(b.expr)
           emit_binding_level(idx + 1, current_destructibles)
       else:
-        # All bindings acquired; check condition if present
         if node.condition:
           self.newline()
           self.emit("if ")
@@ -621,6 +614,19 @@ class PythonStmtMixin:
       self.indent()
       self._visit_in_branch(node.else_block)
       self.dedent()
+
+  def visit_IfNode(self, node: IfNode) -> None:
+    bindings = getattr(
+        node,
+        "bindings",
+        [node.init_binding] if getattr(node, "init_binding", None) else [],
+    )
+    if not bindings:
+      self._emit_simple_if(node)
+    elif len(bindings) == 1:
+      self._emit_single_binding_if(node, bindings[0])
+    else:
+      self._emit_multi_binding_if(node, bindings)
 
   def visit_WhileNode(self, node: WhileNode) -> None:
     self.loop_destructor_depth.append(len(self.destructor_stack))

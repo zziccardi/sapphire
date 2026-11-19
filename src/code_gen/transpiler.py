@@ -90,57 +90,10 @@ def _is_prebuilt_lib_module(resolved_path: str, ext: str) -> bool:
   return os.path.exists(stem + ext)
 
 
-def transpile_file(
-    input_file: str,
-    output_file: Optional[str] = None,
-    target: str = "python",
-    visited: Optional[set] = None,
-    sourcemap: bool = True,
-    test_mode: bool = False,
-    dev_mode: bool = False,
-    quiet: bool = False,
-    raise_on_error: bool = True,
-    use_runtime_module: bool = False,
-    _output_root: Optional[str] = None,
-) -> str:
-  """Transpiles Sapphire source file into target language (Python or Lua 5.1).
-
-  Args:
-    input_file: Path to the Sapphire source file (.sp).
-    output_file: Path to write transpiled target file.
-    target: Target language backend.
-    visited: Set of visited file paths for circular dependency tracking.
-    sourcemap: Whether to generate source map.
-    test_mode: Whether to transpile in test mode (@test inclusion).
-    dev_mode: Whether to enable dev hot-reloading hooks.
-    quiet: Suppress informational logs.
-    raise_on_error: Raise SapphireError exceptions instead of sys.exit(1).
-    use_runtime_module: Emit a shared `_sapphire_runtime` file and import it instead of inlining preamble.
-  """
-  if visited is None:
-
-    visited = set()
-
-  abs_input_file = os.path.abspath(input_file)
-  if abs_input_file in visited:
-    return output_file or ""
-  visited.add(abs_input_file)
-
-  target_info = TranspilerRegistry.get(target)
-  ext = target_info.default_extension
-
-  isolated_root = _output_root
-  if isolated_root is None and output_file is not None:
-    input_dir = os.path.dirname(abs_input_file)
-    output_dir = os.path.dirname(os.path.abspath(output_file))
-    if not _is_path_under(output_dir, input_dir):
-      isolated_root = output_dir
-
-  if not output_file:
-    base_name = os.path.splitext(input_file)[0]
-    output_file = base_name + ext
-
-  # 1. Lexical Analysis
+def _parse_and_check(
+    input_file: str, quiet: bool, raise_on_error: bool
+) -> tuple[Any, str]:
+  """Lexes, parses, builds AST, and runs semantic analysis on *input_file*."""
   if not quiet:
     print(f"Reading source file: {input_file}...")
 
@@ -153,16 +106,15 @@ def transpile_file(
       print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
 
-  error_listener = CustomErrorListener(file_path=input_file, source_content=input_stream, quiet=quiet)
+  error_listener = CustomErrorListener(
+      file_path=input_file, source_content=input_stream, quiet=quiet
+  )
 
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
   lexer.addErrorListener(error_listener)
 
-  stream = CommonTokenStream(lexer)
-
-  # 2. Parsing
-  parser = SapphireParser(stream)
+  parser = SapphireParser(CommonTokenStream(lexer))
   parser.removeErrorListeners()
   parser.addErrorListener(error_listener)
 
@@ -171,23 +123,28 @@ def transpile_file(
   tree = parser.program()
 
   if error_listener.errors > 0:
-    err_text = "\n".join(error_listener.error_messages) if error_listener.error_messages else f"Parsing failed with {error_listener.errors} syntax error(s)."
+    err_text = (
+        "\n".join(error_listener.error_messages)
+        if error_listener.error_messages
+        else f"Parsing failed with {error_listener.errors} syntax error(s)."
+    )
     if raise_on_error:
       raise SapphireSyntaxError(err_text, file_path=input_file)
     if not quiet:
-      print(f"\nParsing failed with {error_listener.errors} syntax error(s).", file=sys.stderr)
+      print(
+          f"\nParsing failed with {error_listener.errors} syntax error(s).",
+          file=sys.stderr,
+      )
     sys.exit(1)
 
-  # 3. Build AST
   if not quiet:
     print("Building AST...")
-  builder = ASTBuilder()
-  ast = builder.visit(tree)
+  ast = ASTBuilder().visit(tree)
 
-  # 4. Semantic Analysis & Type Checking
   if not quiet:
     print("Running Semantic Analysis & Type Checker...")
-  checker = TypeChecker(source_file_path=input_file, source_content=str(input_stream))
+  src_content = str(input_stream)
+  checker = TypeChecker(source_file_path=input_file, source_content=src_content)
   try:
     checker.check(ast)
     if checker.warnings and not quiet:
@@ -201,46 +158,120 @@ def transpile_file(
       print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
     sys.exit(1)
 
-  # 5. Transitive Module Dependencies Transpilation
+  return ast, src_content
+
+
+def _transpile_imports(
+    ast: Any,
+    input_file: str,
+    target: str,
+    ext: str,
+    isolated_root: Optional[str],
+    visited: set,
+    sourcemap: bool,
+    test_mode: bool,
+    dev_mode: bool,
+    quiet: bool,
+    raise_on_error: bool,
+    use_runtime_module: bool,
+) -> None:
+  """Recursively transpiles non-stdlib imported Sapphire modules."""
   from src.semantics.module_resolver import resolve_module_path
 
   for imp in getattr(ast, "imports", []):
     sub_source = resolve_module_path(imp.path, source_file_path=input_file)
-    if is_stdlib_stub(imp.path, sub_source):
+    if is_stdlib_stub(imp.path, sub_source) or not sub_source:
       continue
-    if sub_source:
-      if isolated_root is not None:
-        if _is_prebuilt_lib_module(sub_source, ext):
-          continue
-        sub_output = os.path.join(isolated_root, *imp.path.split(".")) + ext
-        os.makedirs(os.path.dirname(sub_output), exist_ok=True)
-      else:
-        sub_output = os.path.splitext(sub_source)[0] + ext
-      transpile_file(
-          sub_source,
-          sub_output,
-          target=target,
-          visited=visited,
-          sourcemap=sourcemap,
-          test_mode=test_mode,
-          dev_mode=dev_mode,
-          quiet=quiet,
-          raise_on_error=raise_on_error,
-          use_runtime_module=use_runtime_module,
-          _output_root=isolated_root,
-      )
+    if isolated_root is not None:
+      if _is_prebuilt_lib_module(sub_source, ext):
+        continue
+      sub_output = os.path.join(isolated_root, *imp.path.split(".")) + ext
+      os.makedirs(os.path.dirname(sub_output), exist_ok=True)
+    else:
+      sub_output = os.path.splitext(sub_source)[0] + ext
+    transpile_file(
+        sub_source,
+        sub_output,
+        target=target,
+        visited=visited,
+        sourcemap=sourcemap,
+        test_mode=test_mode,
+        dev_mode=dev_mode,
+        quiet=quiet,
+        raise_on_error=raise_on_error,
+        use_runtime_module=use_runtime_module,
+        _output_root=isolated_root,
+    )
 
-  # 6. Transpile via TranspilerRegistry
+
+def transpile_file(
+    input_file: str,
+    output_file: Optional[str] = None,
+    target: str = "python",
+    visited: Optional[set] = None,
+    sourcemap: bool = True,
+    test_mode: bool = False,
+    dev_mode: bool = False,
+    quiet: bool = False,
+    raise_on_error: bool = True,
+    use_runtime_module: bool = False,
+    _output_root: Optional[str] = None,
+) -> str:
+  """Transpiles Sapphire source file into target language (Python or Lua 5.1)."""
+  if visited is None:
+    visited = set()
+
+  abs_input_file = os.path.abspath(input_file)
+  if abs_input_file in visited:
+    return output_file or ""
+  visited.add(abs_input_file)
+
+  target_info = TranspilerRegistry.get(target)
+  ext = target_info.default_extension
+
+  # Isolate build outputs when writing outside the input file's directory tree.
+  isolated_root = _output_root
+  if isolated_root is None and output_file is not None:
+    input_dir = os.path.dirname(abs_input_file)
+    output_dir = os.path.dirname(os.path.abspath(output_file))
+    if not _is_path_under(output_dir, input_dir):
+      isolated_root = output_dir
+
+  if not output_file:
+    output_file = os.path.splitext(input_file)[0] + ext
+
+  ast, src_content = _parse_and_check(input_file, quiet, raise_on_error)
+  _transpile_imports(
+      ast,
+      input_file,
+      target,
+      ext,
+      isolated_root,
+      visited,
+      sourcemap,
+      test_mode,
+      dev_mode,
+      quiet,
+      raise_on_error,
+      use_runtime_module,
+  )
+
   sm_builder = None
   src_filename = os.path.basename(input_file)
-  src_content = str(input_stream)
-
   if target_info.name in ("lua", "love2d", "love"):
     if sourcemap:
       sm_builder = SourceMapBuilder(src_filename, src_content)
-    transpiler = target_info.factory(source_file=src_filename, source_map_builder=sm_builder, test_mode=test_mode, dev_mode=dev_mode, use_runtime_module=use_runtime_module)
+    transpiler = target_info.factory(
+        source_file=src_filename,
+        source_map_builder=sm_builder,
+        test_mode=test_mode,
+        dev_mode=dev_mode,
+        use_runtime_module=use_runtime_module,
+    )
   elif target_info.name == "python":
-    transpiler = target_info.factory(test_mode=test_mode, use_runtime_module=use_runtime_module)
+    transpiler = target_info.factory(
+        test_mode=test_mode, use_runtime_module=use_runtime_module
+    )
   else:
     transpiler = target_info.factory(test_mode=test_mode)
 
@@ -249,9 +280,13 @@ def transpile_file(
   generated_code = transpiler.transpile(ast)
   target_name = target_info.display_name
 
-  # Write generated code
   try:
-    if use_runtime_module and target_info.name in ("python", "lua", "love2d", "love"):
+    if use_runtime_module and target_info.name in (
+        "python",
+        "lua",
+        "love2d",
+        "love",
+    ):
       out_dir = os.path.dirname(os.path.abspath(output_file)) or "."
       emit_runtime_module(out_dir, target=target)
 
@@ -266,12 +301,16 @@ def transpile_file(
         print(f"Source map generated at: {map_output_file}")
 
     if not quiet:
-      print(f"\nCompilation successful! {target_name} output written to:\n"
-            f"{output_file}")
+      print(
+          f"\nCompilation successful! {target_name} output written to:\n"
+          f"{output_file}"
+      )
     return output_file
   except Exception as e:
     if raise_on_error:
-      raise SapphireTranspileError(f"Failed to write output file: {e}", file_path=output_file)
+      raise SapphireTranspileError(
+          f"Failed to write output file: {e}", file_path=output_file
+      )
     if not quiet:  # pragma: no cover
       print(f"Failed to write output file: {e}", file=sys.stderr)
     sys.exit(1)
