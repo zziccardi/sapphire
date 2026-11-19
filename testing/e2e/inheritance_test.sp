@@ -84,3 +84,61 @@ func test_qualified_ancestor_static_dispatch(): int {
   u.step(4, mult = 3);
   return u.hp * 10 + u.altitude;
 }
+
+trait Renderable {
+  func render_score(): int;
+}
+
+struct BaseNode {
+  var x: int = 1;
+}
+
+impl BaseNode {
+  var func move_by(dx: int) {
+    self.x += dx;
+  }
+}
+
+struct MidNode: BaseNode {
+  var y: int = 2;
+}
+
+impl MidNode {
+  var func step(dt: int) {
+    BaseNode.move_by(self, dt);
+    self.y += dt * 2;
+  }
+}
+
+impl Renderable for MidNode {
+  func render_score(): int {
+    return self.x + self.y;
+  }
+}
+
+struct LeafNode: MidNode {
+  var z: int = 5;
+}
+
+impl LeafNode {
+  var func step(dt: int) {
+    MidNode.step(self, dt);
+    self.z += 1;
+  }
+}
+
+impl Renderable for LeafNode {
+  func render_score(): int {
+    return self.x + self.y + self.z;
+  }
+}
+
+@test
+func test_multilevel_inheritance_and_trait_dispatch(): int {
+  var mid = MidNode {};
+  mid.step(3);
+  var leaf = LeafNode {};
+  leaf.step(3);
+  let items: [Renderable] = [mid, leaf];
+  return items[0].render_score() * 100 + items[1].render_score();
+}
