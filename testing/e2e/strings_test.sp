@@ -57,3 +57,17 @@ func test_nested_quotes(): String {
   let scores = {"alice": 100};
   return f"Alice: {scores.contains("alice")}";
 }
+
+@test
+func test_to_int_valid(): int {
+  let pos = "42".to_int() ?? -1;
+  let neg = "-7".to_int() ?? 0;
+  return pos + neg;
+}
+
+@test
+func test_to_int_invalid(): int {
+  let bad = "abc".to_int() ?? -1;
+  let empty = "".to_int() ?? -1;
+  return bad + empty;
+}

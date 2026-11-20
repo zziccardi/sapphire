@@ -31,3 +31,33 @@ func test_map_get(): int {
   }
   return 0;
 }
+
+enum MapDir {
+  North = 1,
+  South = 2,
+}
+
+@test
+func test_enum_map_keys(): int {
+  let weights: [MapDir: int] = {
+    MapDir.North: 15,
+    MapDir.South: 25,
+  };
+  let n = weights.get(MapDir.North) ?? 0;
+  let s = weights.get(MapDir.South) ?? 0;
+  return n + s;
+}
+
+@test
+func test_nested_map_copy_out_write_back(): int {
+  var grid: [int: [String: int]] = {
+    1: {"hp": 10},
+  };
+  var row = grid.get(1) ?? {};
+  row["hp"] = 50;
+  row["mp"] = 20;
+  grid[1] = row;
+  let hp = grid.get(1)?.get("hp") ?? 0;
+  let mp = grid.get(1)?.get("mp") ?? 0;
+  return hp + mp;
+}

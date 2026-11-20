@@ -2703,6 +2703,76 @@ class TestSharedFixtures(unittest.TestCase):
     self.assertIn("_r:add(4, 5)", lua_code)
     self.assertIn("_sapphire_del(r)", lua_code)
 
+  def test_host_interop_extern_trait_export_and_on_reload(self):
+    """Verifies trait-typed @extern var, reassignment, @export in trait impl, and @on_reload."""
+    code = """
+    trait Bridge {
+      func compute(x: int): int;
+    }
+
+    @extern var ext_bridge: Bridge;
+    var reload_count: int = 0;
+
+    struct MockBridge {
+      var factor: int = 3;
+    }
+
+    impl Bridge for MockBridge {
+      @export("compute")
+      func compute(x: int): int {
+        return x * self.factor;
+      }
+
+      static func make_default(): MockBridge {
+        return MockBridge { factor = 4 };
+      }
+    }
+
+    @on_reload
+    func handle_reload() {
+      reload_count += 1;
+    }
+
+    func run_interop(): int {
+      let initial = ext_bridge.compute(5);
+      ext_bridge = MockBridge.make_default();
+      let swapped = ext_bridge.compute(5);
+      handle_reload();
+      return initial * 100 + swapped * 10 + reload_count;
+    }
+
+    export {
+      run_interop,
+    }
+    """
+    lua_code = self._transpile_fixture(code)
+    lua_bin = shutil.which("lua") or shutil.which("lua5.1") or shutil.which("lua5.4")
+    if not lua_bin:
+      self.skipTest("Lua interpreter not found on PATH")
+    driver = (
+        "ext_bridge = { compute = function(self, x) return x * 2 end }\n"
+        "local __mod = (function()\n"
+        f"{lua_code}\n"
+        "end)()\n"
+        "local fn = (__mod and __mod.run_interop) or run_interop\n"
+        "print(tostring(fn()))\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        suffix=".lua", mode="w", delete=False, encoding="utf-8"
+    ) as tmp:
+      tmp.write(driver)
+      tmp_path = tmp.name
+    try:
+      proc = subprocess.run(
+          [lua_bin, tmp_path],
+          capture_output=True, text=True, timeout=10,
+      )
+      if proc.returncode != 0:
+        self.fail(f"Lua execution failed: {proc.stderr.strip()}")
+      self.assertEqual(int(float(proc.stdout.strip())), 1202)
+    finally:
+      os.unlink(tmp_path)
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

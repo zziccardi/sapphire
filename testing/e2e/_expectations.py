@@ -31,6 +31,12 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_now": 1,
         "test_sleep": 1,
     },
+    "std_utf8_test.sp": {
+        "test_utf8_size": 1,
+        "test_utf8_sub": "llo💡",
+        "test_utf8_sub_to_end": "abc",
+        "test_utf8_offset": 1,
+    },
     "arithmetic_test.sp": {
         "test_integer_arithmetic": 15,
         "test_integer_division": 4.25,
@@ -42,6 +48,9 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_lambda_arithmetic": 17,
         "test_lambda_captures_call": 15,
         "test_block_body_lambda": 14,
+        "test_optional_callback_default_param": 712,
+        "test_closures_stored_in_map": 33,
+        "test_lambda_capturing_self_and_local": 33,
     },
     "control_flow_test.sp": {
         "test_if_else": 1,
@@ -62,22 +71,37 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_overridden_field": 6,
         "test_own_field": 1,
         "test_qualified_ancestor_static_dispatch": 274,
+        "test_multilevel_inheritance_and_trait_dispatch": 1218,
     },
     "maps_test.sp": {
         "test_map_lookup": 2,
         "test_map_iteration_sum": 60,
+        "test_map_get": 1,
+        "test_enum_map_keys": 40,
+        "test_nested_map_copy_out_write_back": 70,
     },
     "match_expressions_test.sp": {
         "test_match_statement": 20,
         "test_match_expression": 300,
         "test_match_wildcard": 1,
         "test_match_first_arm": 111,
+        "test_match_multi_pattern_arm": 20,
+        "test_match_block_arm_multi_yield": 9,
+        "test_match_block_arm_with_if_mutation": 153,
+        "test_nested_match": 21,
     },
     "optionals_test.sp": {
         "test_coalesce_none": 42,
         "test_coalesce_value": 7,
         "test_optional_unwrap_taken": 10,
         "test_optional_unwrap_missed": -1,
+        "test_multi_optional_unwrap": 30,
+        "test_multi_optional_unwrap_failure": 0,
+        "test_if_var_module_global": 15,
+        "test_if_var_optional_param": 26,
+        "test_guard_var_nested_map_get": 3,
+        "test_multi_binding_if_let_with_condition": 10,
+        "test_chained_optional_map_get": 40,
     },
     "strings_test.sp": {
         "test_interpolation": "Hello, World!",
@@ -88,6 +112,8 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_upper": "HELLO",
         "test_lower": "hello",
         "test_nested_quotes": "Alice: true",
+        "test_to_int_valid": 35,
+        "test_to_int_invalid": -2,
     },
     "arrays_test.sp": {
         "test_array_indexing": 20,
@@ -134,6 +160,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_coroutine_stepping": 60,
         "test_coroutine_is_done": 111,
         "test_coroutine_reset": 110,
+        "test_optional_struct_field_coroutine": 60,
     },
     "raii_and_cleanup_test.sp": {
         "test_destructor_lifo_order": 21,
@@ -154,6 +181,10 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
     },
     "traits_polymorphism_test.sp": {
         "test_polymorphic_trait_call": 303,
+        "test_heterogeneous_trait_array": 33,
+        "test_trait_array_mutating_method": 21,
+        "test_trait_in_nested_map": 73,
+        "test_optional_trait_field": 50,
     },
     "feature_interactions_test.sp": {
         "test_struct_with_enum_matching_in_loop": 200,
