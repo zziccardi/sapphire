@@ -424,74 +424,91 @@ class BorrowChecker:
     return True
 
   @staticmethod
-  def check_aliasing(checker: Any, node: CallNode, signature: FunctionType, is_constructor: bool = False) -> None:
-    """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
-    borrows: List[Tuple[str, List[str], bool]] = []
-
-    # 1. Check implicit self receiver for non-static method calls
+  def _collect_receiver_borrow(
+      checker: Any,
+      node: CallNode,
+      is_constructor: bool,
+      borrows: List[Tuple[str, List[str], bool]],
+  ) -> None:
+    """Records and validates the implicit `self` borrow for non-static method calls."""
     if (
-        not is_constructor
-        and isinstance(node.callee, MemberAccessNode)
-        and not getattr(node.callee, "is_qualified_ancestor_call", False)
+        is_constructor
+        or not isinstance(node.callee, MemberAccessNode)
+        or getattr(node.callee, "is_qualified_ancestor_call", False)
     ):
-      receiver_node = node.callee.receiver
-      receiver_type = checker.visit(receiver_node)
-      if isinstance(receiver_type, OptionalType):
-        receiver_type = receiver_type.base_type
-      is_shared_ref = False
-      if isinstance(receiver_type, SharedRefType):
-        is_shared_ref = True
-        receiver_type = receiver_type.inner_type
-      elif isinstance(receiver_type, RefType):
-        receiver_type = receiver_type.inner_type
-      if checker.has_shared_ref_base(receiver_node):
-        is_shared_ref = True
+      return
 
-      if isinstance(receiver_type, StructType):
-        method = receiver_type.get_method(node.callee.member, checker.symbol_table)
-        if method and method.modifier != "static":
-          is_mutable = (method.modifier == "var")
-          if is_mutable and is_shared_ref:
-            checker.error(
-                f"Cannot invoke mutating method '{node.callee.member}' "
-                "through deeply immutable 'SharedRef'.",
-                node=node,
-            )
-          res = checker._get_lvalue_path(receiver_node)
-          if res:
-            root, path = res
-            borrows.append((root, path, is_mutable))
-            if is_mutable:
-              reason = None
-              method_fields = getattr(
-                  checker, "_method_self_field_accesses", {}
-              ).get((receiver_type.name, node.callee.member))
-              if method_fields is not None and len(method_fields) > 0:
-                for field_name in method_fields:
-                  reason = checker.get_frozen_lvalue_reason(
-                      root, path + [field_name]
-                  )
-                  if reason:
-                    break
-              else:
-                reason = checker.get_frozen_lvalue_reason(root, path)
-              if reason:
-                checker.error(
-                    f"Cannot invoke mutating method '{node.callee.member}' "
-                    f"on '{root}' while it is frozen ({reason}).",
-                    node=node,
-                )
-              root_sym = checker.symbol_table.lookup(root)
-              if (
-                  isinstance(root_sym, VariableSymbol)
-                  and not root_sym.is_mutable
-              ):
-                checker.error(
-                    f"Cannot invoke mutating method '{node.callee.member}' "
-                    f"on constant variable '{root}'."
-                )
+    receiver_node = node.callee.receiver
+    receiver_type = checker.visit(receiver_node)
+    if isinstance(receiver_type, OptionalType):
+      receiver_type = receiver_type.base_type
+    is_shared_ref = False
+    if isinstance(receiver_type, SharedRefType):
+      is_shared_ref = True
+      receiver_type = receiver_type.inner_type
+    elif isinstance(receiver_type, RefType):
+      receiver_type = receiver_type.inner_type
+    if checker.has_shared_ref_base(receiver_node):
+      is_shared_ref = True
 
-    # 2. Check explicit arguments
+    if not isinstance(receiver_type, StructType):
+      return
+
+    method = receiver_type.get_method(node.callee.member, checker.symbol_table)
+    if not (method and method.modifier != "static"):
+      return
+
+    is_mutable = method.modifier == "var"
+    if is_mutable and is_shared_ref:
+      checker.error(
+          f"Cannot invoke mutating method '{node.callee.member}' "
+          "through deeply immutable 'SharedRef'.",
+          node=node,
+      )
+    res = checker._get_lvalue_path(receiver_node)
+    if not res:
+      return
+
+    root, path = res
+    borrows.append((root, path, is_mutable))
+    if not is_mutable:
+      return
+
+    # If the method only touches a known subset of `self` fields, check those
+    # specific projections against active `if var` / `guard var` freezes.
+    reason = None
+    method_fields = getattr(checker, "_method_self_field_accesses", {}).get(
+        (receiver_type.name, node.callee.member)
+    )
+    if method_fields is not None and len(method_fields) > 0:
+      for field_name in method_fields:
+        reason = checker.get_frozen_lvalue_reason(root, path + [field_name])
+        if reason:
+          break
+    else:
+      reason = checker.get_frozen_lvalue_reason(root, path)
+    if reason:
+      checker.error(
+          f"Cannot invoke mutating method '{node.callee.member}' "
+          f"on '{root}' while it is frozen ({reason}).",
+          node=node,
+      )
+    root_sym = checker.symbol_table.lookup(root)
+    if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+      checker.error(
+          f"Cannot invoke mutating method '{node.callee.member}' "
+          f"on constant variable '{root}'."
+      )
+
+  @staticmethod
+  def _collect_argument_borrows(
+      checker: Any,
+      node: CallNode,
+      signature: FunctionType,
+      is_constructor: bool,
+      borrows: List[Tuple[str, List[str], bool]],
+  ) -> None:
+    """Records and validates borrows for explicit reference-type call arguments."""
     expected_param_types = signature.param_types
     expected_param_names = signature.param_names or []
     expected_mutabilities = signature.param_mutabilities
@@ -509,51 +526,65 @@ class BorrowChecker:
 
     for idx, arg in enumerate(node.arguments):
       param_idx = idx
-      if arg.name and expected_param_names and arg.name in expected_param_names:
+      if (
+          arg.name
+          and expected_param_names
+          and arg.name in expected_param_names
+      ):
         param_idx = expected_param_names.index(arg.name)
-      if param_idx < len(expected_param_types):
-        param_type = expected_param_types[param_idx]
-        is_mutable = (
-            expected_mutabilities[param_idx]
-            if param_idx < len(expected_mutabilities)
-            else False
-        )
-        if checker._is_reference_type(param_type):
-          if is_mutable and checker.has_shared_ref_base(arg.expr):
-            checker.error(
-                "Cannot pass field of deeply immutable 'SharedRef' "
-                "to mutable 'var' parameter.",
-                node=node,
-            )
-          res = checker._get_lvalue_path(arg.expr)
-          if res:
-            root, path = res
-            borrows.append((root, path, is_mutable))
-            if is_mutable:
-              reason = checker.get_frozen_lvalue_reason(root, path)
-              if reason:
-                checker.error(
-                    f"Cannot pass '{root}' to 'var' parameter while it is "
-                    f"frozen ({reason}).",
-                    node=node,
-                )
-              root_sym = checker.symbol_table.lookup(root)
-              if (
-                  isinstance(root_sym, VariableSymbol)
-                  and not root_sym.is_mutable
-              ):
-                checker.error(
-                    f"Cannot pass constant variable '{root}' to mutable 'var' "
-                    "parameter."
-                )
+      if param_idx >= len(expected_param_types):
+        continue
 
-    # 3. Check for conflicts among all borrows
+      param_type = expected_param_types[param_idx]
+      is_mutable = (
+          expected_mutabilities[param_idx]
+          if param_idx < len(expected_mutabilities)
+          else False
+      )
+      if not checker._is_reference_type(param_type):
+        continue
+
+      if is_mutable and checker.has_shared_ref_base(arg.expr):
+        checker.error(
+            "Cannot pass field of deeply immutable 'SharedRef' "
+            "to mutable 'var' parameter.",
+            node=node,
+        )
+      res = checker._get_lvalue_path(arg.expr)
+      if not res:
+        continue
+
+      root, path = res
+      borrows.append((root, path, is_mutable))
+      if is_mutable:
+        reason = checker.get_frozen_lvalue_reason(root, path)
+        if reason:
+          checker.error(
+              f"Cannot pass '{root}' to 'var' parameter while it is "
+              f"frozen ({reason}).",
+              node=node,
+          )
+        root_sym = checker.symbol_table.lookup(root)
+        if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+          checker.error(
+              f"Cannot pass constant variable '{root}' to mutable 'var' "
+              "parameter."
+          )
+
+  @staticmethod
+  def _check_borrow_conflicts(
+      checker: Any,
+      node: CallNode,
+      borrows: List[Tuple[str, List[str], bool]],
+  ) -> None:
+    """Checks pairwise exclusivity and prototype-ancestor conflicts among borrows."""
     for i in range(len(borrows)):
       for j in range(i + 1, len(borrows)):
         r1, p1, m1 = borrows[i]
         r2, p2, m2 = borrows[j]
         if r1 == r2:
-          overlap = p1[:len(p2)] == p2 or p2[:len(p1)] == p1
+          # Prefix overlap means one borrow is the root/ancestor of the other.
+          overlap = p1[: len(p2)] == p2 or p2[: len(p1)] == p1
           if overlap and (m1 or m2):
             hint = ""
             if "[]" in p1 and "[]" in p2:
@@ -577,11 +608,12 @@ class BorrowChecker:
                 f"call.{hint}"
             )
         else:
+          # Mutably borrowing a prototype while borrowing its clone can corrupt
+          # live delegated state.
           sym1 = checker.symbol_table.lookup(r1)
           sym2 = checker.symbol_table.lookup(r2)
-          if (
-              isinstance(sym1, VariableSymbol)
-              and isinstance(sym2, VariableSymbol)
+          if isinstance(sym1, VariableSymbol) and isinstance(
+              sym2, VariableSymbol
           ):
             if m1 and (r1 in getattr(sym2, "proto_ancestors", set())):
               checker.error(
@@ -597,3 +629,20 @@ class BorrowChecker:
                   "call.",
                   node=node,
               )
+
+  @staticmethod
+  def check_aliasing(
+      checker: Any,
+      node: CallNode,
+      signature: FunctionType,
+      is_constructor: bool = False,
+  ) -> None:
+    """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
+    borrows: List[Tuple[str, List[str], bool]] = []
+    BorrowChecker._collect_receiver_borrow(
+        checker, node, is_constructor, borrows
+    )
+    BorrowChecker._collect_argument_borrows(
+        checker, node, signature, is_constructor, borrows
+    )
+    BorrowChecker._check_borrow_conflicts(checker, node, borrows)

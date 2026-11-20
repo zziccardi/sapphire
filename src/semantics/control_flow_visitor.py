@@ -1,0 +1,730 @@
+"""Control-flow AST visitor methods for TypeChecker (if, guard, match, loops)."""
+
+from typing import Any, List, Optional, Set, Tuple
+
+from src.parser.ast import (
+    ASTNode,
+    BlockNode,
+    BreakNode,
+    CallNode,
+    ContinueNode,
+    EllipsisPatternNode,
+    ForNode,
+    GuardStmtNode,
+    HeaderBindingNode,
+    IdentifierNode,
+    IfNode,
+    IndexExprNode,
+    LiteralNode,
+    MatchExprNode,
+    MemberAccessNode,
+    MoveNode,
+    ReturnNode,
+    WhileNode,
+)
+from src.semantics.arena_checker import ArenaChecker
+from src.semantics.lints import (
+    check_guard_contains_access,
+    check_if_contains_access,
+)
+from src.semantics.symbol_table import (
+    ArrayType,
+    EnumSymbol,
+    EnumType,
+    MapType,
+    NoneType,
+    OptionalType,
+    PrimitiveType,
+    RangeType,
+    Type,
+    VariableSymbol,
+)
+
+
+class ControlFlowVisitorMixin:
+  """Provides AST visitor methods for branches, pattern matching, and loops."""
+
+  def _bind_header_binding(
+      self,
+      binding: HeaderBindingNode,
+      owner_node: ASTNode,
+      freeze_label: str,
+      non_optional_msg: str,
+  ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
+    """Resolves and defines a `let`/`var` or `?=` header binding for `if`/`guard`."""
+    expr_type = self.visit(binding.expr)
+    is_borrowed_unwrap = False
+    if binding.is_unwrap:
+      if not isinstance(expr_type, OptionalType):
+        self.error(non_optional_msg.format(expr_t=expr_type), node=binding.expr)
+        unwrapped_type = expr_type
+      else:
+        unwrapped_type = expr_type.base_type
+      # Borrowing an lvalue via `if let`/`if var` avoids moving the source.
+      if isinstance(
+          binding.expr, (IdentifierNode, MemberAccessNode, IndexExprNode)
+      ) and not isinstance(binding.expr, MoveNode):
+        is_borrowed_unwrap = True
+    else:
+      unwrapped_type = expr_type
+      self._check_value_ownership_transfer(
+          binding.expr, expr_type, node=binding.expr
+      )
+
+    let_names = getattr(binding, "let_names", [binding.let_name])
+    self.node_types[binding] = unwrapped_type
+    if len(let_names) > 1:
+      elem_t = (
+          unwrapped_type.element_type
+          if isinstance(unwrapped_type, ArrayType)
+          else unwrapped_type
+      )
+      names_and_types = [(name, elem_t) for name in let_names]
+    else:
+      names_and_types = [(binding.let_name, unwrapped_type)]
+
+    for name, b_type in names_and_types:
+      sym = VariableSymbol(name, b_type, is_mutable=binding.is_mutable)
+      sym.is_borrowed_unwrap = is_borrowed_unwrap
+      sym.ast_decl = binding
+      self.symbol_table.define(name, sym)
+      ArenaChecker.validate_arena_escape(
+          self.symbol_table,
+          sym,
+          binding.expr,
+          lambda msg: self.error(msg, node=owner_node),
+          checker=self,
+      )
+
+    return self._register_unwrap_binding_freeze(binding, freeze_label)
+
+  def _check_match_pattern(
+      self,
+      pattern: Any,
+      subject_type: Type,
+      seen_enum_variants: Set[str],
+      bool_flags: List[bool],
+      opt_flags: List[bool],
+  ) -> None:
+    """Validates a single match pattern against the subject type and updates coverage."""
+    if isinstance(pattern, EllipsisPatternNode):
+      opt_flags[2] = True  # has_ellipsis
+      return
+
+    if isinstance(subject_type, EnumType):
+      if isinstance(pattern, MemberAccessNode):
+        pat_type = self.visit(pattern)
+        if (
+            isinstance(pat_type, EnumType)
+            and pat_type.name == subject_type.name
+        ):
+          seen_enum_variants.add(pattern.member)
+        else:
+          self.error(
+              f"Pattern '{pattern}' is not a valid variant of enum '{subject_type.name}'."
+          )
+      elif isinstance(pattern, IdentifierNode):
+        if pattern.name in subject_type.variants:
+          seen_enum_variants.add(pattern.name)
+        else:
+          sym = self.symbol_table.lookup(pattern.name)
+          if not (isinstance(sym, EnumSymbol) and sym.name == subject_type.name):
+            self.error(f"Undefined identifier '{pattern.name}'.")
+      else:
+        pat_type = self.visit(pattern)
+        if not (
+            isinstance(pat_type, EnumType)
+            and pat_type.name == subject_type.name
+        ):
+          self.error(
+              f"Pattern '{pattern}' is not a valid variant of enum '{subject_type.name}'."
+          )
+      return
+
+    if isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
+      self.visit(pattern)
+      if isinstance(pattern, LiteralNode) and pattern.lit_type == "bool":
+        if pattern.value is True or pattern.value == "true":
+          bool_flags[0] = True
+        elif pattern.value is False or pattern.value == "false":
+          bool_flags[1] = True
+      else:
+        self.error("Bool match pattern must be 'true' or 'false'.")
+      return
+
+    if isinstance(subject_type, OptionalType):
+      pat_type = self.visit(pattern)
+      if isinstance(pat_type, NoneType) or (
+          isinstance(pat_type, PrimitiveType) and pat_type.name == "none"
+      ):
+        opt_flags[0] = True  # seen_optional_none
+      elif pat_type.is_compatible(
+          subject_type.base_type
+      ) or subject_type.base_type.is_compatible(pat_type):
+        opt_flags[1] = True  # seen_optional_some
+      else:
+        self.error(
+            f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'."
+        )
+      return
+
+    pat_type = self.visit(pattern)  # pragma: no cover
+    if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):  # pragma: no cover
+      self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")  # pragma: no cover
+    opt_flags[1] = True  # pragma: no cover
+
+  def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
+    """Type-checks `match` statements and value-producing expressions."""
+    subject_type = self.visit(node.subject)
+    is_stmt = getattr(node, "is_statement", False)
+
+    seen_enum_variants: Set[str] = set()
+    # [seen_true, seen_false] and [seen_none, seen_some, has_ellipsis]
+    bool_flags = [False, False]
+    opt_flags = [False, False, False]
+    has_unyielded_block = False
+
+    case_types: List[Type] = []
+    pre_match_moved = set(self.moved_symbols)
+    union_moved: Set[VariableSymbol] = set(pre_match_moved)
+
+    for case in node.cases:
+      # Each arm starts from the pre-match move state; post-match is the union.
+      self.moved_symbols = set(pre_match_moved)
+      for pattern in case.patterns:
+        self._check_match_pattern(
+            pattern, subject_type, seen_enum_variants, bool_flags, opt_flags
+        )
+
+      if is_stmt:
+        self.visit(case.body)
+        case_types.append(NoneType())
+      else:
+        self._match_stack.append([])
+        if isinstance(case.body, BlockNode):
+          self.visit(case.body)
+          yields = self._match_stack.pop()
+          if yields:
+            first_yield = yields[0]
+            for y in yields[1:]:
+              if not y.is_compatible(first_yield):
+                self.error(
+                    f"Incompatible yield types in match case: '{first_yield}' and '{y}'."
+                )
+            case_types.append(first_yield)
+          else:
+            case_types.append(NoneType())
+            has_unyielded_block = True
+        else:
+          self._match_stack.pop()
+          expr_type = self.visit(case.body)
+          self._check_value_ownership_transfer(
+              case.body, expr_type, node=case.body
+          )
+          case_types.append(expr_type)
+      union_moved |= self.moved_symbols
+
+    if node.cases:
+      self.moved_symbols = union_moved
+
+    has_ellipsis = opt_flags[2]
+    if not has_ellipsis:
+      if isinstance(subject_type, EnumType):
+        missing = set(subject_type.variants.keys()) - seen_enum_variants
+        if missing:
+          self.error(
+              f"Match expression for enum '{subject_type.name}' is not exhaustive. Missing case: '{next(iter(missing))}'."
+          )
+      elif isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
+        if not (bool_flags[0] and bool_flags[1]):
+          self.error("Match expression for bool is not exhaustive.")
+      elif isinstance(subject_type, OptionalType):
+        if not (opt_flags[0] and (opt_flags[1] or has_ellipsis)):
+          self.error(
+              f"Match expression for optional '{subject_type}' is not exhaustive."
+          )
+
+    if is_stmt:
+      return PrimitiveType("none")
+
+    non_none_types = [
+        t
+        for t in case_types
+        if not (
+            isinstance(t, NoneType)
+            or (isinstance(t, PrimitiveType) and t.name == "none")
+        )
+    ]
+    if not non_none_types:
+      return PrimitiveType("none")
+
+    if has_unyielded_block:
+      self.error(
+          "Match case block in value-producing match expression must explicitly yield a value."
+      )
+
+    first_type = non_none_types[0]
+    for t in non_none_types[1:]:
+      if not t.is_compatible(first_type) and not first_type.is_compatible(t):
+        self.error(
+            f"Incompatible return types in match branches: '{first_type}' and '{t}'."
+        )
+
+    has_none = any(
+        isinstance(t, NoneType)
+        or (isinstance(t, PrimitiveType) and t.name == "none")
+        for t in case_types
+    )
+    if has_none or len(non_none_types) < len(case_types):
+      return OptionalType(first_type)
+    return first_type
+
+  def _visit_if_else_branch(
+      self, node: IfNode, pre_branch_moved: Set[VariableSymbol]
+  ) -> None:
+    """Visits an `else` branch with `if var` freezes cleared and move-state reset."""
+    then_moved = set(self.moved_symbols)
+    if node.else_block:
+      saved_frozen = list(self.symbol_table.current_scope.frozen_lvalues)
+      # `if var` unwrap only freezes the source in the `then` branch.
+      self.symbol_table.current_scope.frozen_lvalues = [
+          f for f in saved_frozen if f[2] != "active 'if var' unwrap"
+      ]
+      self.moved_symbols = set(pre_branch_moved)
+      self.visit(node.else_block)
+      else_moved = set(self.moved_symbols)
+      self.moved_symbols = then_moved | else_moved
+      self.symbol_table.current_scope.frozen_lvalues = saved_frozen
+    else:
+      self.moved_symbols = then_moved
+
+  def visit_IfNode(self, node: IfNode) -> None:
+    """Type-checks `if` statements, optional-unwrap bindings, and NLL freezes."""
+    if node.bindings:
+      self.symbol_table.enter_scope()
+      has_unwrap = False
+      unwrap_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
+      for binding in node.bindings:
+        if binding.is_unwrap:
+          has_unwrap = True
+        unwrap_entry = self._bind_header_binding(
+            binding,
+            node,
+            "active 'if var' unwrap",
+            "Expression in optional unwrapping must resolve to an optional type.",
+        )
+        if unwrap_entry:
+          unwrap_freezes.append(unwrap_entry)
+
+      if node.condition:
+        cond_type = self.visit(node.condition)
+        if cond_type != PrimitiveType("bool"):
+          c_node = (
+              node.condition
+              if (
+                  hasattr(node.condition, "start_line")
+                  and isinstance(node.condition.start_line, int)
+              )
+              else None
+          )
+          self.error("If condition must resolve to 'bool'.", node=c_node)
+      elif not has_unwrap:
+        self.error(
+            "Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='."
+        )
+
+      pre_branch_moved = set(self.moved_symbols)
+      self._branch_depth += 1
+      try:
+        if unwrap_freezes and isinstance(node.then_block, BlockNode):
+          if_scope = self.symbol_table.current_scope
+          self.symbol_table.enter_scope()
+          try:
+            self._visit_stmts_with_unwrap_nll(
+                node.then_block.statements,
+                initial_freezes=unwrap_freezes,
+                freeze_scope=if_scope,
+            )
+          finally:
+            cur_scope = self.symbol_table.current_scope
+            self.moved_symbols = {
+                s for s in self.moved_symbols if s.scope_defined != cur_scope
+            }
+            self.symbol_table.exit_scope()
+        else:
+          self.visit(node.then_block)
+        check_if_contains_access(self, node)
+        self._visit_if_else_branch(node, pre_branch_moved)
+      finally:
+        self._branch_depth -= 1
+
+      self.symbol_table.exit_scope()
+      return
+
+    cond_type = self.visit(node.condition)
+    if cond_type != PrimitiveType("bool"):
+      c_node = (
+          node.condition
+          if (
+              hasattr(node.condition, "start_line")
+              and isinstance(node.condition.start_line, int)
+          )
+          else None
+      )
+      self.error("If condition must resolve to 'bool'.", node=c_node)
+
+    pre_branch_moved = set(self.moved_symbols)
+    self._branch_depth += 1
+    try:
+      self._visit_block_with_terminating_unfreeze(node.then_block)
+      check_if_contains_access(self, node)
+      self._visit_if_else_branch(node, pre_branch_moved)
+    finally:
+      self._branch_depth -= 1
+
+  def visit_WhileNode(self, node: WhileNode) -> None:
+    """Type-checks `while` loops and ensures no move-only vars are consumed across iterations."""
+    self.loop_depth += 1
+    self._branch_depth += 1
+    pre_loop_moved = set(self.moved_symbols)
+    try:
+      cond_type = self.visit(node.condition)
+      if cond_type != PrimitiveType("bool"):
+        self.error("While condition must resolve to 'bool'.")
+      self.visit(node.block)
+
+      for sym in self.moved_symbols - pre_loop_moved:
+        self.error(
+            f"Cannot move variable '{sym.name}' inside a loop without re-assigning it before the next iteration.",
+            node=node,
+        )
+    finally:
+      self._branch_depth -= 1
+      self.loop_depth -= 1
+
+  def visit_ForNode(self, node: ForNode) -> None:
+    """Type-checks `for-in` loops and freezes the iterated collection against mutation."""
+    self.loop_depth += 1
+    self._branch_depth += 1
+    pre_loop_moved = set(self.moved_symbols)
+    try:
+      iter_type = self.visit(node.iterable)
+      self.symbol_table.enter_scope()
+      iter_res = ArenaChecker.get_lvalue_path(self.symbol_table, node.iterable)
+      if iter_res:
+        self.symbol_table.current_scope.frozen_lvalues.append(
+            (iter_res[0], iter_res[1], "for-in loop iteration")
+        )
+
+      if isinstance(iter_type, ArrayType):
+        if node.key_var is not None:
+          self.error(
+              "Cannot iterate over an array with key-value syntax; use a single loop variable."
+          )
+        elem_type = iter_type.element_type
+        self.node_types[node] = elem_type
+        val_sym = VariableSymbol(node.val_var, elem_type, node.is_mutable)
+        self.symbol_table.define(node.val_var, val_sym)
+        ArenaChecker.validate_arena_escape(
+            self.symbol_table,
+            val_sym,
+            node.iterable,
+            lambda msg: self.error(msg, node=node),
+            checker=self,
+        )
+      elif isinstance(iter_type, RangeType):
+        if node.key_var is not None:
+          self.error(
+              "Cannot iterate over a range with key-value syntax; use a single loop variable."
+          )
+        self.node_types[node] = PrimitiveType("int")
+        self.symbol_table.define(
+            node.val_var,
+            VariableSymbol(
+                node.val_var, PrimitiveType("int"), node.is_mutable
+            ),
+        )
+      elif isinstance(iter_type, MapType):
+        self.node_types[node] = iter_type.value_type
+        if node.key_var is None:
+          self.error(
+              "Map iteration requires key and value loop variables: 'for key, val in map'."
+          )
+          val_sym = VariableSymbol(
+              node.val_var, iter_type.value_type, node.is_mutable
+          )
+          self.symbol_table.define(node.val_var, val_sym)
+          ArenaChecker.validate_arena_escape(
+              self.symbol_table,
+              val_sym,
+              node.iterable,
+              lambda msg: self.error(msg, node=node),
+              checker=self,
+          )
+        else:
+          key_sym = VariableSymbol(
+              node.key_var, iter_type.key_type, node.is_mutable
+          )
+          val_sym = VariableSymbol(
+              node.val_var, iter_type.value_type, node.is_mutable
+          )
+          self.symbol_table.define(node.key_var, key_sym)
+          self.symbol_table.define(node.val_var, val_sym)
+          for sym in (key_sym, val_sym):
+            ArenaChecker.validate_arena_escape(
+                self.symbol_table,
+                sym,
+                node.iterable,
+                lambda msg: self.error(msg, node=node),
+                checker=self,
+            )
+      else:
+        self.error(
+            "For-in loop source must be an array, map, or range type."
+        )
+        self.node_types[node] = PrimitiveType("none")
+        if node.key_var is not None:
+          self.symbol_table.define(
+              node.key_var,
+              VariableSymbol(
+                  node.key_var, PrimitiveType("none"), node.is_mutable
+              ),
+          )
+        self.symbol_table.define(
+            node.val_var,
+            VariableSymbol(
+                node.val_var, PrimitiveType("none"), node.is_mutable
+            ),
+        )
+
+      self.visit(node.block)
+      self.symbol_table.exit_scope()
+
+      for sym in self.moved_symbols - pre_loop_moved:
+        self.error(
+            f"Cannot move variable '{sym.name}' inside a loop without re-assigning it before the next iteration.",
+            node=node,
+        )
+    finally:
+      self._branch_depth -= 1
+      self.loop_depth -= 1
+
+  def visit_BreakNode(self, node: BreakNode) -> None:
+    if self.loop_depth <= 0:
+      self.error("'break' statement outside of loop.")
+
+  def visit_ContinueNode(self, node: ContinueNode) -> None:
+    if self.loop_depth <= 0:
+      self.error("'continue' statement outside of loop.")
+
+  def _statement_terminates(self, stmt: ASTNode) -> bool:
+    if isinstance(stmt, (ReturnNode, BreakNode, ContinueNode)):
+      return True
+    if isinstance(stmt, IfNode):
+      if stmt.then_block and stmt.else_block:
+        then_term = self._block_terminates(stmt.then_block)
+        else_term = (
+            self._statement_terminates(stmt.else_block)
+            if isinstance(stmt.else_block, ASTNode)
+            else self._block_terminates(stmt.else_block)
+        )
+        return then_term and else_term
+    if isinstance(stmt, BlockNode):
+      return self._block_terminates(stmt)
+    return False
+
+  def _visit_block_with_terminating_unfreeze(self, block: BlockNode) -> None:
+    """Temporarily unfreezes active `if var` bindings on terminating branches.
+
+    Under control-flow-aware non-lexical lifetime analysis, a terminating branch
+    (such as an early `return`) that does not reference an outer `if var`
+    binding cannot observe or fall through to later uses of that binding, so
+    mutating the unwrapped source inside that branch is memory-safe.
+    """
+    active = getattr(self, "_active_unwrap_freezes", [])
+    temporarily_unfrozen = []
+    if active and isinstance(block, BlockNode) and self._block_terminates(block):
+      for unwrap_scope, var_name, freeze_entry in active:
+        if (
+            freeze_entry in unwrap_scope.frozen_lvalues
+            and not self._ast_references_ident(block, var_name)
+        ):
+          unwrap_scope.frozen_lvalues.remove(freeze_entry)
+          temporarily_unfrozen.append((unwrap_scope, freeze_entry))
+    try:
+      self.visit(block)
+    finally:
+      for unwrap_scope, freeze_entry in temporarily_unfrozen:
+        if freeze_entry not in unwrap_scope.frozen_lvalues:
+          unwrap_scope.frozen_lvalues.append(freeze_entry)
+
+  def _block_terminates(self, block: BlockNode) -> bool:
+    for stmt in getattr(block, "statements", []):
+      if self._statement_terminates(stmt):
+        return True
+    return False
+
+  def _resolve_container_get_unwrap(
+      self, expr: ASTNode
+  ) -> Optional[Tuple[Tuple[str, List[str]], ASTNode, ASTNode, bool]]:
+    """Resolves `container.get(key)` on a Map or Array lvalue."""
+    if not (
+        isinstance(expr, CallNode)
+        and isinstance(expr.callee, MemberAccessNode)
+        and expr.callee.member == "get"
+        and not expr.callee.is_optional
+        and len(expr.arguments) == 1
+    ):
+      return None
+    recv = expr.callee.receiver
+    recv_t = self.node_types.get(recv)
+    if not isinstance(recv_t, (MapType, ArrayType)):
+      return None
+    recv_res = ArenaChecker.get_lvalue_path(self.symbol_table, recv)
+    if not recv_res:
+      return None
+    arg = expr.arguments[0]
+    key_expr = arg.expr if hasattr(arg, "expr") else arg
+    return (recv_res, recv, key_expr, isinstance(recv_t, ArrayType))
+
+  def _register_unwrap_binding_freeze(
+      self, binding: HeaderBindingNode, freeze_label: str
+  ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
+    """Validates and registers a mutable optional-unwrap freeze on an lvalue."""
+    if not (binding.is_unwrap and binding.is_mutable):
+      return None
+    b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
+    container_info = None
+    if not b_res:
+      container_info = self._resolve_container_get_unwrap(binding.expr)
+      if container_info:
+        b_res = container_info[0]
+    if not b_res:
+      self.error(
+          "Mutable optional unwrap ('if var' / 'guard var') binds an in-place "
+          "reference and requires a mutable lvalue. Use 'if let' / 'guard let' "
+          "for non-lvalue temporaries.",
+          node=binding.expr,
+      )
+      return None
+    root_sym = self.symbol_table.lookup(b_res[0])
+    if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+      self.error(
+          f"Mutable optional unwrap ('if var' / 'guard var') requires a mutable "
+          f"source lvalue, but '{b_res[0]}' is immutable.",
+          node=binding.expr,
+      )
+      return None
+    if container_info:
+      _, recv, key_expr, is_array = container_info
+      binding._writeback_container = (recv, key_expr, is_array)
+    freeze_entry = (b_res[0], b_res[1], freeze_label)
+    self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
+    return (binding.let_name, freeze_entry)
+
+  def _visit_stmts_with_unwrap_nll(
+      self,
+      stmts: List[ASTNode],
+      initial_freezes: Optional[
+          List[Tuple[str, Tuple[str, List[str], str]]]
+      ] = None,
+      freeze_scope: Any = None,
+  ) -> None:
+    """Visits statements with non-lexical lifetime unfreezing for `if var` and `guard var`."""
+    active_scope = freeze_scope or self.symbol_table.current_scope
+    if not hasattr(self, "_active_unwrap_freezes"):
+      self._active_unwrap_freezes = []
+    pushed_count = 0
+    tracked: List[Tuple[str, Tuple[str, List[str], str], int]] = []
+
+    def register_freezes(
+        freezes: List[Tuple[str, Tuple[str, List[str], str]]], start_idx: int
+    ) -> None:
+      nonlocal pushed_count
+      for var_name, freeze_entry in freezes:
+        last_idx = -1
+        for s_idx in range(start_idx, len(stmts)):
+          if self._ast_references_ident(stmts[s_idx], var_name):
+            last_idx = s_idx
+        if last_idx == -1:
+          if freeze_entry in active_scope.frozen_lvalues:
+            active_scope.frozen_lvalues.remove(freeze_entry)
+        else:
+          self._active_unwrap_freezes.append(
+              (active_scope, var_name, freeze_entry)
+          )
+          pushed_count += 1
+          tracked.append((var_name, freeze_entry, last_idx))
+
+    if initial_freezes:
+      register_freezes(initial_freezes, 0)
+
+    try:
+      for s_idx, stmt in enumerate(stmts):
+        prev_pending = getattr(self, "_pending_guard_unwrap_freezes", None)
+        self._pending_guard_unwrap_freezes = []
+        try:
+          self.visit(stmt)
+          new_guard_freezes = self._pending_guard_unwrap_freezes
+        finally:
+          self._pending_guard_unwrap_freezes = prev_pending
+
+        if new_guard_freezes:
+          register_freezes(new_guard_freezes, s_idx + 1)
+
+        for var_name, freeze_entry, last_idx in tracked:
+          if (
+              last_idx == s_idx
+              and freeze_entry in active_scope.frozen_lvalues
+          ):
+            active_scope.frozen_lvalues.remove(freeze_entry)
+      for s_idx, stmt in enumerate(stmts):
+        if isinstance(stmt, GuardStmtNode):
+          check_guard_contains_access(self, stmt, stmts[s_idx + 1 :])
+    finally:
+      if pushed_count > 0:
+        del self._active_unwrap_freezes[
+            len(self._active_unwrap_freezes) - pushed_count :
+        ]
+
+  def visit_GuardStmtNode(self, node: GuardStmtNode) -> Type:
+    """Type-checks `guard` statements and promotes unwrapped bindings to outer scope."""
+    guard_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
+    for clause in node.clauses:
+      if clause.binding:
+        unwrap_entry = self._bind_header_binding(
+            clause.binding,
+            node,
+            "active 'guard var' unwrap",
+            "Cannot unwrap non-optional type '{expr_t}' in guard clause.",
+        )
+        if unwrap_entry:
+          guard_freezes.append(unwrap_entry)
+      elif clause.condition:
+        cond_t = self.visit(clause.condition)
+        if cond_t != PrimitiveType("bool"):
+          self.error(f"Guard condition must be of type 'bool', got '{cond_t}'.")
+
+    # Temporarily release freezes while checking `else` (which must diverge).
+    if guard_freezes:
+      for _, freeze_entry in guard_freezes:
+        if freeze_entry in self.symbol_table.current_scope.frozen_lvalues:
+          self.symbol_table.current_scope.frozen_lvalues.remove(freeze_entry)
+
+    self.symbol_table.enter_scope()
+    self.visit(node.else_block)
+    self.symbol_table.exit_scope()
+
+    if not self._block_terminates(node.else_block):
+      self.error(
+          "Guard else block must terminate control flow (via return, break, or continue)."
+      )
+
+    if guard_freezes:
+      for _, freeze_entry in guard_freezes:
+        self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
+      pending = getattr(self, "_pending_guard_unwrap_freezes", None)
+      if pending is not None:
+        pending.extend(guard_freezes)
+
+    return PrimitiveType("none")

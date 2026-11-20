@@ -458,69 +458,36 @@ def _escape_lua_string(s: str) -> str:
   return s.replace("\\", "/").replace('"', '\\"')
 
 
-def run_tests_lua(
+def _build_lua_test_harness(
     sp_file: str,
+    out_lua: str,
     standalone_tests: List[str],
     suite_tests: Dict[str, List[str]],
-    filter_pattern: Optional[str] = None,
-    sourcemap: bool = True,
-) -> Tuple[int, int, List[str]]:
-  """Executes discovered tests in Lua 5.1 target backend."""
-  out_lua = None
-  runner_tmp = None
-  try:
-    try:
-      out_lua = transpile_file(
-          sp_file,
-          target="lua",
-          test_mode=True,
-          sourcemap=sourcemap,
-          quiet=True,
-          raise_on_error=True,
-      )
-    except BaseException as e:  # pragma: no cover
-      print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
-      for line in str(e).splitlines():
-        print(f"  {line}")
-      return 0, 1, [f"Transpilation failed: {e}"]
+    filter_pattern: Optional[str],
+) -> str:
+  """Constructs a self-contained Lua 5.1 script that executes discovered tests."""
+  workspace_root = os.path.abspath(
+      os.path.join(os.path.dirname(__file__), "..", "..")
+  )
+  sp_dir = os.path.dirname(os.path.abspath(sp_file))
+  esc_workspace_root = _escape_lua_string(workspace_root)
+  esc_sp_dir = _escape_lua_string(sp_dir)
+  esc_out_lua = _escape_lua_string(out_lua)
+  esc_sp_basename = _escape_lua_string(os.path.basename(sp_file))
 
-    lua_bin = find_lua_binary()
-    if not lua_bin:  # pragma: no cover
-      print(
-          "Error: Lua interpreter ('lua', 'luajit', or 'lua5.1') not found in"
-          " PATH.",
-          file=sys.stderr,
-      )
-      print(
-          f"[ FAIL ] {os.path.basename(sp_file)} (Lua interpreter not found in"
-          f" PATH)"
-      )
-      return 0, 1, ["Lua interpreter not found"]
-
-    workspace_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..")
-    )
-    sp_dir = os.path.dirname(os.path.abspath(sp_file))
-
-    esc_workspace_root = _escape_lua_string(workspace_root)
-    esc_sp_dir = _escape_lua_string(sp_dir)
-    esc_out_lua = _escape_lua_string(out_lua)
-    esc_sp_basename = _escape_lua_string(os.path.basename(sp_file))
-
-    # Construct Lua runner script
-    pkg_path = (
-        f'package.path = "{esc_workspace_root}/?.lua;'
-        f'{esc_workspace_root}/?/init.lua;'
-        f'{esc_workspace_root}/lib/?.lua;'
-        f'{esc_workspace_root}/lib/?/init.lua;'
-        f'{esc_sp_dir}/?.lua;{esc_sp_dir}/?/init.lua;" .. package.path'
-    )
-    dofile_stmt = (
-        f'local target_mod_ok, target_mod = pcall(function() '
-        f'return dofile("{esc_out_lua}") end)'
-    )
-    lua_script_lines = [
-        pkg_path,
+  pkg_path = (
+      f'package.path = "{esc_workspace_root}/?.lua;'
+      f'{esc_workspace_root}/?/init.lua;'
+      f'{esc_workspace_root}/lib/?.lua;'
+      f'{esc_workspace_root}/lib/?/init.lua;'
+      f'{esc_sp_dir}/?.lua;{esc_sp_dir}/?/init.lua;" .. package.path'
+  )
+  dofile_stmt = (
+      f'local target_mod_ok, target_mod = pcall(function() '
+      f'return dofile("{esc_out_lua}") end)'
+  )
+  lua_script_lines = [
+      pkg_path,
       '''
 local function _sp_install_loader()
   if _G._SP_RELATIVE_LOADER_INSTALLED then return end
@@ -579,7 +546,7 @@ local function _sp_install_loader()
 end
 _sp_install_loader()
 ''',
-      f'local testing = require("std.testing")',
+      'local testing = require("std.testing")',
       dofile_stmt,
       'if not target_mod_ok then',
       f'  print("[ FAIL ] {esc_sp_basename} (module load error)")',
@@ -645,12 +612,11 @@ end
 ''',
   ]
 
-    # Run standalone @test functions
-    for fn_name in standalone_tests:
-      if filter_pattern and filter_pattern not in fn_name:
-        continue
-      esc_fn = _escape_lua_string(fn_name)
-      lua_script_lines.append(f'''
+  for fn_name in standalone_tests:
+    if filter_pattern and filter_pattern not in fn_name:
+      continue
+    esc_fn = _escape_lua_string(fn_name)
+    lua_script_lines.append(f'''
   do
     local ctx = testing.TestContext.new("{esc_fn}")
     testing.set_active_context(ctx)
@@ -689,18 +655,19 @@ end
   end
   ''')
 
-    # Run struct test suites
-    for struct_name, methods in suite_tests.items():
-      for m_name in methods:
-        full_name = f"{struct_name}.{m_name}"
-        if (filter_pattern
-            and filter_pattern not in full_name
-            and filter_pattern not in m_name):
-          continue
-        esc_struct = _escape_lua_string(struct_name)
-        esc_m = _escape_lua_string(m_name)
-        esc_full = _escape_lua_string(full_name)
-        lua_script_lines.append(f'''
+  for struct_name, methods in suite_tests.items():
+    for m_name in methods:
+      full_name = f"{struct_name}.{m_name}"
+      if (
+          filter_pattern
+          and filter_pattern not in full_name
+          and filter_pattern not in m_name
+      ):
+        continue
+      esc_struct = _escape_lua_string(struct_name)
+      esc_m = _escape_lua_string(m_name)
+      esc_full = _escape_lua_string(full_name)
+      lua_script_lines.append(f'''
   do
     local ctx = testing.TestContext.new("{esc_full}")
     testing.set_active_context(ctx)
@@ -772,17 +739,59 @@ end
   end
   ''')
 
-    lua_script_lines.append('os.exit((total_failed > 0) and 1 or 0)')
+  lua_script_lines.append("os.exit((total_failed > 0) and 1 or 0)")
+  return "\n".join(lua_script_lines)
 
+
+def run_tests_lua(
+    sp_file: str,
+    standalone_tests: List[str],
+    suite_tests: Dict[str, List[str]],
+    filter_pattern: Optional[str] = None,
+    sourcemap: bool = True,
+) -> Tuple[int, int, List[str]]:
+  """Executes discovered tests in Lua 5.1 target backend."""
+  out_lua = None
+  runner_tmp = None
+  try:
+    try:
+      out_lua = transpile_file(
+          sp_file,
+          target="lua",
+          test_mode=True,
+          sourcemap=sourcemap,
+          quiet=True,
+          raise_on_error=True,
+      )
+    except BaseException as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
+      return 0, 1, [f"Transpilation failed: {e}"]
+
+    lua_bin = find_lua_binary()
+    if not lua_bin:  # pragma: no cover
+      print(
+          "Error: Lua interpreter ('lua', 'luajit', or 'lua5.1') not found in"
+          " PATH.",
+          file=sys.stderr,
+      )
+      print(
+          f"[ FAIL ] {os.path.basename(sp_file)} (Lua interpreter not found in"
+          f" PATH)"
+      )
+      return 0, 1, ["Lua interpreter not found"]
+
+    harness_src = _build_lua_test_harness(
+        sp_file, out_lua, standalone_tests, suite_tests, filter_pattern
+    )
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".runner.lua", delete=False, encoding="utf-8"
     ) as f:
-      f.write("\n".join(lua_script_lines))
+      f.write(harness_src)
       runner_tmp = f.name
 
-    cmd = [lua_bin, runner_tmp]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-
+    res = subprocess.run([lua_bin, runner_tmp], capture_output=True, text=True)
     if res.stdout:
       print(res.stdout.strip())
     if res.stderr:  # pragma: no cover
