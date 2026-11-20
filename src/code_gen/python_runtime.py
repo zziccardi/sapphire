@@ -1,4 +1,12 @@
-"""Python runtime preamble and reserved word table for Sapphire."""
+"""Python runtime preamble and reserved word table for Sapphire.
+
+Provides the embedded runtime header emitted into transpiled Python modules:
+- `_SapphireCoroutine`, `Arena`, `Ref` / `SharedRef` / `WeakRef`, and `_sapphire_del`.
+- `SapphireObject` prototype delegation (`__proto__`) using `__dict__` /
+  `object.__setattr__` for per-instance lifecycle flags (`_sapphire_disposed_`)
+  and Copy-on-Write isolation on nested mutations.
+- Bounds-safe collection and string intrinsic helpers.
+"""
 
 # ==========================================
 # Sapphire Python Runtime Preamble

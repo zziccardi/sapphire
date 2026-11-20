@@ -1,4 +1,12 @@
-"""Lua 5.1 runtime preamble for Sapphire."""
+"""Lua 5.1 runtime preamble for Sapphire.
+
+Provides the embedded runtime header emitted into transpiled Lua modules:
+- Relative module loader (`_sp_install_loader`) for nested `.sapphire` imports.
+- Coroutine wrapper (`_SapphireCoroutine`), `Arena`, and RAII `_sapphire_del`.
+- `SapphireObject` prototype delegation (`__proto__`) using `rawget`/`rawset`
+  for per-instance lifecycle flags (`_sapphire_disposed_`) and CoW isolation.
+- 1-based array/string/map helpers (`_sapphire_array_*`, `_sapphire_map_*`).
+"""
 
 # ==========================================
 # Sapphire Lua 5.1 Runtime Preamble
