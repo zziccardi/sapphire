@@ -2773,6 +2773,45 @@ class TestSharedFixtures(unittest.TestCase):
     finally:
       os.unlink(tmp_path)
 
+  def test_std_utf8_pure_lua_fallback_sub(self):
+    """Verifies std.utf8 pure-Lua fallback matches 0-based exclusive slicing."""
+    lua_bin = (
+        shutil.which("lua")
+        or shutil.which("luajit")
+        or shutil.which("lua5.1")
+        or shutil.which("lua5.4")
+    )
+    if not lua_bin:
+      self.skipTest("Lua interpreter not found on PATH")
+    lib_path = str(_E2E_DIR.parent.parent / "lib")
+    driver = (
+        "_G.utf8 = nil\n"
+        "package.preload['utf8'] = nil\n"
+        "package.preload['lua-utf8'] = nil\n"
+        f"package.path = \"{lib_path}/?.lua;{lib_path}/?/init.lua;\"\n"
+        "local u = require('std.utf8')\n"
+        "assert(u.sub('hello', 1, 3) == 'el')\n"
+        "assert(u.sub('hello', 1, -1) == 'ell')\n"
+        "assert(u.sub('hello', 0, 0) == '')\n"
+        "assert(u.sub('a💡b', 1, 2) == '💡')\n"
+        "print('OK')\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        suffix=".lua", mode="w", delete=False, encoding="utf-8"
+    ) as tmp:
+      tmp.write(driver)
+      tmp_path = tmp.name
+    try:
+      proc = subprocess.run(
+          [lua_bin, tmp_path],
+          capture_output=True, text=True, timeout=10,
+      )
+      if proc.returncode != 0:
+        self.fail(f"Lua execution failed: {proc.stderr.strip()}")
+      self.assertEqual(proc.stdout.strip(), "OK")
+    finally:
+      os.unlink(tmp_path)
+
   def _make_fixture_test(fixture_name: str):  # noqa: N805
     """Factory producing a test method for *fixture_name*."""
     def _test(self):

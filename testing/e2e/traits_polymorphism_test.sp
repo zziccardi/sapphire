@@ -115,3 +115,14 @@ func test_optional_trait_field(): int {
   let v2 = active.leader?.greet() ?? -1;
   return v1 + v2;
 }
+
+@test
+func test_nested_trait_map_literal(): int {
+  let grid: [int: [int: Greeter]] = {
+    1: {2: FriendlyBot { code = 30 }},
+    3: {4: FormalBot { code = 40 }},
+  };
+  let a = grid.get(1)?.get(2)?.greet() ?? 0;
+  let b = grid.get(3)?.get(4)?.greet() ?? 0;
+  return a + b;
+}

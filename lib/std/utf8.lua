@@ -137,7 +137,20 @@ function utf8_mod.sub(s, start_char, end_char)
   end
   local u = _get_utf8()
   if not u then
-    return s:sub((start_char or 0) + 1, end_char)
+    local len = #s
+    local i = start_char or 0
+    if i < 0 then i = len + i end
+    if i < 0 then i = 0 end
+    if i >= len then return "" end
+    local j = end_char
+    if j == nil then
+      j = len
+    else
+      if j < 0 then j = len + j end
+      if j > len then j = len end
+    end
+    if j <= i then return "" end
+    return s:sub(i + 1, j)
   end
   local len = u.len(s)
   if not len then

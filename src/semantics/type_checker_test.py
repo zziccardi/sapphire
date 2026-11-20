@@ -8340,5 +8340,48 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_nested_trait_map_and_array_literal_expected_type(self):
+    self._check("""
+    trait Greeter {
+      func greet(): int;
+    }
+    struct BotA {}
+    impl Greeter for BotA {
+      func greet(): int { return 1; }
+    }
+    struct BotB {}
+    impl Greeter for BotB {
+      func greet(): int { return 2; }
+    }
+    struct Other {}
+
+    func main() {
+      let grid: [int: [int: Greeter]] = {
+        1: {2: BotA {}},
+        3: {4: BotB {}},
+      };
+      let rows: [[Greeter]] = [[BotA {}], [BotB {}]];
+    }
+    """)
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      trait Greeter {
+        func greet(): int;
+      }
+      struct BotA {}
+      impl Greeter for BotA {
+        func greet(): int { return 1; }
+      }
+      struct Other {}
+      func main() {
+        let grid: [int: [int: Greeter]] = {
+          1: {2: BotA {}},
+          3: {4: Other {}},
+        };
+      }
+      """)
+    self.assertIn("Inconsistent value types in map literal.", str(ctx.exception))
+
 if __name__ == "__main__":
   unittest.main()
