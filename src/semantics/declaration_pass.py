@@ -8,7 +8,13 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from antlr4 import InputStream, CommonTokenStream
-from pygls.uris import from_fs_path
+try:
+  from pygls.uris import from_fs_path
+except ImportError:
+  from pathlib import Path
+
+  def from_fs_path(path: str) -> str:
+    return Path(path).resolve().as_uri()
 
 from src.cli.diagnostics import format_diagnostic
 from src.common.errors import SemanticError

@@ -62,7 +62,7 @@ lua_code = ''
 ok = True
 
 try:
-    transpile_file('/sapphire/playground.sp', '/sapphire/out.py', target='python', emit_runtime=True)
+    transpile_file('/sapphire/playground.sp', '/sapphire/out.py', target='python', quiet=True, raise_on_error=True, use_runtime_module=False)
     with open('/sapphire/out.py', 'r', encoding='utf-8') as f:
         python_code = f.read()
 except Exception as exc:
@@ -70,7 +70,7 @@ except Exception as exc:
     stderr_buf.write(f"Compilation Error (Python target):\\n{exc}\\n")
 
 try:
-    transpile_file('/sapphire/playground.sp', '/sapphire/out.lua', target='lua', emit_runtime=True)
+    transpile_file('/sapphire/playground.sp', '/sapphire/out.lua', target='lua', quiet=True, raise_on_error=True, use_runtime_module=False)
     with open('/sapphire/out.lua', 'r', encoding='utf-8') as f:
         lua_code = f.read()
 except Exception as exc:
