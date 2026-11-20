@@ -1,5 +1,4 @@
 # Sapphire language specification
-{: .no_toc }
 
 This document establishes the foundational design, syntax rules, and
 architectural specifications for **Sapphire**, a general-purpose programming
@@ -10,16 +9,6 @@ penalties.
 
 For code style, formatting, and naming guidelines, see the separate
 [style guide](style_guide.md).
-
-<!-- Used by Jekyll -->
-<details markdown="block">
-  <summary>
-    Table of contents
-  </summary>
-  {: .text-delta }
-1. TOC
-{:toc}
-</details>
 
 ## Design philosophy & value proposition
 

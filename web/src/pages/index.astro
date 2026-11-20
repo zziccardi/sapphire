@@ -127,7 +127,7 @@ sapphire run samples/game_loop.sp --dev`,
         </div>
 
         <h1 class="max-w-4xl text-4xl font-extrabold tracking-tight sm:text-6xl">
-          Systems-grade safety.
+          Systems-grade safety.{' '}
           <span class="bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 bg-clip-text text-transparent">
             Dynamic-language ergonomics.
           </span>
@@ -195,7 +195,7 @@ sapphire run samples/game_loop.sp --dev`,
         </div>
         <h2 class="mt-2 text-lg font-bold">RAII &amp; Lexical Arenas</h2>
         <p class="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-          Deterministic LIFO <code>__del__</code> destructors and scoped <code>Arena</code>
+          Deterministic LIFO <code>__del__</code> destructors and scoped <code>Arena</code>{' '}
           blocks keep prototypes, clones, and resources leak-free.
         </p>
       </div>
@@ -238,7 +238,9 @@ sapphire run samples/game_loop.sp --dev`,
               <button
                 type="button"
                 role="tab"
+                id={`tab-${tab.id}`}
                 data-tab-target={tab.id}
+                aria-controls={`panel-${tab.id}`}
                 aria-selected={idx === 0 ? 'true' : 'false'}
                 class={`tab-btn rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
                   idx === 0
@@ -256,6 +258,9 @@ sapphire run samples/game_loop.sp --dev`,
           {
             highlightedTabs.map((tab, idx) => (
               <div
+                role="tabpanel"
+                id={`panel-${tab.id}`}
+                aria-labelledby={`tab-${tab.id}`}
                 data-tab-panel={tab.id}
                 class={idx === 0 ? 'block' : 'hidden'}
               >
