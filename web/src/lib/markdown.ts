@@ -49,10 +49,49 @@ const SUPPORTED_LANGS = new Set([
   'txt',
 ]);
 
+function stripHtmlTags(input: string): string {
+  let result = '';
+  let tagDepth = 0;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === '<') {
+      tagDepth++;
+    } else if (ch === '>') {
+      if (tagDepth > 0) {
+        tagDepth--;
+      }
+    } else if (tagDepth === 0) {
+      result += ch;
+    }
+  }
+  return result;
+}
+
+interface InlineToken {
+  type?: string;
+  text?: string;
+  raw?: string;
+  tokens?: InlineToken[];
+}
+
+function extractPlainTextFromTokens(tokens: InlineToken[]): string {
+  let out = '';
+  for (const token of tokens) {
+    if (token.type === 'html') {
+      continue;
+    }
+    if (token.tokens && token.tokens.length > 0) {
+      out += extractPlainTextFromTokens(token.tokens);
+    } else if (typeof token.text === 'string') {
+      out += token.text;
+    }
+  }
+  return out;
+}
+
 export function slugify(text: string): string {
-  return text
+  return stripHtmlTags(text)
     .toLowerCase()
-    .replace(/<[^>]+>/g, '')
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
@@ -97,7 +136,9 @@ export async function renderMarkdownString(source: string): Promise<RenderedMark
     renderer: {
       heading({ tokens, depth }) {
         const text = this.parser.parseInline(tokens);
-        const plainText = text.replace(/<[^>]+>/g, '');
+        const plainText = stripHtmlTags(
+          extractPlainTextFromTokens(tokens as InlineToken[]),
+        ).trim();
         if (depth === 1 && !title) {
           title = plainText;
         }

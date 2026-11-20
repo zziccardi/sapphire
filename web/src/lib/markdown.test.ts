@@ -13,10 +13,17 @@ describe('markdown helpers', () => {
     expect(rewriteMarkdownHref('https://example.com')).toBe('https://example.com');
   });
 
+  it('strips nested or malformed HTML tags safely in slugify', () => {
+    expect(slugify('<scr<script>ipt>Hello</script> World')).toBe('hello-world');
+    expect(slugify('<span><b>Nested</b></span> Heading!')).toBe('nested-heading');
+  });
+
   it('extracts headings and highlights Sapphire code blocks', async () => {
     const md = [
       '# Main Title',
       '## First Section',
+      '## Using `Ref<T>` Safely',
+      '## <scr<script>ipt>Alert</script> Ignored',
       'See [Spec](SPEC.md) for details.',
       '```sapphire',
       'let x: int = 42;',
@@ -27,6 +34,8 @@ describe('markdown helpers', () => {
     expect(result.title).toBe('Main Title');
     expect(result.headings).toEqual([
       { depth: 2, text: 'First Section', slug: 'first-section' },
+      { depth: 2, text: 'Using Ref Safely', slug: 'using-ref-safely' },
+      { depth: 2, text: 'Alert Ignored', slug: 'alert-ignored' },
     ]);
     expect(result.html).toContain('class="shiki');
     expect(result.html).toContain('href="/docs/spec"');
