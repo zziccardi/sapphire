@@ -402,6 +402,25 @@ class SemanticParityTest(unittest.TestCase):
     self.assertEqual(py_val, 32)
     self.assertEqual(lua_val, 32)
 
+  def test_all_e2e_tests_have_expectations(self):
+    """Ensures every @test function in testing/e2e/*_test.sp is in EXPECTATIONS."""
+    import re
+    from testing.e2e._expectations import EXPECTATIONS
+
+    e2e_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "testing" / "e2e"
+    missing = {}
+    for path in sorted(e2e_dir.glob("*_test.sp")):
+      text = path.read_text(encoding="utf-8")
+      fns = re.findall(r"@test\s+func\s+(\w+)\s*\(", text)
+      registered = set(EXPECTATIONS.get(path.name, {}).keys())
+      unregistered = [fn for fn in fns if fn not in registered]
+      if unregistered:
+        missing[path.name] = unregistered
+    self.assertEqual(
+        missing, {},
+        f"Unregistered @test functions in testing/e2e/: {missing}",
+    )
+
 
 if __name__ == "__main__":
   unittest.main()

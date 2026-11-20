@@ -491,25 +491,36 @@ class ExprVisitorMixin:
     )
 
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> Type:
+    expected_arr = (
+        self.expected_type if isinstance(self.expected_type, ArrayType) else None
+    )
     if not node.elements:
-      if isinstance(self.expected_type, ArrayType):
-        if self.expected_type.is_fixed_size and self.expected_type.size != 0:
-          self.error(f"Fixed-size array '[{self.expected_type.element_type}; {self.expected_type.size}]' requires exactly {self.expected_type.size} element(s), got 0.", node=node)
-        return ArrayType(self.expected_type.element_type, size=0, is_fixed_size=self.expected_type.is_fixed_size)
+      if expected_arr is not None:
+        if expected_arr.is_fixed_size and expected_arr.size != 0:
+          self.error(f"Fixed-size array '[{expected_arr.element_type}; {expected_arr.size}]' requires exactly {expected_arr.size} element(s), got 0.", node=node)
+        return ArrayType(expected_arr.element_type, size=0, is_fixed_size=expected_arr.is_fixed_size)
       return ArrayType(NoneType(), size=0)
 
-    elem_types = [self.visit(e) for e in node.elements]
+    old_expected = self.expected_type
+    elem_types: list[Type] = []
+    try:
+      for e in node.elements:
+        self.expected_type = expected_arr.element_type if expected_arr is not None else None
+        elem_types.append(self.visit(e))
+    finally:
+      self.expected_type = old_expected
+
     for elem_node, etype in zip(node.elements, elem_types):
       self._check_value_ownership_transfer(elem_node, etype, node=elem_node)
-    if isinstance(self.expected_type, ArrayType):
-      target_elem = self.expected_type.element_type
+    if expected_arr is not None:
+      target_elem = expected_arr.element_type
       for etype in elem_types:
         if not etype.is_compatible(target_elem):
           self.error(f"Array element of type '{etype}' is not compatible with expected element type '{target_elem}'.")
           break
-      if self.expected_type.is_fixed_size:
-        if len(node.elements) != self.expected_type.size:
-          self.error(f"Fixed-size array '[{target_elem}; {self.expected_type.size}]' requires exactly {self.expected_type.size} element(s), got {len(node.elements)}.", node=node)
+      if expected_arr.is_fixed_size:
+        if len(node.elements) != expected_arr.size:
+          self.error(f"Fixed-size array '[{target_elem}; {expected_arr.size}]' requires exactly {expected_arr.size} element(s), got {len(node.elements)}.", node=node)
         return ArrayType(target_elem, size=len(node.elements), is_fixed_size=True)
       return ArrayType(target_elem, size=len(node.elements), is_fixed_size=False)
 
@@ -521,15 +532,13 @@ class ExprVisitorMixin:
     return ArrayType(first_type, size=len(node.elements), is_fixed_size=False)
 
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
+    expected_map = (
+        self.expected_type if isinstance(self.expected_type, MapType) else None
+    )
     if not node.entries:
-      if isinstance(self.expected_type, MapType):
-        return MapType(self.expected_type.key_type, self.expected_type.value_type)
+      if expected_map is not None:
+        return MapType(expected_map.key_type, expected_map.value_type)
       return MapType(NoneType(), NoneType())
-
-    first_key_type = self.visit(node.entries[0].key)
-    first_val_type = self.visit(node.entries[0].value)
-    self._check_value_ownership_transfer(node.entries[0].key, first_key_type, node=node.entries[0].key)
-    self._check_value_ownership_transfer(node.entries[0].value, first_val_type, node=node.entries[0].value)
 
     def is_valid_key_type(ktype: Type) -> bool:
       return (
@@ -538,18 +547,35 @@ class ExprVisitorMixin:
           or isinstance(ktype, EnumType)
       )
 
-    if not is_valid_key_type(first_key_type):
-      self.error("Map key must be a string, int, or enum.")
+    old_expected = self.expected_type
+    key_types: list[Type] = []
+    val_types: list[Type] = []
+    try:
+      for entry in node.entries:
+        self.expected_type = expected_map.key_type if expected_map is not None else None
+        key_types.append(self.visit(entry.key))
+        self.expected_type = expected_map.value_type if expected_map is not None else None
+        val_types.append(self.visit(entry.value))
+    finally:
+      self.expected_type = old_expected
 
-    for entry in node.entries[1:]:
-      ktype = self.visit(entry.key)
-      vtype = self.visit(entry.value)
+    for entry, ktype, vtype in zip(node.entries, key_types, val_types):
       self._check_value_ownership_transfer(entry.key, ktype, node=entry.key)
       self._check_value_ownership_transfer(entry.value, vtype, node=entry.value)
-
       if not is_valid_key_type(ktype):
         self.error("Map key must be a string, int, or enum.")
 
+    if expected_map is not None:
+      for ktype, vtype in zip(key_types, val_types):
+        if not ktype.is_compatible(expected_map.key_type):
+          self.error("Inconsistent key types in map literal.")
+        if not vtype.is_compatible(expected_map.value_type):
+          self.error("Inconsistent value types in map literal.")
+      return MapType(expected_map.key_type, expected_map.value_type)
+
+    first_key_type = key_types[0]
+    first_val_type = val_types[0]
+    for ktype, vtype in zip(key_types[1:], val_types[1:]):
       if not ktype.is_compatible(first_key_type) and not first_key_type.is_compatible(ktype):
         self.error("Inconsistent key types in map literal.")
 

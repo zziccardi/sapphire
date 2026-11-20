@@ -121,6 +121,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_array_mutation": 99,
         "test_array_push": 3,
         "test_array_contains": 1,
+        "test_array_get": 1,
         "test_array_swap": 1,
     },
     "expressions_and_casting_test.sp": {
@@ -185,6 +186,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_trait_array_mutating_method": 21,
         "test_trait_in_nested_map": 73,
         "test_optional_trait_field": 50,
+        "test_nested_trait_map_literal": 73,
     },
     "feature_interactions_test.sp": {
         "test_struct_with_enum_matching_in_loop": 200,
