@@ -233,6 +233,26 @@ class BaseTranspiler(ABC):
       return False
     return True
 
+  def _register_binding_destructibles(
+      self,
+      binding_expr: Any,
+      let_names: List[str],
+      then_block: Any,
+      is_unwrap: bool,
+  ) -> List[str]:
+    """Registers destructible struct bindings on *then_block* if owned."""
+    st_name = self._expr_destructible_struct(binding_expr)
+    if not st_name:
+      return []
+    if is_unwrap and not self._is_owned_unwrap_expr(binding_expr):
+      return []
+    if not hasattr(then_block, "_block_destructibles"):
+      then_block._block_destructibles = []
+    for name in let_names:
+      self.variable_types[name] = st_name
+      then_block._block_destructibles.append(name)
+    return list(let_names)
+
   def _is_active_destructible_var(self, m_name: str) -> bool:
     """Returns True if *m_name* is tracked in an active destructor stack frame."""
     return any(m_name in frame for frame in self.destructor_stack)

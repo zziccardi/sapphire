@@ -5,7 +5,7 @@ type-checking pass and converts them into the 5-integer delta-encoded format req
 by the Language Server Protocol.
 """
 
-from typing import List, Tuple, Optional
+from typing import Any, List, Tuple, Optional
 
 from src.parser.ast import ASTNode
 from src.semantics.type_checker import TypeChecker

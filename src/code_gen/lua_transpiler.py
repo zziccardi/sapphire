@@ -406,32 +406,9 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.emit("return _M")
       self.newline()
 
-  def visit_StructDeclNode(self, node: StructDeclNode) -> None:
-    # Header definition for struct
-    self.known_structs.add(node.name)
-    self.declared_symbols.append(node.name)
-    is_proto = node.is_prototype
+  def _emit_struct_init_fields(self, node: StructDeclNode) -> None:
+    """Emits `Struct._init_fields(self)` to apply parent and field defaults."""
     struct_name = node.name
-    methods = self.struct_methods.get(struct_name, [])
-
-    self.newline()
-    if self.dev_mode:
-      self.emit(f"{struct_name} = {struct_name} or {{}}")
-    else:
-      self.emit(f"{struct_name} = {{}}")
-    self.newline()
-    self.emit(f"{struct_name}.__index = {struct_name}")
-    self.newline()
-
-    if node.parent_names:
-      if len(node.parent_names) == 1:
-        self.emit(f"setmetatable({struct_name}, {{ __index = {node.parent_names[0]} }})")
-      else:
-        chain = " or ".join(f"{p}[k]" for p in node.parent_names)
-        self.emit(f"setmetatable({struct_name}, {{ __index = function(t, k) return {chain} end }})")
-      self.newline()
-
-    # Define helper `._init_fields(self)`
     self.emit(f"function {struct_name}._init_fields(self)")
     self.indent()
     if node.parent_names:
@@ -439,7 +416,9 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         self.newline()
         self.emit(f"if {p}._init_fields then {p}._init_fields(self) end")
     for f in node.fields:
-      default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+      default_expr = f.default_expr or get_default_value_for_type_node(
+          f.field_type
+      )
       if default_expr:
         self.newline()
         temp = self._make_expr_transpiler()
@@ -450,16 +429,23 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.emit("end")
     self.newline()
 
-    # Define constructor `.init(...)`
+  def _emit_struct_init_constructor(
+      self, node: StructDeclNode, methods: List[Any]
+  ) -> None:
+    """Emits `Struct.init(...)` handling proto delegation, `__init__`, and kwargs."""
+    struct_name = node.name
+    is_proto = node.is_prototype
     self.emit(f"function {struct_name}.init(...)")
     self.indent()
     self.newline()
-    self.emit("local _n_args = select(\"#\", ...)")
+    self.emit('local _n_args = select("#", ...)')
     self.newline()
     self.emit("local self")
     self.newline()
     if is_proto:
-      self.emit(f"local proto = (_n_args == 2 and type(select(2, ...)) == \"table\") and select(2, ...) or nil")
+      self.emit(
+          'local proto = (_n_args == 2 and type(select(2, ...)) == "table") and select(2, ...) or nil'
+      )
       self.newline()
       self.emit(f"self = _create_proto_object(proto, {struct_name})")
       self.newline()
@@ -475,7 +461,9 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.newline()
       self.emit(f"{struct_name}._init_fields(self)")
 
-    init_member = next((m for m in methods if m.func_decl.name == "__init__"), None)
+    init_member = next(
+        (m for m in methods if m.func_decl.name == "__init__"), None
+    )
     if init_member:
       self.newline()
       self.emit(f"if {struct_name}._init_sapphire then")
@@ -496,15 +484,14 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       if len(init_params) == 0:
         self.emit(f"{struct_name}._init_sapphire(self)")
       else:
-        init_args = []
-        for idx, p in enumerate(init_params):
-          pname = self._mangle_name(p.name)
-          init_args.append(
-              f"(function() if _arg1['{pname}'] ~= nil then "
-              f"return _arg1['{pname}'] else return _arg1[{idx + 1}] end end)()"
-          )
+        init_args = [
+            (
+                f"(function() if _arg1['{self._mangle_name(p.name)}'] ~= nil then "
+                f"return _arg1['{self._mangle_name(p.name)}'] else return _arg1[{idx + 1}] end end)()"
+            )
+            for idx, p in enumerate(init_params)
+        ]
         call_args = ["self"] + init_args
-
         param_checks = " or ".join(
             f"_arg1['{self._mangle_name(p.name)}'] ~= nil" for p in init_params
         )
@@ -544,7 +531,9 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.emit("local _args = { ... }")
       for idx, f in enumerate(node.fields):
         self.newline()
-        self.emit(f"if _args[{idx + 1}] ~= nil then self.{self._mangle_name(f.name)} = _args[{idx + 1}] end")
+        self.emit(
+            f"if _args[{idx + 1}] ~= nil then self.{self._mangle_name(f.name)} = _args[{idx + 1}] end"
+        )
       self.dedent()
       self.newline()
       self.emit("elseif _n_args == 1 then")
@@ -552,19 +541,21 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.newline()
       self.emit("local _arg1 = ...")
       self.newline()
-      self.emit("if type(_arg1) == \"table\" then")
+      self.emit('if type(_arg1) == "table" then')
       self.indent()
       self.newline()
       self.emit("for k, v in pairs(_arg1) do")
       self.indent()
       self.newline()
-      self.emit("if type(k) == \"string\" then self[k] = v end")
+      self.emit('if type(k) == "string" then self[k] = v end')
       self.dedent()
       self.newline()
       self.emit("end")
       for idx, f in enumerate(node.fields):
         self.newline()
-        self.emit(f"if _arg1[{idx + 1}] ~= nil and self.{self._mangle_name(f.name)} == nil then self.{self._mangle_name(f.name)} = _arg1[{idx + 1}] end")
+        self.emit(
+            f"if _arg1[{idx + 1}] ~= nil and self.{self._mangle_name(f.name)} == nil then self.{self._mangle_name(f.name)} = _arg1[{idx + 1}] end"
+        )
       self.dedent()
       self.newline()
       self.emit("else")
@@ -586,6 +577,38 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.emit("end")
     self.newline()
 
+  def visit_StructDeclNode(self, node: StructDeclNode) -> None:
+    """Emits Lua table, metatable inheritance, constructor, methods, and `__del__`."""
+    self.known_structs.add(node.name)
+    self.declared_symbols.append(node.name)
+    is_proto = node.is_prototype
+    struct_name = node.name
+    methods = self.struct_methods.get(struct_name, [])
+
+    self.newline()
+    if self.dev_mode:
+      self.emit(f"{struct_name} = {struct_name} or {{}}")
+    else:
+      self.emit(f"{struct_name} = {{}}")
+    self.newline()
+    self.emit(f"{struct_name}.__index = {struct_name}")
+    self.newline()
+
+    if node.parent_names:
+      if len(node.parent_names) == 1:
+        self.emit(
+            f"setmetatable({struct_name}, {{ __index = {node.parent_names[0]} }})"
+        )
+      else:
+        chain = " or ".join(f"{p}[k]" for p in node.parent_names)
+        self.emit(
+            f"setmetatable({struct_name}, {{ __index = function(t, k) return {chain} end }})"
+        )
+      self.newline()
+
+    self._emit_struct_init_fields(node)
+    self._emit_struct_init_constructor(node, methods)
+
     has_explicit_del = any(
         getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
         for m in methods
@@ -603,7 +626,6 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         )
     )
 
-    # Emit methods from impl block
     for m in methods:
       self._visit_ImplMemberNode_for_struct(m, struct_name)
 

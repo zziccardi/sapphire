@@ -287,6 +287,45 @@ class ArenaChecker:
     return _dedup_deps(deps)
 
   @staticmethod
+  def _collect_symbol_arena_deps(
+      symbol_table: SymbolTable, name: str
+  ) -> List[Tuple[str, int]]:
+    """Returns `(arena_name, generation)` dependency records for variable *name*."""
+    sym = symbol_table.lookup(name)
+    if isinstance(sym, VariableSymbol):
+      if sym.arena_dep_records:
+        return list(sym.arena_dep_records)
+      if sym.arena_dependency:
+        return [(sym.arena_dependency, 0)]
+    return []
+
+  @staticmethod
+  def _collect_match_arena_deps(
+      symbol_table: SymbolTable, node: MatchExprNode, checker: Any
+  ) -> List[Tuple[str, int]]:
+    """Collects arena dependencies across all branches of a `match` expression."""
+    deps: List[Tuple[str, int]] = []
+    for case in node.cases:
+      if isinstance(case.body, BlockNode):
+        for stmt in case.body.statements:
+          if isinstance(stmt, ReturnNode):
+            for rexpr in stmt.expressions:
+              deps.extend(
+                  ArenaChecker.collect_arena_deps(symbol_table, rexpr, checker)
+              )
+          elif isinstance(stmt, ExprStmtNode):
+            deps.extend(
+                ArenaChecker.collect_arena_deps(
+                    symbol_table, stmt.expr, checker
+                )
+            )
+      else:
+        deps.extend(
+            ArenaChecker.collect_arena_deps(symbol_table, case.body, checker)
+        )
+    return _dedup_deps(deps)
+
+  @staticmethod
   def collect_arena_deps(
       symbol_table: SymbolTable, node: Any, checker: Any = None
   ) -> List[Tuple[str, int]]:
@@ -294,6 +333,8 @@ class ArenaChecker:
     if node is None:
       return []
 
+    # Value types that cannot transitively hold arena-allocated `proto` refs
+    # can never carry an arena dependency out of scope.
     if checker is not None and not isinstance(
         node, (StructInitializerNode, CloneNode, LambdaNode)
     ):
@@ -319,6 +360,7 @@ class ArenaChecker:
       return _dedup_deps(deps)
 
     if isinstance(node, CallNode):
+      # Constructing a new Arena() does not depend on an enclosing arena.
       if isinstance(node.callee, IdentifierNode) and node.callee.name == "Arena":
         return []
       if node.arena_expr:
@@ -351,23 +393,8 @@ class ArenaChecker:
           deps.append((resolved[0], resolved[2]))
       return _dedup_deps(deps)
 
-    if isinstance(node, IdentifierNode):
-      sym = symbol_table.lookup(node.name)
-      if isinstance(sym, VariableSymbol):
-        if sym.arena_dep_records:
-          return list(sym.arena_dep_records)
-        if sym.arena_dependency:
-          return [(sym.arena_dependency, 0)]
-      return []
-
-    if isinstance(node, MoveNode):
-      sym = symbol_table.lookup(node.name)
-      if isinstance(sym, VariableSymbol):
-        if sym.arena_dep_records:
-          return list(sym.arena_dep_records)
-        if sym.arena_dependency:
-          return [(sym.arena_dependency, 0)]
-      return []
+    if isinstance(node, (IdentifierNode, MoveNode)):
+      return ArenaChecker._collect_symbol_arena_deps(symbol_table, node.name)
 
     if isinstance(node, MemberAccessNode):
       return ArenaChecker.collect_arena_deps(
@@ -375,9 +402,7 @@ class ArenaChecker:
       )
 
     if isinstance(node, IndexExprNode):
-      return ArenaChecker.collect_arena_deps(
-          symbol_table, node.array, checker
-      )
+      return ArenaChecker.collect_arena_deps(symbol_table, node.array, checker)
 
     if isinstance(node, ArrayLiteralNode):
       for elem in node.elements:
@@ -421,27 +446,7 @@ class ArenaChecker:
       return ArenaChecker.collect_arena_deps(symbol_table, node.expr, checker)
 
     if isinstance(node, MatchExprNode):
-      for case in node.cases:
-        if isinstance(case.body, BlockNode):
-          for stmt in case.body.statements:
-            if isinstance(stmt, ReturnNode):
-              for rexpr in stmt.expressions:
-                deps.extend(
-                    ArenaChecker.collect_arena_deps(
-                        symbol_table, rexpr, checker
-                    )
-                )
-            elif isinstance(stmt, ExprStmtNode):
-              deps.extend(
-                  ArenaChecker.collect_arena_deps(
-                      symbol_table, stmt.expr, checker
-                  )
-              )
-        else:
-          deps.extend(
-              ArenaChecker.collect_arena_deps(symbol_table, case.body, checker)
-          )
-      return _dedup_deps(deps)
+      return ArenaChecker._collect_match_arena_deps(symbol_table, node, checker)
 
     if isinstance(node, LambdaNode):
       return ArenaChecker._collect_lambda_capture_deps(symbol_table, node)
