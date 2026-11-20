@@ -1,0 +1,49 @@
+---
+import SapphireLogo from './SapphireLogo.astro';
+import { withBase } from '../lib/url';
+---
+
+<footer class="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/50">
+  <div class="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+    <div class="flex flex-col justify-between gap-8 md:flex-row md:items-center">
+      <div class="flex items-start gap-3">
+        <SapphireLogo size={26} class="mt-0.5 shrink-0" />
+        <div>
+          <p class="font-semibold text-[var(--text-primary)]">Sapphire Language</p>
+          <p class="mt-1 max-w-md text-sm text-[var(--text-secondary)]">
+            Statically typed systems safety meets dynamic prototyping ergonomics.
+            Currently a transpiler toolchain targeting Python &amp; Lua 5.1, with a native
+            LLVM/Rust compiler planned on the roadmap.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-6 text-sm text-[var(--text-secondary)]">
+        <a href={withBase('/docs/spec')} class="hover:text-[var(--text-primary)]">
+          Language Spec
+        </a>
+        <a href={withBase('/examples')} class="hover:text-[var(--text-primary)]">
+          Examples
+        </a>
+        <a href={withBase('/compare')} class="hover:text-[var(--text-primary)]">
+          Comparisons
+        </a>
+        <a href={withBase('/playground')} class="hover:text-[var(--text-primary)]">
+          Playground
+        </a>
+        <a
+          href="https://github.com/zziccardi/sapphire"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="hover:text-[var(--text-primary)]"
+        >
+          GitHub
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-8 border-t border-[var(--border-subtle)] pt-6 text-xs text-[var(--text-muted)]">
+      &copy; {new Date().getFullYear()} Sapphire Language Contributors. Open-source under Apache 2.0.
+    </div>
+  </div>
+</footer>

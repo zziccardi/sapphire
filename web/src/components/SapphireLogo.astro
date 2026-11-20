@@ -1,0 +1,46 @@
+---
+interface Props {
+  size?: number;
+  class?: string;
+}
+
+const { size = 28, class: className = '' } = Astro.props;
+---
+
+<svg
+  width={size}
+  height={size}
+  viewBox="0 0 32 32"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+  class={className}
+  aria-hidden="true"
+>
+  <defs>
+    <linearGradient id="sapphire-grad-main" x1="4" y1="3" x2="28" y2="29" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="45%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+    <linearGradient id="sapphire-grad-facet" x1="16" y1="3" x2="16" y2="29" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#bae6fd" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0.2" />
+    </linearGradient>
+  </defs>
+  <polygon
+    points="16,2 27,9 27,23 16,30 5,23 5,9"
+    fill="url(#sapphire-grad-main)"
+    stroke="#60a5fa"
+    stroke-width="1.2"
+  />
+  <polygon
+    points="16,6.5 22.5,11 22.5,21 16,25.5 9.5,21 9.5,11"
+    fill="url(#sapphire-grad-facet)"
+    stroke="#93c5fd"
+    stroke-width="0.9"
+  />
+  <line x1="16" y1="2" x2="16" y2="6.5" stroke="#bfdbfe" stroke-width="0.9" />
+  <line x1="27" y1="9" x2="22.5" y2="11" stroke="#93c5fd" stroke-width="0.9" />
+  <line x1="5" y1="9" x2="9.5" y2="11" stroke="#bae6fd" stroke-width="0.9" />
+  <line x1="16" y1="30" x2="16" y2="25.5" stroke="#60a5fa" stroke-width="0.9" />
+</svg>

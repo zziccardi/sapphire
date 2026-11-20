@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://zziccardi.github.io/sapphire/sitemap-index.xml

@@ -26,3 +26,9 @@ main.lua
 *.map
 
 .sapphire_reload
+
+# Website build & dependencies
+web/node_modules/
+web/dist/
+web/.astro/
+web/public/sapphire-compiler.json

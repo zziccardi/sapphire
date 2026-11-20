@@ -1,0 +1,247 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { SAMPLE_EXAMPLES, readSampleSource } from '../../data/examples';
+import { withBase } from '../../lib/url';
+
+const presets = SAMPLE_EXAMPLES.filter((ex) => ex.runnableInPlayground).map((ex) => ({
+  slug: ex.slug,
+  title: ex.title,
+  source: readSampleSource(ex.file),
+}));
+
+const defaultSource = presets[0]?.source ?? 'func main() {\n  print("Hello, Sapphire!");\n}\n';
+const workerUrl = withBase('/playground-worker.js');
+const bundleUrl = withBase('/sapphire-compiler.json');
+---
+
+<BaseLayout
+  title="Playground | Sapphire"
+  description="Compile and run Sapphire code directly in your browser via Pyodide WebAssembly."
+>
+  <section
+    class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"
+    id="playground-root"
+    data-worker-url={workerUrl}
+    data-bundle-url={bundleUrl}
+  >
+    <div class="flex flex-col justify-between gap-4 border-b border-[var(--border-subtle)] pb-5 sm:flex-row sm:items-center">
+      <div>
+        <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">
+          Sapphire Browser Playground
+        </h1>
+        <p class="mt-1 text-sm text-[var(--text-secondary)]">
+          Runs the full Sapphire type checker and Python/Lua 5.1 transpilers client-side in WebAssembly.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <span
+          id="pg-status"
+          class="inline-flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]"
+        >
+          <span id="pg-status-dot" class="h-2 w-2 rounded-full bg-amber-400"></span>
+          <span id="pg-status-text">Initializing WebAssembly...</span>
+        </span>
+
+        <select
+          id="pg-preset"
+          aria-label="Load sample preset"
+          class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
+        >
+          {presets.map((p) => <option value={p.slug}>{p.title}</option>)}
+        </select>
+
+        <button
+          type="button"
+          id="pg-run"
+          disabled
+          class="inline-flex items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-4 py-1.5 text-sm font-semibold text-white transition-opacity hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span>Run</span>
+          <kbd class="hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] sm:inline">Ctrl+Enter</kbd>
+        </button>
+      </div>
+    </div>
+
+    <div class="mt-6 grid gap-6 lg:grid-cols-2">
+      <!-- Editor Pane -->
+      <div class="flex flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-code)]">
+        <div class="flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-semibold text-[var(--text-secondary)]">
+          <span>playground.sp</span>
+          <span class="text-[var(--text-muted)]">Sapphire Source</span>
+        </div>
+        <textarea
+          id="pg-editor"
+          spellcheck="false"
+          aria-label="Sapphire source code editor"
+          class="min-h-[30rem] w-full flex-1 resize-y bg-transparent p-4 font-mono text-sm leading-relaxed text-[var(--text-primary)] focus:outline-none"
+        >{defaultSource}</textarea>
+      </div>
+
+      <!-- Output Pane -->
+      <div class="flex flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-code)]">
+        <div class="flex items-center gap-1 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
+          <button
+            type="button"
+            data-out-tab="output"
+            class="out-tab rounded-md bg-[var(--accent-glow)] px-3 py-1 text-xs font-semibold text-[var(--accent-primary)]"
+          >
+            Output
+          </button>
+          <button
+            type="button"
+            data-out-tab="python"
+            class="out-tab rounded-md px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          >
+            Generated Python
+          </button>
+          <button
+            type="button"
+            data-out-tab="lua"
+            class="out-tab rounded-md px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          >
+            Generated Lua 5.1
+          </button>
+        </div>
+
+        <pre
+          id="pg-panel-output"
+          data-out-panel="output"
+          class="min-h-[30rem] flex-1 overflow-auto p-4 font-mono text-sm leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap"
+        >Loading Pyodide WebAssembly compiler. Once ready, click Run to compile &amp; execute.</pre>
+
+        <pre
+          id="pg-panel-python"
+          data-out-panel="python"
+          class="hidden min-h-[30rem] flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed text-[var(--text-secondary)]"
+        ></pre>
+
+        <pre
+          id="pg-panel-lua"
+          data-out-panel="lua"
+          class="hidden min-h-[30rem] flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed text-[var(--text-secondary)]"
+        ></pre>
+      </div>
+    </div>
+  </section>
+
+  <script type="application/json" id="playground-presets" set:html={JSON.stringify(presets)} />
+</BaseLayout>
+
+<script is:inline>
+  (() => {
+    const root = document.getElementById('playground-root');
+    const workerUrl = root?.getAttribute('data-worker-url');
+    const bundleUrl = new URL(
+      root?.getAttribute('data-bundle-url') || '/sapphire-compiler.json',
+      window.location.origin,
+    ).href;
+
+    const presetsRaw = document.getElementById('playground-presets')?.textContent || '[]';
+    const presets = JSON.parse(presetsRaw);
+    const presetSelect = document.getElementById('pg-preset');
+    const editor = document.getElementById('pg-editor');
+    const runBtn = document.getElementById('pg-run');
+    const statusDot = document.getElementById('pg-status-dot');
+    const statusText = document.getElementById('pg-status-text');
+    const outOutput = document.getElementById('pg-panel-output');
+    const outPython = document.getElementById('pg-panel-python');
+    const outLua = document.getElementById('pg-panel-lua');
+
+    // Load ?sample=<slug> if provided
+    const params = new URLSearchParams(window.location.search);
+    const sampleSlug = params.get('sample');
+    if (sampleSlug) {
+      const match = presets.find((p) => p.slug === sampleSlug);
+      if (match && editor && presetSelect) {
+        editor.value = match.source;
+        presetSelect.value = match.slug;
+      }
+    }
+
+    presetSelect?.addEventListener('change', () => {
+      const match = presets.find((p) => p.slug === presetSelect.value);
+      if (match && editor) {
+        editor.value = match.source;
+      }
+    });
+
+    // Tab indentation in editor
+    editor?.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        editor.value = `${editor.value.slice(0, start)}  ${editor.value.slice(end)}`;
+        editor.selectionStart = editor.selectionEnd = start + 2;
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!runBtn?.disabled) runCode();
+      }
+    });
+
+    // Output tabs
+    const tabBtns = document.querySelectorAll('.out-tab');
+    const tabPanels = document.querySelectorAll('[data-out-panel]');
+    tabBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-out-tab');
+        tabBtns.forEach((b) => {
+          const active = b.getAttribute('data-out-tab') === target;
+          b.className = active
+            ? 'out-tab rounded-md bg-[var(--accent-glow)] px-3 py-1 text-xs font-semibold text-[var(--accent-primary)]'
+            : 'out-tab rounded-md px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]';
+        });
+        tabPanels.forEach((p) => {
+          p.classList.toggle('hidden', p.getAttribute('data-out-panel') !== target);
+        });
+      });
+    });
+
+    const worker = workerUrl ? new Worker(workerUrl) : null;
+    if (!worker) return;
+
+    function runCode() {
+      if (!editor || !runBtn || !outOutput) return;
+      runBtn.disabled = true;
+      if (statusText) statusText.textContent = 'Compiling & running...';
+      if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-sky-400 animate-pulse';
+      outOutput.textContent = 'Running...';
+      worker.postMessage({ type: 'run', source: editor.value });
+    }
+
+    runBtn?.addEventListener('click', runCode);
+
+    worker.onmessage = (event) => {
+      const msg = event.data;
+      if (msg.type === 'status') {
+        if (statusText) statusText.textContent = msg.message;
+      } else if (msg.type === 'ready') {
+        if (statusText) statusText.textContent = 'Ready (Pyodide Wasm)';
+        if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-emerald-400';
+        if (runBtn) runBtn.disabled = false;
+      } else if (msg.type === 'result') {
+        if (runBtn) runBtn.disabled = false;
+        if (statusText) statusText.textContent = msg.ok ? 'Execution succeeded' : 'Compilation / runtime error';
+        if (statusDot) {
+          statusDot.className = msg.ok
+            ? 'h-2 w-2 rounded-full bg-emerald-400'
+            : 'h-2 w-2 rounded-full bg-rose-500';
+        }
+        if (outOutput) {
+          const combined = [msg.stdout, msg.stderr].filter(Boolean).join('\n');
+          outOutput.textContent = combined || '(Program exited with no output)';
+        }
+        if (outPython) outPython.textContent = msg.pythonCode || '// No Python output';
+        if (outLua) outLua.textContent = msg.luaCode || '-- No Lua output';
+      } else if (msg.type === 'error') {
+        if (runBtn) runBtn.disabled = false;
+        if (statusText) statusText.textContent = 'Worker error';
+        if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-rose-500';
+        if (outOutput) outOutput.textContent = msg.error;
+      }
+    };
+
+    worker.postMessage({ type: 'init', bundleUrl });
+  })();
+</script>
