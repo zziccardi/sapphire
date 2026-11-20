@@ -201,73 +201,15 @@ class DeclarationPass:
     return computed_exports
 
   @staticmethod
-  def _check_imported_file(
-      checker: Any,
-      imp: Any,
+  def _parse_and_check_imported_module(
       target_file: str,
+      mod_file_path: str,
+      sub_code: str,
       mod_sym: ModuleSymbol,
-      is_builtin: bool,
       checked_results: Dict[str, Any],
       active_stack: Set[str],
-      reported_errors: Set[str],
-      resolved_dep_stats: Dict[str, Tuple[int, int]],
-  ) -> None:
-    """Parses, typechecks, caches, and extracts exports for *target_file*."""
-    mod_file_path = os.path.abspath(target_file)
-    mod_sym.file_path = mod_file_path
-    try:
-      stat_res = os.stat(mod_file_path)
-      mtime: Optional[int] = stat_res.st_mtime_ns
-      fsize: Optional[int] = stat_res.st_size
-    except OSError:
-      mtime = None
-      fsize = None
-
-    cached_entry = DeclarationPass._module_cache.get(mod_file_path)
-    if DeclarationPass._is_cache_entry_valid(cached_entry, mtime, fsize):
-      mod_sym.exports.update(cached_entry[2])
-      resolved_dep_stats[mod_file_path] = (mtime, fsize)
-      if len(cached_entry) > 3:
-        resolved_dep_stats.update(cached_entry[3])
-      if imp.path == "std.testing" or imp.path.startswith("std.testing"):
-        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
-      return
-    if cached_entry is not None:
-      DeclarationPass._module_cache.pop(mod_file_path, None)
-
-    if mod_file_path in checked_results:
-      cached_exports, mod_errors, sub_deps, sub_cycle = checked_results[
-          mod_file_path
-      ]
-      mod_sym.exports.update(cached_exports)
-      if is_builtin:
-        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
-      if mtime is not None and fsize is not None:
-        resolved_dep_stats[mod_file_path] = (mtime, fsize)
-        resolved_dep_stats.update(sub_deps)
-      if sub_cycle:
-        checker._hit_import_cycle = True
-      DeclarationPass._propagate_import_errors(
-          checker, imp, mod_errors, reported_errors
-      )
-      return
-
-    if mod_file_path in active_stack:
-      checker._hit_import_cycle = True
-      if is_builtin:
-        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
-      return
-
-    try:
-      with open(target_file, "r", encoding="utf-8") as f:
-        sub_code = f.read()
-    except OSError as os_err:
-      checker.error(
-          f"Failed to read imported module '{imp.path}': {os_err}",
-          node=imp,
-      )
-      return
-
+  ) -> Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]:
+    """Parses and type-checks *target_file*, returning exports, errors, deps, and cycle flag."""
     err_listener = CustomErrorListener(
         file_path=target_file, source_content=sub_code, quiet=True
     )
@@ -302,6 +244,7 @@ class DeclarationPass:
         DeclarationPass._mark_file_uri(sub_ast, from_fs_path(mod_file_path))
 
         from src.semantics.type_checker import TypeChecker
+
         sub_checker = TypeChecker(
             source_file_path=target_file, source_content=sub_code
         )
@@ -326,6 +269,90 @@ class DeclarationPass:
             sub_checker, sub_ast, mod_sym
         )
 
+    return computed_exports, mod_errors, sub_deps, sub_hit_cycle
+
+  @staticmethod
+  def _check_imported_file(
+      checker: Any,
+      imp: Any,
+      target_file: str,
+      mod_sym: ModuleSymbol,
+      is_builtin: bool,
+      checked_results: Dict[str, Any],
+      active_stack: Set[str],
+      reported_errors: Set[str],
+      resolved_dep_stats: Dict[str, Tuple[int, int]],
+  ) -> None:
+    """Parses, typechecks, caches, and extracts exports for *target_file*."""
+    mod_file_path = os.path.abspath(target_file)
+    mod_sym.file_path = mod_file_path
+    try:
+      stat_res = os.stat(mod_file_path)
+      mtime: Optional[int] = stat_res.st_mtime_ns
+      fsize: Optional[int] = stat_res.st_size
+    except OSError:
+      mtime = None
+      fsize = None
+
+    # 1. Reuse global cross-file module cache when mtime/size and deps match.
+    cached_entry = DeclarationPass._module_cache.get(mod_file_path)
+    if DeclarationPass._is_cache_entry_valid(cached_entry, mtime, fsize):
+      mod_sym.exports.update(cached_entry[2])
+      resolved_dep_stats[mod_file_path] = (mtime, fsize)
+      if len(cached_entry) > 3:
+        resolved_dep_stats.update(cached_entry[3])
+      if imp.path == "std.testing" or imp.path.startswith("std.testing"):
+        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+      return
+    if cached_entry is not None:
+      DeclarationPass._module_cache.pop(mod_file_path, None)
+
+    # 2. Reuse per-compilation result if already checked in this session.
+    if mod_file_path in checked_results:
+      cached_exports, mod_errors, sub_deps, sub_cycle = checked_results[
+          mod_file_path
+      ]
+      mod_sym.exports.update(cached_exports)
+      if is_builtin:
+        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+      if mtime is not None and fsize is not None:
+        resolved_dep_stats[mod_file_path] = (mtime, fsize)
+        resolved_dep_stats.update(sub_deps)
+      if sub_cycle:
+        checker._hit_import_cycle = True
+      DeclarationPass._propagate_import_errors(
+          checker, imp, mod_errors, reported_errors
+      )
+      return
+
+    # 3. Break recursive import cycles without caching partial exports.
+    if mod_file_path in active_stack:
+      checker._hit_import_cycle = True
+      if is_builtin:
+        mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
+      return
+
+    try:
+      with open(target_file, "r", encoding="utf-8") as f:
+        sub_code = f.read()
+    except OSError as os_err:
+      checker.error(
+          f"Failed to read imported module '{imp.path}': {os_err}",
+          node=imp,
+      )
+      return
+
+    computed_exports, mod_errors, sub_deps, sub_hit_cycle = (
+        DeclarationPass._parse_and_check_imported_module(
+            target_file,
+            mod_file_path,
+            sub_code,
+            mod_sym,
+            checked_results,
+            active_stack,
+        )
+    )
+
     checked_results[mod_file_path] = (
         dict(computed_exports),
         list(mod_errors),
@@ -337,6 +364,7 @@ class DeclarationPass:
     if mtime is not None and fsize is not None:
       resolved_dep_stats[mod_file_path] = (mtime, fsize)
       resolved_dep_stats.update(sub_deps)
+      # Only cache clean, cycle-free modules across compilations.
       if not mod_errors and not sub_hit_cycle:
         DeclarationPass._module_cache[mod_file_path] = (
             mtime,
@@ -425,6 +453,209 @@ class DeclarationPass:
         active_stack.discard(abs_src_path)
 
   @staticmethod
+  def _validate_decl_annotations(checker: Any, decl: ASTNode) -> None:
+    """Validates annotations on a top-level declaration and its members."""
+    if hasattr(decl, "annotations") and decl.annotations:
+      DeclarationPass.validate_annotations(checker, decl.annotations, node=decl)
+    if isinstance(decl, TraitDeclNode):
+      for member in decl.members:
+        if hasattr(member, "annotations") and member.annotations:
+          DeclarationPass.validate_annotations(
+              checker, member.annotations, node=member
+          )
+    elif hasattr(decl, "members") and isinstance(decl.members, list):
+      for member in decl.members:
+        if hasattr(member, "annotations") and member.annotations:
+          DeclarationPass.validate_annotations(
+              checker, member.annotations, node=member
+          )
+        if (
+            hasattr(member, "func_decl")
+            and hasattr(member.func_decl, "annotations")
+            and member.func_decl.annotations
+        ):
+          DeclarationPass.validate_annotations(
+              checker, member.func_decl.annotations, node=member.func_decl
+          )
+
+  @staticmethod
+  def _declare_enum_global(checker: Any, decl: EnumDeclNode) -> None:
+    if checker.symbol_table.lookup_current_scope(
+        decl.name
+    ) or checker.symbol_table.lookup_type(decl.name):
+      checker.error(f"Redefinition of identifier '{decl.name}'.")
+      return
+    current_val: Union[int, str] = 0
+    is_string_enum = any(isinstance(m.value, str) for m in decl.members)
+    variants: Dict[str, Union[int, str]] = {}
+    seen_members: Set[str] = set()
+    for member in decl.members:
+      if member.name in seen_members:
+        checker.error(f"Duplicate member '{member.name}' in enum '{decl.name}'.")
+        continue
+      seen_members.add(member.name)
+      if member.value is not None:
+        current_val = member.value
+      elif is_string_enum and isinstance(current_val, str):
+        current_val = member.name
+      variants[member.name] = current_val
+      if isinstance(current_val, int):
+        current_val += 1
+    enum_type = EnumType(decl.name, variants)
+    enum_type.ast_decl = decl
+    checker.symbol_table.define_type(decl.name, enum_type)
+    checker.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
+
+  @staticmethod
+  def _declare_trait_global(checker: Any, decl: TraitDeclNode) -> None:
+    if checker.symbol_table.lookup_current_scope(
+        decl.name
+    ) or checker.symbol_table.lookup_type(decl.name):
+      checker.error(f"Redefinition of identifier '{decl.name}'.")
+      return
+    trait_type = TraitType(
+        decl.name, type_params=decl.type_params, ast_decl=decl
+    )
+    if decl.type_params:
+      checker.symbol_table.enter_scope()
+      for tp in decl.type_params:
+        checker.symbol_table.define_type(tp, GenericTypeParameter(tp))
+    for member in decl.members:
+      DeclarationPass.validate_parameter_defaults(checker, member.parameters)
+      p_types = []
+      for p in member.parameters:
+        if p.name == "self" and p.param_type is None:
+          p_types.append(trait_type)
+        else:
+          p_types.append(checker._resolve_type_node(p.param_type))
+      ret_t = checker._resolve_return_types(member)
+      p_mutabilities = [p.is_mutable for p in member.parameters]
+      param_names = [p.name for p in member.parameters]
+      has_self = bool(param_names) and param_names[0] == "self"
+      extern_name = None
+      for ann in getattr(member, "annotations", []):
+        if ann.name == "export" and ann.arg:
+          extern_name = ann.arg
+          break
+      num_defaults = sum(
+          1
+          for p in member.parameters
+          if getattr(p, "default_expr", None) is not None
+      )
+      param_defaults = [
+          getattr(p, "default_expr", None) for p in member.parameters
+      ]
+      trait_type.methods[member.name] = FunctionType(
+          p_types,
+          ret_t,
+          p_mutabilities,
+          param_names=param_names,
+          has_self=has_self,
+          extern_name=extern_name,
+          num_defaults=num_defaults,
+          param_defaults=param_defaults,
+          ast_decl=member,
+      )
+    if decl.type_params:
+      checker.symbol_table.exit_scope()
+    checker.symbol_table.define_type(decl.name, trait_type)
+    checker.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
+
+  @staticmethod
+  def _declare_var_global(checker: Any, decl: VarDeclNode) -> None:
+    """Pre-registers @extern globals and type-alias module bindings."""
+    for i, name in enumerate(decl.names):
+      if checker.symbol_table.lookup_current_scope(name):
+        checker.error(f"Redefinition of identifier '{name}'.", node=decl)
+        continue
+      if any(a.name == "extern" for a in decl.annotations):
+        if decl.exprs:
+          checker.error(
+              "An '@extern' variable declaration cannot have an initializer expression.",
+              node=decl,
+          )
+        v_type = (
+            checker._resolve_type_node(decl.val_types[i])
+            if (decl.val_types and i < len(decl.val_types) and decl.val_types[i])
+            else PrimitiveType("none")
+        )
+        if not decl.val_types or not decl.val_types[i]:
+          checker.error(
+              f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.",
+              node=decl,
+          )
+        sym = VariableSymbol(name, v_type, decl.is_mutable)
+        # Mark so Pass 2 (`visit_VarDeclNode`) knows this global was pre-declared.
+        sym._from_declare_globals = True
+        sym.is_extern = True
+        checker.symbol_table.define(name, sym)
+      elif decl.exprs and i < len(decl.exprs):
+        expr_node = decl.exprs[i]
+        val_t = None
+        if isinstance(expr_node, MemberAccessNode) and isinstance(
+            expr_node.receiver, IdentifierNode
+        ):
+          mod_sym = checker.symbol_table.lookup(expr_node.receiver.name)
+          if isinstance(mod_sym, ModuleSymbol):
+            exp = mod_sym.lookup_export(expr_node.member)
+            if isinstance(exp, Type):
+              val_t = exp
+            elif hasattr(exp, "symbol_type") and isinstance(
+                exp.symbol_type, Type
+            ):
+              val_t = exp.symbol_type
+        elif isinstance(expr_node, IdentifierNode):
+          exp = checker.symbol_table.lookup_type(expr_node.name)
+          if isinstance(exp, Type):
+            val_t = exp
+        if val_t:
+          sym = VariableSymbol(name, val_t, decl.is_mutable)
+          sym._from_declare_globals = True
+          checker.symbol_table.define(name, sym)
+          checker.symbol_table.define_type(name, val_t)
+
+  @staticmethod
+  def _declare_func_global(checker: Any, decl: FuncDeclNode) -> None:
+    if checker.symbol_table.lookup_current_scope(decl.name):
+      checker.error(f"Redefinition of identifier '{decl.name}'.")
+      return
+    DeclarationPass.validate_parameter_defaults(checker, decl.parameters)
+    if decl.type_params:
+      checker.symbol_table.enter_scope()
+      for tp in decl.type_params:
+        checker.symbol_table.define_type(tp, GenericTypeParameter(tp))
+    param_types = []
+    param_mutabilities = []
+    for p in decl.parameters:
+      param_types.append(checker._resolve_type_node(p.param_type))
+      param_mutabilities.append(p.is_mutable)
+    ret_type = checker._resolve_return_types(decl)
+    if decl.type_params:
+      checker.symbol_table.exit_scope()
+    num_defaults = sum(
+        1
+        for p in decl.parameters
+        if getattr(p, "default_expr", None) is not None
+    )
+    param_defaults = [
+        getattr(p, "default_expr", None) for p in decl.parameters
+    ]
+    signature = FunctionType(
+        param_types,
+        ret_type,
+        param_mutabilities,
+        param_names=[p.name for p in decl.parameters],
+        num_defaults=num_defaults,
+        param_defaults=param_defaults,
+    )
+    checker.symbol_table.define(
+        decl.name,
+        FunctionSymbol(
+            decl.name, signature, type_params=decl.type_params, ast_decl=decl
+        ),
+    )
+
+  @staticmethod
   def declare_globals(checker: Any, program: ProgramNode) -> None:
     """Pass 1: Collect struct, enum, and function declarations into global scope."""
     for decl in program.declarations:
@@ -446,21 +677,12 @@ class DeclarationPass:
         )
         continue
 
-      if hasattr(decl, "annotations") and decl.annotations:
-        DeclarationPass.validate_annotations(checker, decl.annotations, node=decl)
-      if isinstance(decl, TraitDeclNode):
-        for member in decl.members:
-          if hasattr(member, "annotations") and member.annotations:
-            DeclarationPass.validate_annotations(checker, member.annotations, node=member)
-      elif hasattr(decl, "members") and isinstance(decl.members, list):
-        for member in decl.members:
-          if hasattr(member, "annotations") and member.annotations:
-            DeclarationPass.validate_annotations(checker, member.annotations, node=member)
-          if hasattr(member, "func_decl") and hasattr(member.func_decl, "annotations") and member.func_decl.annotations:
-            DeclarationPass.validate_annotations(checker, member.func_decl.annotations, node=member.func_decl)
+      DeclarationPass._validate_decl_annotations(checker, decl)
 
       if isinstance(decl, StructDeclNode):
-        if checker.symbol_table.lookup_current_scope(decl.name) or checker.symbol_table.lookup_type(decl.name):
+        if checker.symbol_table.lookup_current_scope(
+            decl.name
+        ) or checker.symbol_table.lookup_type(decl.name):
           checker.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         struct_type = StructType(
@@ -473,148 +695,14 @@ class DeclarationPass:
             is_imported=False,
         )
         checker.symbol_table.define_type(decl.name, struct_type)
-        checker.symbol_table.define(decl.name, StructSymbol(decl.name, struct_type))
-
-      elif isinstance(decl, EnumDeclNode):
-        if checker.symbol_table.lookup_current_scope(decl.name) or checker.symbol_table.lookup_type(decl.name):
-          checker.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        current_val: Union[int, str] = 0
-        is_string_enum = any(isinstance(m.value, str) for m in decl.members)
-        variants: Dict[str, Union[int, str]] = {}
-        seen_members = set()
-        for member in decl.members:
-          if member.name in seen_members:
-            checker.error(f"Duplicate member '{member.name}' in enum '{decl.name}'.")
-            continue
-          seen_members.add(member.name)
-          if member.value is not None:
-            current_val = member.value
-          elif is_string_enum and isinstance(current_val, str):
-            current_val = member.name
-          variants[member.name] = current_val
-          if isinstance(current_val, int):
-            current_val += 1
-        enum_type = EnumType(decl.name, variants)
-        enum_type.ast_decl = decl
-        checker.symbol_table.define_type(decl.name, enum_type)
-        checker.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
-
-      elif isinstance(decl, TraitDeclNode):
-        if checker.symbol_table.lookup_current_scope(decl.name) or checker.symbol_table.lookup_type(decl.name):
-          checker.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        trait_type = TraitType(decl.name, type_params=decl.type_params, ast_decl=decl)
-        # Populate trait method signatures
-        if decl.type_params:
-          checker.symbol_table.enter_scope()
-          for tp in decl.type_params:
-            checker.symbol_table.define_type(tp, GenericTypeParameter(tp))
-        for member in decl.members:
-          DeclarationPass.validate_parameter_defaults(checker, member.parameters)
-          p_types = []
-          for p in member.parameters:
-            if p.name == "self" and p.param_type is None:
-              p_types.append(trait_type)
-            else:
-              p_types.append(checker._resolve_type_node(p.param_type))
-          ret_t = checker._resolve_return_types(member)
-          p_mutabilities = [p.is_mutable for p in member.parameters]
-          param_names = [p.name for p in member.parameters]
-          has_self = bool(param_names) and param_names[0] == "self"
-          extern_name = None
-          for ann in getattr(member, "annotations", []):
-            if ann.name == "export" and ann.arg:
-              extern_name = ann.arg
-              break
-          num_defaults = sum(1 for p in member.parameters if getattr(p, "default_expr", None) is not None)
-          param_defaults = [getattr(p, "default_expr", None) for p in member.parameters]
-          fn_type = FunctionType(
-              p_types,
-              ret_t,
-              p_mutabilities,
-              param_names=param_names,
-              has_self=has_self,
-              extern_name=extern_name,
-              num_defaults=num_defaults,
-              param_defaults=param_defaults,
-              ast_decl=member,
-          )
-          trait_type.methods[member.name] = fn_type
-        if decl.type_params:
-          checker.symbol_table.exit_scope()
-        checker.symbol_table.define_type(decl.name, trait_type)
-        checker.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
-
-      elif isinstance(decl, VarDeclNode):
-        for i, name in enumerate(decl.names):
-          if checker.symbol_table.lookup_current_scope(name):
-            checker.error(f"Redefinition of identifier '{name}'.", node=decl)
-            continue
-          if any(a.name == "extern" for a in decl.annotations):
-            if decl.exprs:
-              checker.error("An '@extern' variable declaration cannot have an initializer expression.", node=decl)
-            v_type = (
-                checker._resolve_type_node(decl.val_types[i])
-                if (decl.val_types and i < len(decl.val_types) and decl.val_types[i])
-                else PrimitiveType("none")
-            )
-            if not decl.val_types or not decl.val_types[i]:
-              checker.error(f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.", node=decl)
-            sym = VariableSymbol(name, v_type, decl.is_mutable)
-            sym._from_declare_globals = True
-            sym.is_extern = True
-            checker.symbol_table.define(name, sym)
-          elif decl.exprs and i < len(decl.exprs):
-            expr_node = decl.exprs[i]
-            val_t = None
-            if isinstance(expr_node, MemberAccessNode) and isinstance(expr_node.receiver, IdentifierNode):
-              mod_sym = checker.symbol_table.lookup(expr_node.receiver.name)
-              if isinstance(mod_sym, ModuleSymbol):
-                exp = mod_sym.lookup_export(expr_node.member)
-                if isinstance(exp, Type):
-                  val_t = exp
-                elif hasattr(exp, "symbol_type") and isinstance(exp.symbol_type, Type):
-                  val_t = exp.symbol_type
-            elif isinstance(expr_node, IdentifierNode):
-              exp = checker.symbol_table.lookup_type(expr_node.name)
-              if isinstance(exp, Type):
-                val_t = exp
-            if val_t:
-              sym = VariableSymbol(name, val_t, decl.is_mutable)
-              sym._from_declare_globals = True
-              checker.symbol_table.define(name, sym)
-              checker.symbol_table.define_type(name, val_t)
-
-      elif isinstance(decl, FuncDeclNode):
-        if checker.symbol_table.lookup_current_scope(decl.name):
-          checker.error(f"Redefinition of identifier '{decl.name}'.")
-          continue
-        DeclarationPass.validate_parameter_defaults(checker, decl.parameters)
-        if decl.type_params:
-          checker.symbol_table.enter_scope()
-          for tp in decl.type_params:
-            checker.symbol_table.define_type(tp, GenericTypeParameter(tp))
-        param_types = []
-        param_mutabilities = []
-        for p in decl.parameters:
-          ptype = checker._resolve_type_node(p.param_type)
-          param_types.append(ptype)
-          param_mutabilities.append(p.is_mutable)
-        ret_type = checker._resolve_return_types(decl)
-        if decl.type_params:
-          checker.symbol_table.exit_scope()
-        num_defaults = sum(1 for p in decl.parameters if getattr(p, "default_expr", None) is not None)
-        param_defaults = [getattr(p, "default_expr", None) for p in decl.parameters]
-        signature = FunctionType(
-            param_types,
-            ret_type,
-            param_mutabilities,
-            param_names=[p.name for p in decl.parameters],
-            num_defaults=num_defaults,
-            param_defaults=param_defaults,
-        )
         checker.symbol_table.define(
-            decl.name,
-            FunctionSymbol(decl.name, signature, type_params=decl.type_params, ast_decl=decl),
+            decl.name, StructSymbol(decl.name, struct_type)
         )
+      elif isinstance(decl, EnumDeclNode):
+        DeclarationPass._declare_enum_global(checker, decl)
+      elif isinstance(decl, TraitDeclNode):
+        DeclarationPass._declare_trait_global(checker, decl)
+      elif isinstance(decl, VarDeclNode):
+        DeclarationPass._declare_var_global(checker, decl)
+      elif isinstance(decl, FuncDeclNode):
+        DeclarationPass._declare_func_global(checker, decl)

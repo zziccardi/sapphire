@@ -7,6 +7,7 @@ the core TypeChecker.
 from typing import Any, Dict, List, Optional
 from src.parser.ast import CallNode, IdentifierNode, LiteralNode, MemberAccessNode
 from src.semantics.arena_checker import ArenaChecker
+from src.semantics.semantic_context import TypeCheckerProtocol
 from src.semantics.symbol_table import (
     ARRAY_METHODS,
     MAP_METHODS,
@@ -27,7 +28,7 @@ class CollectionChecker:
 
   @staticmethod
   def resolve_array_member(
-      checker: Any, node: MemberAccessNode, receiver_type: ArrayType
+      checker: TypeCheckerProtocol, node: MemberAccessNode, receiver_type: ArrayType
   ) -> Type:
     """Resolves member access on an ArrayType receiver."""
     if node.member in ARRAY_METHODS:
