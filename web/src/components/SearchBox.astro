@@ -1,0 +1,92 @@
+---
+import { withBase } from '../lib/url';
+
+const pagefindPath = withBase('/pagefind/pagefind.js');
+---
+
+<div class="relative w-full max-w-md" data-pagefind-ignore data-pagefind-path={pagefindPath} id="docs-search-root">
+  <label for="docs-search-input" class="sr-only">Search documentation</label>
+  <div class="relative">
+    <svg
+      class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+    <input
+      id="docs-search-input"
+      type="search"
+      placeholder="Search docs (e.g. Arena, guard, __del__)..."
+      autocomplete="off"
+      class="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
+    />
+  </div>
+  <div
+    id="docs-search-results"
+    class="absolute left-0 right-0 z-30 mt-2 hidden max-h-96 overflow-y-auto rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2 shadow-xl"
+  ></div>
+</div>
+
+<script is:inline>
+  (() => {
+    const root = document.getElementById('docs-search-root');
+    const pagefindPath = root?.getAttribute('data-pagefind-path') || '/pagefind/pagefind.js';
+    const input = document.getElementById('docs-search-input');
+    const resultsBox = document.getElementById('docs-search-results');
+    let pagefind = null;
+
+    async function ensurePagefind() {
+      if (!pagefind) {
+        try {
+          pagefind = await import(/* @vite-ignore */ pagefindPath);
+          await pagefind.init();
+        } catch {
+          return null;
+        }
+      }
+      return pagefind;
+    }
+
+    input?.addEventListener('focus', () => {
+      ensurePagefind();
+    });
+
+    input?.addEventListener('input', async () => {
+      const query = input.value.trim();
+      if (!query) {
+        resultsBox?.classList.add('hidden');
+        return;
+      }
+      const pf = await ensurePagefind();
+      if (!pf || !resultsBox) return;
+
+      const search = await pf.search(query);
+      const top = await Promise.all(search.results.slice(0, 6).map((r) => r.data()));
+      if (top.length === 0) {
+        resultsBox.innerHTML =
+          '<p class="p-3 text-xs text-[var(--text-muted)]">No matching documentation found.</p>';
+      } else {
+        resultsBox.innerHTML = top
+          .map(
+            (item) => `
+            <a href="${item.url}" class="block rounded-lg p-2.5 hover:bg-[var(--bg-secondary)]">
+              <div class="text-sm font-semibold text-[var(--text-primary)]">${item.meta?.title || 'Documentation'}</div>
+              <div class="mt-0.5 line-clamp-2 text-xs text-[var(--text-secondary)]">${item.excerpt}</div>
+            </a>`,
+          )
+          .join('');
+      }
+      resultsBox.classList.remove('hidden');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!input?.contains(e.target) && !resultsBox?.contains(e.target)) {
+        resultsBox?.classList.add('hidden');
+      }
+    });
+  })();
+</script>

@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro check && astro build",
+    "build": "astro check && astro build && pagefind --site dist",
     "preview": "astro preview",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
+    "pagefind": "^1.6.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"
   }
