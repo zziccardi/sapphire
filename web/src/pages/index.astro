@@ -1,14 +1,334 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import SapphireLogo from '../components/SapphireLogo.astro';
+import { highlightCode } from '../lib/highlight';
+import { withBase } from '../lib/url';
+
+const showcaseTabs = [
+  {
+    id: 'proto',
+    label: 'Prototypes & Arenas',
+    summary: 'Data-only prototypal delegation inside lexical Arenas with copy-on-write safety.',
+    code: `proto Entity {
+  var health: int = 100;
+  let name: String;
+}
+
+func spawn_wave() {
+  var arena = Arena();
+  let goblin = Entity { name = "Goblin", health = 50 } in arena;
+  var elite = clone goblin {
+    self.health = 150;  // Local property shadowing
+  };
+  print(f"{elite.name} spawned with {elite.health} HP");
+}  // arena & prototypes cleaned up deterministically`,
+  },
+  {
+    id: 'traits',
+    label: 'Traits & Delegation',
+    summary: 'Zero-vtable trait polymorphism and static structural composition without up-casting.',
+    code: `struct Vector2 {
+  var x: float = 0.0;
+  var y: float = 0.0;
+}
+
+// Static structural delegation: zero-overhead composition
+struct Position: Vector2 {
+  var z: float = 0.0;
+}
+
+trait Movable {
+  var func move_by(dx: float, dy: float);
+}
+
+impl Movable for Position {
+  var func move_by(dx: float, dy: float) {
+    self.x = self.x + dx;
+    self.y = self.y + dy;
+  }
+}`,
+  },
+  {
+    id: 'optionals',
+    label: 'Optionals & Guard',
+    summary: 'No throwable exceptions. Safe unwrapping promotes bindings to the outer scope.',
+    code: `struct Player {
+  var health: int;
+  let name: String;
+}
+
+func heal(target_opt: Player?, amount: int): bool {
+  guard var target ?= target_opt; target.health > 0 else {
+    print("Target is missing or defeated.");
+    return false;
+  }
+  target.health = target.health + amount;
+  return true;
+}`,
+  },
+  {
+    id: 'raii',
+    label: 'RAII & Coroutines',
+    summary: 'Deterministic LIFO __del__ destructors paired with stackless Coroutine<T>.',
+    code: `struct ScopedTimer {
+  let label: String;
+}
+
+impl ScopedTimer {
+  func __del__() {
+    print(f"Finished: {self.label}");
+  }
+}
+
+func ticker(): Coroutine<int> {
+  var step: int = 0;
+  while step < 3 {
+    step = step + 1;
+    yield step;
+  }
+}`,
+  },
+];
+
+const highlightedTabs = await Promise.all(
+  showcaseTabs.map(async (tab) => ({
+    ...tab,
+    html: await highlightCode(tab.code, 'sapphire'),
+  })),
+);
+
+const cliHtml = await highlightCode(
+  `# Run with Python backend (default)
+sapphire samples/overview.sp
+
+# Transpile & run with Lua 5.1 (Love2D compatible)
+sapphire samples/overview.sp -t lua
+
+# Run native test suite & live hot-reload dev mode
+sapphire test
+sapphire run samples/game_loop.sp --dev`,
+  'bash',
+);
 ---
 
 <BaseLayout title="Sapphire Programming Language">
-  <section class="mx-auto max-w-5xl px-4 py-24 text-center sm:px-6 lg:px-8">
-    <h1 class="text-4xl font-extrabold tracking-tight sm:text-6xl">
-      The Sapphire Programming Language
-    </h1>
-    <p class="mx-auto mt-6 max-w-2xl text-lg text-[var(--text-secondary)]">
-      Systems-grade safety meets dynamic prototyping ergonomics.
-    </p>
+  <!-- Hero -->
+  <section class="relative overflow-hidden border-b border-[var(--border-subtle)]">
+    <div
+      class="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_var(--accent-glow),_transparent_65%)]"
+    ></div>
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
+      <div class="flex flex-col items-center text-center">
+        <div
+          class="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-1 text-xs font-medium text-[var(--text-secondary)] shadow-sm"
+        >
+          <SapphireLogo size={16} />
+          <span>Transpiles to Python &amp; Lua 5.1 &middot; Native LLVM/Rust compiler prospective</span>
+        </div>
+
+        <h1 class="max-w-4xl text-4xl font-extrabold tracking-tight sm:text-6xl">
+          Systems-grade safety.
+          <span class="bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 bg-clip-text text-transparent">
+            Dynamic-language ergonomics.
+          </span>
+        </h1>
+
+        <p class="mt-6 max-w-2xl text-lg leading-relaxed text-[var(--text-secondary)]">
+          Sapphire is a statically typed general-purpose language with zero-vtable
+          polymorphism, scope-bound reference safety without lifetime annotations,
+          deterministic RAII, and opt-in prototypal delegation in lexical arenas.
+        </p>
+
+        <div class="mt-9 flex flex-wrap items-center justify-center gap-3.5">
+          <a
+            href={withBase('/playground')}
+            class="inline-flex items-center gap-2 rounded-xl bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--accent-hover)]"
+          >
+            Try in Playground
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+          <a
+            href={withBase('/docs/spec')}
+            class="inline-flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] px-5 py-3 text-sm font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-secondary)]"
+          >
+            Read the Spec
+          </a>
+          <a
+            href={withBase('/examples')}
+            class="inline-flex items-center gap-2 rounded-xl border border-transparent px-4 py-3 text-sm font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          >
+            Browse Examples
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Design Pillars -->
+  <section class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6">
+        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--accent-primary)]">
+          01 / Polymorphism
+        </div>
+        <h2 class="mt-2 text-lg font-bold">Zero-Vtable by Default</h2>
+        <p class="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          Traits compile via monomorphization and closed tagged unions. Structs use
+          syntactic delegation with no up-casting or object slicing.
+        </p>
+      </div>
+
+      <div class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6">
+        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--accent-primary)]">
+          02 / Memory Safety
+        </div>
+        <h2 class="mt-2 text-lg font-bold">Scope-Bound Exclusivity</h2>
+        <p class="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          Non-primitives pass by constant reference by default. Call-site aliasing
+          checks prevent data corruption without lifetime annotations.
+        </p>
+      </div>
+
+      <div class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6">
+        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--accent-primary)]">
+          03 / Resource Control
+        </div>
+        <h2 class="mt-2 text-lg font-bold">RAII &amp; Lexical Arenas</h2>
+        <p class="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          Deterministic LIFO <code>__del__</code> destructors and scoped <code>Arena</code>
+          blocks keep prototypes, clones, and resources leak-free.
+        </p>
+      </div>
+
+      <div class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6">
+        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--accent-primary)]">
+          04 / Tooling &amp; Targets
+        </div>
+        <h2 class="mt-2 text-lg font-bold">Python, Lua 5.1 &amp; Beyond</h2>
+        <p class="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          Transpiles today to Python and Lua 5.1 (for Love2D) with LSP, VS Code, and
+          hot-reload. A native LLVM/Rust compiler is a prospective future target.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Code Showcase -->
+  <section class="border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 py-16">
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Sapphire at a Glance</h2>
+          <p class="mt-1 text-sm text-[var(--text-secondary)]">
+            Explore core language constructs with static type checking and deterministic cleanup.
+          </p>
+        </div>
+        <a
+          href={withBase('/playground')}
+          class="text-sm font-semibold text-[var(--accent-primary)] hover:underline"
+        >
+          Open interactive playground &rarr;
+        </a>
+      </div>
+
+      <div class="mt-6">
+        <div class="flex flex-wrap gap-2" role="tablist" aria-label="Sapphire feature examples">
+          {
+            highlightedTabs.map((tab, idx) => (
+              <button
+                type="button"
+                role="tab"
+                data-tab-target={tab.id}
+                aria-selected={idx === 0 ? 'true' : 'false'}
+                class={`tab-btn rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+                  idx === 0
+                    ? 'border-[var(--accent-primary)] bg-[var(--accent-glow)] text-[var(--accent-primary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))
+          }
+        </div>
+
+        <div class="mt-4">
+          {
+            highlightedTabs.map((tab, idx) => (
+              <div
+                data-tab-panel={tab.id}
+                class={idx === 0 ? 'block' : 'hidden'}
+              >
+                <p class="mb-3 text-sm text-[var(--text-secondary)]">{tab.summary}</p>
+                <div set:html={tab.html} />
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quickstart & Comparisons CTA -->
+  <section class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="grid gap-10 lg:grid-cols-2 lg:items-center">
+      <div>
+        <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">
+          Built for rapid iteration today
+        </h2>
+        <p class="mt-3 text-[var(--text-secondary)]">
+          Use the CLI to type-check, run tests with <code>sapphire test</code>, or
+          iterate in live hot-reload mode. Coming from another systems or scripting
+          language? Read our side-by-side comparisons.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a
+            href={withBase('/compare/rust')}
+            class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
+          >
+            Sapphire vs Rust
+          </a>
+          <a
+            href={withBase('/compare/cpp')}
+            class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
+          >
+            Sapphire vs C++
+          </a>
+          <a
+            href={withBase('/compare/swift')}
+            class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
+          >
+            Sapphire vs Swift
+          </a>
+        </div>
+      </div>
+
+      <div set:html={cliHtml} />
+    </div>
   </section>
 </BaseLayout>
+
+<script is:inline>
+  (() => {
+    const buttons = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('[data-tab-panel]');
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-tab-target');
+        buttons.forEach((b) => {
+          const active = b.getAttribute('data-tab-target') === target;
+          b.setAttribute('aria-selected', String(active));
+          b.className = active
+            ? 'tab-btn rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors border-[var(--accent-primary)] bg-[var(--accent-glow)] text-[var(--accent-primary)]'
+            : 'tab-btn rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]';
+        });
+        panels.forEach((panel) => {
+          panel.classList.toggle(
+            'hidden',
+            panel.getAttribute('data-tab-panel') !== target,
+          );
+        });
+      });
+    });
+  })();
+</script>

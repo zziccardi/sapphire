@@ -1,15 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createHighlighter, type Highlighter } from 'shiki';
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
 function loadSapphireGrammar() {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const toolsDir = fs.existsSync(path.resolve(process.cwd(), '../tools'))
+    ? path.resolve(process.cwd(), '../tools')
+    : path.resolve(process.cwd(), 'tools');
   const grammarPath = path.resolve(
-    __dirname,
-    '../../../tools/vscode-extension/syntaxes/sapphire.tmLanguage.json',
+    toolsDir,
+    'vscode-extension/syntaxes/sapphire.tmLanguage.json',
   );
   const raw = JSON.parse(fs.readFileSync(grammarPath, 'utf-8'));
   return {
