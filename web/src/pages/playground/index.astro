@@ -220,6 +220,7 @@ const bundleUrl = withBase('/sapphire-compiler.json');
         if (statusText) statusText.textContent = 'Ready (Pyodide Wasm)';
         if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-emerald-400';
         if (runBtn) runBtn.disabled = false;
+        if (outOutput) outOutput.textContent = 'Ready!';
       } else if (msg.type === 'result') {
         if (runBtn) runBtn.disabled = false;
         if (statusText) statusText.textContent = msg.ok ? 'Execution succeeded' : 'Compilation / runtime error';
