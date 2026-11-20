@@ -341,108 +341,14 @@ def dump_ast_command(args):
     print(ast_json)
 
 
-def _check_file_recursive(
+def _validate_target_lowering(
+    ast: Any,
     file_path: str,
-    visited: Set[str],
-    files_checked: List[str],
+    target: str,
     error_diags: List[Diagnostic],
-    warning_diags: List[Diagnostic],
     formatted_errors: List[str],
-    formatted_warnings: List[str],
-    target: Optional[str],
-    quiet: bool,
-    check_transitive: bool,
-    is_root: bool = False,
 ) -> None:
-  """Checks a Sapphire file and optionally its transitive non-stdlib imports."""
-  abs_path = os.path.abspath(file_path)
-  if abs_path in visited:
-    return
-  visited.add(abs_path)
-  files_checked.append(file_path)
-
-  if is_root and not quiet:
-    print(f"Reading source file: {file_path}...")
-
-  try:
-    input_stream = FileStream(file_path, encoding="utf-8")
-  except Exception as e:  # pragma: no cover
-    msg = f"Failed to read file: {e}"
-    error_diags.append(
-        Diagnostic(severity="error", code="E_IO", message=msg, file_path=file_path)
-    )
-    formatted_errors.append(msg)
-    return
-
-  error_listener = CustomErrorListener(
-      file_path=file_path, source_content=input_stream, quiet=quiet
-  )
-  lexer = SapphireLexer(input_stream)
-  lexer.removeErrorListeners()
-  lexer.addErrorListener(error_listener)
-  stream = CommonTokenStream(lexer)
-
-  parser = SapphireParser(stream)
-  parser.removeErrorListeners()
-  parser.addErrorListener(error_listener)
-
-  if is_root and not quiet:
-    print("Parsing program to Parse Tree...")
-  tree = parser.program()
-
-  if error_listener.errors > 0:
-    error_diags.extend(error_listener.diagnostics)
-    formatted_errors.extend(error_listener.error_messages)
-    return
-
-  if is_root and not quiet:
-    print("Building AST...")
-  builder = ASTBuilder()
-  ast = builder.visit(tree)
-
-  if check_transitive:
-    for imp in getattr(ast, "imports", []):
-      sub_source = resolve_module_path(imp.path, source_file_path=file_path)
-      if is_stdlib_stub(imp.path, sub_source):
-        continue
-      if sub_source:
-        _check_file_recursive(
-            sub_source,
-            visited,
-            files_checked,
-            error_diags,
-            warning_diags,
-            formatted_errors,
-            formatted_warnings,
-            target=target,
-            quiet=True,
-            check_transitive=True,
-            is_root=False,
-        )
-
-  if is_root and not quiet:
-    print("Running Semantic Analysis & Type Checker...")
-  checker = TypeChecker(
-      source_file_path=file_path, source_content=str(input_stream)
-  )
-  has_semantic_errors = False
-  try:
-    checker.check(ast)
-  except SemanticError:
-    has_semantic_errors = True
-
-  for d in checker.diagnostics:
-    if d.severity == "warning":
-      warning_diags.append(d)
-    else:
-      error_diags.append(d)
-  formatted_warnings.extend(checker.warnings)
-  formatted_errors.extend(checker.errors)
-
-  if has_semantic_errors or not target:
-    return
-
-  # Optional in-memory target lowering validation (e.g. -t lua)
+  """Runs in-memory target lowering (e.g. `-t lua`) to catch backend errors."""
   target_info = TranspilerRegistry.get(target)
   src_filename = os.path.basename(file_path)
   if target_info.name in ("lua", "love2d", "love"):
@@ -469,6 +375,110 @@ def _check_file_recursive(
         )
     )
     formatted_errors.append(msg)
+
+
+def _check_file_recursive(
+    file_path: str,
+    visited: Set[str],
+    files_checked: List[str],
+    error_diags: List[Diagnostic],
+    warning_diags: List[Diagnostic],
+    formatted_errors: List[str],
+    formatted_warnings: List[str],
+    target: Optional[str],
+    quiet: bool,
+    check_transitive: bool,
+    is_root: bool = False,
+) -> None:
+  """Checks a Sapphire file and optionally its transitive non-stdlib imports."""
+  # Guard against cyclic imports using canonicalized absolute paths.
+  abs_path = os.path.abspath(file_path)
+  if abs_path in visited:
+    return
+  visited.add(abs_path)
+  files_checked.append(file_path)
+
+  if is_root and not quiet:
+    print(f"Reading source file: {file_path}...")
+
+  try:
+    input_stream = FileStream(file_path, encoding="utf-8")
+  except Exception as e:  # pragma: no cover
+    msg = f"Failed to read file: {e}"
+    error_diags.append(
+        Diagnostic(
+            severity="error", code="E_IO", message=msg, file_path=file_path
+        )
+    )
+    formatted_errors.append(msg)
+    return
+
+  error_listener = CustomErrorListener(
+      file_path=file_path, source_content=input_stream, quiet=quiet
+  )
+  lexer = SapphireLexer(input_stream)
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(error_listener)
+
+  parser = SapphireParser(CommonTokenStream(lexer))
+  parser.removeErrorListeners()
+  parser.addErrorListener(error_listener)
+
+  if is_root and not quiet:
+    print("Parsing program to Parse Tree...")
+  tree = parser.program()
+
+  if error_listener.errors > 0:
+    error_diags.extend(error_listener.diagnostics)
+    formatted_errors.extend(error_listener.error_messages)
+    return
+
+  if is_root and not quiet:
+    print("Building AST...")
+  ast = ASTBuilder().visit(tree)
+
+  if check_transitive:
+    for imp in getattr(ast, "imports", []):
+      sub_source = resolve_module_path(imp.path, source_file_path=file_path)
+      if is_stdlib_stub(imp.path, sub_source) or not sub_source:
+        continue
+      _check_file_recursive(
+          sub_source,
+          visited,
+          files_checked,
+          error_diags,
+          warning_diags,
+          formatted_errors,
+          formatted_warnings,
+          target=target,
+          quiet=True,
+          check_transitive=True,
+          is_root=False,
+      )
+
+  if is_root and not quiet:
+    print("Running Semantic Analysis & Type Checker...")
+  checker = TypeChecker(
+      source_file_path=file_path, source_content=str(input_stream)
+  )
+  has_semantic_errors = False
+  try:
+    checker.check(ast)
+  except SemanticError:
+    has_semantic_errors = True
+
+  for d in checker.diagnostics:
+    if d.severity == "warning":
+      warning_diags.append(d)
+    else:
+      error_diags.append(d)
+  formatted_warnings.extend(checker.warnings)
+  formatted_errors.extend(checker.errors)
+
+  if not has_semantic_errors and target:
+    _validate_target_lowering(
+        ast, file_path, target, error_diags, formatted_errors
+    )
 
 
 def check_command(args):
