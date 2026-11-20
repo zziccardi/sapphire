@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/bundle-compiler.mjs",
     "dev": "astro dev",
+    "prebuild": "node scripts/bundle-compiler.mjs",
     "build": "astro check && astro build && pagefind --site dist",
     "preview": "astro preview",
     "test": "vitest run",

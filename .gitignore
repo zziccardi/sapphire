@@ -31,3 +31,4 @@ main.lua
 web/node_modules/
 web/dist/
 web/.astro/
+web/public/sapphire-compiler.json
