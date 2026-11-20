@@ -5,7 +5,7 @@ and struct/trait members from cursor position.
 """
 
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 from pygls.uris import from_fs_path, to_fs_path
 from lsprotocol.types import (
     DefinitionParams,

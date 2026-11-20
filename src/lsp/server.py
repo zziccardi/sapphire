@@ -6,7 +6,7 @@ tokens for accurate syntax highlighting in Visual Studio Code.
 
 import sys
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
 
 # Add parent directories to Python path to allow imports from parser and semantics
 sys.path.insert(0, os.path.abspath(

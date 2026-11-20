@@ -378,6 +378,12 @@ pipenv run sapphire run samples/overview.sp --dev
      from the original module for backward compatibility, and use
      `type(self)()` rather than hardcoding the concrete transpiler class inside
      emitter mixins.
+   * Function size & inline comments: Aim for soft maximums of ~50–80 lines for
+     standard functions/helpers and ~80–120 lines for AST visitors/dispatchers
+     (splitting multi-responsibility blocks rather than adding `# 1. ...` section
+     banners). Add inline comments for "why, not what": cross-pass AST
+     attributes, ownership/freeze/escape invariants, target-backend asymmetries
+     (e.g. Lua 1-based indexing), and ordering constraints.
    * Sapphire code: Follow `docs/style_guide.md` (80 chars max line length,
      2-space indentation, semicolon terminated).
    * Markdown files: Lines should not exceed 80 characters (except when

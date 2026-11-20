@@ -55,3 +55,6 @@ exclude = [
     "__pycache__",
     "htmlcov",
 ]
+
+[tool.ruff.lint]
+select = ["E9", "F821"]
