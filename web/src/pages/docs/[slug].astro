@@ -15,6 +15,12 @@ export function getStaticPaths() {
 const { doc } = Astro.props;
 const rendered = await renderDocFile(doc.file);
 const groups = ['Getting Started', 'Language Reference', 'Compiler & Testing'] as const;
+const currentIndex = DOC_PAGES.findIndex((d) => d.slug === doc.slug);
+const prevDoc = currentIndex > 0 ? DOC_PAGES[currentIndex - 1] : null;
+const nextDoc =
+  currentIndex >= 0 && currentIndex < DOC_PAGES.length - 1
+    ? DOC_PAGES[currentIndex + 1]
+    : null;
 const hasMermaid = rendered.html.includes('class="mermaid"');
 ---
 
@@ -29,7 +35,44 @@ const hasMermaid = rendered.html.includes('class="mermaid"');
       <SearchBox />
     </div>
 
-    <div class="grid gap-10 lg:grid-cols-[240px_1fr_220px]">
+    <!-- Mobile Docs Nav -->
+    <details class="mb-6 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] lg:hidden" data-pagefind-ignore>
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">
+        Browse Documentation ({doc.title})
+      </summary>
+      <nav aria-label="Mobile documentation" class="space-y-4 border-t border-[var(--border-subtle)] px-4 py-3">
+        {
+          groups.map((group) => (
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                {group}
+              </div>
+              <ul class="mt-1.5 space-y-1">
+                {DOC_PAGES.filter((d) => d.group === group).map((item) => {
+                  const active = item.slug === doc.slug;
+                  return (
+                    <li>
+                      <a
+                        href={withBase(`/docs/${item.slug}`)}
+                        class={`block rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                          active
+                            ? 'bg-[var(--accent-glow)] font-semibold text-[var(--accent-primary)]'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {item.title}
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </details>
+
+    <div class="grid gap-10 lg:grid-cols-[240px_1fr] xl:grid-cols-[240px_1fr_220px]">
       <!-- Left Sidebar -->
       <aside class="hidden lg:block" data-pagefind-ignore>
         <nav aria-label="Documentation" class="sticky top-24 space-y-6">
@@ -65,7 +108,44 @@ const hasMermaid = rendered.html.includes('class="mermaid"');
       </aside>
 
       <!-- Main Content -->
-      <article class="sapphire-prose min-w-0" data-pagefind-body set:html={rendered.html} />
+      <div class="min-w-0">
+        <article class="sapphire-prose" data-pagefind-body set:html={rendered.html} />
+
+        {
+          (prevDoc || nextDoc) && (
+            <nav
+              aria-label="Documentation pagination"
+              data-pagefind-ignore
+              class="mt-12 grid gap-4 border-t border-[var(--border-subtle)] pt-6 sm:grid-cols-2"
+            >
+              {prevDoc ? (
+                <a
+                  href={withBase(`/docs/${prevDoc.slug}`)}
+                  class="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 transition-colors hover:border-[var(--accent-primary)]"
+                >
+                  <div class="text-xs font-medium text-[var(--text-muted)]">&larr; Previous</div>
+                  <div class="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                    {prevDoc.title}
+                  </div>
+                </a>
+              ) : (
+                <div />
+              )}
+              {nextDoc && (
+                <a
+                  href={withBase(`/docs/${nextDoc.slug}`)}
+                  class="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 text-right transition-colors hover:border-[var(--accent-primary)]"
+                >
+                  <div class="text-xs font-medium text-[var(--text-muted)]">Next &rarr;</div>
+                  <div class="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                    {nextDoc.title}
+                  </div>
+                </a>
+              )}
+            </nav>
+          )
+        }
+      </div>
 
       <!-- Right TOC -->
       <aside class="hidden xl:block" data-pagefind-ignore>
@@ -101,8 +181,33 @@ const hasMermaid = rendered.html.includes('class="mermaid"');
   hasMermaid && (
     <script type="module">
       import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-      const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
-      mermaid.initialize({ startOnLoad: true, theme });
+
+      const nodes = Array.from(document.querySelectorAll('.mermaid'));
+      for (const el of nodes) {
+        if (!el.getAttribute('data-mermaid-src')) {
+          el.setAttribute('data-mermaid-src', el.textContent || '');
+        }
+      }
+
+      async function renderMermaid() {
+        const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
+        mermaid.initialize({ startOnLoad: false, theme });
+        for (const el of nodes) {
+          const src = el.getAttribute('data-mermaid-src') || '';
+          el.removeAttribute('data-processed');
+          el.textContent = src;
+        }
+        await mermaid.run({ nodes });
+      }
+
+      await renderMermaid();
+
+      const observer = new MutationObserver((mutations) => {
+        if (mutations.some((m) => m.attributeName === 'data-theme')) {
+          renderMermaid();
+        }
+      });
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     </script>
   )
 }
