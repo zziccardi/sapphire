@@ -1,6 +1,6 @@
 """Type resolution and pre-pass global/lambda analysis for TypeChecker."""
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import *
 from src.semantics.symbol_table import (
@@ -156,7 +156,10 @@ class TypeResolverMixin:
         for member in decl.members:
           if trait_type and member.func_decl.name in trait_type.methods:
             trait_method = trait_type.methods[member.func_decl.name]
-            if getattr(trait_method.ast_decl, "modifier", None) == "static":
+            if (
+                member.modifier is None
+                and getattr(trait_method.ast_decl, "modifier", None) == "static"
+            ):
               member.modifier = "static"
           func_decl = member.func_decl
           # Resolve parameters
@@ -475,6 +478,35 @@ class TypeResolverMixin:
         for item in node:
           walk(item)
         return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
+        return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
             [node.expr] if getattr(node, "expr", None) else []
@@ -501,8 +533,16 @@ class TypeResolverMixin:
         return
       if isinstance(node, CallNode):
         if isinstance(node.callee, IdentifierNode):
-          direct_calls.add(node.callee.name)
+          callee_name = node.callee.name
+          if callee_name in local_names:
+            self.func_has_dynamic.add(func_id)
+          elif callee_name in self.module_var_globals:
+            direct_globals.add(callee_name)
+            self.func_has_dynamic.add(func_id)
+          else:
+            direct_calls.add(callee_name)
         elif isinstance(node.callee, MemberAccessNode):
+          walk(node.callee.receiver)
           if (
               isinstance(node.callee.receiver, IdentifierNode)
               and node.callee.receiver.name == "self"
@@ -515,6 +555,7 @@ class TypeResolverMixin:
           else:
             direct_calls.add(node.callee.member)
         else:
+          walk(node.callee)
           self.func_has_dynamic.add(func_id)
         for arg in node.arguments:
           walk(arg.expr)
@@ -539,6 +580,35 @@ class TypeResolverMixin:
       if isinstance(node, list):
         for item in node:
           walk(item)
+        return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
         return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
@@ -588,4 +658,150 @@ class TypeResolverMixin:
 
     walk(lambda_node.body)
     return borrows
+
+  def _scan_lambda_capture_modes(
+      self, lambda_node: LambdaNode
+  ) -> Tuple[Set[str], Set[str]]:
+    """Returns `(mutated_captures, read_captures)` for outer variables in *lambda_node*."""
+    local_names: Set[str] = {p.name for p in lambda_node.parameters}
+    mutated: Set[str] = set()
+    read: Set[str] = set()
+    collection_mutators = {
+        "push", "pop", "insert", "remove", "clear", "swap", "reverse", "sort",
+    }
+
+    def record_mutated(expr: ASTNode) -> None:
+      root = ArenaChecker.get_root_identifier(expr)
+      if root and root.name not in local_names:
+        sym = self.symbol_table.lookup(root.name)
+        if isinstance(sym, VariableSymbol):
+          mutated.add(sym.name)
+
+    def walk(node: Any) -> None:
+      if node is None:
+        return
+      if isinstance(node, list):
+        for item in node:
+          walk(item)
+        return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          if b.is_mutable:
+            record_mutated(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, VarDeclNode):
+        expr_list = getattr(node, "exprs", None) or (
+            [node.expr] if getattr(node, "expr", None) else []
+        )
+        for e in expr_list:
+          walk(e)
+        for n in node.names:
+          local_names.add(n)
+        return
+      if isinstance(node, AssignmentNode):
+        for target in node.targets:
+          record_mutated(target)
+          walk(target)
+        for e in node.exprs:
+          walk(e)
+        return
+      if isinstance(node, CallNode):
+        if isinstance(node.callee, MemberAccessNode):
+          recv = node.callee.receiver
+          recv_type = self.node_types.get(recv)
+          if isinstance(recv_type, OptionalType):
+            recv_type = recv_type.base_type
+          if isinstance(recv_type, RefType):
+            recv_type = recv_type.inner_type
+          is_mut_method = False
+          if isinstance(recv_type, StructType):
+            m = recv_type.get_method(node.callee.member, self.symbol_table)
+            is_mut_method = bool(m and m.modifier == "var")
+          elif isinstance(recv_type, TraitType):
+            fn = recv_type.methods.get(node.callee.member)
+            is_mut_method = bool(
+                fn and getattr(fn.ast_decl, "modifier", None) == "var"
+            )
+          elif isinstance(recv_type, (ArrayType, MapType)):
+            if node.callee.member in collection_mutators:
+              is_mut_method = True
+            elif node.callee.member in ("map", "filter") and any(
+                a.name == "in_place" for a in node.arguments
+            ):
+              is_mut_method = True
+          if is_mut_method:
+            record_mutated(recv)
+          walk(recv)
+        else:
+          walk(node.callee)
+        callee_type = self.node_types.get(node.callee)
+        if isinstance(callee_type, FunctionType):
+          param_muts = callee_type.param_mutabilities or []
+          param_names = callee_type.param_names or []
+          if (
+              getattr(callee_type, "has_self", False)
+              and isinstance(node.callee, MemberAccessNode)
+          ):
+            param_muts = param_muts[1:]
+            param_names = param_names[1:] if param_names else []
+          for idx, arg in enumerate(node.arguments):
+            p_idx = idx
+            if arg.name and param_names and arg.name in param_names:
+              p_idx = param_names.index(arg.name)
+            if p_idx < len(param_muts) and param_muts[p_idx]:
+              record_mutated(arg.expr)
+        for arg in node.arguments:
+          walk(arg.expr)
+        return
+      if isinstance(node, LambdaNode):
+        saved = set(local_names)
+        for p in node.parameters:
+          local_names.add(p.name)
+        walk(node.body)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, (IdentifierNode, MoveNode)):
+        if node.name not in local_names:
+          sym = self.symbol_table.lookup(node.name)
+          if isinstance(sym, VariableSymbol):
+            if ArenaChecker.is_reference_type(sym.symbol_type):
+              read.add(sym.name)
+            mutated.update(getattr(sym, "closure_mutated_captures", set()))
+            read.update(getattr(sym, "closure_read_captures", set()))
+        return
+      if isinstance(node, ASTNode):
+        for v in node.__dict__.values():
+          if isinstance(v, (ASTNode, list)):
+            walk(v)
+
+    walk(lambda_node.body)
+    read -= mutated
+    return (mutated, read)
 

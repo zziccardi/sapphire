@@ -159,8 +159,13 @@ class ExprVisitorMixin:
     if cond_type != PrimitiveType("bool"):
       self.error(f"Ternary condition must be of type 'bool', got '{cond_type}'.")
 
+    pre_branch_moved = set(self.moved_symbols)
     true_type = self.visit(node.true_expr)
+    true_moved = set(self.moved_symbols)
+    self._restore_moved_symbols(pre_branch_moved)
     false_type = self.visit(node.false_expr)
+    false_moved = set(self.moved_symbols)
+    self._restore_moved_symbols(true_moved | false_moved)
 
     # Check type compatibility between true and false branches
     if isinstance(true_type, NoneType) and isinstance(false_type, NoneType):
@@ -285,10 +290,18 @@ class ExprVisitorMixin:
       self.is_in_clone_init = True
       # Define self inside block as mutable
       clone_self_sym = VariableSymbol("self", expr_type, is_mutable=True)
-      clone_self_deps = ArenaChecker.collect_arena_deps(
-          self.symbol_table, node.expr, self
+      clone_self_deps = list(
+          ArenaChecker.collect_arena_deps(self.symbol_table, node.expr, self)
       )
-      clone_self_sym.arena_dep_records = list(clone_self_deps)
+      if node.arena_expr:
+        resolved_arena = ArenaChecker._resolve_arena_target(
+            self.symbol_table, node.arena_expr
+        )
+        if resolved_arena:
+          dep_rec = (resolved_arena[0], resolved_arena[2])
+          if dep_rec not in clone_self_deps:
+            clone_self_deps.append(dep_rec)
+      clone_self_sym.arena_dep_records = clone_self_deps
       clone_self_sym.arena_dependency = (
           clone_self_deps[0][0] if clone_self_deps else None
       )
@@ -323,6 +336,19 @@ class ExprVisitorMixin:
       return sym.symbol_type
     if self.current_function is not None and sym.scope_defined is not None and sym.scope_defined.parent is None:
       self.error(f"Cannot move out of module-level global variable '{node.name}'.", node=node)
+      return sym.symbol_type
+    if (
+        isinstance(self.current_function, FunctionSymbol)
+        and self.current_function.name == "<lambda>"
+        and sym.scope_defined is not None
+        and not ArenaChecker.is_descendant_scope(
+            sym.scope_defined, self.current_function_scope
+        )
+    ):
+      self.error(
+          f"Cannot move captured outer variable '{node.name}' inside a closure.",
+          node=node,
+      )
       return sym.symbol_type
     if sym in self.moved_symbols:
       self.error(f"Use of moved variable '{node.name}'.", node=node)
@@ -426,8 +452,7 @@ class ExprVisitorMixin:
     if self.is_in_del and self._ast_references_self(node.body):
       self.error("Cannot capture 'self' in a closure inside destructor '__del__'.", node=node)
     self.symbol_table.enter_scope()
-    old_moved_symbols = set(self.moved_symbols)
-    self.moved_symbols = set()
+    pre_lambda_moved = set(self.moved_symbols)
 
     expected_func = self.expected_type
     from src.semantics.symbol_table import OptionalType
@@ -481,9 +506,12 @@ class ExprVisitorMixin:
     if node.return_type:
       ret_type = self._resolve_type_node(node.return_type)
 
-    self.moved_symbols = old_moved_symbols
+    self._restore_moved_symbols(pre_lambda_moved)
     self.symbol_table.exit_scope()
     node.stack_borrow_symbols = self._scan_lambda_stack_borrows(node)
+    mut_caps, read_caps = self._scan_lambda_capture_modes(node)
+    node.closure_mutated_captures = mut_caps
+    node.closure_read_captures = read_caps
     return FunctionType(
         resolved_param_types,
         ret_type,

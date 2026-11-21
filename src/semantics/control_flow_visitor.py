@@ -15,6 +15,7 @@ from src.parser.ast import (
     IdentifierNode,
     IfNode,
     IndexExprNode,
+    LambdaNode,
     LiteralNode,
     MatchExprNode,
     MemberAccessNode,
@@ -190,7 +191,7 @@ class ControlFlowVisitorMixin:
 
     for case in node.cases:
       # Each arm starts from the pre-match move state; post-match is the union.
-      self.moved_symbols = set(pre_match_moved)
+      self._restore_moved_symbols(pre_match_moved)
       for pattern in case.patterns:
         self._check_match_pattern(
             pattern, subject_type, seen_enum_variants, bool_flags, opt_flags
@@ -225,7 +226,7 @@ class ControlFlowVisitorMixin:
       union_moved |= self.moved_symbols
 
     if node.cases:
-      self.moved_symbols = union_moved
+      self._restore_moved_symbols(union_moved)
 
     has_ellipsis = opt_flags[2]
     if not has_ellipsis:
@@ -290,18 +291,19 @@ class ControlFlowVisitorMixin:
       self.symbol_table.current_scope.frozen_lvalues = [
           f for f in saved_frozen if f[2] != "active 'if var' unwrap"
       ]
-      self.moved_symbols = set(pre_branch_moved)
+      self._restore_moved_symbols(pre_branch_moved)
       self.visit(node.else_block)
       else_moved = set(self.moved_symbols)
-      self.moved_symbols = then_moved | else_moved
+      self._restore_moved_symbols(then_moved | else_moved)
       self.symbol_table.current_scope.frozen_lvalues = saved_frozen
     else:
-      self.moved_symbols = then_moved
+      self._restore_moved_symbols(then_moved)
 
   def visit_IfNode(self, node: IfNode) -> None:
     """Type-checks `if` statements, optional-unwrap bindings, and NLL freezes."""
     if node.bindings:
       self.symbol_table.enter_scope()
+      if_header_scope = self.symbol_table.current_scope
       has_unwrap = False
       unwrap_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
       for binding in node.bindings:
@@ -347,9 +349,9 @@ class ControlFlowVisitorMixin:
             )
           finally:
             cur_scope = self.symbol_table.current_scope
-            self.moved_symbols = {
-                s for s in self.moved_symbols if s.scope_defined != cur_scope
-            }
+            self._restore_moved_symbols(
+                {s for s in self.moved_symbols if s.scope_defined != cur_scope}
+            )
             self.symbol_table.exit_scope()
         else:
           self.visit(node.then_block)
@@ -358,6 +360,9 @@ class ControlFlowVisitorMixin:
       finally:
         self._branch_depth -= 1
 
+      self._restore_moved_symbols(
+          {s for s in self.moved_symbols if s.scope_defined != if_header_scope}
+      )
       self.symbol_table.exit_scope()
       return
 
@@ -387,6 +392,8 @@ class ControlFlowVisitorMixin:
     self.loop_depth += 1
     self._branch_depth += 1
     pre_loop_moved = set(self.moved_symbols)
+    loop_outer_scope = self.symbol_table.current_scope
+    self._loop_context_stack.append((pre_loop_moved, loop_outer_scope))
     try:
       cond_type = self.visit(node.condition)
       if cond_type != PrimitiveType("bool"):
@@ -399,6 +406,7 @@ class ControlFlowVisitorMixin:
             node=node,
         )
     finally:
+      self._loop_context_stack.pop()
       self._branch_depth -= 1
       self.loop_depth -= 1
 
@@ -407,9 +415,12 @@ class ControlFlowVisitorMixin:
     self.loop_depth += 1
     self._branch_depth += 1
     pre_loop_moved = set(self.moved_symbols)
+    loop_outer_scope = self.symbol_table.current_scope
+    self._loop_context_stack.append((pre_loop_moved, loop_outer_scope))
     try:
       iter_type = self.visit(node.iterable)
       self.symbol_table.enter_scope()
+      for_scope = self.symbol_table.current_scope
       iter_res = ArenaChecker.get_lvalue_path(self.symbol_table, node.iterable)
       if iter_res:
         self.symbol_table.current_scope.frozen_lvalues.append(
@@ -424,6 +435,7 @@ class ControlFlowVisitorMixin:
         elem_type = iter_type.element_type
         self.node_types[node] = elem_type
         val_sym = VariableSymbol(node.val_var, elem_type, node.is_mutable)
+        val_sym.is_borrowed_unwrap = True
         self.symbol_table.define(node.val_var, val_sym)
         ArenaChecker.validate_arena_escape(
             self.symbol_table,
@@ -453,6 +465,7 @@ class ControlFlowVisitorMixin:
           val_sym = VariableSymbol(
               node.val_var, iter_type.value_type, node.is_mutable
           )
+          val_sym.is_borrowed_unwrap = True
           self.symbol_table.define(node.val_var, val_sym)
           ArenaChecker.validate_arena_escape(
               self.symbol_table,
@@ -468,6 +481,8 @@ class ControlFlowVisitorMixin:
           val_sym = VariableSymbol(
               node.val_var, iter_type.value_type, node.is_mutable
           )
+          key_sym.is_borrowed_unwrap = True
+          val_sym.is_borrowed_unwrap = True
           self.symbol_table.define(node.key_var, key_sym)
           self.symbol_table.define(node.val_var, val_sym)
           for sym in (key_sym, val_sym):
@@ -498,6 +513,9 @@ class ControlFlowVisitorMixin:
         )
 
       self.visit(node.block)
+      self._restore_moved_symbols(
+          {s for s in self.moved_symbols if s.scope_defined != for_scope}
+      )
       self.symbol_table.exit_scope()
 
       for sym in self.moved_symbols - pre_loop_moved:
@@ -506,6 +524,7 @@ class ControlFlowVisitorMixin:
             node=node,
         )
     finally:
+      self._loop_context_stack.pop()
       self._branch_depth -= 1
       self.loop_depth -= 1
 
@@ -516,6 +535,21 @@ class ControlFlowVisitorMixin:
   def visit_ContinueNode(self, node: ContinueNode) -> None:
     if self.loop_depth <= 0:
       self.error("'continue' statement outside of loop.")
+      return
+    if self._loop_context_stack:
+      pre_loop_moved, loop_outer_scope = self._loop_context_stack[-1]
+      for sym in self.moved_symbols - pre_loop_moved:
+        if (
+            sym.scope_defined is None
+            or ArenaChecker.is_descendant_scope(
+                loop_outer_scope, sym.scope_defined
+            )
+        ):
+          self.error(
+              f"Cannot move variable '{sym.name}' before 'continue' without "
+              "re-assigning it before the next iteration.",
+              node=node,
+          )
 
   def _statement_terminates(self, stmt: ASTNode) -> bool:
     if isinstance(stmt, (ReturnNode, BreakNode, ContinueNode)):
@@ -533,20 +567,50 @@ class ControlFlowVisitorMixin:
       return self._block_terminates(stmt)
     return False
 
+  def _stmt_always_returns(self, stmt: ASTNode) -> bool:
+    """Returns True if *stmt* unconditionally exits the enclosing function via `return`."""
+    if isinstance(stmt, ReturnNode):
+      return True
+    if isinstance(stmt, IfNode):
+      if stmt.then_block and stmt.else_block:
+        then_ret = self._block_always_returns(stmt.then_block)
+        else_ret = (
+            self._stmt_always_returns(stmt.else_block)
+            if isinstance(stmt.else_block, ASTNode)
+            else self._block_always_returns(stmt.else_block)
+        )
+        return then_ret and else_ret
+    if isinstance(stmt, BlockNode):
+      return self._block_always_returns(stmt)
+    return False
+
+  def _block_always_returns(self, block: BlockNode) -> bool:
+    for stmt in getattr(block, "statements", []):
+      if self._stmt_always_returns(stmt):
+        return True
+    return False
+
   def _visit_block_with_terminating_unfreeze(self, block: BlockNode) -> None:
-    """Temporarily unfreezes active `if var` bindings on terminating branches.
+    """Temporarily unfreezes active `if var` bindings on branches that exit the unwrap scope.
 
     Under control-flow-aware non-lexical lifetime analysis, a terminating branch
-    (such as an early `return`) that does not reference an outer `if var`
-    binding cannot observe or fall through to later uses of that binding, so
-    mutating the unwrapped source inside that branch is memory-safe.
+    that leaves the enclosing `if var` / `guard var` scope without referencing
+    the unwrapped binding cannot fall through to later uses of that binding.
+    Inner-loop `break` / `continue` only exit the loop, not an outer unwrap, so
+    unfreezing inside an inner loop requires an unconditional `return`.
     """
     active = getattr(self, "_active_unwrap_freezes", [])
     temporarily_unfrozen = []
     if active and isinstance(block, BlockNode) and self._block_terminates(block):
-      for unwrap_scope, var_name, freeze_entry in active:
+      always_returns = self._block_always_returns(block)
+      for entry in active:
+        unwrap_scope, var_name, freeze_entry, freeze_loop_depth = entry
+        exits_unwrap_scope = always_returns or (
+            self.loop_depth == freeze_loop_depth
+        )
         if (
-            freeze_entry in unwrap_scope.frozen_lvalues
+            exits_unwrap_scope
+            and freeze_entry in unwrap_scope.frozen_lvalues
             and not self._ast_references_ident(block, var_name)
         ):
           unwrap_scope.frozen_lvalues.remove(freeze_entry)
@@ -562,6 +626,29 @@ class ControlFlowVisitorMixin:
     for stmt in getattr(block, "statements", []):
       if self._statement_terminates(stmt):
         return True
+    return False
+
+  def _ast_captures_ident_in_lambda(self, ast_node: Any, name: str) -> bool:
+    """Returns True if any LambdaNode within *ast_node* captures *name*."""
+    if ast_node is None:
+      return False
+    if isinstance(ast_node, list):
+      return any(
+          self._ast_captures_ident_in_lambda(item, name) for item in ast_node
+      )
+    if isinstance(ast_node, LambdaNode):
+      param_names = {p.name for p in getattr(ast_node, "parameters", [])}
+      if name not in param_names and self._ast_references_ident(
+          ast_node.body, name
+      ):
+        return True
+      return False
+    if isinstance(ast_node, ASTNode):
+      for val in ast_node.__dict__.values():
+        if isinstance(val, (ASTNode, list)) and self._ast_captures_ident_in_lambda(
+            val, name
+        ):
+          return True
     return False
 
   def _resolve_container_get_unwrap(
@@ -595,10 +682,12 @@ class ControlFlowVisitorMixin:
       return None
     b_res = ArenaChecker.get_lvalue_path(self.symbol_table, binding.expr)
     container_info = None
+    target_lvalue_node = binding.expr
     if not b_res:
       container_info = self._resolve_container_get_unwrap(binding.expr)
       if container_info:
         b_res = container_info[0]
+        target_lvalue_node = container_info[1]
     if not b_res:
       self.error(
           "Mutable optional unwrap ('if var' / 'guard var') binds an in-place "
@@ -607,11 +696,27 @@ class ControlFlowVisitorMixin:
           node=binding.expr,
       )
       return None
+    if self.has_shared_ref_base(target_lvalue_node):
+      self.error(
+          "Mutable optional unwrap ('if var' / 'guard var') cannot borrow "
+          "through deeply immutable 'SharedRef'.",
+          node=binding.expr,
+      )
+      return None
     root_sym = self.symbol_table.lookup(b_res[0])
     if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
       self.error(
           f"Mutable optional unwrap ('if var' / 'guard var') requires a mutable "
           f"source lvalue, but '{b_res[0]}' is immutable.",
+          node=binding.expr,
+      )
+      return None
+    immut = self._find_immutable_field_in_chain(target_lvalue_node)
+    if immut is not None:
+      field_name, struct_name = immut
+      self.error(
+          f"Mutable optional unwrap ('if var' / 'guard var') cannot borrow "
+          f"through constant field '{field_name}' of '{struct_name}'.",
           node=binding.expr,
       )
       return None
@@ -643,7 +748,12 @@ class ControlFlowVisitorMixin:
       nonlocal pushed_count
       for var_name, freeze_entry in freezes:
         last_idx = -1
+        captured_in_lambda = False
         for s_idx in range(start_idx, len(stmts)):
+          if self._ast_captures_ident_in_lambda(stmts[s_idx], var_name):
+            captured_in_lambda = True
+            last_idx = len(stmts)
+            break
           if self._ast_references_ident(stmts[s_idx], var_name):
             last_idx = s_idx
         if last_idx == -1:
@@ -651,10 +761,13 @@ class ControlFlowVisitorMixin:
             active_scope.frozen_lvalues.remove(freeze_entry)
         else:
           self._active_unwrap_freezes.append(
-              (active_scope, var_name, freeze_entry)
+              (active_scope, var_name, freeze_entry, self.loop_depth)
           )
           pushed_count += 1
           tracked.append((var_name, freeze_entry, last_idx))
+          if captured_in_lambda:
+            # Keep freeze alive through end of block; closure may run later.
+            pass
 
     if initial_freezes:
       register_freezes(initial_freezes, 0)
@@ -711,11 +824,14 @@ class ControlFlowVisitorMixin:
         if freeze_entry in self.symbol_table.current_scope.frozen_lvalues:
           self.symbol_table.current_scope.frozen_lvalues.remove(freeze_entry)
 
+    pre_else_moved = set(self.moved_symbols)
     self.symbol_table.enter_scope()
     self.visit(node.else_block)
     self.symbol_table.exit_scope()
 
-    if not self._block_terminates(node.else_block):
+    if self._block_terminates(node.else_block):
+      self._restore_moved_symbols(pre_else_moved)
+    else:
       self.error(
           "Guard else block must terminate control flow (via return, break, or continue)."
       )

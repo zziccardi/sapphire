@@ -21,7 +21,7 @@ from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType,
 class TestTypeChecker(unittest.TestCase):
   """Suite of unit tests verifying semantic and type constraints in Sapphire."""
 
-  def _check(self, code: str) -> TypeChecker:
+  def _check(self, code: str, source_file_path=None) -> TypeChecker:
     """Helper to parse and run the semantic check on a code string."""
     input_stream = InputStream(code)
     lexer = SapphireLexer(input_stream)
@@ -34,7 +34,7 @@ class TestTypeChecker(unittest.TestCase):
       raise SyntaxError(f"Syntax error while parsing code string for type checking:\n{code}")
     builder = ASTBuilder()
     ast = builder.visit(tree)
-    checker = TypeChecker()
+    checker = TypeChecker(source_file_path=source_file_path)
     checker.check(ast)
     return checker
 
@@ -8415,6 +8415,671 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
     self.assertIn("Destructor '__del__' must return void.", str(ctx.exception))
+
+  def test_phase3_method_scope_return_escape_and_yield(self):
+    """Verifies methods enforce arena/stack-borrow return escape and scope coroutine yield checks."""
+    # 1. Method returning local-arena proto must be rejected
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      proto Item { var v: int; }
+      struct Factory {}
+      impl Factory {
+        func make(): Item {
+          var a = Arena();
+          let it = Item { v = 1 } in a;
+          return it;
+        }
+      }
+      """)
+    self.assertIn("local arena 'a'", str(ctx1.exception))
+
+    # 2. Method returning closure capturing local var must be rejected
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Maker {}
+      impl Maker {
+        func make_fn(): () -> int {
+          var n = 42;
+          return () -> n;
+        }
+      }
+      """)
+    self.assertIn("local variable 'n'", str(ctx2.exception))
+
+    # 3. Coroutine method yield must not walk past method scope into globals
+    self._check("""
+    @extern var GLOBAL_REF: Ref<int>;
+    struct Gen {}
+    impl Gen {
+      func run(): Coroutine<int> {
+        yield 1;
+      }
+    }
+    """)
+
+  def test_phase3_arena_and_stack_borrow_escape_bypasses(self):
+    """Verifies all Phase 3 arena and stack-borrow escape bypasses are rejected."""
+    # 1. Match block arm yield escaping inner arena
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      func test(flag: bool) {
+        var out: Item? = none;
+        {
+          var a = Arena();
+          let p = Item { v = 1 } in a;
+          out = match flag {
+            true -> { yield p; },
+            false -> none
+          };
+        }
+      }
+      """)
+
+    # 2. Match expression escaping closure stack borrow
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test(flag: bool): () -> int {
+        var x = 10;
+        return match flag {
+          true -> { yield () -> x; },
+          false -> () -> 0
+        };
+      }
+      """)
+
+    # 3. Calling closure capturing inner-arena proto
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      func test() {
+        var out: Item? = none;
+        {
+          var a = Arena();
+          let p = Item { v = 1 } in a;
+          let get_p = () -> p;
+          out = get_p();
+        }
+      }
+      """)
+
+    # 4. Multi-var decl inside lambda capturing inner-arena proto
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      func test() {
+        var out: (() -> int)? = none;
+        {
+          var a = Arena();
+          let p = Item { v = 1 } in a;
+          out = () -> int {
+            let x, y = 1, p;
+            return x + y.v;
+          };
+        }
+      }
+      """)
+
+    # 5. Clone initializer block storing shorter-lived proto into longer-lived arena
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Node { var next: Node? = none; }
+      func test() {
+        var outer = Arena();
+        let base = Node {} in outer;
+        {
+          var inner = Arena();
+          let short_lived = Node {} in inner;
+          let bad = clone base {
+            self.next = short_lived;
+          } in outer;
+        }
+      }
+      """)
+
+    # 6. Storing borrowed proto parameter into module-level global
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      var G: Item? = none;
+      func leak(p: Item) {
+        G = p;
+      }
+      """)
+
+    # 7. Delegated var method & optional receiver var method escape
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      struct BaseHolder { var slot: Item? = none; }
+      impl BaseHolder {
+        var func add(it: Item) { self.slot = it; }
+      }
+      struct ChildHolder : BaseHolder {}
+      func test() {
+        var child = ChildHolder {};
+        {
+          var a = Arena();
+          let p = Item { v = 1 } in a;
+          child.add(p);
+        }
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      struct Holder { var slot: Item? = none; }
+      impl Holder {
+        var func add(it: Item) { self.slot = it; }
+      }
+      func test() {
+        var opt_h: Holder? = Holder {};
+        {
+          var a = Arena();
+          let p = Item { v = 1 } in a;
+          opt_h?.add(p);
+        }
+      }
+      """)
+
+    # 8. Arena allocation through intermediate let field and SharedRef
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      struct Inner { var a: Arena; }
+      struct Outer { let inner: Inner; }
+      func test() {
+        var o = Outer { inner = Inner { a = Arena() } };
+        let it = Item { v = 1 } in o.inner.a;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Item { var v: int; }
+      struct Holder { var a: Arena; }
+      func test() {
+        var sr = SharedRef(Holder { a = Arena() });
+        let it = Item { v = 1 } in sr.a;
+      }
+      """)
+
+  def test_phase3_ownership_and_move_tracking(self):
+    """Verifies lambda move rules, continue move checks, yield RAII across branches, multi-return moves, for-var borrows, and Ref? args."""
+    # 1. Lambda reading already-moved outer variable rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let r = Ref(1);
+        let r2 = move r;
+        let f = () -> int { return r; };
+      }
+      """)
+
+    # 2. Lambda moving captured outer variable rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let r = Ref(1);
+        let f = () -> Ref<int> { return move r; };
+      }
+      """)
+
+    # 3. Lambda moving its own local variable allowed
+    self._check("""
+    func consume(x: Ref<int>) {}
+    func test() {
+      let f = () -> {
+        let local_r = Ref(1);
+        consume(move local_r);
+      };
+    }
+    """)
+
+    # 4. Continue after moving outer variable without reassignment rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func consume(x: Ref<int>) {}
+      func test(flag: bool) {
+        var r = Ref(1);
+        while flag {
+          consume(move r);
+          if flag {
+            continue;
+          }
+          r = Ref(2);
+        }
+      }
+      """)
+
+    # 5. Continue after moving loop-local variable allowed
+    self._check("""
+    func consume(x: Ref<int>) {}
+    func test(flag: bool) {
+      while flag {
+        let local_r = Ref(1);
+        consume(move local_r);
+        if flag {
+          continue;
+        }
+      }
+    }
+    """)
+
+    # 6. Branch move must not clear RAII yield check in sibling branch
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func consume(x: Ref<int>) {}
+      func gen(flag: bool): Coroutine<int> {
+        let r = Ref(1);
+        if flag {
+          consume(move r);
+        } else {
+          yield 1;
+        }
+      }
+      """)
+
+    # 7. Multi-return duplicating move-only variable rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func bad(): Ref<int>, Ref<int> {
+        let r = Ref(1);
+        return r, r;
+      }
+      """)
+
+    # 8. Moving out of for-var loop binding rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Handle { var fd: int; }
+      impl Handle { func __del__() {} }
+      func test() {
+        var arr: [Handle] = [Handle { fd = 1 }];
+        for var h in arr {
+          let stolen = move h;
+        }
+      }
+      """)
+
+    # 9. Ref<T>? argument move checks + ternary Ref argument checks
+    self._check("""
+    func take_opt(x: Ref<int>?) {}
+    func take_ref(x: Ref<int>) {}
+    func test(cond: bool) {
+      let a = Ref(1);
+      take_opt(move a);
+      take_opt(none);
+      let r1 = Ref(2);
+      let r2 = Ref(3);
+      take_ref(cond ? move r1 : move r2);
+    }
+    """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func take_opt(x: Ref<int>?) {}
+      func test() {
+        let b = Ref(1);
+        take_opt(b);
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func take_ref(x: Ref<int>) {}
+      func test(cond: bool) {
+        let r1 = Ref(1);
+        let r2 = Ref(2);
+        take_ref(cond ? r1 : r2);
+      }
+      """)
+
+    # 10. False move positives fixed: cond ? move r : move r, guard else move+return, if let in loop
+    self._check("""
+    func consume(x: Ref<int>) {}
+    func read_val(x: int): int { return x; }
+    func test(cond: bool) {
+      let r1 = Ref(1);
+      let moved = cond ? move r1 : move r1;
+
+      let r2 = Ref(2);
+      guard cond else {
+        consume(move r2);
+        return;
+      }
+      let v = read_val(r2);
+
+      while cond {
+        if let r3 = Ref(3); true {
+          consume(move r3);
+        }
+      }
+    }
+    """)
+
+  def test_phase3_deep_mutability_shared_ref_and_encapsulation(self):
+    """Verifies SharedRef rebinding vs deref mutation, full lvalue chain immutability, self=, and export encapsulation."""
+    # 1. Rebinding var SharedRef itself is allowed
+    self._check("""
+    func test() {
+      var sr = SharedRef(1);
+      sr = SharedRef(2);
+    }
+    """)
+
+    # 2. Mutating nested fields/indices through SharedRef rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Inner { var x: int; }
+      struct Wrap { var inner: Inner; var arr: [int]; }
+      struct Holder { var sr: SharedRef<Wrap>; }
+      func test() {
+        var h = Holder { sr = SharedRef(Wrap { inner = Inner { x = 1 }, arr = [1] }) };
+        h.sr.inner.x = 99;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Wrap { var arr: [int]; }
+      struct Holder { var sr: SharedRef<Wrap>; }
+      func test() {
+        var h = Holder { sr = SharedRef(Wrap { arr = [1] }) };
+        h.sr.arr[0] = 99;
+      }
+      """)
+
+    # 3. Direct self = ... rejected; self.inner.x and self.arr[0] in immutable func rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct S { var x: int; }
+      impl S {
+        var func bad(other: S) { self = other; }
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Inner { var x: int; }
+      struct S { var inner: Inner; var arr: [int]; }
+      impl S {
+        func bad1() { self.inner.x = 42; }
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct S { var arr: [int]; }
+      impl S {
+        func bad2() { self.arr[0] = 99; }
+      }
+      """)
+
+    # 4. Deep immutability through let array, let nested array, let struct field, and if var
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      func test() {
+        let arr = [Box { x = 1 }];
+        arr[0].x = 99;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func test() {
+        let m = [[1, 2]];
+        m[0][0] = 99;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Inner { var x: int; }
+      struct Outer { let const_inner: Inner; }
+      func test() {
+        var o = Outer { const_inner = Inner { x = 1 } };
+        o.const_inner.x = 99;
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      struct Holder { let const_opt: Box?; }
+      func test() {
+        var h = Holder { const_opt = Box { x = 1 } };
+        if var b ?= h.const_opt {
+          b.x = 99;
+        }
+      }
+      """)
+
+    # 5. var func, var param, and collection mutator through let field rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Counter { var n: int; }
+      impl Counter { var func inc() { self.n += 1; } }
+      struct Outer { let c: Counter; }
+      func test() {
+        var o = Outer { c = Counter { n = 0 } };
+        o.c.inc();
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      struct Outer { let b: Box; }
+      func bump(var b: Box) { b.x += 1; }
+      func test() {
+        var o = Outer { b = Box { x = 0 } };
+        bump(o.b);
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Outer { let arr: [int]; }
+      func test() {
+        var o = Outer { arr = [1] };
+        o.arr.push(2);
+      }
+      """)
+
+    # 6. export { ... } manifest preserves imported struct encapsulation
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+      mod_path = os.path.join(tmpdir, "encap_mod.sp")
+      main_path = os.path.join(tmpdir, "main.sp")
+      with open(mod_path, "w") as f:
+        f.write("""
+        struct Secret {
+          var val: int;
+        }
+        impl Secret {
+          func __init__(v: int) {
+            self.val = v;
+          }
+        }
+        export { Secret }
+        """)
+      main_code = """
+      import encap_mod;
+      func test() {
+        var s = encap_mod.Secret(10);
+        s.val = 99;
+      }
+      """
+      with open(main_path, "w") as f:
+        f.write(main_code)
+      with self.assertRaises(SemanticError) as ctx_enc:
+        self._check(main_code, source_file_path=main_path)
+      self.assertIn("encapsulated struct 'Secret'", str(ctx_enc.exception))
+
+  def test_phase3_function_mutability_traits_aliasing_nll_and_scanners(self):
+    """Verifies FunctionType param_mutabilities, trait modifiers/receivers, var primitives, closure aliasing, proto_ancestors, NLL, and scanners."""
+    # 1. FunctionType.is_compatible enforces param_mutabilities
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      func mutate(var b: Box) { b.x = 99; }
+      func test() {
+        let f: (Box) -> void = mutate;
+      }
+      """)
+
+    # 2. Trait immutable method cannot be implemented as var func
+    with self.assertRaises(SemanticError):
+      self._check("""
+      trait Reader { func read(): int; }
+      struct S { var x: int; }
+      impl Reader for S {
+        var func read(): int { self.x += 1; return self.x; }
+      }
+      """)
+
+    # 3. TraitType receiver enforces var func mutability
+    with self.assertRaises(SemanticError):
+      self._check("""
+      trait Mutator { var func inc(); }
+      func bad(m: Mutator) {
+        m.inc();
+      }
+      """)
+
+    # 4. var primitive param immutability & aliasing (while 1 var + 1 value copy allowed)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func inc(var x: int) { x += 1; }
+      func test() {
+        let c = 1;
+        inc(c);
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func swap_int(var a: int, var b: int) {
+        let t = a;
+        a = b;
+        b = t;
+      }
+      func test() {
+        var v = 1;
+        swap_int(v, v);
+      }
+      """)
+
+    self._check("""
+    func add_to(var a: int, delta: int) { a += delta; }
+    func test() {
+      var v = 1;
+      add_to(v, v);
+    }
+    """)
+
+    # 5. Closure-captured var aliasing at call site rejected
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      func test() {
+        var b = Box { x = 1 };
+        let f = (other: Box) -> {
+          b.x = other.x + 1;
+        };
+        f(b);
+      }
+      """)
+
+    # 6. proto_ancestors propagated on let c2 = c1;
+    with self.assertRaises(SemanticError):
+      self._check("""
+      proto Enemy { var hp: int; }
+      func clash(var base: Enemy, other: Enemy) {
+        base.hp = other.hp + 1;
+      }
+      func test() {
+        var a = Arena();
+        var base = Enemy { hp = 10 } in a;
+        let c1 = clone base;
+        let c2 = c1;
+        clash(base, c2);
+      }
+      """)
+
+    # 7. Inner-loop break must not unfreeze outer if var
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      func test(cond: bool) {
+        var opt: Box? = Box { x = 1 };
+        if var b ?= opt {
+          while cond {
+            if cond {
+              opt = none;
+              break;
+            }
+          }
+          let v = b.x;
+        }
+      }
+      """)
+
+    # 8. NLL keeps unwrap frozen when captured in closure
+    with self.assertRaises(SemanticError):
+      self._check("""
+      struct Box { var x: int; }
+      func test() {
+        var opt: Box? = Box { x = 1 };
+        if var b ?= opt {
+          let cb = () -> b.x;
+          opt = none;
+          let v = cb();
+        }
+      }
+      """)
+
+    # 9. Global reentrancy catches method receiver (g.push) and higher-order cb()
+    with self.assertRaises(SemanticError):
+      self._check("""
+      var G: [int] = [1, 2];
+      func mutate_g(arr: [int]) {
+        G.push(3);
+      }
+      func test() {
+        mutate_g(G);
+      }
+      """)
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      var G: [int] = [1, 2];
+      func clear_g() { G.clear(); }
+      func call_cb(arr: [int], cb: () -> void) {
+        cb();
+      }
+      func test() {
+        call_cb(G, clear_g);
+      }
+      """)
+
+    # 10. Lambda stack-borrow scanner respects block-scoped shadowing
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func leak(): () -> int {
+        var x = 10;
+        return () -> int {
+          if false {
+            let x = 0;
+          }
+          return x;
+        };
+      }
+      """)
 
 
 if __name__ == "__main__":

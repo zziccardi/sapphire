@@ -188,6 +188,9 @@ class DeclarationPass:
             elif hasattr(exp, "struct_type"):
               exp.struct_type.is_imported = True
               exp.struct_type.defining_module = defining_mod
+            elif isinstance(getattr(exp, "symbol_type", None), StructType):
+              exp.symbol_type.is_imported = True
+              exp.symbol_type.defining_module = defining_mod
             computed_exports[export_name] = exp
     else:
       sub_root = sub_checker.symbol_table.current_scope
@@ -197,6 +200,9 @@ class DeclarationPass:
         if hasattr(sym, "struct_type"):
           sym.struct_type.is_imported = True
           sym.struct_type.defining_module = defining_mod
+        elif isinstance(getattr(sym, "symbol_type", None), StructType):
+          sym.symbol_type.is_imported = True
+          sym.symbol_type.defining_module = defining_mod
         computed_exports[name] = sym
       for name, t in sub_root.types.items():
         if name not in ("int", "float", "bool", "String", "none", "Arena"):

@@ -582,12 +582,15 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     )
 
     effective_arg_type = arg_type
+    unwrapped_param = (
+        param_type.base_type if isinstance(param_type, OptionalType) else param_type
+    )
     # Auto-borrow Ref<T>/SharedRef<T> when passing to an unboxed parameter.
-    if isinstance(arg_type, RefType) and not isinstance(param_type, RefType):
+    if isinstance(arg_type, RefType) and not isinstance(unwrapped_param, RefType):
       effective_arg_type = arg_type.inner_type
       arg.is_auto_borrow = True
     elif isinstance(arg_type, SharedRefType) and not isinstance(
-        param_type, SharedRefType
+        unwrapped_param, SharedRefType
     ):
       if param_is_var:
         self.error(
@@ -598,19 +601,32 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
         effective_arg_type = arg_type.inner_type
         arg.is_auto_borrow = True
 
-    if isinstance(param_type, RefType):
-      if isinstance(arg.expr, IdentifierNode) and not isinstance(
-          arg.expr, MoveNode
-      ):
-        self.error(
-            f"Cannot pass move-only type '{arg_type}' by value; use "
-            f"explicit 'move {arg.expr.name}' to transfer ownership."
-        )
-      elif isinstance(arg.expr, (MemberAccessNode, IndexExprNode)):
-        self.error(
-            f"Cannot copy or partially move move-only type '{arg_type}' "
-            "out of a field or collection index."
-        )
+    if isinstance(unwrapped_param, RefType) and not getattr(
+        arg, "is_auto_borrow", False
+    ):
+      def _check_ref_arg_move(expr: ASTNode) -> None:
+        if isinstance(expr, TernaryExprNode):
+          _check_ref_arg_move(expr.true_expr)
+          _check_ref_arg_move(expr.false_expr)
+          return
+        if isinstance(expr, BinaryOpNode) and expr.op == "??":
+          _check_ref_arg_move(expr.left)
+          _check_ref_arg_move(expr.right)
+          return
+        if isinstance(expr, IdentifierNode) and not isinstance(expr, MoveNode):
+          self.error(
+              f"Cannot pass move-only type '{arg_type}' by value; use "
+              f"explicit 'move {expr.name}' to transfer ownership.",
+              node=arg,
+          )
+        elif isinstance(expr, (MemberAccessNode, IndexExprNode)):
+          self.error(
+              f"Cannot copy or partially move move-only type '{arg_type}' "
+              "out of a field or collection index.",
+              node=arg,
+          )
+
+      _check_ref_arg_move(arg.expr)
 
     if not effective_arg_type.is_compatible(param_type):
       self.error(

@@ -37,6 +37,8 @@ class VariableSymbol(Symbol):
     self.is_moved: bool = False
     self.proto_ancestors: Set[str] = set()
     self.stack_borrow_symbols: Set[str] = set()
+    self.closure_mutated_captures: Set[str] = set()
+    self.closure_read_captures: Set[str] = set()
 
 
 class FunctionSymbol(Symbol):

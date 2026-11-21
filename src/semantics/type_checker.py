@@ -88,6 +88,7 @@ class TypeChecker(
     self._init_assigned_arena_fields: Set[str] = set()
     self._init_used_arena_fields: Set[str] = set()
     self._temporary_frozen_lvalues: List[Tuple[str, List[str], str]] = []
+    self._loop_context_stack: List[Tuple[Set[VariableSymbol], Any]] = []
     self._checked_import_results: Dict[
         str, Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]
     ] = {}
@@ -95,6 +96,44 @@ class TypeChecker(
     self._reported_import_errors: Set[str] = set()
     self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
     self._current_node: Optional[ASTNode] = None
+
+  def _restore_moved_symbols(
+      self, target_moved: Set[VariableSymbol]
+  ) -> None:
+    """Restores `moved_symbols` to *target_moved* and keeps `sym.is_moved` synced."""
+    for sym in self.moved_symbols - target_moved:
+      sym.is_moved = False
+    for sym in target_moved - self.moved_symbols:
+      sym.is_moved = True
+    self.moved_symbols = set(target_moved)
+
+  def _find_immutable_field_in_chain(
+      self,
+      node: ASTNode,
+      skip_outermost: bool = False,
+  ) -> Optional[Tuple[str, str]]:
+    """Walks an lvalue chain and returns `(field_name, struct_name)` for any `let` field."""
+    curr: Any = node
+    first = True
+    while curr is not None:
+      if isinstance(curr, MemberAccessNode):
+        if not (first and skip_outermost):
+          recv_type = self.node_types.get(curr.receiver)
+          if isinstance(recv_type, OptionalType):
+            recv_type = recv_type.base_type
+          if isinstance(recv_type, RefType):
+            recv_type = recv_type.inner_type
+          if isinstance(recv_type, StructType):
+            field = recv_type.fields.get(curr.member)
+            if field and not field.is_mutable:
+              return (curr.member, recv_type.name)
+        curr = curr.receiver
+      elif isinstance(curr, IndexExprNode):
+        curr = curr.array
+      else:
+        break
+      first = False
+    return None
 
   def get_frozen_lvalue_reason(
       self, root: str, path: List[str]

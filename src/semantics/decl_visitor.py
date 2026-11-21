@@ -163,12 +163,33 @@ class DeclVisitorMixin:
                   f"'{trait_method_name}' of '{node.trait_name}'."
               )
             else:
-              impl_sig = struct_type.methods[trait_method_name].method_type
+              impl_method = struct_type.methods[trait_method_name]
+              impl_sig = impl_method.method_type
               if impl_sig != expected_sig:
                 self.error(
                     f"Method '{trait_method_name}' in struct '{node.struct_name}' "
                     f"has signature {impl_sig}, but trait '{node.trait_name}' "
                     f"requires {expected_sig}."
+                )
+              trait_mod = getattr(trait_sig.ast_decl, "modifier", None)
+              impl_mod = impl_method.modifier
+              if trait_mod is None and impl_mod == "var":
+                self.error(
+                    f"Method '{trait_method_name}' in struct '{node.struct_name}' "
+                    f"is declared 'var', but trait '{node.trait_name}' requires "
+                    "an immutable method."
+                )
+              elif trait_mod != "static" and impl_mod == "static":
+                self.error(
+                    f"Method '{trait_method_name}' in struct '{node.struct_name}' "
+                    f"is declared 'static', but trait '{node.trait_name}' requires "
+                    "an instance method."
+                )
+              elif trait_mod == "static" and impl_mod == "var":
+                self.error(
+                    f"Method '{trait_method_name}' in struct '{node.struct_name}' "
+                    f"is declared 'var', but trait '{node.trait_name}' requires "
+                    "a 'static' method."
                 )
       else:
         self.error(f"Trait '{node.trait_name}' is not defined.")
@@ -232,7 +253,10 @@ class DeclVisitorMixin:
     # Enter scope of method
     self.symbol_table.enter_scope()
     old_moved_symbols = set(self.moved_symbols)
-    self.moved_symbols = set()
+    self._restore_moved_symbols(set())
+    old_function_scope = self.current_function_scope
+    self.current_function_scope = self.symbol_table.current_scope
+    old_current_function = self.current_function
 
     resolved_params = [
         (
@@ -354,8 +378,9 @@ class DeclVisitorMixin:
     self.initialized_fields = old_fields
     self._init_assigned_arena_fields = old_init_assigned_arenas
     self._init_used_arena_fields = old_init_used_arenas
-    self.current_function = None
-    self.moved_symbols = old_moved_symbols
+    self.current_function = old_current_function
+    self.current_function_scope = old_function_scope
+    self._restore_moved_symbols(old_moved_symbols)
 
     self.symbol_table.exit_scope()
 
@@ -383,9 +408,10 @@ class DeclVisitorMixin:
     # Register parameters and check body
     self.symbol_table.enter_scope()
     old_moved_symbols = set(self.moved_symbols)
-    self.moved_symbols = set()
+    self._restore_moved_symbols(set())
     old_function_scope = self.current_function_scope
     self.current_function_scope = self.symbol_table.current_scope
+    old_current_function = self.current_function
 
     resolved_params = [self._resolve_type_node(p.param_type) for p in node.parameters]
     self._check_parameter_defaults(node.parameters, resolved_params)
@@ -409,9 +435,9 @@ class DeclVisitorMixin:
 
     self.visit(node.body)
 
-    self.current_function = None
+    self.current_function = old_current_function
     self.current_function_scope = old_function_scope
-    self.moved_symbols = old_moved_symbols
+    self._restore_moved_symbols(old_moved_symbols)
     self.symbol_table.exit_scope()
 
   def visit_BlockNode(self, node: BlockNode) -> None:

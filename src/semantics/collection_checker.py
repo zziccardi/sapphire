@@ -292,6 +292,14 @@ class CollectionChecker:
             f"Cannot invoke {action_desc} '{method_label}' on constant "
             f"variable '{r}'."
         )
+      else:
+        immut = checker._find_immutable_field_in_chain(receiver)
+        if immut is not None:
+          field_name, struct_name = immut
+          checker.error(
+              f"Cannot invoke {action_desc} '{method_label}' through constant "
+              f"field '{field_name}' of '{struct_name}'."
+          )
       reason = checker.get_frozen_lvalue_reason(r, path)
       if reason:
         hint = ""

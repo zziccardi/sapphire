@@ -16,6 +16,7 @@ from src.parser.ast import (
     CloneNode,
     ExprStmtNode,
     IdentifierNode,
+    IfNode,
     IndexExprNode,
     LambdaNode,
     MapLiteralNode,
@@ -27,6 +28,7 @@ from src.parser.ast import (
     TernaryExprNode,
     UnaryOpNode,
     VarDeclNode,
+    YieldNode,
 )
 from src.semantics.symbol_table import (
     ArenaType,
@@ -142,6 +144,52 @@ class BorrowChecker:
                 symbol_table, entry.value, checker
             )
         )
+      return out
+    if isinstance(node, MatchExprNode):
+      out = set()
+
+      def walk_match_stmt(stmt: Any) -> None:
+        if stmt is None:
+          return
+        if isinstance(stmt, BlockNode):
+          for s in stmt.statements:
+            walk_match_stmt(s)
+        elif isinstance(stmt, IfNode):
+          walk_match_stmt(stmt.then_block)
+          walk_match_stmt(stmt.else_block)
+        elif isinstance(stmt, YieldNode):
+          exprs = getattr(stmt, "expressions", None) or (
+              [stmt.expr] if getattr(stmt, "expr", None) else []
+          )
+          for yexpr in exprs:
+            out.update(
+                BorrowChecker.collect_stack_borrow_symbols(
+                    symbol_table, yexpr, checker
+                )
+            )
+        elif isinstance(stmt, ReturnNode):
+          for rexpr in stmt.expressions:
+            out.update(
+                BorrowChecker.collect_stack_borrow_symbols(
+                    symbol_table, rexpr, checker
+                )
+            )
+        elif isinstance(stmt, ExprStmtNode):
+          out.update(
+              BorrowChecker.collect_stack_borrow_symbols(
+                  symbol_table, stmt.expr, checker
+              )
+          )
+
+      for case in node.cases:
+        if isinstance(case.body, BlockNode):
+          walk_match_stmt(case.body)
+        else:
+          out.update(
+              BorrowChecker.collect_stack_borrow_symbols(
+                  symbol_table, case.body, checker
+              )
+          )
       return out
     return set()
 
@@ -348,10 +396,18 @@ class BorrowChecker:
       # If mutating method on variable receiver (or receiver symbol is Arena-aware),
       # check whether any arg escapes into receiver's outer scope/lifetime.
       recv_type = checker.node_types.get(recv_expr)
+      if isinstance(recv_type, OptionalType):
+        recv_type = recv_type.base_type
+      if isinstance(recv_type, (RefType, SharedRefType)):
+        recv_type = recv_type.inner_type
       method_is_mutating = False
       if isinstance(recv_type, StructType):
-        method = recv_type.methods.get(node.callee.member)
+        method = recv_type.get_method(node.callee.member, checker.symbol_table)
         if method and method.modifier == "var":
+          method_is_mutating = True
+      elif isinstance(recv_type, TraitType):
+        trait_fn = recv_type.methods.get(node.callee.member)
+        if trait_fn and getattr(trait_fn.ast_decl, "modifier", None) == "var":
           method_is_mutating = True
       if method_is_mutating and arg_exprs:
         BorrowChecker.validate_container_mutation(
@@ -451,14 +507,25 @@ class BorrowChecker:
     if checker.has_shared_ref_base(receiver_node):
       is_shared_ref = True
 
-    if not isinstance(receiver_type, StructType):
+    modifier: Optional[str] = None
+    has_method = False
+    if isinstance(receiver_type, StructType):
+      method = receiver_type.get_method(node.callee.member, checker.symbol_table)
+      if method:
+        has_method = True
+        modifier = method.modifier
+    elif isinstance(receiver_type, TraitType):
+      trait_fn = receiver_type.methods.get(node.callee.member)
+      if trait_fn:
+        has_method = True
+        modifier = getattr(trait_fn.ast_decl, "modifier", None)
+    else:
       return
 
-    method = receiver_type.get_method(node.callee.member, checker.symbol_table)
-    if not (method and method.modifier != "static"):
+    if not (has_method and modifier != "static"):
       return
 
-    is_mutable = method.modifier == "var"
+    is_mutable = modifier == "var"
     if is_mutable and is_shared_ref:
       checker.error(
           f"Cannot invoke mutating method '{node.callee.member}' "
@@ -477,8 +544,12 @@ class BorrowChecker:
     # If the method only touches a known subset of `self` fields, check those
     # specific projections against active `if var` / `guard var` freezes.
     reason = None
-    method_fields = getattr(checker, "_method_self_field_accesses", {}).get(
-        (receiver_type.name, node.callee.member)
+    method_fields = (
+        getattr(checker, "_method_self_field_accesses", {}).get(
+            (receiver_type.name, node.callee.member)
+        )
+        if isinstance(receiver_type, StructType)
+        else None
     )
     if method_fields is not None and len(method_fields) > 0:
       for field_name in method_fields:
@@ -499,6 +570,15 @@ class BorrowChecker:
           f"Cannot invoke mutating method '{node.callee.member}' "
           f"on constant variable '{root}'."
       )
+    else:
+      immut = checker._find_immutable_field_in_chain(receiver_node)
+      if immut is not None:
+        field_name, struct_name = immut
+        checker.error(
+            f"Cannot invoke mutating method '{node.callee.member}' "
+            f"through constant field '{field_name}' of '{struct_name}'.",
+            node=node,
+        )
 
   @staticmethod
   def _collect_argument_borrows(
@@ -508,7 +588,7 @@ class BorrowChecker:
       is_constructor: bool,
       borrows: List[Tuple[str, List[str], bool]],
   ) -> None:
-    """Records and validates borrows for explicit reference-type call arguments."""
+    """Records and validates borrows for call arguments (references and `var` params)."""
     expected_param_types = signature.param_types
     expected_param_names = signature.param_names or []
     expected_mutabilities = signature.param_mutabilities
@@ -541,7 +621,7 @@ class BorrowChecker:
           if param_idx < len(expected_mutabilities)
           else False
       )
-      if not checker._is_reference_type(param_type):
+      if not is_mutable and not checker._is_reference_type(param_type):
         continue
 
       if is_mutable and checker.has_shared_ref_base(arg.expr):
@@ -570,6 +650,37 @@ class BorrowChecker:
               f"Cannot pass constant variable '{root}' to mutable 'var' "
               "parameter."
           )
+        else:
+          immut = checker._find_immutable_field_in_chain(arg.expr)
+          if immut is not None:
+            field_name, struct_name = immut
+            checker.error(
+                f"Cannot pass constant field '{field_name}' of '{struct_name}' "
+                "to mutable 'var' parameter.",
+                node=node,
+            )
+
+  @staticmethod
+  def _collect_closure_capture_borrows(
+      checker: Any,
+      expr: ASTNode,
+      borrows: List[Tuple[str, List[str], bool]],
+  ) -> None:
+    """Appends borrows for outer variables captured by a closure callee or argument."""
+    mut_caps: Set[str] = set()
+    read_caps: Set[str] = set()
+    if isinstance(expr, LambdaNode):
+      mut_caps = set(getattr(expr, "closure_mutated_captures", set()))
+      read_caps = set(getattr(expr, "closure_read_captures", set()))
+    elif isinstance(expr, IdentifierNode):
+      sym = checker.symbol_table.lookup(expr.name)
+      if isinstance(sym, VariableSymbol):
+        mut_caps = set(getattr(sym, "closure_mutated_captures", set()))
+        read_caps = set(getattr(sym, "closure_read_captures", set()))
+    for name in sorted(mut_caps):
+      borrows.append((name, [], True))
+    for name in sorted(read_caps - mut_caps):
+      borrows.append((name, [], False))
 
   @staticmethod
   def _check_borrow_conflicts(
@@ -637,7 +748,7 @@ class BorrowChecker:
       signature: FunctionType,
       is_constructor: bool = False,
   ) -> None:
-    """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
+    """Verifies that call receiver, arguments, and closure captures do not alias mutably."""
     borrows: List[Tuple[str, List[str], bool]] = []
     BorrowChecker._collect_receiver_borrow(
         checker, node, is_constructor, borrows
@@ -645,4 +756,7 @@ class BorrowChecker:
     BorrowChecker._collect_argument_borrows(
         checker, node, signature, is_constructor, borrows
     )
+    BorrowChecker._collect_closure_capture_borrows(checker, node.callee, borrows)
+    for arg in node.arguments:
+      BorrowChecker._collect_closure_capture_borrows(checker, arg.expr, borrows)
     BorrowChecker._check_borrow_conflicts(checker, node, borrows)

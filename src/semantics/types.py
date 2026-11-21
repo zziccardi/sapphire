@@ -199,6 +199,8 @@ class FunctionType(Type):
     for p1, p2 in zip(self.param_types, other.param_types):
       if not p2.is_compatible(p1):
         return False
+    if self.param_mutabilities != other.param_mutabilities:
+      return False
     ret1 = self.return_type
     ret2 = other.return_type
     is_void1 = isinstance(ret1, (NoneType, InferredType)) or (isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void"))
