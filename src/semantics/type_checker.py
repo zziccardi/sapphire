@@ -84,6 +84,8 @@ class TypeChecker(
     self._match_stack: List[List[Type]] = []
     self.loop_depth: int = 0
     self.moved_symbols: Set[VariableSymbol] = set()
+    self.uninitialized_symbols: Set[VariableSymbol] = set()
+    self._mono_depth: int = 0
     self._branch_depth: int = 0
     self._init_assigned_arena_fields: Set[str] = set()
     self._init_used_arena_fields: Set[str] = set()
@@ -106,6 +108,63 @@ class TypeChecker(
     for sym in target_moved - self.moved_symbols:
       sym.is_moved = True
     self.moved_symbols = set(target_moved)
+
+  def _widen_types(self, t1: Type, t2: Type) -> Optional[Type]:
+    """Returns the common widened type for *t1* and *t2*, or None if incompatible."""
+    if isinstance(t1, InferredType):
+      return t2
+    if isinstance(t2, InferredType):
+      return t1
+    if t1 == t2:
+      return t1
+    is_t1_none = isinstance(t1, NoneType) or (
+        isinstance(t1, PrimitiveType) and t1.name == "none"
+    )
+    is_t2_none = isinstance(t2, NoneType) or (
+        isinstance(t2, PrimitiveType) and t2.name == "none"
+    )
+    if is_t1_none and is_t2_none:
+      return NoneType()
+    if is_t1_none:
+      return t2 if isinstance(t2, OptionalType) else OptionalType(t2)
+    if is_t2_none:
+      return t1 if isinstance(t1, OptionalType) else OptionalType(t1)
+    if isinstance(t1, OptionalType) and isinstance(t2, OptionalType):
+      inner = self._widen_types(t1.base_type, t2.base_type)
+      return OptionalType(inner) if inner is not None else None
+    if isinstance(t1, OptionalType):
+      inner = self._widen_types(t1.base_type, t2)
+      return OptionalType(inner) if inner is not None else None
+    if isinstance(t2, OptionalType):
+      inner = self._widen_types(t1, t2.base_type)
+      return OptionalType(inner) if inner is not None else None
+    if isinstance(t1, PrimitiveType) and isinstance(t2, PrimitiveType):
+      if {t1.name, t2.name} == {"int", "float"}:
+        return PrimitiveType("float")
+    if isinstance(t1, ArrayType) and isinstance(t2, ArrayType):
+      if isinstance(t1.element_type, NoneType):
+        return ArrayType(t2.element_type, is_fixed_size=False)
+      if isinstance(t2.element_type, NoneType):
+        return ArrayType(t1.element_type, is_fixed_size=False)
+      elem = self._widen_types(t1.element_type, t2.element_type)
+      if elem is not None:
+        return ArrayType(elem, is_fixed_size=False)
+    if isinstance(t1, MapType) and isinstance(t2, MapType):
+      if isinstance(t1.key_type, NoneType) and isinstance(t1.value_type, NoneType):
+        return t2
+      if isinstance(t2.key_type, NoneType) and isinstance(t2.value_type, NoneType):
+        return t1
+      k = self._widen_types(t1.key_type, t2.key_type)
+      v = self._widen_types(t1.value_type, t2.value_type)
+      if k is not None and v is not None:
+        return MapType(k, v)
+    if t1.is_compatible(t2) and not t2.is_compatible(t1):
+      return t2
+    if t2.is_compatible(t1):
+      return t1
+    if t1.is_compatible(t2):
+      return t2
+    return None
 
   def _find_immutable_field_in_chain(
       self,

@@ -674,13 +674,14 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
-    # 7. Identity lambda x -> x: usage is unconstrained; falls back to
-    #    InferredType which resolves to none.  No error should be raised.
-    self._check("""
-    func test() {
-      let f = x -> x;
-    }
-    """)
+    # 7. Identity lambda x -> x without type context: param type cannot be inferred.
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let f = x -> x;
+      }
+      """)
+    self.assertIn("Cannot infer type for lambda parameter 'x'", str(ctx.exception))
 
   def test_lambda_param_inference_coverage(self):
     """Exercises every scan branch in _infer_lambda_param_type for full coverage.
@@ -1077,12 +1078,14 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
 
-    # 16. Lambda without type context
-    self._check("""
-    func test() {
-      let f = x -> x;
-    }
-    """)
+    # 16. Lambda without type context fails with unresolved parameter type
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func test() {
+        let f = x -> x;
+      }
+      """)
+    self.assertIn("Cannot infer type for lambda parameter 'x'", str(ctx.exception))
 
     # 17. Undefined type referenced
     with self.assertRaises(SemanticError):
@@ -2431,7 +2434,6 @@ class TestTypeChecker(unittest.TestCase):
 
     var mode: enums.DrawMode;
     let mode_val = enums.DrawMode;
-    let missing_member = enums.NonExistent;
     """
     checker = TypeChecker()
     input_stream = InputStream(code)
@@ -2447,6 +2449,16 @@ class TestTypeChecker(unittest.TestCase):
       enums_sym.exports["DrawMode"] = EnumType("DrawMode")
 
     checker.check(ast)
+
+    # Unknown exported member on imported module must raise SemanticError
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      import lib.love2d.enums;
+      func f() {
+        let missing = enums.NonExistent;
+      }
+      """)
+    self.assertIn("has no exported member 'NonExistent'", str(ctx.exception))
 
   def test_real_file_module_import(self):
     """Verifies that type checking graphics.sp automatically resolves lib.love2d.enums."""
@@ -9079,6 +9091,385 @@ class TestTypeChecker(unittest.TestCase):
           return x;
         };
       }
+      """)
+
+  def test_phase4_control_flow_scoping_and_match_exhaustiveness(self):
+    """Verifies Phase 4 if/guard else scoping, multi-name if-let, and match rules."""
+    # 1. `if let` binding must NOT be visible in `else`
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(opt: int?): int {
+        if let v ?= opt {
+          return v;
+        } else {
+          return v;
+        }
+      }
+      """)
+    self.assertIn("Undefined identifier 'v'", str(ctx.exception))
+
+    # 2. `guard let` binding must NOT be visible in `else`
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(opt: int?): int {
+        guard let v ?= opt else {
+          return v;
+        }
+        return v;
+      }
+      """)
+    self.assertIn("Undefined identifier 'v'", str(ctx.exception))
+
+    # 3. Multi-name `if let a, b = pair(); ...` unpacks MultiReturnType
+    self._check("""
+    func pair(): int, String { return 1, "ok"; }
+    func f(): int {
+      if let a, b = pair(); a > 0 {
+        let s: String = b;
+        return a;
+      }
+      return 0;
+    }
+    """)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func pair(): int, String { return 1, "ok"; }
+      func f() {
+        if let a, b, c = pair(); a > 0 {}
+      }
+      """)
+
+    # 4. `match` on int? is NOT exhaustive without `...`
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(opt: int?): int {
+        return match opt {
+          none -> 0,
+          1 -> 1,
+        };
+      }
+      """)
+    self.assertIn("not exhaustive", str(ctx.exception))
+
+    # 5. `match` on Enum? IS exhaustive with `none` + all variants
+    self._check("""
+    enum Dir { Up, Down }
+    func f(opt: Dir?): int {
+      return match opt {
+        none -> 0,
+        Dir.Up -> 1,
+        Dir.Down -> 2,
+      };
+    }
+    """)
+
+    # 6. `match` on open type `int` requires `...`
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(n: int): int {
+        return match n {
+          1 -> 10,
+          2 -> 20,
+        };
+      }
+      """)
+    self.assertIn("not exhaustive", str(ctx.exception))
+
+    # 7. Value-producing `match` block arm must yield on ALL paths
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(n: int): int {
+        return match n {
+          1 -> {
+            if false { yield 10; }
+          },
+          ... -> 20,
+        };
+      }
+      """)
+    self.assertIn("must explicitly yield a value", str(ctx.exception))
+
+    # 8. `match` subject clears `expected_type` (e.g. matching array inside int return)
+    self._check("""
+    func f(): int {
+      return match [1, 2].size() {
+        2 -> 10,
+        ... -> 0,
+      };
+    }
+    """)
+
+  def test_phase4_type_widening_coalescing_comparisons_and_expected_type(self):
+    """Verifies Phase 4 widening, ??, ordering ops, optional chaining, and expected_type."""
+    # 1. `??` typing: T? ?? T? -> T?, T? ?? none -> T?, reject int? ?? 3.14
+    self._check("""
+    func f(a: int?, b: int?): int? {
+      let c: int? = a ?? b;
+      let d: int? = a ?? none;
+      return c ?? d;
+    }
+    """)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f(a: int?) {
+        let x: int = a ?? 3.14;
+      }
+      """)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f(a: int?, b: int?) {
+        let x: int = a ?? b;
+      }
+      """)
+
+    # 2. Array, map, and match widening
+    self._check("""
+    func f(opt: int?, flag: bool) {
+      let a: [float] = [1, 2.5];
+      let b: [int?] = [1, opt];
+      let c: [int?] = [1, none];
+      let m: [String: int?] = {"a": 1, "b": opt};
+      let r: int? = match flag {
+        true -> 1,
+        false -> opt,
+      };
+    }
+    """)
+
+    # 3. `expected_type` propagated in assignment, return, lambda, and cleared on ternary cond
+    self._check("""
+    func make_fixed(): [int; 2] {
+      return [1, 2];
+    }
+    func f() {
+      var arr: [int; 2] = [0, 0];
+      arr = [3, 4];
+      let fn: () -> [int; 2] = () -> [5, 6];
+      let t: [int; 2] = ([1, 2].size() == 2) ? [7, 8] : [9, 10];
+    }
+    """)
+
+    # 4. Optional-chained collection calls return OptionalType
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f(opt_arr: [int]?) {
+        let n: int = opt_arr?.size();
+      }
+      """)
+    self._check("""
+    func f(opt_arr: [int]?, opt_map: [String: int]?) {
+      let n: int? = opt_arr?.size();
+      let m: int? = opt_map?.size();
+      let g: int? = opt_map?.get("k");
+    }
+    """)
+
+    # 5. Ordering operators reject optionals, bools, and structs
+    for bad_cmp in (
+        "func f(a: int?, b: int?): bool { return a < b; }",
+        "func f(): bool { return true < false; }",
+        "struct S { var x: int; }\nfunc f(a: S, b: S): bool { return a < b; }",
+    ):
+      with self.assertRaises(SemanticError):
+        self._check(bad_cmp)
+
+    # 6. Map indexing strictly rejects int? and float keys on [int: V]
+    for bad_key in (
+        "func f(m: [int: String], k: int?) { let v = m[k]; }",
+        "func f(m: [int: String]) { let v = m[1.5]; }",
+        "func f(var m: [int: String], k: int?) { m[k] = \"x\"; }",
+    ):
+      with self.assertRaises(SemanticError):
+        self._check(bad_key)
+
+    # 7. Ref<T> and SharedRef<T> auto-deref on indexing and String/Coroutine/Trait access
+    self._check("""
+    trait Greeter { func hi(): String; }
+    func gen(): Coroutine<int> { yield 1; }
+    func f(
+        ra: Ref<[int]>,
+        sra: SharedRef<[int]>,
+        rs: Ref<String>,
+        srs: SharedRef<String>,
+        rc: Ref<Coroutine<int>>,
+        rt: Ref<Greeter>
+    ) {
+      let a: int = ra[0];
+      let b: int = sra[0];
+      let u1: String = rs.upper();
+      let u2: String = srs.upper();
+      let done: bool = rc.is_done();
+      let g: String = rt.hi();
+    }
+    """)
+
+    # 8. Fixed-size array rejects assigning empty dynamic array; var array/map invariance
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let empty = [];
+        let fixed: [int; 3] = empty;
+      }
+      """)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func push_none(var a: [int?]) { a.push(none); }
+      func f() {
+        var ints: [int] = [1, 2];
+        push_none(ints);
+      }
+      """)
+
+    # 9. Bare `return;` allowed in `: void` function; `lookup_type` rejects value symbols
+    self._check("""
+    func f(flag: bool): void {
+      if flag { return; }
+    }
+    """)
+    with self.assertRaises(SemanticError):
+      self._check("""
+      let NOT_A_TYPE = 42;
+      func f(x: NOT_A_TYPE) {}
+      """)
+
+  def test_phase4_declarations_returns_init_and_diagnostics(self):
+    """Verifies return-path, branch-intersected __init__, uninit reads, and decl rules."""
+    # 1. Non-void function missing return fails; exhaustive match/if-else passes
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(flag: bool): int {
+        if flag { return 1; }
+      }
+      """)
+    self.assertIn("does not return a value on all code paths", str(ctx.exception))
+
+    self._check("""
+    enum Mode { A, B }
+    func f(m: Mode): int {
+      match m {
+        Mode.A -> { return 1; },
+        Mode.B -> { return 2; },
+      }
+    }
+    """)
+
+    # 2. Branch-intersected __init__ field initialization
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct S { var name: String; }
+      impl S {
+        func __init__(flag: bool) {
+          if flag { self.name = "ok"; }
+        }
+      }
+      """)
+    self.assertIn("failed to initialize non-optional field 'name'", str(ctx.exception))
+
+    self._check("""
+    struct S { var name: String; }
+    impl S {
+      func __init__(flag: bool) {
+        if flag { self.name = "a"; } else { self.name = "b"; }
+      }
+    }
+    """)
+
+    # 3. Definite-assignment checks for uninitialized non-default locals
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f() {
+        let r: Ref<int>;
+        let v = r;
+      }
+      """)
+    self.assertIn("Use of uninitialized variable 'r'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func f(flag: bool) {
+        var s: String;
+        if flag { s = "hi"; }
+        let t = s;
+      }
+      """)
+    self.assertIn("Use of uninitialized variable 's'", str(ctx.exception))
+
+    self._check("""
+    func f(flag: bool): String {
+      var s: String;
+      if flag { s = "a"; } else { s = "b"; }
+      return s;
+    }
+    """)
+
+    # 4. Duplicate parameter names, lambda is_parameter=True, void assignment
+    with self.assertRaises(SemanticError):
+      self._check("func f(x: int, x: int) {}")
+    with self.assertRaises(SemanticError):
+      self._check("func f() { let cb = (x: int, x: int) -> x; }")
+    with self.assertRaises(SemanticError):
+      self._check("""
+      func f() {
+        let cb = (r: Ref<int>) -> { let r2 = move r; };
+      }
+      """)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      func noop() {}
+      func f() { let x = noop(); }
+      """)
+    self.assertIn("Cannot assign void result", str(ctx.exception))
+
+    # 5. __init__ modifier/return, enum uniformity, duplicate trait method,
+    #    self-referencing trait, static-on-instance, and _ASSERTION_NAMES restriction
+    with self.assertRaises(SemanticError):
+      self._check("struct S { var x: int; }\nimpl S { static func __init__() {} }")
+    with self.assertRaises(SemanticError):
+      self._check("struct S { var x: int; }\nimpl S { func __init__(): int { self.x = 1; return 1; } }")
+    with self.assertRaises(SemanticError):
+      self._check('enum Mixed { A = 1, B = "two" }')
+    with self.assertRaises(SemanticError):
+      self._check("trait T { func f(); func f(); }")
+    self._check("trait Mergeable { func merge(other: Mergeable): Mergeable; }")
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct S {}
+      impl S { static func make(): int { return 1; } }
+      func f() { let s = S {}; s.make(); }
+      """)
+    self.assertIn("Cannot call static method 'make' on an instance", str(ctx.exception))
+    with self.assertRaises(SemanticError):
+      self._check("func f() { let x = 42; x.assert_eq(42); }")
+
+    # 6. lints.py suggests `if var` when a `var func` mutating method is called
+    checker = self._check("""
+    struct Counter { var n: int; }
+    impl Counter { var func inc() { self.n += 1; } }
+    func f(var m: [String: Counter]) {
+      if m.contains("a") {
+        m["a"].inc();
+      }
+    }
+    """)
+    self.assertTrue(
+        any("if var" in w for w in checker.warnings),
+        f"Expected 'if var' lint warning, got: {checker.warnings}",
+    )
+
+    # 7. Duplicate leaf module names rejected and TestCase not leaked onto std.math
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      import std.math;
+      import nonexistent.math;
+      func f() {}
+      """)
+    self.assertIn("Duplicate imported module name 'math'", str(ctx.exception))
+    self.assertIn("Cannot resolve imported module 'nonexistent.math'", str(ctx.exception))
+
+    with self.assertRaises(SemanticError):
+      self._check("""
+      import std.math;
+      func f(x: math.TestCase) {}
       """)
 
 

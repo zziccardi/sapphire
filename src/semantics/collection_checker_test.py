@@ -114,6 +114,76 @@ class TestCollectionChecker(unittest.TestCase):
     errs2 = self._check_error(src_alias_key2)
     self.assertIn("Aliasing conflict", errs2)
 
+  def test_dynamic_in_place_variable_enforces_mutability_and_type_preservation(self):
+    # Runtime bool variable `in_place = flag` must trigger all in-place checks
+    err_const = self._check_error("""
+    func test(flag: bool): void {
+      let arr = [1, 2, 3];
+      arr.reverse(in_place = flag);
+    }
+    """)
+    self.assertIn("constant variable 'arr'", err_const)
+
+    err_fixed = self._check_error("""
+    func test(flag: bool): void {
+      var arr: [int; 3] = [1, 2, 3];
+      arr.filter(x -> x > 1, in_place = flag);
+    }
+    """)
+    self.assertIn("fixed-size array", err_fixed)
+
+    err_type = self._check_error("""
+    func test(flag: bool): void {
+      var arr = [1, 2, 3];
+      arr.map(x -> String.from(x), in_place = flag);
+    }
+    """)
+    self.assertIn("In-place mapping requires closure return type", err_type)
+
+  def test_collection_callbacks_require_function_type_and_exact_arity(self):
+    self.assertIn(
+        ".map() callback must be a function",
+        self._check_error("func t() { let a = [1, 2]; a.map(42); }"),
+    )
+    self.assertIn(
+        ".filter() predicate must be a function",
+        self._check_error('func t() { let a = [1, 2]; a.filter("bad"); }'),
+    )
+    self.assertIn(
+        ".reduce() callback must be a function",
+        self._check_error("func t() { let a = [1, 2]; a.reduce(0, 42); }"),
+    )
+    self.assertIn(
+        ".sort() comparator must be a function",
+        self._check_error("func t() { let a = [1, 2]; a.sort(by = 42); }"),
+    )
+    self.assertIn(
+        ".map() callback must take 1 parameter",
+        self._check_error("func t() { let a = [1, 2]; a.map((x: int, y: int) -> x + y); }"),
+    )
+    self.assertIn(
+        ".reduce() callback must take 2 parameters",
+        self._check_error("func t() { let a = [1, 2]; a.reduce(0, (x: int) -> x); }"),
+    )
+    self.assertIn(
+        ".sort() comparator must take 2 parameters",
+        self._check_error("func t() { let a = [1, 2]; a.sort(by = (x: int) -> x); }"),
+    )
+
+  def test_bind_args_rejects_extra_positional_and_unknown_named_args(self):
+    self.assertIn(
+        "Unknown named argument 'bogus'",
+        self._check_error("func t() { let a = [1, 2]; a.sort(bogus = true); }"),
+    )
+    self.assertIn(
+        ".map() takes at most 2 arguments",
+        self._check_error("func t() { var a = [1, 2]; a.map(x -> x, false, 99); }"),
+    )
+    self.assertIn(
+        "Duplicate argument 'in_place'",
+        self._check_error("func t() { var a = [1, 2]; a.reverse(false, in_place = false); }"),
+    )
+
 
 if __name__ == "__main__":
   unittest.main()

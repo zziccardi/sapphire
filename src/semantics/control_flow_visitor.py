@@ -9,6 +9,7 @@ from src.parser.ast import (
     CallNode,
     ContinueNode,
     EllipsisPatternNode,
+    ExprStmtNode,
     ForNode,
     GuardStmtNode,
     HeaderBindingNode,
@@ -22,6 +23,7 @@ from src.parser.ast import (
     MoveNode,
     ReturnNode,
     WhileNode,
+    YieldNode,
 )
 from src.semantics.arena_checker import ArenaChecker
 from src.semantics.lints import (
@@ -33,6 +35,7 @@ from src.semantics.symbol_table import (
     EnumSymbol,
     EnumType,
     MapType,
+    MultiReturnType,
     NoneType,
     OptionalType,
     PrimitiveType,
@@ -75,15 +78,37 @@ class ControlFlowVisitorMixin:
     let_names = getattr(binding, "let_names", [binding.let_name])
     self.node_types[binding] = unwrapped_type
     if len(let_names) > 1:
-      elem_t = (
-          unwrapped_type.element_type
-          if isinstance(unwrapped_type, ArrayType)
-          else unwrapped_type
-      )
-      names_and_types = [(name, elem_t) for name in let_names]
+      if isinstance(unwrapped_type, MultiReturnType):
+        if len(unwrapped_type.types) != len(let_names):
+          self.error(
+              f"Cannot unpack {len(unwrapped_type.types)} value(s) into "
+              f"{len(let_names)} variable(s).",
+              node=binding,
+          )
+          names_and_types = [
+              (
+                  name,
+                  unwrapped_type.types[i]
+                  if i < len(unwrapped_type.types)
+                  else PrimitiveType("none"),
+              )
+              for i, name in enumerate(let_names)
+          ]
+        else:
+          names_and_types = list(zip(let_names, unwrapped_type.types))
+      elif isinstance(unwrapped_type, ArrayType):
+        names_and_types = [(name, unwrapped_type.element_type) for name in let_names]
+      else:
+        self.error(
+            f"Cannot unpack single value of type '{unwrapped_type}' into "
+            f"{len(let_names)} variable(s).",
+            node=binding,
+        )
+        names_and_types = [(name, unwrapped_type) for name in let_names]
     else:
       names_and_types = [(binding.let_name, unwrapped_type)]
 
+    binding._bound_names = [name for name, _ in names_and_types]
     for name, b_type in names_and_types:
       sym = VariableSymbol(name, b_type, is_mutable=binding.is_mutable)
       sym.is_borrowed_unwrap = is_borrowed_unwrap
@@ -98,6 +123,36 @@ class ControlFlowVisitorMixin:
       )
 
     return self._register_unwrap_binding_freeze(binding, freeze_label)
+
+  def _stmt_always_yields(self, stmt: ASTNode) -> bool:
+    """Returns True if *stmt* unconditionally yields or diverges from a match block."""
+    if isinstance(stmt, (YieldNode, ReturnNode, BreakNode, ContinueNode)):
+      return True
+    if isinstance(stmt, IfNode):
+      if stmt.then_block and stmt.else_block:
+        then_y = self._block_always_yields(stmt.then_block)
+        else_y = (
+            self._stmt_always_yields(stmt.else_block)
+            if isinstance(stmt.else_block, ASTNode)
+            else self._block_always_yields(stmt.else_block)
+        )
+        return then_y and else_y
+      return False
+    if isinstance(stmt, BlockNode):
+      return self._block_always_yields(stmt)
+    if isinstance(stmt, ExprStmtNode) and isinstance(stmt.expr, MatchExprNode):
+      stmt = stmt.expr
+    if isinstance(stmt, MatchExprNode) and getattr(stmt, "_is_exhaustive", False):
+      return bool(stmt.cases) and all(
+          self._stmt_always_yields(c.body) for c in stmt.cases
+      )
+    return False
+
+  def _block_always_yields(self, block: BlockNode) -> bool:
+    for stmt in getattr(block, "statements", []):
+      if self._stmt_always_yields(stmt):
+        return True
+    return False
 
   def _check_match_pattern(
       self,
@@ -117,7 +172,7 @@ class ControlFlowVisitorMixin:
         pat_type = self.visit(pattern)
         if (
             isinstance(pat_type, EnumType)
-            and pat_type.name == subject_type.name
+            and pat_type == subject_type
         ):
           seen_enum_variants.add(pattern.member)
         else:
@@ -135,7 +190,7 @@ class ControlFlowVisitorMixin:
         pat_type = self.visit(pattern)
         if not (
             isinstance(pat_type, EnumType)
-            and pat_type.name == subject_type.name
+            and pat_type == subject_type
         ):
           self.error(
               f"Pattern '{pattern}' is not a valid variant of enum '{subject_type.name}'."
@@ -154,29 +209,70 @@ class ControlFlowVisitorMixin:
       return
 
     if isinstance(subject_type, OptionalType):
+      if isinstance(pattern, LiteralNode) and pattern.lit_type == "none":
+        self.visit(pattern)
+        opt_flags[0] = True  # seen_optional_none
+        return
+      if isinstance(subject_type.base_type, EnumType):
+        if isinstance(pattern, IdentifierNode) and pattern.name in subject_type.base_type.variants:
+          seen_enum_variants.add(pattern.name)
+          opt_flags[1] = True
+          return
+        pat_type = self.visit(pattern)
+        if isinstance(pat_type, NoneType) or (
+            isinstance(pat_type, PrimitiveType) and pat_type.name == "none"
+        ):
+          opt_flags[0] = True
+        elif isinstance(pat_type, EnumType) and pat_type == subject_type.base_type:
+          if isinstance(pattern, MemberAccessNode):
+            seen_enum_variants.add(pattern.member)
+          opt_flags[1] = True
+        else:
+          self.error(
+              f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'."
+          )
+        return
       pat_type = self.visit(pattern)
       if isinstance(pat_type, NoneType) or (
           isinstance(pat_type, PrimitiveType) and pat_type.name == "none"
       ):
         opt_flags[0] = True  # seen_optional_none
+      elif isinstance(subject_type.base_type, PrimitiveType) and subject_type.base_type.name == "bool":
+        if isinstance(pattern, LiteralNode) and pattern.lit_type == "bool":
+          if pattern.value is True or pattern.value == "true":
+            bool_flags[0] = True
+          elif pattern.value is False or pattern.value == "false":
+            bool_flags[1] = True
+          opt_flags[1] = True
+        elif pat_type == PrimitiveType("bool"):
+          opt_flags[1] = True
+        else:
+          self.error(
+              f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'."
+          )
       elif pat_type.is_compatible(
           subject_type.base_type
       ) or subject_type.base_type.is_compatible(pat_type):
-        opt_flags[1] = True  # seen_optional_some
+        opt_flags[1] = True  # seen_optional_some (not exhaustive by itself)
       else:
         self.error(
             f"Pattern type '{pat_type}' is incompatible with optional inner type '{subject_type.base_type}'."
         )
       return
 
-    pat_type = self.visit(pattern)  # pragma: no cover
-    if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):  # pragma: no cover
-      self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")  # pragma: no cover
-    opt_flags[1] = True  # pragma: no cover
+    pat_type = self.visit(pattern)
+    if not pat_type.is_compatible(subject_type) and not subject_type.is_compatible(pat_type):
+      self.error(f"Pattern type '{pat_type}' is incompatible with subject type '{subject_type}'.")
+    opt_flags[1] = True
 
   def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
     """Type-checks `match` statements and value-producing expressions."""
-    subject_type = self.visit(node.subject)
+    old_expected = self.expected_type
+    self.expected_type = None
+    try:
+      subject_type = self.visit(node.subject)
+    finally:
+      self.expected_type = old_expected
     is_stmt = getattr(node, "is_statement", False)
 
     seen_enum_variants: Set[str] = set()
@@ -188,31 +284,58 @@ class ControlFlowVisitorMixin:
     case_types: List[Type] = []
     pre_match_moved = set(self.moved_symbols)
     union_moved: Set[VariableSymbol] = set(pre_match_moved)
+    pre_match_uninit = set(self.uninitialized_symbols)
+    pre_match_init_fields = set(self.initialized_fields)
+    fallthrough_uninit: List[Set[VariableSymbol]] = []
+    fallthrough_init_fields: List[Set[str]] = []
 
     for case in node.cases:
-      # Each arm starts from the pre-match move state; post-match is the union.
+      # Each arm starts from the pre-match state.
       self._restore_moved_symbols(pre_match_moved)
-      for pattern in case.patterns:
-        self._check_match_pattern(
-            pattern, subject_type, seen_enum_variants, bool_flags, opt_flags
-        )
+      self.uninitialized_symbols = set(pre_match_uninit)
+      self.initialized_fields = set(pre_match_init_fields)
 
+      pat_old_expected = self.expected_type
+      self.expected_type = None
+      try:
+        for pattern in case.patterns:
+          self._check_match_pattern(
+              pattern, subject_type, seen_enum_variants, bool_flags, opt_flags
+          )
+      finally:
+        self.expected_type = pat_old_expected
+
+      arm_diverges = False
       if is_stmt:
         self.visit(case.body)
+        if isinstance(case.body, BlockNode):
+          arm_diverges = self._block_terminates(case.body)
+        else:
+          arm_diverges = self._statement_terminates(case.body)
         case_types.append(NoneType())
       else:
         self._match_stack.append([])
         if isinstance(case.body, BlockNode):
           self.visit(case.body)
           yields = self._match_stack.pop()
+          all_yield_or_diverge = self._block_always_yields(case.body)
+          arm_diverges = self._block_terminates(case.body)
           if yields:
-            first_yield = yields[0]
+            widened_yield = yields[0]
             for y in yields[1:]:
-              if not y.is_compatible(first_yield):
+              merged = self._widen_types(widened_yield, y)
+              if merged is None:
                 self.error(
-                    f"Incompatible yield types in match case: '{first_yield}' and '{y}'."
+                    f"Incompatible yield types in match case: '{widened_yield}' and '{y}'."
                 )
-            case_types.append(first_yield)
+              else:
+                widened_yield = merged
+            case_types.append(widened_yield)
+            if not all_yield_or_diverge:
+              has_unyielded_block = True
+          elif arm_diverges:
+            # Block unconditionally exits via return/break/continue; no yield needed.
+            pass
           else:
             case_types.append(NoneType())
             has_unyielded_block = True
@@ -224,26 +347,66 @@ class ControlFlowVisitorMixin:
           )
           case_types.append(expr_type)
       union_moved |= self.moved_symbols
+      if not arm_diverges:
+        fallthrough_uninit.append(set(self.uninitialized_symbols))
+        fallthrough_init_fields.append(set(self.initialized_fields))
 
     if node.cases:
       self._restore_moved_symbols(union_moved)
 
     has_ellipsis = opt_flags[2]
+    is_exhaustive = True
     if not has_ellipsis:
       if isinstance(subject_type, EnumType):
         missing = set(subject_type.variants.keys()) - seen_enum_variants
         if missing:
+          is_exhaustive = False
           self.error(
               f"Match expression for enum '{subject_type.name}' is not exhaustive. Missing case: '{next(iter(missing))}'."
           )
       elif isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
         if not (bool_flags[0] and bool_flags[1]):
+          is_exhaustive = False
           self.error("Match expression for bool is not exhaustive.")
       elif isinstance(subject_type, OptionalType):
-        if not (opt_flags[0] and (opt_flags[1] or has_ellipsis)):
+        base = subject_type.base_type
+        if isinstance(base, EnumType):
+          missing = set(base.variants.keys()) - seen_enum_variants
+          if not opt_flags[0] or missing:
+            is_exhaustive = False
+            self.error(
+                f"Match expression for optional '{subject_type}' is not exhaustive."
+            )
+        elif isinstance(base, PrimitiveType) and base.name == "bool":
+          if not (opt_flags[0] and bool_flags[0] and bool_flags[1]):
+            is_exhaustive = False
+            self.error(
+                f"Match expression for optional '{subject_type}' is not exhaustive."
+            )
+        else:
+          is_exhaustive = False
           self.error(
-              f"Match expression for optional '{subject_type}' is not exhaustive."
+              f"Match expression for optional '{subject_type}' is not exhaustive. Add a wildcard '...' arm."
           )
+      elif not isinstance(subject_type, NoneType):
+        is_exhaustive = False
+        self.error(
+            f"Match expression for type '{subject_type}' is not exhaustive. Add a wildcard '...' arm."
+        )
+
+    node._is_exhaustive = is_exhaustive
+    if is_exhaustive and fallthrough_uninit:
+      merged_uninit: Set[VariableSymbol] = set()
+      for u_set in fallthrough_uninit:
+        merged_uninit |= u_set
+      self.uninitialized_symbols = merged_uninit
+      merged_fields = set(fallthrough_init_fields[0])
+      for f_set in fallthrough_init_fields[1:]:
+        merged_fields &= f_set
+      self.initialized_fields = merged_fields
+    elif not is_exhaustive:
+      self.uninitialized_symbols = set(pre_match_uninit)
+      self.initialized_fields = set(pre_match_init_fields)
 
     if is_stmt:
       return PrimitiveType("none")
@@ -257,6 +420,10 @@ class ControlFlowVisitorMixin:
         )
     ]
     if not non_none_types:
+      if has_unyielded_block:
+        self.error(
+            "Match case block in value-producing match expression must explicitly yield a value."
+        )
       return PrimitiveType("none")
 
     if has_unyielded_block:
@@ -264,12 +431,15 @@ class ControlFlowVisitorMixin:
           "Match case block in value-producing match expression must explicitly yield a value."
       )
 
-    first_type = non_none_types[0]
+    result_type = non_none_types[0]
     for t in non_none_types[1:]:
-      if not t.is_compatible(first_type) and not first_type.is_compatible(t):
+      widened = self._widen_types(result_type, t)
+      if widened is None:
         self.error(
-            f"Incompatible return types in match branches: '{first_type}' and '{t}'."
+            f"Incompatible return types in match branches: '{result_type}' and '{t}'."
         )
+      else:
+        result_type = widened
 
     has_none = any(
         isinstance(t, NoneType)
@@ -277,14 +447,35 @@ class ControlFlowVisitorMixin:
         for t in case_types
     )
     if has_none or len(non_none_types) < len(case_types):
-      return OptionalType(first_type)
-    return first_type
+      return (
+          result_type
+          if isinstance(result_type, OptionalType)
+          else OptionalType(result_type)
+      )
+    return result_type
 
   def _visit_if_else_branch(
-      self, node: IfNode, pre_branch_moved: Set[VariableSymbol]
+      self,
+      node: IfNode,
+      pre_branch_moved: Set[VariableSymbol],
+      pre_uninit: Set[VariableSymbol],
+      pre_init_fields: Set[str],
+      then_moved: Optional[Set[VariableSymbol]] = None,
+      then_uninit: Optional[Set[VariableSymbol]] = None,
+      then_init_fields: Optional[Set[str]] = None,
   ) -> None:
-    """Visits an `else` branch with `if var` freezes cleared and move-state reset."""
-    then_moved = set(self.moved_symbols)
+    """Visits an `else` branch with `if var` freezes cleared and merges branch states."""
+    if then_moved is None:
+      then_moved = set(self.moved_symbols)
+    if then_uninit is None:
+      then_uninit = set(self.uninitialized_symbols)
+    if then_init_fields is None:
+      then_init_fields = set(self.initialized_fields)
+    then_term = (
+        self._block_terminates(node.then_block)
+        if isinstance(node.then_block, BlockNode)
+        else self._statement_terminates(node.then_block)
+    )
     if node.else_block:
       saved_frozen = list(self.symbol_table.current_scope.frozen_lvalues)
       # `if var` unwrap only freezes the source in the `then` branch.
@@ -292,16 +483,40 @@ class ControlFlowVisitorMixin:
           f for f in saved_frozen if f[2] != "active 'if var' unwrap"
       ]
       self._restore_moved_symbols(pre_branch_moved)
+      self.uninitialized_symbols = set(pre_uninit)
+      self.initialized_fields = set(pre_init_fields)
       self.visit(node.else_block)
       else_moved = set(self.moved_symbols)
+      else_uninit = set(self.uninitialized_symbols)
+      else_init_fields = set(self.initialized_fields)
+      else_term = (
+          self._statement_terminates(node.else_block)
+          if isinstance(node.else_block, ASTNode)
+          else self._block_terminates(node.else_block)
+      )
       self._restore_moved_symbols(then_moved | else_moved)
       self.symbol_table.current_scope.frozen_lvalues = saved_frozen
+
+      if then_term and not else_term:
+        self.uninitialized_symbols = else_uninit
+        self.initialized_fields = else_init_fields
+      elif else_term and not then_term:
+        self.uninitialized_symbols = then_uninit
+        self.initialized_fields = then_init_fields
+      else:
+        self.uninitialized_symbols = then_uninit | else_uninit
+        self.initialized_fields = then_init_fields & else_init_fields
     else:
       self._restore_moved_symbols(then_moved)
+      self.uninitialized_symbols = set(pre_uninit)
+      self.initialized_fields = set(pre_init_fields)
 
   def visit_IfNode(self, node: IfNode) -> None:
     """Type-checks `if` statements, optional-unwrap bindings, and NLL freezes."""
     if node.bindings:
+      pre_branch_moved = set(self.moved_symbols)
+      pre_uninit = set(self.uninitialized_symbols)
+      pre_init_fields = set(self.initialized_fields)
       self.symbol_table.enter_scope()
       if_header_scope = self.symbol_table.current_scope
       has_unwrap = False
@@ -335,35 +550,59 @@ class ControlFlowVisitorMixin:
             "Init-statement in 'if' must be followed by a condition unless using optional unwrapping '?='."
         )
 
-      pre_branch_moved = set(self.moved_symbols)
+      post_header_moved = set(self.moved_symbols)
       self._branch_depth += 1
       try:
-        if unwrap_freezes and isinstance(node.then_block, BlockNode):
-          if_scope = self.symbol_table.current_scope
-          self.symbol_table.enter_scope()
-          try:
-            self._visit_stmts_with_unwrap_nll(
-                node.then_block.statements,
-                initial_freezes=unwrap_freezes,
-                freeze_scope=if_scope,
-            )
-          finally:
-            cur_scope = self.symbol_table.current_scope
-            self._restore_moved_symbols(
-                {s for s in self.moved_symbols if s.scope_defined != cur_scope}
-            )
-            self.symbol_table.exit_scope()
-        else:
-          self.visit(node.then_block)
-        check_if_contains_access(self, node)
-        self._visit_if_else_branch(node, pre_branch_moved)
+        try:
+          if unwrap_freezes and isinstance(node.then_block, BlockNode):
+            if_scope = self.symbol_table.current_scope
+            self.symbol_table.enter_scope()
+            try:
+              self._visit_stmts_with_unwrap_nll(
+                  node.then_block.statements,
+                  initial_freezes=unwrap_freezes,
+                  freeze_scope=if_scope,
+              )
+            finally:
+              cur_scope = self.symbol_table.current_scope
+              self._restore_moved_symbols(
+                  {s for s in self.moved_symbols if s.scope_defined != cur_scope}
+              )
+              self.symbol_table.exit_scope()
+          else:
+            self.visit(node.then_block)
+          check_if_contains_access(self, node)
+          then_moved = {
+              s for s in self.moved_symbols if s.scope_defined != if_header_scope
+          }
+          then_uninit = {
+              s
+              for s in self.uninitialized_symbols
+              if s.scope_defined != if_header_scope
+          }
+          then_init_fields = set(self.initialized_fields)
+        finally:
+          # Exit `if_header_scope` BEFORE visiting `else_block` so `if let`/`if var`
+          # bindings are strictly scoped to the `then` branch (not `else`).
+          self._restore_moved_symbols(
+              {s for s in self.moved_symbols if s.scope_defined != if_header_scope}
+          )
+          self.symbol_table.exit_scope()
+
+        else_pre_moved = {
+            s for s in post_header_moved if s.scope_defined != if_header_scope
+        }
+        self._visit_if_else_branch(
+            node,
+            else_pre_moved,
+            pre_uninit,
+            pre_init_fields,
+            then_moved=then_moved,
+            then_uninit=then_uninit,
+            then_init_fields=then_init_fields,
+        )
       finally:
         self._branch_depth -= 1
-
-      self._restore_moved_symbols(
-          {s for s in self.moved_symbols if s.scope_defined != if_header_scope}
-      )
-      self.symbol_table.exit_scope()
       return
 
     cond_type = self.visit(node.condition)
@@ -379,11 +618,15 @@ class ControlFlowVisitorMixin:
       self.error("If condition must resolve to 'bool'.", node=c_node)
 
     pre_branch_moved = set(self.moved_symbols)
+    pre_uninit = set(self.uninitialized_symbols)
+    pre_init_fields = set(self.initialized_fields)
     self._branch_depth += 1
     try:
       self._visit_block_with_terminating_unfreeze(node.then_block)
       check_if_contains_access(self, node)
-      self._visit_if_else_branch(node, pre_branch_moved)
+      self._visit_if_else_branch(
+          node, pre_branch_moved, pre_uninit, pre_init_fields
+      )
     finally:
       self._branch_depth -= 1
 
@@ -392,6 +635,8 @@ class ControlFlowVisitorMixin:
     self.loop_depth += 1
     self._branch_depth += 1
     pre_loop_moved = set(self.moved_symbols)
+    pre_loop_uninit = set(self.uninitialized_symbols)
+    pre_loop_init_fields = set(self.initialized_fields)
     loop_outer_scope = self.symbol_table.current_scope
     self._loop_context_stack.append((pre_loop_moved, loop_outer_scope))
     try:
@@ -409,12 +654,17 @@ class ControlFlowVisitorMixin:
       self._loop_context_stack.pop()
       self._branch_depth -= 1
       self.loop_depth -= 1
+      # Loop body may execute 0 times; restore pre-loop initialization guarantees.
+      self.uninitialized_symbols = set(pre_loop_uninit)
+      self.initialized_fields = set(pre_loop_init_fields)
 
   def visit_ForNode(self, node: ForNode) -> None:
     """Type-checks `for-in` loops and freezes the iterated collection against mutation."""
     self.loop_depth += 1
     self._branch_depth += 1
     pre_loop_moved = set(self.moved_symbols)
+    pre_loop_uninit = set(self.uninitialized_symbols)
+    pre_loop_init_fields = set(self.initialized_fields)
     loop_outer_scope = self.symbol_table.current_scope
     self._loop_context_stack.append((pre_loop_moved, loop_outer_scope))
     try:
@@ -527,6 +777,9 @@ class ControlFlowVisitorMixin:
       self._loop_context_stack.pop()
       self._branch_depth -= 1
       self.loop_depth -= 1
+      # Loop body may execute 0 times; restore pre-loop initialization guarantees.
+      self.uninitialized_symbols = set(pre_loop_uninit)
+      self.initialized_fields = set(pre_loop_init_fields)
 
   def visit_BreakNode(self, node: BreakNode) -> None:
     if self.loop_depth <= 0:
@@ -565,6 +818,12 @@ class ControlFlowVisitorMixin:
         return then_term and else_term
     if isinstance(stmt, BlockNode):
       return self._block_terminates(stmt)
+    if isinstance(stmt, ExprStmtNode) and isinstance(stmt.expr, MatchExprNode):
+      stmt = stmt.expr
+    if isinstance(stmt, MatchExprNode) and getattr(stmt, "_is_exhaustive", False):
+      return bool(stmt.cases) and all(
+          self._statement_terminates(c.body) for c in stmt.cases
+      )
     return False
 
   def _stmt_always_returns(self, stmt: ASTNode) -> bool:
@@ -582,6 +841,12 @@ class ControlFlowVisitorMixin:
         return then_ret and else_ret
     if isinstance(stmt, BlockNode):
       return self._block_always_returns(stmt)
+    if isinstance(stmt, ExprStmtNode) and isinstance(stmt.expr, MatchExprNode):
+      stmt = stmt.expr
+    if isinstance(stmt, MatchExprNode) and getattr(stmt, "_is_exhaustive", False):
+      return bool(stmt.cases) and all(
+          self._stmt_always_returns(c.body) for c in stmt.cases
+      )
     return False
 
   def _block_always_returns(self, block: BlockNode) -> bool:
@@ -802,6 +1067,8 @@ class ControlFlowVisitorMixin:
 
   def visit_GuardStmtNode(self, node: GuardStmtNode) -> Type:
     """Type-checks `guard` statements and promotes unwrapped bindings to outer scope."""
+    outer_scope = self.symbol_table.current_scope
+    pre_clause_symbols = dict(outer_scope.symbols)
     guard_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
     for clause in node.clauses:
       if clause.binding:
@@ -818,19 +1085,31 @@ class ControlFlowVisitorMixin:
         if cond_t != PrimitiveType("bool"):
           self.error(f"Guard condition must be of type 'bool', got '{cond_t}'.")
 
-    # Temporarily release freezes while checking `else` (which must diverge).
+    post_clause_symbols = dict(outer_scope.symbols)
+
+    # Temporarily release freezes and hide newly bound guard vars while checking `else`.
     if guard_freezes:
       for _, freeze_entry in guard_freezes:
-        if freeze_entry in self.symbol_table.current_scope.frozen_lvalues:
-          self.symbol_table.current_scope.frozen_lvalues.remove(freeze_entry)
+        if freeze_entry in outer_scope.frozen_lvalues:
+          outer_scope.frozen_lvalues.remove(freeze_entry)
 
     pre_else_moved = set(self.moved_symbols)
-    self.symbol_table.enter_scope()
-    self.visit(node.else_block)
-    self.symbol_table.exit_scope()
+    pre_else_uninit = set(self.uninitialized_symbols)
+    pre_else_init_fields = set(self.initialized_fields)
+    outer_scope.symbols = pre_clause_symbols
+    try:
+      self.symbol_table.enter_scope()
+      try:
+        self.visit(node.else_block)
+      finally:
+        self.symbol_table.exit_scope()
+    finally:
+      outer_scope.symbols = post_clause_symbols
 
     if self._block_terminates(node.else_block):
       self._restore_moved_symbols(pre_else_moved)
+      self.uninitialized_symbols = pre_else_uninit
+      self.initialized_fields = pre_else_init_fields
     else:
       self.error(
           "Guard else block must terminate control flow (via return, break, or continue)."
@@ -838,7 +1117,7 @@ class ControlFlowVisitorMixin:
 
     if guard_freezes:
       for _, freeze_entry in guard_freezes:
-        self.symbol_table.current_scope.frozen_lvalues.append(freeze_entry)
+        outer_scope.frozen_lvalues.append(freeze_entry)
       pending = getattr(self, "_pending_guard_unwrap_freezes", None)
       if pending is not None:
         pending.extend(guard_freezes)

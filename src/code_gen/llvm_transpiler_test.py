@@ -190,10 +190,10 @@ class TestLLVMTranspiler(unittest.TestCase):
     code_bool = "func f_bool(): bool {}"
     code_struct = "struct Point { var x: int; }\nfunc f_struct(): Point {}"
 
-    self.assertIn("ret i64 0", self._parse_and_transpile(code_int))
-    self.assertIn("ret double", self._parse_and_transpile(code_float))
-    self.assertIn("ret i1 0", self._parse_and_transpile(code_bool))
-    self.assertIn('ret %"struct.Point"* null', self._parse_and_transpile(code_struct))
+    self.assertIn("ret i64 0", self._parse_and_transpile(code_int, check_types=False))
+    self.assertIn("ret double", self._parse_and_transpile(code_float, check_types=False))
+    self.assertIn("ret i1 0", self._parse_and_transpile(code_bool, check_types=False))
+    self.assertIn('ret %"struct.Point"* null', self._parse_and_transpile(code_struct, check_types=False))
 
   def test_block_and_expr_stmt(self):
     code = """

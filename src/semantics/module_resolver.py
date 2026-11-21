@@ -87,23 +87,23 @@ def resolve_module_path(
   if cwd not in search_dirs:
     search_dirs.append(cwd)
 
-  # 3. Built-in library directories (lib, lib/std, lib/love2d, and parent)
+  # 3. Built-in library directory (strictly bounded to `lib_dir` so bare names
+  #    like `math` or unrelated directories in `lib_dir`'s parent do not leak).
   lib_dir = find_sapphire_lib_dir()
-  if lib_dir:
-    lib_parent = os.path.dirname(lib_dir)
-    if lib_parent not in search_dirs:
-      search_dirs.append(lib_parent)
-    if lib_dir not in search_dirs:
-      search_dirs.append(lib_dir)
-    std_dir = os.path.join(lib_dir, "std")
-    if os.path.isdir(std_dir) and std_dir not in search_dirs:
-      search_dirs.append(std_dir)
-    love2d_dir = os.path.join(lib_dir, "love2d")
-    if os.path.isdir(love2d_dir) and love2d_dir not in search_dirs:
-      search_dirs.append(love2d_dir)
+  if lib_dir and lib_dir not in search_dirs:
+    search_dirs.append(lib_dir)
 
   for d in search_dirs:
     candidate = os.path.join(d, rel_path)
+    if os.path.isfile(candidate):
+      return os.path.abspath(candidate)
+
+  # Support explicit `lib.*` qualified imports (e.g. `lib.love2d.enums`,
+  # `lib.std.math`) directly within `lib_dir` without exposing `lib_dir`'s
+  # parent directory.
+  if lib_dir and import_path.startswith("lib."):
+    sub_rel = import_path[4:].replace(".", "/") + ".sp"
+    candidate = os.path.join(lib_dir, sub_rel)
     if os.path.isfile(candidate):
       return os.path.abspath(candidate)
 

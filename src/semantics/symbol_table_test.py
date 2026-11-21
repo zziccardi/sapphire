@@ -327,8 +327,9 @@ class TestSymbolTable(unittest.TestCase):
     self.assertFalse(coro_int == "not-a-coroutine")
 
     # Compatibility
-    self.assertTrue(coro_void.is_compatible(coro_int))
-    self.assertTrue(coro_int.is_compatible(coro_void))
+    self.assertTrue(coro_void.is_compatible(coro_void_explicit))
+    self.assertFalse(coro_void.is_compatible(coro_int))
+    self.assertFalse(coro_int.is_compatible(coro_void))
     self.assertTrue(coro_int.is_compatible(coro_float))
     self.assertFalse(coro_float.is_compatible(coro_int))
     self.assertTrue(coro_int.is_compatible(OptionalType(coro_int)))

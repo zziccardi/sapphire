@@ -89,13 +89,41 @@ class TypeResolverMixin:
 
   def _get_impl_type_params(self, decl: ImplBlockNode) -> List[str]:
     type_params = list(decl.type_params) if decl.type_params else []
+    struct_type = self.symbol_table.lookup_type(decl.struct_name)
+    trait_type = (
+        self.symbol_table.lookup_type(decl.trait_name)
+        if getattr(decl, "trait_name", None)
+        else None
+    )
+    struct_is_generic = isinstance(struct_type, StructType) and bool(
+        struct_type.type_params
+    )
+    trait_tparams = (
+        set(trait_type.type_params)
+        if isinstance(trait_type, TraitType) and trait_type.type_params
+        else set()
+    )
     builtin_type_names = {
         "int", "float", "String", "bool", "none", "void",
         "Array", "Map", "Coroutine", "Ref", "SharedRef", "WeakRef", "Arena", "Range",
     }
-    for arg in getattr(decl, "trait_type_args", []) + getattr(decl, "struct_type_args", []):
-      if isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names:
-        if "." not in arg.name and self.symbol_table.lookup_type(arg.name) is None:
+    if struct_is_generic:
+      for arg in getattr(decl, "struct_type_args", []) + getattr(decl, "trait_type_args", []):
+        if isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names:
+          if "." not in arg.name and self.symbol_table.lookup_type(arg.name) is None:
+            if arg.name not in type_params:
+              type_params.append(arg.name)
+    elif trait_tparams:
+      # For concrete structs implementing a generic trait (`impl Trait<T> for S`),
+      # only treat unresolved type args that match the trait's declared type
+      # parameter names as generic; typos like `impl Trait<Typo> for S` remain
+      # undefined-type errors.
+      for arg in getattr(decl, "trait_type_args", []):
+        if (
+            isinstance(arg, BasicTypeNode)
+            and arg.name in trait_tparams
+            and self.symbol_table.lookup_type(arg.name) is None
+        ):
           if arg.name not in type_params:
             type_params.append(arg.name)
     decl.type_params = type_params
@@ -107,12 +135,24 @@ class TypeResolverMixin:
     if isinstance(t, OptionalType):
       return OptionalType(self._substitute_type_params(t.base_type, type_map))
     if isinstance(t, ArrayType):
-      return ArrayType(self._substitute_type_params(t.element_type, type_map), size=t.size)
+      return ArrayType(
+          self._substitute_type_params(t.element_type, type_map),
+          size=t.size,
+          is_fixed_size=t.is_fixed_size,
+      )
     if isinstance(t, MapType):
       return MapType(
           self._substitute_type_params(t.key_type, type_map),
           self._substitute_type_params(t.value_type, type_map),
       )
+    if isinstance(t, RefType):
+      return RefType(self._substitute_type_params(t.inner_type, type_map))
+    if isinstance(t, SharedRefType):
+      return SharedRefType(self._substitute_type_params(t.inner_type, type_map))
+    if isinstance(t, WeakRefType):
+      return WeakRefType(self._substitute_type_params(t.inner_type, type_map))
+    if isinstance(t, CoroutineType):
+      return CoroutineType(self._substitute_type_params(t.yield_type, type_map))
     if isinstance(t, MultiReturnType):
       return MultiReturnType([self._substitute_type_params(sub, type_map) for sub in t.types])
     if isinstance(t, FunctionType):
@@ -187,7 +227,7 @@ class TypeResolverMixin:
 
           method = StructMethod(func_decl.name, signature, member.modifier)
 
-          # Validate __del__ destructor
+          # Validate __del__ destructor and __init__ constructor
           if func_decl.name == "__del__":
             if member.modifier == "static":
               self.error("Destructor '__del__' cannot be static.")
@@ -208,6 +248,24 @@ class TypeResolverMixin:
             )
             if not is_void:
               self.error("Destructor '__del__' must return void.")
+          elif func_decl.name == "__init__":
+            if member.modifier == "static":
+              self.error("Constructor '__init__' cannot be static.", node=func_decl)
+            is_void = (
+                len(ret_type) == 0
+                or (
+                    len(ret_type) == 1
+                    and (
+                        isinstance(ret_type[0], NoneType)
+                        or (
+                            isinstance(ret_type[0], PrimitiveType)
+                            and ret_type[0].name in ("none", "void")
+                        )
+                    )
+                )
+            )
+            if not is_void:
+              self.error("Constructor '__init__' must return void.", node=func_decl)
 
           # Check for duplicate definitions
           if func_decl.name in struct_type.methods:
@@ -282,7 +340,12 @@ class TypeResolverMixin:
         if isinstance(mod_sym, ModuleSymbol):
           exp_sym = mod_sym.lookup_export(parts[1])
           if exp_sym:
-            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+            resolved = exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+            if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
+              resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+              if not any(isinstance(t, GenericTypeParameter) for t in resolved_type_args):
+                return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
+            return resolved
           self.error(f"Module '{parts[0]}' does not export type '{parts[1]}'.", node=node)
           return PrimitiveType("none")
       resolved = self.symbol_table.lookup_type(node.name)

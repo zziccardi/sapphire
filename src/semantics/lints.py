@@ -19,7 +19,14 @@ from src.parser.ast import (
     UnaryOpNode,
 )
 from src.semantics.arena_checker import ArenaChecker
-from src.semantics.symbol_table import MapType, VariableSymbol
+from src.semantics.symbol_table import (
+    MapType,
+    OptionalType,
+    RefType,
+    StructType,
+    TraitType,
+    VariableSymbol,
+)
 
 
 _STRUCTURAL_MAP_MUTATIONS = frozenset({"remove", "clear", "insert", "set"})
@@ -200,10 +207,20 @@ def _scan_subtrees_for_map_access(
         state["has_recv_mutation"] = True
       elif _is_rooted_at_matching_index(callee_recv, recv, key):
         state["has_access"] = True
-        callee_t = checker.node_types.get(node.callee)
-        is_mut_method = bool(getattr(callee_t, "is_mutating", False)) or (
-            node.callee.member in _BUILTIN_MUTATING_METHODS
-        )
+        recv_t = checker.node_types.get(callee_recv)
+        if isinstance(recv_t, OptionalType):
+          recv_t = recv_t.base_type
+        if isinstance(recv_t, RefType):
+          recv_t = recv_t.inner_type
+        is_mut_method = node.callee.member in _BUILTIN_MUTATING_METHODS
+        if not is_mut_method and isinstance(recv_t, StructType):
+          m = recv_t.get_method(node.callee.member, checker.symbol_table)
+          if m is not None and m.modifier == "var":
+            is_mut_method = True
+        elif not is_mut_method and isinstance(recv_t, TraitType):
+          tm = recv_t.methods.get(node.callee.member)
+          if tm is not None and getattr(tm.ast_decl, "modifier", None) == "var":
+            is_mut_method = True
         if is_mut_method:
           state["has_in_place_mutation"] = True
 

@@ -54,6 +54,21 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         v_type = self._resolve_type_node(val_type_node)
       sym = VariableSymbol(name, v_type, node.is_mutable)
       self.symbol_table.define(name, sym)
+      if (
+          self.current_function is not None
+          and not self._has_implicit_default_value(v_type)
+          and not (isinstance(v_type, PrimitiveType) and v_type.name == "none")
+      ):
+        self.uninitialized_symbols.add(sym)
+
+  def _is_void_call_result(self, expr_node: ASTNode, expr_type: Type) -> bool:
+    """Returns True if *expr_node* is a call returning void/none."""
+    from src.parser.ast import CallNode
+    if not isinstance(expr_node, CallNode):
+      return False
+    return isinstance(expr_type, NoneType) or (
+        isinstance(expr_type, PrimitiveType) and expr_type.name in ("none", "void")
+    )
 
   def _check_module_level_const_init(self, node: VarDeclNode) -> None:
     """Enforces compile-time constant initializers for module-level bindings."""
@@ -93,20 +108,28 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     # Propagate expected_type for single-variable lambda/literal inference.
     old_expected = self.expected_type
+    pre_rhs_errors = len(self.errors)
     if len(node.names) == 1 and node.val_types[0]:
       self.expected_type = self._resolve_type_node(node.val_types[0])
 
-    if len(node.exprs) == 1:
-      single_type = self.visit(node.exprs[0])
-      rhs_types = (
-          single_type.types
-          if isinstance(single_type, MultiReturnType)
-          else [single_type]
-      )
-    else:
-      rhs_types = [self.visit(e) for e in node.exprs]
-
-    self.expected_type = old_expected
+    try:
+      if len(node.exprs) == 1:
+        single_type = self.visit(node.exprs[0])
+        rhs_types = (
+            single_type.types
+            if isinstance(single_type, MultiReturnType)
+            else [single_type]
+        )
+      else:
+        rhs_types = []
+        for idx, e in enumerate(node.exprs):
+          if idx < len(node.val_types) and node.val_types[idx]:
+            self.expected_type = self._resolve_type_node(node.val_types[idx])
+          else:
+            self.expected_type = None
+          rhs_types.append(self.visit(e))
+    finally:
+      self.expected_type = old_expected
 
     if len(rhs_types) != len(node.names):
       self.error(
@@ -115,10 +138,23 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       )
       return
 
+    rhs_had_errors = len(self.errors) > pre_rhs_errors
+
     for i, (name, val_type_node, expr_type) in enumerate(
         zip(node.names, node.val_types, rhs_types)
     ):
-      if val_type_node:
+      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if not rhs_had_errors and self._is_void_call_result(expr_node, expr_type):
+        self.error(
+            f"Cannot assign void result of function call to variable '{name}'.",
+            node=node,
+        )
+        var_type: Type = (
+            self._resolve_type_node(val_type_node)
+            if val_type_node
+            else PrimitiveType("none")
+        )
+      elif val_type_node:
         val_type = self._resolve_type_node(val_type_node)
         if not expr_type.is_compatible(val_type):
           self.error(
@@ -150,7 +186,6 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         sym.is_constant_expr = True
       self.symbol_table.define(name, sym)
 
-      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       self._propagate_binding_metadata(sym, expr_node, replace=False)
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       ArenaChecker.validate_arena_escape(
@@ -307,23 +342,33 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     if isinstance(target, IdentifierNode):
       target_sym = self.symbol_table.lookup(target.name)
       if isinstance(target_sym, VariableSymbol):
-        # Re-initializing a previously moved `var` makes it live again.
+        # Re-initializing a previously moved or uninitialized `var` makes it live.
         target_sym.is_moved = False
         self.moved_symbols.discard(target_sym)
+        self.uninitialized_symbols.discard(target_sym)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     """Type-checks single and multi-target assignments."""
     target_types = [self._check_lvalue(t) for t in node.targets]
 
-    if len(node.exprs) == 1:
-      single_type = self.visit(node.exprs[0])
-      rhs_types = (
-          single_type.types
-          if isinstance(single_type, MultiReturnType)
-          else [single_type]
-      )
-    else:
-      rhs_types = [self.visit(e) for e in node.exprs]
+    old_expected = self.expected_type
+    pre_rhs_errors = len(self.errors)
+    try:
+      if len(node.exprs) == 1:
+        self.expected_type = target_types[0] if len(target_types) == 1 else None
+        single_type = self.visit(node.exprs[0])
+        rhs_types = (
+            single_type.types
+            if isinstance(single_type, MultiReturnType)
+            else [single_type]
+        )
+      else:
+        rhs_types = []
+        for idx, e in enumerate(node.exprs):
+          self.expected_type = target_types[idx] if idx < len(target_types) else None
+          rhs_types.append(self.visit(e))
+    finally:
+      self.expected_type = old_expected
 
     if len(rhs_types) != len(target_types):
       self.error(
@@ -332,15 +377,22 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       )
       return
 
+    rhs_had_errors = len(self.errors) > pre_rhs_errors
+
     for i, (target, target_type, expr_type) in enumerate(
         zip(node.targets, target_types, rhs_types)
     ):
-      if not expr_type.is_compatible(target_type):
+      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if not rhs_had_errors and self._is_void_call_result(expr_node, expr_type):
+        self.error(
+            "Cannot assign void result of function call to target.",
+            node=node,
+        )
+      elif not expr_type.is_compatible(target_type):
         self.error(
             f"Cannot assign type '{expr_type}' to target of type '{target_type}'.",
             node=node,
         )
-      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       self._update_assignment_target(target, target_type, expr_node, node)
 
@@ -499,10 +551,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
           self.error("Array index must be of type 'int'.", node=node)
         self._check_array_bounds(node, container_type)
         return container_type.element_type
-      if (
-          not index_type.is_compatible(container_type.key_type)
-          and not container_type.key_type.is_compatible(index_type)
-      ):
+      if not index_type.is_compatible(container_type.key_type):
         self.error(
             f"Map index type '{index_type}' is not compatible with key type "
             f"'{container_type.key_type}'.",
@@ -613,17 +662,27 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     actual_ret_types: List[Type] = []
     if node.expressions:
-      if len(node.expressions) == 1:
-        single_type = self.visit(node.expressions[0])
-        if isinstance(single_type, MultiReturnType):
-          actual_ret_types = single_type.types
+      old_expected = self.expected_type
+      try:
+        if len(node.expressions) == 1:
+          self.expected_type = (
+              expected_ret_types[0] if len(expected_ret_types) == 1 else None
+          )
+          single_type = self.visit(node.expressions[0])
+          if isinstance(single_type, MultiReturnType):
+            actual_ret_types = single_type.types
+          else:
+            actual_ret_types = [single_type]
         else:
-          actual_ret_types = [single_type]
-      else:
-        for e in node.expressions:
-          et = self.visit(e)
-          actual_ret_types.append(et)
-          self._mark_rvo_return_moved(e, et)
+          for idx, e in enumerate(node.expressions):
+            self.expected_type = (
+                expected_ret_types[idx] if idx < len(expected_ret_types) else None
+            )
+            et = self.visit(e)
+            actual_ret_types.append(et)
+            self._mark_rvo_return_moved(e, et)
+      finally:
+        self.expected_type = old_expected
 
     if len(actual_ret_types) != len(expected_ret_types):
       if len(expected_ret_types) == 0:

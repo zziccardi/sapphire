@@ -185,11 +185,17 @@ class DeclarationPass:
             if isinstance(exp, StructType):
               exp.is_imported = True
               exp.defining_module = defining_mod
+            elif isinstance(exp, (TraitType, EnumType)):
+              exp.defining_module = defining_mod
             elif hasattr(exp, "struct_type"):
               exp.struct_type.is_imported = True
               exp.struct_type.defining_module = defining_mod
             elif isinstance(getattr(exp, "symbol_type", None), StructType):
               exp.symbol_type.is_imported = True
+              exp.symbol_type.defining_module = defining_mod
+            elif isinstance(
+                getattr(exp, "symbol_type", None), (TraitType, EnumType)
+            ):
               exp.symbol_type.defining_module = defining_mod
             computed_exports[export_name] = exp
     else:
@@ -203,11 +209,17 @@ class DeclarationPass:
         elif isinstance(getattr(sym, "symbol_type", None), StructType):
           sym.symbol_type.is_imported = True
           sym.symbol_type.defining_module = defining_mod
+        elif isinstance(
+            getattr(sym, "symbol_type", None), (TraitType, EnumType)
+        ):
+          sym.symbol_type.defining_module = defining_mod
         computed_exports[name] = sym
       for name, t in sub_root.types.items():
         if name not in ("int", "float", "bool", "String", "none", "Arena"):
           if isinstance(t, StructType):
             t.is_imported = True
+            t.defining_module = defining_mod
+          elif isinstance(t, (TraitType, EnumType)):
             t.defining_module = defining_mod
           computed_exports[name] = t
     return computed_exports
@@ -322,12 +334,15 @@ class DeclarationPass:
       DeclarationPass._module_cache.pop(mod_file_path, None)
 
     # 2. Reuse per-compilation result if already checked in this session.
+    is_std_testing = imp.path == "std.testing" or imp.path.startswith(
+        "std.testing"
+    )
     if mod_file_path in checked_results:
       cached_exports, mod_errors, sub_deps, sub_cycle = checked_results[
           mod_file_path
       ]
       mod_sym.exports.update(cached_exports)
-      if is_builtin:
+      if is_std_testing:
         mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
       if mtime is not None and fsize is not None:
         resolved_dep_stats[mod_file_path] = (mtime, fsize)
@@ -342,7 +357,7 @@ class DeclarationPass:
     # 3. Break recursive import cycles without caching partial exports.
     if mod_file_path in active_stack:
       checker._hit_import_cycle = True
-      if is_builtin:
+      if is_std_testing:
         mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
       return
 
@@ -388,7 +403,7 @@ class DeclarationPass:
         )
 
     mod_sym.exports.update(computed_exports)
-    if is_builtin:
+    if is_std_testing:
       mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
     DeclarationPass._propagate_import_errors(
         checker, imp, mod_errors, reported_errors
@@ -423,9 +438,33 @@ class DeclarationPass:
       active_stack.add(abs_src_path)
       added_self = True
 
+    seen_import_names: Dict[str, str] = {}
     try:
       for imp in getattr(program, "imports", []):
         module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
+
+        # Resolve imported module file path on disk
+        target_file = resolve_module_path(
+            imp.path, source_file_path=getattr(checker, "source_file_path", None)
+        )
+        is_builtin = is_builtin_module(imp.path)
+
+        if module_name in seen_import_names:
+          if seen_import_names[module_name] != imp.path:
+            checker.error(
+                f"Duplicate imported module name '{module_name}' "
+                f"(already imported from '{seen_import_names[module_name]}'); "
+                f"use an 'as' alias for '{imp.path}'.",
+                node=imp,
+            )
+            if not target_file and not is_builtin:
+              checker.error(
+                  f"Cannot resolve imported module '{imp.path}'. Module file not found.",
+                  node=imp,
+              )
+          continue
+        seen_import_names[module_name] = imp.path
+
         existing = checker.symbol_table.lookup_current_scope(module_name)
         is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
         if not is_predefined:
@@ -438,12 +477,6 @@ class DeclarationPass:
         if imp.path == "std.testing" or imp.path.startswith("std.testing"):
           mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
 
-        # Resolve imported module file path on disk
-        target_file = resolve_module_path(
-            imp.path, source_file_path=getattr(checker, "source_file_path", None)
-        )
-
-        is_builtin = is_builtin_module(imp.path)
         if not target_file and not is_builtin and not is_predefined:
           checker.error(
               f"Cannot resolve imported module '{imp.path}'. Module file not found.",
@@ -499,8 +532,15 @@ class DeclarationPass:
     ) or checker.symbol_table.lookup_type(decl.name):
       checker.error(f"Redefinition of identifier '{decl.name}'.")
       return
-    current_val: Union[int, str] = 0
-    is_string_enum = any(isinstance(m.value, str) for m in decl.members)
+    has_int_val = any(isinstance(m.value, int) for m in decl.members)
+    has_str_val = any(isinstance(m.value, str) for m in decl.members)
+    if has_int_val and has_str_val:
+      checker.error(
+          f"Enum '{decl.name}' cannot mix integer and string variant values.",
+          node=decl,
+      )
+    current_val: Union[int, str] = "" if has_str_val else 0
+    is_string_enum = has_str_val
     variants: Dict[str, Union[int, str]] = {}
     seen_members: Set[str] = set()
     for member in decl.members:
@@ -510,12 +550,16 @@ class DeclarationPass:
       seen_members.add(member.name)
       if member.value is not None:
         current_val = member.value
-      elif is_string_enum and isinstance(current_val, str):
+      elif is_string_enum:
         current_val = member.name
       variants[member.name] = current_val
       if isinstance(current_val, int):
         current_val += 1
-    enum_type = EnumType(decl.name, variants)
+    enum_type = EnumType(
+        decl.name,
+        variants,
+        defining_module=checker.source_file_path or "__main__",
+    )
     enum_type.ast_decl = decl
     checker.symbol_table.define_type(decl.name, enum_type)
     checker.symbol_table.define(decl.name, EnumSymbol(decl.name, enum_type))
@@ -528,13 +572,26 @@ class DeclarationPass:
       checker.error(f"Redefinition of identifier '{decl.name}'.")
       return
     trait_type = TraitType(
-        decl.name, type_params=decl.type_params, ast_decl=decl
+        decl.name,
+        type_params=decl.type_params,
+        ast_decl=decl,
+        defining_module=checker.source_file_path or "__main__",
     )
+    # Forward-register trait before resolving member signatures so self-referencing
+    # traits (e.g. `trait Mergeable { func merge(other: Mergeable); }`) resolve.
+    checker.symbol_table.define_type(decl.name, trait_type)
+    checker.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
     if decl.type_params:
       checker.symbol_table.enter_scope()
       for tp in decl.type_params:
         checker.symbol_table.define_type(tp, GenericTypeParameter(tp))
     for member in decl.members:
+      if member.name in trait_type.methods:
+        checker.error(
+            f"Duplicate method '{member.name}' in trait '{decl.name}'.",
+            node=member,
+        )
+        continue
       DeclarationPass.validate_parameter_defaults(checker, member.parameters)
       p_types = []
       for p in member.parameters:
@@ -572,8 +629,6 @@ class DeclarationPass:
       )
     if decl.type_params:
       checker.symbol_table.exit_scope()
-    checker.symbol_table.define_type(decl.name, trait_type)
-    checker.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
 
   @staticmethod
   def _declare_var_global(checker: Any, decl: VarDeclNode) -> None:

@@ -75,6 +75,8 @@ class DeclVisitorMixin:
             if sym is not None:
               self.symbol_table.define(name, sym)
           continue
+        if getattr(decl, "_already_type_checked", False):
+          continue
         self.visit(decl)
     if getattr(node, "export_block", None):
       self.visit(node.export_block)
@@ -122,6 +124,19 @@ class DeclVisitorMixin:
             node=node,
         )
         return
+
+  def _check_duplicate_params(
+      self, parameters: List[ParameterNode], node: ASTNode
+  ) -> None:
+    """Rejects duplicate parameter names in function, method, and trait signatures."""
+    seen: Set[str] = set()
+    for p in parameters:
+      if p.name in seen:
+        self.error(
+            f"Duplicate parameter name '{p.name}'.",
+            node=node,
+        )
+      seen.add(p.name)
 
   def visit_ImplBlockNode(self, node: ImplBlockNode) -> None:
     for member in node.members:
@@ -246,14 +261,46 @@ class DeclVisitorMixin:
             node=p,
         )
 
+  def _check_missing_return(
+      self,
+      func_decl: FuncDeclNode,
+      func_type: FunctionType,
+  ) -> None:
+    """Verifies that non-void, non-coroutine, non-extern functions return on all paths."""
+    if getattr(func_decl, "body", None) is None:
+      return
+    if any(
+        a.name == "extern" for a in getattr(func_decl, "annotations", [])
+    ):
+      return
+    ret_types = func_type.return_types
+    if not ret_types:
+      return
+    if any(isinstance(t, CoroutineType) for t in ret_types):
+      return
+    if not self._block_always_returns(func_decl.body):
+      ret_desc = (
+          str(ret_types[0])
+          if len(ret_types) == 1
+          else f"({', '.join(str(t) for t in ret_types)})"
+      )
+      self.error(
+          f"Function '{func_decl.name}' with return type '{ret_desc}' does not "
+          "return a value on all code paths.",
+          node=func_decl,
+      )
+
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func_decl = node.func_decl
     struct_type = self.current_struct
+    self._check_duplicate_params(func_decl.parameters, func_decl)
 
     # Enter scope of method
     self.symbol_table.enter_scope()
     old_moved_symbols = set(self.moved_symbols)
+    old_uninit_symbols = set(self.uninitialized_symbols)
     self._restore_moved_symbols(set())
+    self.uninitialized_symbols = set()
     old_function_scope = self.current_function_scope
     self.current_function_scope = self.symbol_table.current_scope
     old_current_function = self.current_function
@@ -363,6 +410,7 @@ class DeclVisitorMixin:
 
     # Visit body
     self.visit(func_decl.body)
+    self._check_missing_return(func_decl, self.current_function)
 
     # Verify constructor initializes all non-optional fields
     if func_decl.name == "__init__" and struct_type:
@@ -381,12 +429,14 @@ class DeclVisitorMixin:
     self.current_function = old_current_function
     self.current_function_scope = old_function_scope
     self._restore_moved_symbols(old_moved_symbols)
+    self.uninitialized_symbols = old_uninit_symbols
 
     self.symbol_table.exit_scope()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
     for member in node.members:
       self._check_no_explicit_self(member.parameters, member)
+      self._check_duplicate_params(member.parameters, member)
     if node.type_params:
       return
     trait_type = self.symbol_table.lookup_type(node.name)
@@ -399,6 +449,7 @@ class DeclVisitorMixin:
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
     self._check_no_explicit_self(node.parameters, node)
+    self._check_duplicate_params(node.parameters, node)
     if hasattr(node, "annotations") and node.annotations:
       DeclarationPass.validate_annotations(self, node.annotations, node=node)
     if node.base_initializers:
@@ -408,7 +459,9 @@ class DeclVisitorMixin:
     # Register parameters and check body
     self.symbol_table.enter_scope()
     old_moved_symbols = set(self.moved_symbols)
+    old_uninit_symbols = set(self.uninitialized_symbols)
     self._restore_moved_symbols(set())
+    self.uninitialized_symbols = set()
     old_function_scope = self.current_function_scope
     self.current_function_scope = self.symbol_table.current_scope
     old_current_function = self.current_function
@@ -434,10 +487,12 @@ class DeclVisitorMixin:
     )
 
     self.visit(node.body)
+    self._check_missing_return(node, self.current_function)
 
     self.current_function = old_current_function
     self.current_function_scope = old_function_scope
     self._restore_moved_symbols(old_moved_symbols)
+    self.uninitialized_symbols = old_uninit_symbols
     self.symbol_table.exit_scope()
 
   def visit_BlockNode(self, node: BlockNode) -> None:
@@ -447,5 +502,8 @@ class DeclVisitorMixin:
     finally:
       cur_scope = self.symbol_table.current_scope
       self.moved_symbols = {s for s in self.moved_symbols if s.scope_defined != cur_scope}
+      self.uninitialized_symbols = {
+          s for s in self.uninitialized_symbols if s.scope_defined != cur_scope
+      }
       self.symbol_table.exit_scope()
 
