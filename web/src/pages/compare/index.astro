@@ -4,6 +4,16 @@ import { withBase } from '../../lib/url';
 
 const comparisons = [
   {
+    slug: 'lua',
+    title: 'Sapphire vs Lua',
+    tagline: 'Static typing, explicit mutability, and lexical arenas vs dynamic tables and metatables.',
+    highlights: [
+      'Compile-time null safety (T?, guard ?=) instead of pervasive runtime nil',
+      'Structs, traits, and opt-in proto/clone with CoW instead of manual metatables',
+      'Explicit var mutability, call-site exclusivity, and deterministic RAII cleanup',
+    ],
+  },
+  {
     slug: 'rust',
     title: 'Sapphire vs Rust',
     tagline: 'Scope-bound reference exclusivity vs explicit lifetimes and borrow-checker annotations.',
@@ -38,7 +48,7 @@ const comparisons = [
 
 <BaseLayout
   title="Language Comparisons | Sapphire"
-  description="How Sapphire compares with Rust, C++, and Swift."
+  description="How Sapphire compares with Lua, Rust, C++, and Swift."
 >
   <section class="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8">
     <div class="max-w-2xl">
@@ -47,11 +57,11 @@ const comparisons = [
       </h1>
       <p class="mt-3 text-[var(--text-secondary)]">
         Side-by-side design trade-offs, memory models, and code examples comparing
-        Sapphire with Rust, C++, and Swift.
+        Sapphire with Lua, Rust, C++, and Swift.
       </p>
     </div>
 
-    <div class="mt-10 grid gap-6 md:grid-cols-3">
+    <div class="mt-10 grid gap-6 md:grid-cols-2">
       {
         comparisons.map((item) => (
           <a

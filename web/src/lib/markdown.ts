@@ -17,6 +17,8 @@ export interface RenderedMarkdown {
 }
 
 const DOC_LINK_MAP: Record<string, string> = {
+  'quickstart.md': '/docs/quickstart',
+  'host_interop.md': '/docs/host-interop',
   'SPEC.md': '/docs/spec',
   'builtins.md': '/docs/builtins',
   'stdlib.md': '/docs/stdlib',
@@ -24,6 +26,7 @@ const DOC_LINK_MAP: Record<string, string> = {
   'development.md': '/docs/development',
   'style_guide.md': '/docs/style-guide',
   'testing.md': '/docs/testing',
+  'lua_comparison.md': '/compare/lua',
   'rust_comparison.md': '/compare/rust',
   'cpp_comparison.md': '/compare/cpp',
   'swift_comparison.md': '/compare/swift',
