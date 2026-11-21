@@ -18,26 +18,38 @@ def format_syntax_error_message(recognizer: Any, offendingSymbol: Any, msg: str)
         while prev_idx >= 0 and stream.get(prev_idx).channel != 0:
           prev_idx -= 1  # pragma: no cover
 
-        if prev_idx >= 0 and stream.get(prev_idx).text == "}":
+        if (
+            getattr(offendingSymbol, "text", None) != ";"
+            and prev_idx >= 0
+            and stream.get(prev_idx).text == "}"
+        ):
           depth = 1
           curr = prev_idx - 1
           while curr >= 0 and depth > 0:
-            tok_text = stream.get(curr).text
-            if tok_text == "}":
-              depth += 1
-            elif tok_text == "{":
-              depth -= 1
+            tok = stream.get(curr)
+            if getattr(tok, "channel", 0) == 0:
+              tok_text = tok.text
+              if tok_text == "}":
+                depth += 1
+              elif tok_text == "{":
+                depth -= 1
             curr -= 1
 
-          search_limit = max(0, curr - 30)
-          while curr >= search_limit:
-            tok = stream.get(curr)
-            if tok.text == "match":
-              return (
-                  f"Missing semicolon ';' after closing brace '}}' of match expression. "
-                  f"Match expressions (e.g. in variable declarations or returns) must end with a semicolon ';' (e.g. 'let x = match ... }};')."
-              )
-            curr -= 1
+          if depth == 0:
+            search_limit = max(0, curr - 30)
+            while curr >= search_limit:
+              tok = stream.get(curr)
+              if getattr(tok, "channel", 0) != 0:
+                curr -= 1
+                continue
+              if tok.text in (";", "{", "}", "->"):
+                break
+              if tok.text == "match":
+                return (
+                    f"Missing semicolon ';' after closing brace '}}' of match expression. "
+                    f"Match expressions (e.g. in variable declarations or returns) must end with a semicolon ';' (e.g. 'let x = match ... }};')."
+                )
+              curr -= 1
     except Exception:  # pragma: no cover
       pass
   return msg

@@ -9,32 +9,109 @@ class TestErrorListener(unittest.TestCase):
   """Unit tests for ANTLR error listener and syntax error formatting."""
 
   def test_format_syntax_error_message_match_expression(self):
-    mock_token = MagicMock()
-    mock_token.tokenIndex = 5
-    mock_token.text = "}"
-
-    t_match = MagicMock(text="match", channel=0)
-    t_open = MagicMock(text="{", channel=0)
-    t_close = MagicMock(text="}", channel=0)
-
-    def get_token(i):
-      if i == 0:
-        return t_match
-      elif i == 3:
-        return t_open
-      else:
-        return t_close
-
+    tokens = [
+        MagicMock(text="match", channel=0),
+        MagicMock(text="x", channel=0),
+        MagicMock(text="{", channel=0),
+        MagicMock(text="}", channel=0),
+        MagicMock(text="let", channel=0, tokenIndex=4),
+    ]
     mock_stream = MagicMock()
-    mock_stream.get.side_effect = get_token
-
+    mock_stream.get.side_effect = lambda i: tokens[i]
 
     mock_recognizer = MagicMock()
     mock_recognizer.getTokenStream.return_value = mock_stream
 
-
-    msg = format_syntax_error_message(mock_recognizer, mock_token, "mismatched input")
+    msg = format_syntax_error_message(mock_recognizer, tokens[4], "mismatched input")
     self.assertIn("Missing semicolon ';'", msg)
+
+  def test_match_expression_missing_semicolon_real_parser(self):
+    from antlr4 import CommonTokenStream, InputStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+
+    code = """
+    func test(v: int) {
+      let x = match v {
+        1 -> "one",
+        ... -> "other"
+      }
+      let y = 2;
+    }
+    """
+    listener = CustomErrorListener(file_path="test.sp", source_content=code, quiet=True)
+    lexer = SapphireLexer(InputStream(code))
+    lexer.removeErrorListeners()
+    lexer.addErrorListener(listener)
+    parser = SapphireParser(CommonTokenStream(lexer))
+    parser.removeErrorListeners()
+    parser.addErrorListener(listener)
+    parser.program()
+
+    self.assertGreater(listener.errors, 0)
+    self.assertTrue(
+        any("Missing semicolon ';'" in d.message for d in listener.diagnostics),
+        f"Expected match semicolon hint, got: {[d.message for d in listener.diagnostics]}",
+    )
+
+  def test_missing_comma_after_match_arm_block_not_misreported(self):
+    from antlr4 import CommonTokenStream, InputStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+
+    code = """
+    func test(v: int): int {
+      let x = match v {
+        1 -> { let a = 1; yield a; }
+        2 -> 3
+      };
+      return x;
+    }
+    """
+    listener = CustomErrorListener(file_path="test.sp", source_content=code, quiet=True)
+    lexer = SapphireLexer(InputStream(code))
+    lexer.removeErrorListeners()
+    lexer.addErrorListener(listener)
+    parser = SapphireParser(CommonTokenStream(lexer))
+    parser.removeErrorListeners()
+    parser.addErrorListener(listener)
+    parser.program()
+
+    self.assertGreater(listener.errors, 0)
+    self.assertFalse(
+        any("Missing semicolon ';'" in d.message for d in listener.diagnostics),
+        f"Unexpected match semicolon hint on missing arm comma: {[d.message for d in listener.diagnostics]}",
+    )
+
+  def test_struct_initializer_missing_semicolon_after_match_not_misreported(self):
+    from antlr4 import CommonTokenStream, InputStream
+    from src.parser.gen.SapphireLexer import SapphireLexer
+    from src.parser.gen.SapphireParser import SapphireParser
+
+    code = """
+    func test(v: int) {
+      match v {
+        1 -> print("a"),
+        ... -> print("b")
+      }
+      let p = Point { x = 1 }
+      let q = 2;
+    }
+    """
+    listener = CustomErrorListener(file_path="test.sp", source_content=code, quiet=True)
+    lexer = SapphireLexer(InputStream(code))
+    lexer.removeErrorListeners()
+    lexer.addErrorListener(listener)
+    parser = SapphireParser(CommonTokenStream(lexer))
+    parser.removeErrorListeners()
+    parser.addErrorListener(listener)
+    parser.program()
+
+    self.assertGreater(listener.errors, 0)
+    self.assertFalse(
+        any("Missing semicolon ';'" in d.message for d in listener.diagnostics),
+        f"Unexpected match semicolon hint on struct init: {[d.message for d in listener.diagnostics]}",
+    )
 
   def test_custom_error_listener_quiet_and_verbose(self):
     listener = CustomErrorListener(file_path="sample.sp", source_content="let x = 5;", quiet=True)

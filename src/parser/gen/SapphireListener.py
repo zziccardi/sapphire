@@ -260,6 +260,24 @@ class SapphireListener(ParseTreeListener):
         pass
 
 
+    # Enter a parse tree produced by SapphireParser#functionParamTypes.
+    def enterFunctionParamTypes(self, ctx:SapphireParser.FunctionParamTypesContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#functionParamTypes.
+    def exitFunctionParamTypes(self, ctx:SapphireParser.FunctionParamTypesContext):
+        pass
+
+
+    # Enter a parse tree produced by SapphireParser#multiReturnTypeList.
+    def enterMultiReturnTypeList(self, ctx:SapphireParser.MultiReturnTypeListContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#multiReturnTypeList.
+    def exitMultiReturnTypeList(self, ctx:SapphireParser.MultiReturnTypeListContext):
+        pass
+
+
     # Enter a parse tree produced by SapphireParser#functionType.
     def enterFunctionType(self, ctx:SapphireParser.FunctionTypeContext):
         pass
@@ -467,6 +485,24 @@ class SapphireListener(ParseTreeListener):
         pass
 
 
+    # Enter a parse tree produced by SapphireParser#LambdaExpr.
+    def enterLambdaExpr(self, ctx:SapphireParser.LambdaExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#LambdaExpr.
+    def exitLambdaExpr(self, ctx:SapphireParser.LambdaExprContext):
+        pass
+
+
+    # Enter a parse tree produced by SapphireParser#NonLambdaExpr.
+    def enterNonLambdaExpr(self, ctx:SapphireParser.NonLambdaExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#NonLambdaExpr.
+    def exitNonLambdaExpr(self, ctx:SapphireParser.NonLambdaExprContext):
+        pass
+
+
     # Enter a parse tree produced by SapphireParser#CoalesceExpr.
     def enterCoalesceExpr(self, ctx:SapphireParser.CoalesceExprContext):
         pass
@@ -476,12 +512,12 @@ class SapphireListener(ParseTreeListener):
         pass
 
 
-    # Enter a parse tree produced by SapphireParser#LambdaExpr.
-    def enterLambdaExpr(self, ctx:SapphireParser.LambdaExprContext):
+    # Enter a parse tree produced by SapphireParser#RelationalExpr.
+    def enterRelationalExpr(self, ctx:SapphireParser.RelationalExprContext):
         pass
 
-    # Exit a parse tree produced by SapphireParser#LambdaExpr.
-    def exitLambdaExpr(self, ctx:SapphireParser.LambdaExprContext):
+    # Exit a parse tree produced by SapphireParser#RelationalExpr.
+    def exitRelationalExpr(self, ctx:SapphireParser.RelationalExprContext):
         pass
 
 
@@ -539,21 +575,21 @@ class SapphireListener(ParseTreeListener):
         pass
 
 
+    # Enter a parse tree produced by SapphireParser#EqualityExpr.
+    def enterEqualityExpr(self, ctx:SapphireParser.EqualityExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#EqualityExpr.
+    def exitEqualityExpr(self, ctx:SapphireParser.EqualityExprContext):
+        pass
+
+
     # Enter a parse tree produced by SapphireParser#AdditiveExpr.
     def enterAdditiveExpr(self, ctx:SapphireParser.AdditiveExprContext):
         pass
 
     # Exit a parse tree produced by SapphireParser#AdditiveExpr.
     def exitAdditiveExpr(self, ctx:SapphireParser.AdditiveExprContext):
-        pass
-
-
-    # Enter a parse tree produced by SapphireParser#CompareExpr.
-    def enterCompareExpr(self, ctx:SapphireParser.CompareExprContext):
-        pass
-
-    # Exit a parse tree produced by SapphireParser#CompareExpr.
-    def exitCompareExpr(self, ctx:SapphireParser.CompareExprContext):
         pass
 
 
@@ -608,6 +644,42 @@ class SapphireListener(ParseTreeListener):
 
     # Exit a parse tree produced by SapphireParser#TernaryExpr.
     def exitTernaryExpr(self, ctx:SapphireParser.TernaryExprContext):
+        pass
+
+
+    # Enter a parse tree produced by SapphireParser#PostfixIndexExpr.
+    def enterPostfixIndexExpr(self, ctx:SapphireParser.PostfixIndexExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#PostfixIndexExpr.
+    def exitPostfixIndexExpr(self, ctx:SapphireParser.PostfixIndexExprContext):
+        pass
+
+
+    # Enter a parse tree produced by SapphireParser#PostfixMemberAccessExpr.
+    def enterPostfixMemberAccessExpr(self, ctx:SapphireParser.PostfixMemberAccessExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#PostfixMemberAccessExpr.
+    def exitPostfixMemberAccessExpr(self, ctx:SapphireParser.PostfixMemberAccessExprContext):
+        pass
+
+
+    # Enter a parse tree produced by SapphireParser#PostfixCallExpr.
+    def enterPostfixCallExpr(self, ctx:SapphireParser.PostfixCallExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#PostfixCallExpr.
+    def exitPostfixCallExpr(self, ctx:SapphireParser.PostfixCallExprContext):
+        pass
+
+
+    # Enter a parse tree produced by SapphireParser#PostfixPrimaryExpr.
+    def enterPostfixPrimaryExpr(self, ctx:SapphireParser.PostfixPrimaryExprContext):
+        pass
+
+    # Exit a parse tree produced by SapphireParser#PostfixPrimaryExpr.
+    def exitPostfixPrimaryExpr(self, ctx:SapphireParser.PostfixPrimaryExprContext):
         pass
 
 

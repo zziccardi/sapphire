@@ -149,6 +149,16 @@ class SapphireVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by SapphireParser#functionParamTypes.
+    def visitFunctionParamTypes(self, ctx:SapphireParser.FunctionParamTypesContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by SapphireParser#multiReturnTypeList.
+    def visitMultiReturnTypeList(self, ctx:SapphireParser.MultiReturnTypeListContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by SapphireParser#functionType.
     def visitFunctionType(self, ctx:SapphireParser.FunctionTypeContext):
         return self.visitChildren(ctx)
@@ -264,13 +274,23 @@ class SapphireVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by SapphireParser#LambdaExpr.
+    def visitLambdaExpr(self, ctx:SapphireParser.LambdaExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by SapphireParser#NonLambdaExpr.
+    def visitNonLambdaExpr(self, ctx:SapphireParser.NonLambdaExprContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by SapphireParser#CoalesceExpr.
     def visitCoalesceExpr(self, ctx:SapphireParser.CoalesceExprContext):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by SapphireParser#LambdaExpr.
-    def visitLambdaExpr(self, ctx:SapphireParser.LambdaExprContext):
+    # Visit a parse tree produced by SapphireParser#RelationalExpr.
+    def visitRelationalExpr(self, ctx:SapphireParser.RelationalExprContext):
         return self.visitChildren(ctx)
 
 
@@ -304,13 +324,13 @@ class SapphireVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by SapphireParser#AdditiveExpr.
-    def visitAdditiveExpr(self, ctx:SapphireParser.AdditiveExprContext):
+    # Visit a parse tree produced by SapphireParser#EqualityExpr.
+    def visitEqualityExpr(self, ctx:SapphireParser.EqualityExprContext):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by SapphireParser#CompareExpr.
-    def visitCompareExpr(self, ctx:SapphireParser.CompareExprContext):
+    # Visit a parse tree produced by SapphireParser#AdditiveExpr.
+    def visitAdditiveExpr(self, ctx:SapphireParser.AdditiveExprContext):
         return self.visitChildren(ctx)
 
 
@@ -341,6 +361,26 @@ class SapphireVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by SapphireParser#TernaryExpr.
     def visitTernaryExpr(self, ctx:SapphireParser.TernaryExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by SapphireParser#PostfixIndexExpr.
+    def visitPostfixIndexExpr(self, ctx:SapphireParser.PostfixIndexExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by SapphireParser#PostfixMemberAccessExpr.
+    def visitPostfixMemberAccessExpr(self, ctx:SapphireParser.PostfixMemberAccessExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by SapphireParser#PostfixCallExpr.
+    def visitPostfixCallExpr(self, ctx:SapphireParser.PostfixCallExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by SapphireParser#PostfixPrimaryExpr.
+    def visitPostfixPrimaryExpr(self, ctx:SapphireParser.PostfixPrimaryExprContext):
         return self.visitChildren(ctx)
 
 
