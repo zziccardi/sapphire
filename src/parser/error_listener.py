@@ -63,11 +63,12 @@ class CustomErrorListener(ErrorListener):
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1
     custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
-    length = (
-        len(offendingSymbol.text)
+    tok_text = (
+        offendingSymbol.text
         if (offendingSymbol and hasattr(offendingSymbol, "text") and offendingSymbol.text)
-        else 1
+        else ""
     )
+    length = 1 if (not tok_text or tok_text == "<EOF>") else len(tok_text)
     source_content = (
         str(self.source_content) if self.source_content is not None else None
     )

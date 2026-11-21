@@ -438,8 +438,9 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(specs[2].symbol, "DrawMode")
 
   def test_multiple_export_blocks_error(self):
-    """Verifies that multiple export blocks raise a SyntaxError."""
-    with self.assertRaises(SyntaxError):
+    """Verifies that multiple export blocks raise a SapphireSyntaxError."""
+    from src.common.errors import SapphireSyntaxError
+    with self.assertRaises(SapphireSyntaxError):
       self._get_ast("""
       export { A }
       export { B }
@@ -627,13 +628,14 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(node_trailing.parts[0].value, "hello\\")
 
   def test_invalid_struct_initializer_syntax(self):
-    """Verifies that malformed struct initializer field syntax without expression raises a clean SyntaxError."""
+    """Verifies that malformed struct initializer field syntax without expression raises a clean SapphireSyntaxError."""
+    from src.common.errors import SapphireSyntaxError
     class MockToken:
       def getText(self): return "item"
     class MockCtx:
       def IDENTIFIER(self): return MockToken()
       def expression(self): return None
-    with self.assertRaises(SyntaxError) as ctx:
+    with self.assertRaises(SapphireSyntaxError) as ctx:
       ASTBuilder().visitStructInitField(MockCtx())
     self.assertIn("must be assigned an expression using '='", str(ctx.exception))
 

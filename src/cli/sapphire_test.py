@@ -566,6 +566,75 @@ class SapphireCLITest(unittest.TestCase):
     self.assertTrue(data["ok"])
     self.assertFalse(os.path.exists(lua_out))
 
+  def test_prepare_exec_env_does_not_shadow_python_stdlib(self):
+    env = _prepare_exec_env()
+    py_entries = [os.path.abspath(p) for p in env["PYTHONPATH"].split(os.pathsep) if p]
+    std_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../lib/std")
+    )
+    self.assertNotIn(std_dir, py_entries)
+
+  def test_check_syntax_error_printed_once_with_syntax_header(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    bad_sp = os.path.join(self.temp_dir.name, "single_syn.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "check", bad_sp]):
+      with redirect_stdout(io.StringIO()), redirect_stderr(stderr_buf):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+    err_out = stderr_buf.getvalue()
+    self.assertEqual(err_out.count("no viable alternative"), 1)
+    self.assertIn("Syntax Analysis failed with errors:", err_out)
+    self.assertNotIn("Semantic Analysis failed with errors:", err_out)
+
+  def test_duplicate_export_block_handled_in_check_json_and_dump_ast(self):
+    import io
+    import json
+    from contextlib import redirect_stderr, redirect_stdout
+
+    dup_sp = os.path.join(self.temp_dir.name, "dup_export.sp")
+    with open(dup_sp, "w", encoding="utf-8") as f:
+      f.write("let a = 1;\nexport { a }\nexport { a }\n")
+
+    stdout_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "check", dup_sp, "--json"]):
+      with redirect_stdout(stdout_buf), redirect_stderr(io.StringIO()):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+    payload = json.loads(stdout_buf.getvalue())
+    self.assertFalse(payload["ok"])
+    self.assertEqual(payload["errors"][0]["code"], "E_SYNTAX")
+    self.assertIn("Only a single export block", payload["errors"][0]["message"])
+
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "dump-ast", dup_sp]):
+      with redirect_stdout(io.StringIO()), redirect_stderr(stderr_buf):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+    self.assertIn("Only a single export block", stderr_buf.getvalue())
+
+  def test_shortcut_invocation_with_leading_flags_preserves_sys_argv(self):
+    orig_argv = ["sapphire", "-t", "lua", self.sp_file]
+    argv_copy = list(orig_argv)
+    with patch.object(sys, "argv", argv_copy):
+      with patch("src.cli.sapphire._find_lua_binary", return_value="/usr/bin/lua"):
+        with patch("subprocess.run") as mock_run:
+          mock_run.return_value.returncode = 0
+          with self.assertRaises(SystemExit) as cm:
+            with suppress_output():
+              main()
+          self.assertEqual(cm.exception.code, 0)
+          mock_run.assert_called_once()
+      self.assertEqual(sys.argv, orig_argv)
 
 
 if __name__ == "__main__":

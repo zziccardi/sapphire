@@ -107,7 +107,9 @@ def discover_tests(
     # Discover impl blocks for structs implementing TestCase
     elif isinstance(stmt, ImplBlockNode):
       trait_name = stmt.trait_name
-      if trait_name and ("TestCase" in trait_name or trait_name == "TestCase"):
+      if trait_name and (
+          trait_name == "TestCase" or trait_name.endswith(".TestCase")
+      ):
         struct_name = stmt.struct_name
         test_methods = []
         for member in stmt.members:
@@ -126,7 +128,7 @@ def discover_tests(
                   "executed as a test."
               )
         if test_methods:
-          suite_tests[struct_name] = test_methods
+          suite_tests.setdefault(struct_name, []).extend(test_methods)
 
   return standalone_tests, suite_tests
 
@@ -185,16 +187,13 @@ def _format_python_failure(
   actual = f.get("actual")
   user_msg = f.get("message", "")
 
-  if kind in ("eq", "ne", "almost_eq", "bool"):
+  if kind in ("eq", "ne", "almost_eq", "bool", "none", "not_none"):
     lines_out.append(f"  Expected: {expected!r}")
     lines_out.append(f"  Actual:   {actual!r}")
     if user_msg:
       user_only = re.sub(r"^[^(]+ \((.+)\)$", r"\1", user_msg)
       if user_only != user_msg:
         lines_out.append(f"  Message:  {user_only}")
-  elif kind in ("none", "not_none"):
-    lines_out.append(f"  Expected: {expected!r}")
-    lines_out.append(f"  Actual:   {actual!r}")
   else:  # pragma: no cover
     lines_out.append(f"  {user_msg}")
 
@@ -241,33 +240,119 @@ def _print_python_test_failures(
     print(_format_python_failure(f, sp_file, sp_line_map))
 
 
-def _prepare_python_test_paths(sp_file: str) -> str:
-  """Configures sys.path and clears stale cached modules for *sp_file*."""
+def _mangle_python_name(name: str) -> str:
+  """Mirrors PythonTranspiler._mangle_name for looking up generated symbols."""
+  from src.code_gen.python_runtime import PYTHON_RESERVED_WORDS
+
+  if not name or name in ("self", "__init__", "__del__", "main"):
+    return name
+  if name in PYTHON_RESERVED_WORDS:
+    return f"{name}_"
+  return name
+
+
+def _mangle_lua_name(name: str) -> str:
+  """Mirrors LuaTranspiler._mangle_name for looking up generated symbols."""
+  from src.code_gen.lua_transpiler import LUA_RESERVED_WORDS
+
+  if not name or name in ("self", "__init__", "__del__", "_init_sapphire"):
+    return name
+  if name in LUA_RESERVED_WORDS:
+    return f"{name}_"
+  return name
+
+
+def _is_path_under(path: str, parent_dir: str) -> bool:
+  """Returns True if *path* is equal to or nested inside *parent_dir*."""
+  try:
+    return os.path.commonpath(
+        [os.path.abspath(parent_dir), os.path.abspath(path)]
+    ) == os.path.abspath(parent_dir)
+  except ValueError:
+    return False
+
+
+def _is_protected_module(
+    mod_name: str,
+    mod_obj: Any,
+    sp_dir: str,
+    out_dir: Optional[str],
+    compiler_lib_dir: str,
+) -> bool:
+  """Returns True if *mod_name* belongs to Python stdlib or the compiler."""
+  root_pkg = mod_name.split(".", 1)[0]
+  if (
+      root_pkg in sys.stdlib_module_names
+      or root_pkg in sys.builtin_module_names
+      or root_pkg in ("src", "antlr4", "std", "unittest", "pytest")
+  ):
+    return True
+  if mod_obj is None:
+    return False
+  mod_file = getattr(mod_obj, "__file__", None)
+  if not mod_file:
+    return True
+  if _is_path_under(mod_file, compiler_lib_dir) and not _is_path_under(
+      compiler_lib_dir, sp_dir
+  ):
+    return True
+  if _is_path_under(mod_file, sp_dir):
+    return False
+  if out_dir and _is_path_under(mod_file, out_dir):
+    return False
+  return True
+
+
+def _prepare_python_test_paths(
+    sp_file: str, out_dir: Optional[str] = None
+) -> str:
+  """Configures sys.path and clears stale local test modules for *sp_file*."""
   workspace_root = os.path.abspath(
       os.path.join(os.path.dirname(__file__), "..", "..")
   )
   from src.semantics.module_resolver import find_sapphire_lib_dir
 
   discovered_lib = find_sapphire_lib_dir()
-  lib_dir = discovered_lib or os.path.join(workspace_root, "lib")
+  lib_dir = os.path.abspath(discovered_lib or os.path.join(workspace_root, "lib"))
   lib_parent = os.path.dirname(lib_dir)
   sp_dir = os.path.dirname(os.path.abspath(sp_file))
   cwd = os.getcwd()
-  for path_entry in (workspace_root, lib_parent, lib_dir, cwd, sp_dir):
+  for path_entry in (workspace_root, lib_parent, lib_dir, cwd, sp_dir, out_dir):
     if path_entry:
       if path_entry in sys.path:
         sys.path.remove(path_entry)
       sys.path.insert(0, path_entry)
 
-  # Clear stale local `lib` or test-dir modules so each test file loads fresh.
-  sp_lib = os.path.join(sp_dir, "lib")
-  if os.path.isdir(sp_lib):
+  # Clear stale local `lib` or test-dir modules so each test file loads fresh,
+  # while never evicting Python stdlib or Sapphire compiler modules.
+  sp_lib = os.path.abspath(os.path.join(sp_dir, "lib"))
+  if os.path.isdir(sp_lib) and sp_lib != lib_dir:
     for k in [
         k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")
     ]:
-      del sys.modules[k]
+      mod_obj = sys.modules.get(k)
+      if mod_obj is None or (
+          getattr(mod_obj, "__file__", None)
+          and _is_path_under(mod_obj.__file__, sp_lib)
+      ):
+        del sys.modules[k]
 
-  for root, _, files in os.walk(sp_dir):
+  # Avoid walking the compiler source tree if a test resides at workspace root.
+  skip_dirs = {
+      os.path.abspath(os.path.join(workspace_root, "src")),
+      lib_dir,
+      os.path.abspath(os.path.join(workspace_root, "testing")),
+  }
+  for root, dirs, files in os.walk(sp_dir):
+    abs_root = os.path.abspath(root)
+    dirs[:] = [
+        d
+        for d in dirs
+        if d not in ("__pycache__", ".git", "node_modules")
+        and os.path.abspath(os.path.join(abs_root, d)) not in skip_dirs
+    ]
+    if abs_root in skip_dirs:
+      continue
     rel_root = os.path.relpath(root, sp_dir).replace(os.sep, ".")
     for f in files:
       if f.endswith(".py"):
@@ -276,7 +361,9 @@ def _prepare_python_test_paths(sp_file: str) -> str:
         if rel_root != ".":
           mod_candidates.append(f"{rel_root}.{base_f}")
         for mc in mod_candidates:
-          if mc in sys.modules and mc != "std.testing":
+          if mc in sys.modules and not _is_protected_module(
+              mc, sys.modules.get(mc), sp_dir, out_dir, lib_dir
+          ):
             del sys.modules[mc]
   return sp_dir
 
@@ -288,145 +375,187 @@ def run_tests_python(
     filter_pattern: Optional[str] = None,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Python target backend."""
-  out_py = None
   orig_sys_path = list(sys.path)
   orig_modules = set(sys.modules.keys())
+  stem = os.path.splitext(os.path.basename(sp_file))[0]
   try:
-    try:
-      out_py = transpile_file(
-          sp_file,
-          target="python",
-          test_mode=True,
-          quiet=True,
-          raise_on_error=True,
-      )
-    except BaseException as e:  # pragma: no cover
-      print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
-      for line in str(e).splitlines():
-        print(f"  {line}")
-      return 0, 1, [f"Transpilation failed: {e}"]
-
-    _prepare_python_test_paths(sp_file)
-
-    try:
-      import std.testing as testing
-    except ImportError:  # pragma: no cover
+    with tempfile.TemporaryDirectory(prefix="sapphire_test_py_") as tmp_dir:
+      target_out_py = os.path.join(tmp_dir, f"{stem}.py")
       try:
-        from lib.std import testing
+        out_py = transpile_file(
+            sp_file,
+            output_file=target_out_py,
+            target="python",
+            test_mode=True,
+            quiet=True,
+            raise_on_error=True,
+        )
+      except Exception as e:  # pragma: no cover
+        print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+        for line in str(e).splitlines():
+          print(f"  {line}")
+        return 0, 1, [f"Transpilation failed: {e}"]
+
+      out_dir = os.path.dirname(os.path.abspath(out_py))
+      _prepare_python_test_paths(sp_file, out_dir=out_dir)
+
+      try:
+        import std.testing as testing
       except ImportError:  # pragma: no cover
-        print(
-            f"[ FAIL ] {os.path.basename(sp_file)} (could not import"
-            f" std.testing module)",
-            file=sys.stderr,
-        )
-        return 0, 1, ["Failed to load std.testing module"]
+        try:
+          from lib.std import testing
+        except ImportError:  # pragma: no cover
+          print(
+              f"[ FAIL ] {os.path.basename(sp_file)} (could not import"
+              f" std.testing module)",
+              file=sys.stderr,
+          )
+          return 0, 1, ["Failed to load std.testing module"]
 
-    module_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
-    spec = importlib.util.spec_from_file_location(module_name, out_py)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = mod
-    try:
-      spec.loader.exec_module(mod)
-    except BaseException as e:  # pragma: no cover
-      print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
-      for line in str(e).splitlines():
-        print(f"  {line}")
-      return 0, 1, [f"Failed to execute transpiled test module: {e}"]
-
-    passed = 0
-    failed = 0
-    logs: List[str] = []
-    sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
-
-    for fn_name in standalone_tests:
-      if filter_pattern and filter_pattern not in fn_name:
-        continue
-      if not hasattr(mod, fn_name):  # pragma: no cover
-        continue
-      test_func = getattr(mod, fn_name)
-      ctx = testing.TestContext(fn_name)
-      testing.set_active_context(ctx)
-
-      err = None
+      module_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
+      spec = importlib.util.spec_from_file_location(module_name, out_py)
+      mod = importlib.util.module_from_spec(spec)
+      sys.modules[module_name] = mod
       try:
-        test_func()
-      except testing.TestFailure as tf:
-        err = str(tf)
-      except Exception as ex:  # pragma: no cover
-        err = f"Unhandled Exception: {ex}"
+        spec.loader.exec_module(mod)
+      except Exception as e:  # pragma: no cover
+        print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
+        for line in str(e).splitlines():
+          print(f"  {line}")
+        return 0, 1, [f"Failed to execute transpiled test module: {e}"]
 
-      if not ctx.failures and err is None:
-        passed += 1
-        print(f"[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
-      else:
-        failed += 1
-        _print_python_test_failures(
-            fn_name, sp_file, ctx.failures, err, sp_line_map
-        )
+      passed = 0
+      failed = 0
+      logs: List[str] = []
+      sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
 
-    for struct_name, methods in suite_tests.items():
-      if not hasattr(mod, struct_name):  # pragma: no cover
-        continue
-      struct_cls = getattr(mod, struct_name)
-
-      for m_name in methods:
-        full_name = f"{struct_name}.{m_name}"
-        if (
-            filter_pattern
-            and filter_pattern not in full_name
-            and filter_pattern not in m_name
-        ):
+      for fn_name in standalone_tests:
+        if filter_pattern and filter_pattern not in fn_name:
+          continue
+        py_fn_name = _mangle_python_name(fn_name)
+        test_func = getattr(mod, py_fn_name, None)
+        if test_func is None and py_fn_name != fn_name:
+          test_func = getattr(mod, fn_name, None)
+        if not callable(test_func):
+          failed += 1
+          msg = f"Test function '{fn_name}' not found or not callable"
+          print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
+          print(f"  {msg}")
+          logs.append(msg)
           continue
 
-        instance = struct_cls()
-        ctx = testing.TestContext(full_name)
+        ctx = testing.TestContext(fn_name)
         testing.set_active_context(ctx)
 
-        setup_fn = getattr(instance, "set_up", None) or getattr(
-            instance, "func_set_up", None
-        )
-        if setup_fn:
-          try:
-            setup_fn()
-          except Exception as ex:
-            failed += 1
-            print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
-            continue
-
         err = None
-        if hasattr(instance, m_name):
-          try:
-            getattr(instance, m_name)()
-          except testing.TestFailure as tf:
-            err = str(tf)
-          except Exception as ex:  # pragma: no cover
-            err = f"Unhandled Exception: {ex}"
-
-        teardown_fn = getattr(instance, "tear_down", None) or getattr(
-            instance, "func_tear_down", None
-        )
-        if teardown_fn:
-          try:
-            teardown_fn()
-          except Exception:  # pragma: no cover
-            pass
+        try:
+          test_func()
+        except testing.TestFailure as tf:
+          err = str(tf)
+        except Exception as ex:  # pragma: no cover
+          err = f"Unhandled Exception: {ex}"
 
         if not ctx.failures and err is None:
           passed += 1
-          print(f"[ PASS ] {full_name} ({os.path.basename(sp_file)})")
+          print(f"[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
         else:
           failed += 1
           _print_python_test_failures(
-              full_name, sp_file, ctx.failures, err, sp_line_map
+              fn_name, sp_file, ctx.failures, err, sp_line_map
           )
 
-    return passed, failed, logs
+      for struct_name, methods in suite_tests.items():
+        py_struct_name = _mangle_python_name(struct_name)
+        struct_cls = getattr(mod, py_struct_name, None)
+        if struct_cls is None and py_struct_name != struct_name:
+          struct_cls = getattr(mod, struct_name, None)
+
+        for m_name in methods:
+          full_name = f"{struct_name}.{m_name}"
+          if (
+              filter_pattern
+              and filter_pattern not in full_name
+              and filter_pattern not in m_name
+          ):
+            continue
+
+          if struct_cls is None:
+            failed += 1
+            msg = f"Test suite struct '{struct_name}' not found"
+            print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
+            print(f"  {msg}")
+            logs.append(msg)
+            continue
+
+          try:
+            instance = struct_cls()
+          except Exception as ex:
+            failed += 1
+            msg = f"instantiation failed: {ex}"
+            print(f"[ FAIL ] {full_name} ({msg})")
+            logs.append(f"{full_name}: {msg}")
+            continue
+
+          ctx = testing.TestContext(full_name)
+          testing.set_active_context(ctx)
+
+          setup_fn = getattr(instance, "set_up", None) or getattr(
+              instance, "func_set_up", None
+          )
+          if setup_fn:
+            try:
+              setup_fn()
+            except Exception as ex:
+              failed += 1
+              print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
+              continue
+
+          err = None
+          py_m_name = _mangle_python_name(m_name)
+          test_method = getattr(instance, py_m_name, None)
+          if test_method is None and py_m_name != m_name:
+            test_method = getattr(instance, m_name, None)
+
+          if not callable(test_method):
+            err = f"Test method '{m_name}' not found on struct '{struct_name}'"
+          else:
+            try:
+              test_method()
+            except testing.TestFailure as tf:
+              err = str(tf)
+            except Exception as ex:  # pragma: no cover
+              err = f"Unhandled Exception: {ex}"
+
+          teardown_fn = getattr(instance, "tear_down", None) or getattr(
+              instance, "func_tear_down", None
+          )
+          if teardown_fn:
+            try:
+              teardown_fn()
+            except Exception as ex:
+              td_msg = f"tear_down failed: {ex}"
+              if err is None:
+                err = td_msg
+              else:
+                ctx.failures.append({
+                    "message": td_msg,
+                    "lineno": 0,
+                    "filename": sp_file,
+                    "fatal": False,
+                    "kind": "generic",
+                })
+
+          if not ctx.failures and err is None:
+            passed += 1
+            print(f"[ PASS ] {full_name} ({os.path.basename(sp_file)})")
+          else:
+            failed += 1
+            _print_python_test_failures(
+                full_name, sp_file, ctx.failures, err, sp_line_map
+            )
+
+      return passed, failed, logs
   finally:
-    if out_py and os.path.exists(out_py):
-      try:
-        os.remove(out_py)
-      except OSError:
-        pass
     for k in list(sys.modules.keys()):
       if k not in orig_modules or k.startswith("sapphire_test_"):
         del sys.modules[k]
@@ -450,13 +579,16 @@ def _build_lua_test_harness(
       os.path.join(os.path.dirname(__file__), "..", "..")
   )
   sp_dir = os.path.dirname(os.path.abspath(sp_file))
+  out_dir = os.path.dirname(os.path.abspath(out_lua))
   esc_workspace_root = _escape_lua_string(workspace_root)
   esc_sp_dir = _escape_lua_string(sp_dir)
+  esc_out_dir = _escape_lua_string(out_dir)
   esc_out_lua = _escape_lua_string(out_lua)
   esc_sp_basename = _escape_lua_string(os.path.basename(sp_file))
 
   pkg_path = (
-      f'package.path = "{esc_workspace_root}/?.lua;'
+      f'package.path = "{esc_out_dir}/?.lua;{esc_out_dir}/?/init.lua;'
+      f'{esc_workspace_root}/?.lua;'
       f'{esc_workspace_root}/?/init.lua;'
       f'{esc_workspace_root}/lib/?.lua;'
       f'{esc_workspace_root}/lib/?/init.lua;'
@@ -596,11 +728,13 @@ end
     if filter_pattern and filter_pattern not in fn_name:
       continue
     esc_fn = _escape_lua_string(fn_name)
+    esc_lua_fn = _escape_lua_string(_mangle_lua_name(fn_name))
     lua_script_lines.append(f'''
   do
     local ctx = testing.TestContext.new("{esc_fn}")
     testing.set_active_context(ctx)
-    local fn = (target_mod and target_mod["{esc_fn}"]) or _G["{esc_fn}"]
+    local fn = (target_mod and (target_mod["{esc_lua_fn}"] or target_mod["{esc_fn}"]))
+        or _G["{esc_lua_fn}"] or _G["{esc_fn}"]
     if type(fn) ~= "function" then
       total_failed = total_failed + 1
       print("[ FAIL ] {esc_fn} ({esc_sp_basename})")
@@ -645,27 +779,39 @@ end
       ):
         continue
       esc_struct = _escape_lua_string(struct_name)
+      esc_lua_struct = _escape_lua_string(_mangle_lua_name(struct_name))
       esc_m = _escape_lua_string(m_name)
+      esc_lua_m = _escape_lua_string(_mangle_lua_name(m_name))
       esc_full = _escape_lua_string(full_name)
       lua_script_lines.append(f'''
   do
     local ctx = testing.TestContext.new("{esc_full}")
     testing.set_active_context(ctx)
-    local struct_cls = (target_mod and target_mod["{esc_struct}"])
-        or _G["{esc_struct}"]
+    local struct_cls = (target_mod and (target_mod["{esc_lua_struct}"] or target_mod["{esc_struct}"]))
+        or _G["{esc_lua_struct}"] or _G["{esc_struct}"]
     local inst = nil
+    local init_ok, init_err = true, nil
     if struct_cls then
-      setmetatable(struct_cls, {{ __index = testing.TestCase }})
+      for k, v in pairs(testing.TestCase) do
+        if k ~= "__index" and struct_cls[k] == nil then
+          struct_cls[k] = v
+        end
+      end
       if struct_cls.init then
-        inst = struct_cls.init()
-      elseif struct_cls.new then
-        inst = struct_cls.new()
+        init_ok, inst = pcall(function() return struct_cls.init() end)
+        if not init_ok then
+          init_err = inst
+          inst = nil
+        end
       else
         inst = setmetatable({{}}, struct_cls)
       end
     end
 
-    if not inst then
+    if not init_ok then
+      total_failed = total_failed + 1
+      print("[ FAIL ] {esc_full} (instantiation failed: " .. tostring(init_err) .. ")")
+    elseif not inst then
       total_failed = total_failed + 1
       print("[ FAIL ] {esc_full} ({esc_sp_basename})")
       print("  Test suite struct '{esc_struct}' could not be instantiated")
@@ -679,14 +825,30 @@ end
         print("[ FAIL ] {esc_full} (set_up failed: "
             .. tostring(setup_err) .. ")")
       else
-        local test_fn = inst["{esc_m}"]
+        local test_fn = inst["{esc_lua_m}"] or inst["{esc_m}"]
         if type(test_fn) ~= "function" then
           total_failed = total_failed + 1
           print("[ FAIL ] {esc_full} ({esc_sp_basename})")
           print("  Test method '{esc_m}' not found on struct '{esc_struct}'")
         else
           local ok, err = pcall(function() test_fn(inst) end)
-          if inst.tear_down then pcall(function() inst:tear_down() end) end
+          local td_ok, td_err = true, nil
+          if inst.tear_down then
+            td_ok, td_err = pcall(function() inst:tear_down() end)
+          end
+          if not td_ok then
+            if ok then
+              ok = false
+              err = "tear_down failed: " .. tostring(td_err)
+            else
+              table.insert(ctx.failures, {{
+                message = "tear_down failed: " .. tostring(td_err),
+                lineno = 0,
+                fatal = false,
+                kind = "generic",
+              }})
+            end
+          end
 
           if ok and #ctx.failures == 0 then
             total_passed = total_passed + 1
@@ -731,19 +893,20 @@ def run_tests_lua(
     sourcemap: bool = True,
 ) -> Tuple[int, int, List[str]]:
   """Executes discovered tests in Lua 5.1 target backend."""
-  out_lua = None
-  runner_tmp = None
-  try:
+  stem = os.path.splitext(os.path.basename(sp_file))[0]
+  with tempfile.TemporaryDirectory(prefix="sapphire_test_lua_") as tmp_dir:
+    target_out_lua = os.path.join(tmp_dir, f"{stem}.lua")
     try:
       out_lua = transpile_file(
           sp_file,
+          output_file=target_out_lua,
           target="lua",
           test_mode=True,
           sourcemap=sourcemap,
           quiet=True,
           raise_on_error=True,
       )
-    except BaseException as e:  # pragma: no cover
+    except Exception as e:  # pragma: no cover
       print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
       for line in str(e).splitlines():
         print(f"  {line}")
@@ -765,36 +928,34 @@ def run_tests_lua(
     harness_src = _build_lua_test_harness(
         sp_file, out_lua, standalone_tests, suite_tests, filter_pattern
     )
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".runner.lua", delete=False, encoding="utf-8"
-    ) as f:
+    runner_tmp = os.path.join(tmp_dir, f"{stem}.runner.lua")
+    with open(runner_tmp, "w", encoding="utf-8") as f:
       f.write(harness_src)
-      runner_tmp = f.name
 
     res = subprocess.run([lua_bin, runner_tmp], capture_output=True, text=True)
     if res.stdout:
       print(res.stdout.strip())
-    if res.stderr:  # pragma: no cover
-      print(res.stderr.strip(), file=sys.stderr)
+    stderr_text = res.stderr.strip() if res.stderr else ""
+    if stderr_text:  # pragma: no cover
+      print(stderr_text, file=sys.stderr)
 
     stdout_lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
     passed = sum(1 for l in stdout_lines if l.startswith("[ PASS ]"))
     failed = sum(1 for l in stdout_lines if l.startswith("[ FAIL ]"))
-    if res.returncode != 0 and passed == 0 and failed == 0:
+    errs: List[str] = []
+    if stderr_text:
+      errs.append(stderr_text)
+    if res.returncode != 0 and failed == 0:
       failed = 1
+      crash_msg = (
+          f"Lua test runner exited unexpectedly with code {res.returncode}"
+          + (f": {stderr_text}" if stderr_text else "")
+      )
+      print(f"[ FAIL ] {os.path.basename(sp_file)} ({crash_msg})")
+      if not errs:
+        errs.append(crash_msg)
 
-    return passed, failed, []
-  finally:
-    for path_to_clean in (
-        runner_tmp,
-        out_lua,
-        (out_lua + ".map") if out_lua else None,
-    ):
-      if path_to_clean and os.path.exists(path_to_clean):
-        try:
-          os.remove(path_to_clean)
-        except OSError:
-          pass
+    return passed, failed, errs
 
 
 
@@ -893,6 +1054,7 @@ def run_tests(
   test_records: List[Dict[str, Any]] = []
   file_errors: List[Dict[str, Any]] = []
   start_time = time.time()
+  use_lua_backend = target.lower() in ("lua", "lua5.1", "love2d", "love")
 
   if not json_output:
     print(f"Running Sapphire tests in target '{target}'...\n")
@@ -905,7 +1067,7 @@ def run_tests(
       if not json_output:
         for w in disc_warnings:
           print(f"[ WARNING ] {os.path.basename(sp_file)}: {w}")
-    except BaseException as e:  # pragma: no cover
+    except Exception as e:  # pragma: no cover
       if json_output:
         file_errors.append({"file": sp_file, "message": str(e)})
       else:
@@ -926,7 +1088,7 @@ def run_tests(
       out_buf = io.StringIO()
       err_buf = io.StringIO()
       with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
-        if target.lower() in ("lua", "lua5.1"):
+        if use_lua_backend:
           passed, failed, errs = run_tests_lua(
               sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap
           )
@@ -939,8 +1101,11 @@ def run_tests(
       test_records.extend(_parse_test_output_lines(out_buf.getvalue(), sp_file))
       for err_msg in errs:
         file_errors.append({"file": sp_file, "message": err_msg})
+      extra_err = err_buf.getvalue().strip()
+      if extra_err and extra_err not in errs:
+        file_errors.append({"file": sp_file, "message": extra_err})
     else:
-      if target.lower() in ("lua", "lua5.1"):
+      if use_lua_backend:
         passed, failed, _ = run_tests_lua(
             sp_file, standalone_tests, suite_tests, filter_pattern, sourcemap
         )
@@ -954,7 +1119,8 @@ def run_tests(
         total_failed += failed
 
   if len(sp_files) > 1 and tests_found == 0 and total_failed == 0 and not json_output:
-    print(f"No tests found in '{path}'.")
+    joined = ", ".join(paths)
+    print(f"No tests found in '{joined}'.")
 
   duration = time.time() - start_time
   if json_output:

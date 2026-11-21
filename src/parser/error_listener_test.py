@@ -45,3 +45,12 @@ class TestErrorListener(unittest.TestCase):
     self.assertEqual(listener.errors, 1)
     self.assertEqual(len(listener.error_messages), 1)
     self.assertIn("Syntax Error", listener.error_messages[0])
+
+  def test_eof_token_length_is_one(self):
+    listener = CustomErrorListener(file_path="eof.sp", source_content="let x = 1", quiet=True)
+    mock_eof = MagicMock()
+    mock_eof.text = "<EOF>"
+
+    listener.syntaxError(None, mock_eof, 1, 9, "missing ';'", None)
+    self.assertEqual(len(listener.diagnostics), 1)
+    self.assertEqual(listener.diagnostics[0].length, 1)

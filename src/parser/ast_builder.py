@@ -7,6 +7,7 @@ ast.py.
 
 from typing import List
 
+from src.common.errors import SapphireSyntaxError
 from src.parser.ast import *
 from src.parser.gen.SapphireVisitor import SapphireVisitor
 from src.parser.gen.SapphireParser import SapphireParser
@@ -42,7 +43,11 @@ class ASTBuilder(SapphireVisitor):
         imports.append(node)
       elif isinstance(node, ExportStmtNode):
         if export_block is not None:
-          raise SyntaxError("Only a single export block is allowed per file.")
+          raise SapphireSyntaxError(
+              "Only a single export block is allowed per file.",
+              line=getattr(node, "start_line", None),
+              column=getattr(node, "start_column", None),
+          )
         export_block = node
       elif node is not None:
         declarations.append(node)
@@ -886,17 +891,23 @@ class ASTBuilder(SapphireVisitor):
     return [self.visit(field) for field in ctx.structInitField()]
 
   def visitStructInitField(self, ctx: SapphireParser.StructInitFieldContext) -> ArgumentNode:
-    name = ctx.IDENTIFIER().getText()
+    ident = ctx.IDENTIFIER()
+    name = ident.getText()
     expr_ctx = ctx.expression()
+    name_token = ident.getSymbol() if hasattr(ident, "getSymbol") else None
     if expr_ctx is None:
-      raise SyntaxError(f"Field '{name}' in struct initializer must be assigned an expression using '='.")
+      raise SapphireSyntaxError(
+          f"Field '{name}' in struct initializer must be assigned an expression using '='.",
+          line=getattr(name_token, "line", None),
+          column=getattr(name_token, "column", None),
+      )
     expr = self.visit(expr_ctx)
     node = ArgumentNode(name, expr)
     # Positioning for Language Server:
-    name_token = ctx.IDENTIFIER().getSymbol()
-    node.name_line = name_token.line
-    node.name_column = name_token.column
-    node.name_length = len(name_token.text)
+    if name_token is not None:
+      node.name_line = name_token.line
+      node.name_column = name_token.column
+      node.name_length = len(name_token.text)
     return node
 
   def visitYieldStatement(self, ctx: SapphireParser.YieldStatementContext) -> YieldNode:

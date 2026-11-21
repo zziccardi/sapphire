@@ -17,7 +17,7 @@ except ImportError:
     return Path(path).resolve().as_uri()
 
 from src.cli.diagnostics import format_diagnostic
-from src.common.errors import SemanticError
+from src.common.errors import SapphireSyntaxError, SemanticError
 from src.parser.ast import (
     ASTNode,
     EnumDeclNode,
@@ -236,12 +236,14 @@ class DeclarationPass:
       sub_ast = None
       try:
         sub_ast = ASTBuilder().visit(sub_tree)
-      except SyntaxError as syn_err:
+      except (SapphireSyntaxError, SyntaxError) as syn_err:
         mod_errors.append(
             format_diagnostic(
                 error_type="Syntax Error",
-                message=str(syn_err),
+                message=getattr(syn_err, "message", str(syn_err)),
                 file_path=target_file,
+                line=getattr(syn_err, "line", None),
+                column=getattr(syn_err, "column", None),
                 source_content=sub_code,
             )
         )

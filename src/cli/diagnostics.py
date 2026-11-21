@@ -37,7 +37,7 @@ class Diagnostic:
 
 
 def get_source_line(
-    source: Union[str, List[str]], lineno: int
+    source: Union[str, List[str]], lineno: int, *, allow_file_path: bool = True
 ) -> Optional[str]:
   """Reads a 1-indexed line from a file path, multi-line string, or list of lines."""
   if lineno < 1:
@@ -50,7 +50,13 @@ def get_source_line(
 
   if isinstance(source, str):
     # If source is a valid existing file path
-    if os.path.isfile(source):
+    if (
+        allow_file_path
+        and "\n" not in source
+        and "\r" not in source
+        and "\x00" not in source
+        and os.path.isfile(source)
+    ):
       try:
         with open(source, "r", encoding="utf-8") as f:
           lines = f.readlines()
@@ -117,35 +123,41 @@ def format_diagnostic(
 
   # Source line snippet construction
   if line and line > 0:
-    source_ref = source_content if source_content is not None else file_path
-    if source_ref:
-      raw_line = get_source_line(source_ref, line)
-      if raw_line is not None:
-        # Expand tabs to 4 spaces to maintain column alignment in terminal
-        expanded_line = raw_line.rstrip("\r\n").expandtabs(4)
-        line_str = str(line)
-        lines_out.append(f"  Line {line_str}:  {expanded_line}")
+    if source_content is not None:
+      raw_line = get_source_line(source_content, line, allow_file_path=False)
+    elif file_path:
+      raw_line = get_source_line(file_path, line, allow_file_path=True)
+    else:
+      raw_line = None
+    if raw_line is not None:
+      # Strip line endings before column slicing so past-EOL columns do not
+      # shift carets past the end of the displayed line.
+      clean_line = raw_line.rstrip("\r\n")
+      # Expand tabs to 4 spaces to maintain column alignment in terminal
+      expanded_line = clean_line.expandtabs(4)
+      line_str = str(line)
+      lines_out.append(f"  Line {line_str}:  {expanded_line}")
 
-        indent_pad = " " * (len(line_str) + 8)
+      indent_pad = " " * (len(line_str) + 8)
 
-        if column is not None and column >= 0:
-          # Compute expanded column index if original line contained tabs
-          prefix_before_col = raw_line[:column].expandtabs(4)
-          col_offset = len(prefix_before_col)
+      if column is not None and column >= 0:
+        # Compute expanded column index if original line contained tabs
+        prefix_before_col = clean_line[:column].expandtabs(4)
+        col_offset = len(prefix_before_col)
 
-          caret_span = length if (length is not None and length > 0) else 1
-          # Cap span so it doesn't exceed line length
-          available_chars = max(1, len(expanded_line) - col_offset)
-          caret_span = min(caret_span, available_chars)
+        caret_span = length if (length is not None and length > 0) else 1
+        # Cap span so it doesn't exceed line length
+        available_chars = max(1, len(expanded_line) - col_offset)
+        caret_span = min(caret_span, available_chars)
 
-          caret_line = f"  {indent_pad}{' ' * col_offset}{'^' * caret_span}"
-        else:
-          # Underline non-whitespace portion of line
-          indent_len = len(expanded_line) - len(expanded_line.lstrip())
-          stripped_len = max(1, len(expanded_line.strip()))
-          caret_line = f"  {indent_pad}{' ' * indent_len}{'^' * stripped_len}"
+        caret_line = f"  {indent_pad}{' ' * col_offset}{'^' * caret_span}"
+      else:
+        # Underline non-whitespace portion of line
+        indent_len = len(expanded_line) - len(expanded_line.lstrip())
+        stripped_len = max(1, len(expanded_line.strip()))
+        caret_line = f"  {indent_pad}{' ' * indent_len}{'^' * stripped_len}"
 
-        lines_out.append(caret_line)
+      lines_out.append(caret_line)
 
   if hint:
     lines_out.append(f"  Hint: {hint}")

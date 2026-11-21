@@ -8383,5 +8383,39 @@ class TestTypeChecker(unittest.TestCase):
       """)
     self.assertIn("Inconsistent value types in map literal.", str(ctx.exception))
 
+  def test_double_lookup_lint_with_literal_and_unary_keys(self):
+    """Verifies map double-lookup lint handles LiteralNode and UnaryOpNode keys without crashing."""
+    checker = self._check("""
+    func main() {
+      let m1: [String: int] = {"a": 1};
+      if m1.contains("a") {
+        let v1 = m1["a"];
+      }
+      let m2: [int: String] = {-1: "neg"};
+      if m2.contains(-1) {
+        let v2 = m2[-1];
+      }
+    }
+    """)
+    self.assertEqual(len(checker.warnings), 2)
+
+  def test_destructor_explicit_void_and_optional_return_type(self):
+    """Verifies __del__(): void succeeds and __del__(): int? raises SemanticError without AttributeError."""
+    self._check("""
+    struct Clean { var x: int; }
+    impl Clean {
+      func __del__(): void {}
+    }
+    """)
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      struct BadDel { var x: int; }
+      impl BadDel {
+        func __del__(): int? { return none; }
+      }
+      """)
+    self.assertIn("Destructor '__del__' must return void.", str(ctx.exception))
+
+
 if __name__ == "__main__":
   unittest.main()

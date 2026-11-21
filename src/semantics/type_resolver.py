@@ -190,7 +190,19 @@ class TypeResolverMixin:
               self.error("Destructor '__del__' cannot be static.")
             if len(func_decl.parameters) > 0:
               self.error("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.")
-            is_void = (len(ret_type) == 1 and (ret_type[0].name in ("none", "void") or (isinstance(ret_type[0], PrimitiveType) and ret_type[0].name in ("none", "void"))))
+            is_void = (
+                len(ret_type) == 0
+                or (
+                    len(ret_type) == 1
+                    and (
+                        isinstance(ret_type[0], NoneType)
+                        or (
+                            isinstance(ret_type[0], PrimitiveType)
+                            and ret_type[0].name in ("none", "void")
+                        )
+                    )
+                )
+            )
             if not is_void:
               self.error("Destructor '__del__' must return void.")
 

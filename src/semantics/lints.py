@@ -41,11 +41,11 @@ def _exprs_equal(a: Optional[ASTNode], b: Optional[ASTNode]) -> bool:
         and _exprs_equal(a.receiver, b.receiver)
     )
   if isinstance(a, LiteralNode):
-    return a.value == b.value and a.literal_type == b.literal_type
+    return a.value == b.value and a.lit_type == b.lit_type
   if isinstance(a, IndexExprNode):
     return _exprs_equal(a.array, b.array) and _exprs_equal(a.index, b.index)
   if isinstance(a, UnaryOpNode):
-    return a.op == b.op and _exprs_equal(a.operand, b.operand)
+    return a.op == b.op and _exprs_equal(a.expr, b.expr)
   if isinstance(a, BinaryOpNode):
     return (
         a.op == b.op

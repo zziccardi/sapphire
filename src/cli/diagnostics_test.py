@@ -138,6 +138,34 @@ class TestDiagnostics(unittest.TestCase):
         },
     )
 
+  def test_format_diagnostic_crlf_past_eol_caret_not_shifted(self):
+    diag = format_diagnostic(
+        error_type="Syntax Error",
+        message="msg",
+        file_path="test.sp",
+        line=1,
+        column=15,
+        length=1,
+        source_content=["let x = 1\r\n"],
+    )
+    lines = diag.splitlines()
+    # Line 1: "  Line 1:  let x = 1" -> len("  Line 1:  ") == 11, len("let x = 1") == 9 -> col 20
+    self.assertEqual(lines[1], "  Line 1:  let x = 1")
+    self.assertEqual(lines[2], " " * 20 + "^")
+
+  def test_format_diagnostic_source_content_not_treated_as_filename(self):
+    # "LICENSE" exists in repo root; passing it as source_content must treat it as text.
+    diag = format_diagnostic(
+        error_type="Error",
+        message="bad",
+        file_path="inline.sp",
+        line=1,
+        column=0,
+        length=7,
+        source_content="LICENSE",
+    )
+    self.assertIn("  Line 1:  LICENSE", diag)
+
 
 if __name__ == "__main__":
   unittest.main()
