@@ -12,13 +12,19 @@ import { withBase } from '../lib/url';
           <p class="font-semibold text-[var(--text-primary)]">Sapphire Language</p>
           <p class="mt-1 max-w-md text-sm text-[var(--text-secondary)]">
             Statically typed systems safety meets dynamic prototyping ergonomics.
-            Currently a transpiler toolchain targeting Python &amp; Lua 5.1, with a native
-            LLVM/Rust compiler planned on the roadmap.
+            Compiles today to Python &amp; Lua with built-in host interop, with a
+            native LLVM/Rust compiler planned on the roadmap.
           </p>
         </div>
       </div>
 
       <div class="flex flex-wrap gap-6 text-sm text-[var(--text-secondary)]">
+        <a href={withBase('/docs/quickstart')} class="hover:text-[var(--text-primary)]">
+          Quickstart
+        </a>
+        <a href={withBase('/docs/host-interop')} class="hover:text-[var(--text-primary)]">
+          Host Interop
+        </a>
         <a href={withBase('/docs/spec')} class="hover:text-[var(--text-primary)]">
           Language Spec
         </a>
