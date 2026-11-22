@@ -629,8 +629,15 @@ class ASTBuilder(SapphireVisitor):
     return CloneNode(expr, initializer_block, arena_expr)
 
   def visitMoveExpr(self, ctx: SapphireParser.MoveExprContext) -> MoveNode:
-    name = ctx.IDENTIFIER().getText()
-    return MoveNode(name)
+    ident = ctx.IDENTIFIER()
+    name = ident.getText()
+    node = MoveNode(name)
+    token = ident.getSymbol() if hasattr(ident, "getSymbol") else None
+    if token is not None:
+      node.name_line = token.line
+      node.name_column = token.column
+      node.name_length = len(name)
+    return node
 
   def visitIndexExpr(self, ctx: SapphireParser.IndexExprContext) -> IndexExprNode:
     array = self.visit(ctx.nonLambdaExpression())

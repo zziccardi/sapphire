@@ -37,18 +37,43 @@ const pagefindPath = withBase('/pagefind/pagefind.js');
     const pagefindPath = root?.getAttribute('data-pagefind-path') || '/pagefind/pagefind.js';
     const input = document.getElementById('docs-search-input');
     const resultsBox = document.getElementById('docs-search-results');
-    let pagefind = null;
+    let pagefindPromise = null;
+    let latestSearchId = 0;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function sanitizeUrl(url) {
+      const raw = String(url ?? '').trim();
+      const normalized = raw.replace(/[\u0000-\u001F\s]+/g, '').toLowerCase();
+      if (
+        normalized.startsWith('javascript:') ||
+        normalized.startsWith('vbscript:') ||
+        normalized.startsWith('data:')
+      ) {
+        return '#';
+      }
+      return raw || '#';
+    }
 
     async function ensurePagefind() {
-      if (!pagefind) {
-        try {
-          pagefind = await import(/* @vite-ignore */ pagefindPath);
-          await pagefind.init();
-        } catch {
+      if (!pagefindPromise) {
+        pagefindPromise = (async () => {
+          const pf = await import(/* @vite-ignore */ pagefindPath);
+          await pf.init();
+          return pf;
+        })().catch(() => {
+          pagefindPromise = null;
           return null;
-        }
+        });
       }
-      return pagefind;
+      return pagefindPromise;
     }
 
     input?.addEventListener('focus', () => {
@@ -56,28 +81,35 @@ const pagefindPath = withBase('/pagefind/pagefind.js');
     });
 
     input?.addEventListener('input', async () => {
+      const searchId = ++latestSearchId;
       const query = input.value.trim();
       if (!query) {
         resultsBox?.classList.add('hidden');
         return;
       }
       const pf = await ensurePagefind();
-      if (!pf || !resultsBox) return;
+      if (searchId !== latestSearchId || !pf || !resultsBox) return;
 
       const search = await pf.search(query);
+      if (searchId !== latestSearchId) return;
+
       const top = await Promise.all(search.results.slice(0, 6).map((r) => r.data()));
+      if (searchId !== latestSearchId) return;
+
       if (top.length === 0) {
         resultsBox.innerHTML =
           '<p class="p-3 text-xs text-[var(--text-muted)]">No matching documentation found.</p>';
       } else {
         resultsBox.innerHTML = top
-          .map(
-            (item) => `
-            <a href="${item.url}" class="block rounded-lg p-2.5 hover:bg-[var(--bg-secondary)]">
-              <div class="text-sm font-semibold text-[var(--text-primary)]">${item.meta?.title || 'Documentation'}</div>
+          .map((item) => {
+            const safeUrl = escapeHtml(sanitizeUrl(item.url));
+            const safeTitle = escapeHtml(item.meta?.title || 'Documentation');
+            return `
+            <a href="${safeUrl}" class="block rounded-lg p-2.5 hover:bg-[var(--bg-secondary)]">
+              <div class="text-sm font-semibold text-[var(--text-primary)]">${safeTitle}</div>
               <div class="mt-0.5 line-clamp-2 text-xs text-[var(--text-secondary)]">${item.excerpt}</div>
-            </a>`,
-          )
+            </a>`;
+          })
           .join('');
       }
       resultsBox.classList.remove('hidden');

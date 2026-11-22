@@ -127,6 +127,82 @@ class TestHoverProvider(unittest.TestCase):
     self.assertIn("method", res.contents.value)
     self.assertIn("draw", res.contents.value)
 
+  def test_hover_method_call_unwraps_struct_method_and_shadows_global(self):
+    """Verifies CallNode(MemberAccessNode) unwraps StructMethod and local hover beats global."""
+    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///hover_bugfixes.sp"
+    code = (
+        "struct Base {\n"
+        "  var val: int;\n"
+        "}\n"
+        "impl Base {\n"
+        "  func compute(x: int): int { return self.val + x; }\n"
+        "}\n"
+        "func helper(): int { return 1; }\n"
+        "func demo(helper: int) {\n"
+        "  let b = Base { val = 10 };\n"
+        "  let r = b.compute(helper);\n"
+        "  let a, msg = 1, \"hi\";\n"
+        "}\n"
+    )
+    doc = MagicMock()
+    doc.source = code
+    doc.uri = doc_uri
+    ls.workspace.get_text_document.return_value = doc
+    validate_source(ls, doc_uri, code)
+    lines = code.splitlines()
+
+    # Hover on parameter declaration `helper` (line 7) shows parameter: int, not global function.
+    res_param = HoverProvider.provide_hover(
+        ls,
+        HoverParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=7, character=lines[7].index("helper")),
+        ),
+    )
+    self.assertIsNotNone(res_param)
+    self.assertIn("(parameter)", res_param.contents.value)
+    self.assertIn("int", res_param.contents.value)
+
+    # Hover on `helper` identifier inside demo() (line 9) shows parameter, NOT function.
+    res_use = HoverProvider.provide_hover(
+        ls,
+        HoverParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=9, character=lines[9].index("helper")),
+        ),
+    )
+    self.assertIsNotNone(res_use)
+    self.assertIn("(parameter)", res_use.contents.value)
+    self.assertNotIn("(function)", res_use.contents.value)
+
+    # Hover on `compute` in `b.compute(helper)` renders clean method signature, never StructMethod repr.
+    res_call = HoverProvider.provide_hover(
+        ls,
+        HoverParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=9, character=lines[9].index("compute")),
+        ),
+    )
+    self.assertIsNotNone(res_call)
+    self.assertNotIn("StructMethod", res_call.contents.value)
+    self.assertIn("compute", res_call.contents.value)
+    self.assertIn("Returns: `int`", res_call.contents.value)
+
+    # Hover on `msg` in multi-var `let a, msg = 1, "hi";` shows `msg: String`, not `a: int`.
+    res_mv = HoverProvider.provide_hover(
+        ls,
+        HoverParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=10, character=lines[10].index("msg")),
+        ),
+    )
+    self.assertIsNotNone(res_mv)
+    self.assertIn("`msg`", res_mv.contents.value)
+    self.assertIn("`String`", res_mv.contents.value)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -1730,12 +1730,12 @@ let field_ref = c_var.p.x;
     # 2. Top-level func ForNode in _find_local_decl (lines 522-524)
     res_top_k = definition(self.ls, DefinitionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=14, character=18)
+        position=Position(line=14, character=16)
     ))
     self.assertIsNotNone(res_top_k)
     res_top_v = definition(self.ls, DefinitionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=15, character=18)
+        position=Position(line=15, character=16)
     ))
     self.assertIsNotNone(res_top_v)
 

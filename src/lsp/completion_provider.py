@@ -6,11 +6,18 @@ from typing import Any, Callable, List, Optional
 from lsprotocol.types import CompletionItem, CompletionList, CompletionParams
 
 from src.parser.ast import (
+    BlockNode,
     ForNode,
     FuncDeclNode,
     ImplBlockNode,
     VarDeclNode,
+    WhileNode,
 )
+from src.lsp.definition_provider import (
+    _line_in_node_span,
+    find_local_decl,
+)
+from src.lsp.semantic_tokens import utf16_to_codepoint
 
 _KEYWORDS = [
     "let",
@@ -56,10 +63,24 @@ def _collect_block_stmt_locals(
     if st_start is not None and st_start > line:
       continue
     if isinstance(stmt, VarDeclNode):
-      vtype = node_types.get(stmt)
-      type_str = f": {vtype}" if vtype else ""
-      add_item(stmt.name, 6, f"(variable) {stmt.name}{type_str}")
-    elif type(stmt).__name__ in ("IfNode", "GuardStmtNode"):
+      binding_types = getattr(stmt, "binding_types", {}) or {}
+      names = getattr(stmt, "names", None) or (
+          [stmt.name] if getattr(stmt, "name", None) else []
+      )
+      for idx, v_name in enumerate(names):
+        vtype = binding_types.get(v_name) or (
+            node_types.get(stmt) if idx == 0 else None
+        )
+        type_str = f": {vtype}" if vtype else ""
+        add_item(v_name, 6, f"(variable) {v_name}{type_str}")
+    elif type(stmt).__name__ == "GuardStmtNode":
+      else_block = getattr(stmt, "else_block", None)
+      if else_block is not None and _line_in_node_span(else_block, line):
+        _collect_block_stmt_locals(
+            getattr(else_block, "statements", []), line, node_types, add_item
+        )
+        if line > getattr(else_block, "start_line", line):
+          continue
       bindings = getattr(
           stmt,
           "bindings",
@@ -71,11 +92,58 @@ def _collect_block_stmt_locals(
         )
         for b_name in names:
           add_item(b_name, 6, f"(variable) {b_name}")
+    elif type(stmt).__name__ == "IfNode":
+      if not _line_in_node_span(stmt, line):
+        continue
+      then_block = getattr(stmt, "then_block", None)
+      else_block = getattr(stmt, "else_block", None)
+      in_else = else_block is not None and _line_in_node_span(else_block, line)
+      if in_else:
+        else_stmts = (
+            [else_block]
+            if type(else_block).__name__ == "IfNode"
+            else getattr(else_block, "statements", [])
+        )
+        _collect_block_stmt_locals(else_stmts, line, node_types, add_item)
+      else:
+        bindings = getattr(
+            stmt,
+            "bindings",
+            [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
+        )
+        for b in bindings:
+          names = getattr(
+              b,
+              "let_names",
+              [b.let_name] if getattr(b, "let_name", None) else [],
+          )
+          for b_name in names:
+            add_item(b_name, 6, f"(variable) {b_name}")
+        if then_block is not None and _line_in_node_span(then_block, line):
+          _collect_block_stmt_locals(
+              getattr(then_block, "statements", []), line, node_types, add_item
+          )
     elif isinstance(stmt, ForNode):
+      if not _line_in_node_span(stmt, line):
+        continue
       if getattr(stmt, "key_var", None):
         add_item(stmt.key_var, 6, f"(variable) {stmt.key_var}")
       val_var = getattr(stmt, "val_var", stmt.loop_var)
       add_item(val_var, 6, f"(variable) {val_var}")
+      block = getattr(stmt, "block", None)
+      if block is not None and _line_in_node_span(block, line):
+        _collect_block_stmt_locals(
+            getattr(block, "statements", []), line, node_types, add_item
+        )
+    elif isinstance(stmt, (WhileNode, BlockNode)):
+      if not _line_in_node_span(stmt, line):
+        continue
+      nested = (
+          getattr(stmt, "statements", [])
+          if isinstance(stmt, BlockNode)
+          else getattr(getattr(stmt, "block", None), "statements", [])
+      )
+      _collect_block_stmt_locals(nested, line, node_types, add_item)
 
 
 def get_scope_completion_items(
@@ -103,7 +171,7 @@ def get_scope_completion_items(
   for decl in getattr(ast, "declarations", []):
     s_start = getattr(decl, "start_line", None)
     s_end = getattr(decl, "end_line", None)
-    if s_start is None or s_start > line or (s_end is not None and line > s_end + 10):
+    if s_start is None or s_start > line or (s_end is not None and line > s_end):
       continue
 
     if isinstance(decl, FuncDeclNode):
@@ -125,7 +193,7 @@ def get_scope_completion_items(
         if (
             f_start is not None
             and f_start <= line
-            and (f_end is None or line <= f_end + 10)
+            and (f_end is None or line <= f_end)
         ):
           if getattr(member, "modifier", None) != "static":
             add_item("self", 6, f"(variable) self: {decl.struct_name}")
@@ -199,6 +267,18 @@ def get_scope_completion_items(
   return items
 
 
+def _find_enclosing_impl_struct(
+    ast: Any, sym_table: Any, line: int
+) -> Optional[Any]:
+  """Returns the StructType of the ImplBlockNode enclosing *line*, if any."""
+  if not ast or not sym_table:
+    return None
+  for decl in getattr(ast, "declarations", []):
+    if isinstance(decl, ImplBlockNode) and _line_in_node_span(decl, line):
+      return sym_table.lookup_type(decl.struct_name)
+  return None
+
+
 class CompletionProvider:
   """Provides dot-access and scope-level completions for Sapphire."""
 
@@ -211,31 +291,59 @@ class CompletionProvider:
       node_types: dict,
   ) -> Optional[CompletionList]:
     """Resolves member completions for `<receiver_name>.`."""
+    ast = ls.ast_cache.get(uri)
+    sym_table = ls.symbol_table_cache.get(uri)
     receiver_type = None
     best_node = None
-    min_dist = float("inf")
-    for node in node_types.keys():
-      n_name = (
-          getattr(node, "name", None)
-          or getattr(node, "member", None)
-          or getattr(node, "alias", None)
-          or getattr(node, "let_name", None)
-          or getattr(node, "key_var", None)
-          or getattr(node, "val_var", None)
-          or getattr(node, "loop_var", None)
-      )
-      if n_name == receiver_name:
-        s_line = getattr(node, "start_line", getattr(node, "name_line", None))
-        dist = abs(s_line - line) if s_line else 0
-        if dist < min_dist:
-          min_dist = dist
-          best_node = node
 
-    if best_node:
-      receiver_type = node_types.get(best_node)
+    # Resolve `self.` directly from the enclosing `impl` block so sibling
+    # `impl` blocks never hijack completions.
+    if receiver_name == "self":
+      receiver_type = _find_enclosing_impl_struct(ast, sym_table, line)
 
-    if not receiver_type and uri in ls.symbol_table_cache:
-      sym = ls.symbol_table_cache[uri].lookup(receiver_name)
+    # Prefer lexically visible local declaration (including multi-var bindings).
+    if receiver_type is None and ast is not None:
+      local_decl = find_local_decl(ast, receiver_name, line)
+      if local_decl is not None:
+        binding_types = getattr(local_decl, "binding_types", None)
+        if isinstance(binding_types, dict) and receiver_name in binding_types:
+          receiver_type = binding_types[receiver_name]
+          best_node = local_decl
+        elif local_decl in node_types:
+          receiver_type = node_types[local_decl]
+          best_node = local_decl
+
+    if receiver_type is None:
+      min_dist = float("inf")
+      for node in node_types.keys():
+        binding_types = getattr(node, "binding_types", None)
+        if isinstance(binding_types, dict) and receiver_name in binding_types:
+          s_line = getattr(node, "start_line", getattr(node, "name_line", None))
+          dist = abs(s_line - line) if s_line else 0
+          if dist < min_dist:
+            min_dist = dist
+            best_node = node
+            receiver_type = binding_types[receiver_name]
+          continue
+        n_name = (
+            getattr(node, "name", None)
+            or getattr(node, "member", None)
+            or getattr(node, "alias", None)
+            or getattr(node, "let_name", None)
+            or getattr(node, "key_var", None)
+            or getattr(node, "val_var", None)
+            or getattr(node, "loop_var", None)
+        )
+        if n_name == receiver_name:
+          s_line = getattr(node, "start_line", getattr(node, "name_line", None))
+          dist = abs(s_line - line) if s_line else 0
+          if dist < min_dist:
+            min_dist = dist
+            best_node = node
+            receiver_type = node_types.get(node)
+
+    if not receiver_type and sym_table is not None:
+      sym = sym_table.lookup(receiver_name)
       if sym:
         receiver_type = getattr(sym, "symbol_type", None)
 
@@ -267,15 +375,10 @@ class CompletionProvider:
 
     if type(receiver_type).__name__ == "ModuleType" or (
         not best_node
-        and uri in ls.symbol_table_cache
-        and type(ls.symbol_table_cache[uri].lookup(receiver_name)).__name__
-        == "ModuleSymbol"
+        and sym_table is not None
+        and type(sym_table.lookup(receiver_name)).__name__ == "ModuleSymbol"
     ):
-      mod_sym = (
-          ls.symbol_table_cache[uri].lookup(receiver_name)
-          if uri in ls.symbol_table_cache
-          else None
-      )
+      mod_sym = sym_table.lookup(receiver_name) if sym_table is not None else None
       exports = (
           mod_sym.exports if mod_sym and hasattr(mod_sym, "exports") else {}
       )
@@ -313,27 +416,46 @@ class CompletionProvider:
 
     if hasattr(receiver_type, "fields") or hasattr(receiver_type, "methods"):
       items = []
-      for field_name, field in getattr(receiver_type, "fields", {}).items():
-        items.append(
-            CompletionItem(
-                label=field_name,
-                kind=10,
-                detail=f"(property) {field_name}: {str(field.field_type)}",
-                insert_text=field_name,
-            )
-        )
-      for method_name, method in getattr(receiver_type, "methods", {}).items():
-        if method_name in ("__init__", "__del__"):
+      seen_fields: set = set()
+      seen_methods: set = set()
+      visited_types: set = set()
+      queue = [receiver_type]
+      while queue:
+        cur_type = queue.pop(0)
+        type_key = getattr(cur_type, "name", None) or id(cur_type)
+        if type_key in visited_types:
           continue
-        m_type = str(getattr(method, "method_type", method))
-        items.append(
-            CompletionItem(
-                label=method_name,
-                kind=2,
-                detail=f"(method) {method_name}{m_type}",
-                insert_text=method_name,
-            )
-        )
+        visited_types.add(type_key)
+        for field_name, field in getattr(cur_type, "fields", {}).items():
+          if field_name in seen_fields:
+            continue
+          seen_fields.add(field_name)
+          items.append(
+              CompletionItem(
+                  label=field_name,
+                  kind=10,
+                  detail=f"(property) {field_name}: {str(field.field_type)}",
+                  insert_text=field_name,
+              )
+          )
+        for method_name, method in getattr(cur_type, "methods", {}).items():
+          if method_name in ("__init__", "__del__") or method_name in seen_methods:
+            continue
+          seen_methods.add(method_name)
+          m_type = str(getattr(method, "method_type", method))
+          items.append(
+              CompletionItem(
+                  label=method_name,
+                  kind=2,
+                  detail=f"(method) {method_name}{m_type}",
+                  insert_text=method_name,
+              )
+          )
+        if sym_table is not None:
+          for p_name in getattr(cur_type, "parent_names", []) or []:
+            p_type = sym_table.lookup_type(p_name)
+            if p_type is not None:
+              queue.append(p_type)
       return CompletionList(is_incomplete=True, items=items)
 
     return None
@@ -360,6 +482,7 @@ class CompletionProvider:
         lines = source.splitlines()
         if 0 <= line - 1 < len(lines):
           line_text = lines[line - 1]
+          col = utf16_to_codepoint(line_text, col)
     except (AttributeError, KeyError, IndexError, TypeError):  # pragma: no cover
       pass
 

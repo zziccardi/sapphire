@@ -42,7 +42,12 @@ from src.semantics.symbol_table import (
     TraitSymbol,
     VariableSymbol,
 )
-from src.lsp.semantic_tokens import find_node_at_position
+from src.lsp.definition_provider import find_local_decl
+from src.lsp.semantic_tokens import (
+    find_node_at_position,
+    get_doc_line,
+    utf16_to_codepoint,
+)
 
 
 def format_ast_expr(expr: Any) -> str:
@@ -88,6 +93,17 @@ def format_ast_expr(expr: Any) -> str:
 class HoverProvider:
   """Extracts hover documentation and tooltips from Sapphire AST and types."""
 
+  @staticmethod
+  def _match_binding_name(node: Any, line: int, col: int) -> Optional[str]:
+    """Finds the specific binding name under `(line, col)` in a multi-var node."""
+    for info in getattr(node, "bindings_info", []) or []:
+      b_line = info.get("line")
+      b_col = info.get("column")
+      b_len = info.get("length", 0)
+      if b_line == line and b_col is not None and b_col <= col < b_col + b_len:
+        return info.get("name")
+    return None
+
   @classmethod
   def _resolve_hover_node_and_type(
       cls, ls: Any, uri: str, node: Any, line: int, col: int, node_types: Any
@@ -108,14 +124,36 @@ class HoverProvider:
         and isinstance(node.callee, MemberAccessNode)
         and uri in ls.symbol_table_cache
     ):  # pragma: no cover
+      from src.semantics.symbol_table import OptionalType, RefType, SharedRefType
+
       rec_type = node_types.get(node.callee.receiver)
-      if (
+      if isinstance(rec_type, OptionalType):
+        rec_type = rec_type.base_type
+      if isinstance(rec_type, (SharedRefType, RefType)):
+        rec_type = rec_type.inner_type
+      sym_table = ls.symbol_table_cache[uri]
+      method_obj = None
+      if rec_type and hasattr(rec_type, "get_method"):
+        method_obj = rec_type.get_method(node.callee.member, sym_table)
+      elif (
           rec_type
           and hasattr(rec_type, "methods")
           and node.callee.member in rec_type.methods
       ):
+        method_obj = rec_type.methods[node.callee.member]
+      if method_obj is not None:
         node = node.callee
-        node_type = rec_type.methods[node.member]
+        node_type = getattr(method_obj, "method_type", method_obj)
+
+    if not node_type and isinstance(node, VarDeclNode):
+      matched_name = cls._match_binding_name(node, line, col)
+      binding_types = getattr(node, "binding_types", None)
+      if (
+          matched_name
+          and isinstance(binding_types, dict)
+          and matched_name in binding_types
+      ):
+        node_type = binding_types[matched_name]
 
     if not node_type:
       node_type = node_types.get(node)
@@ -176,7 +214,15 @@ class HoverProvider:
 
     if isinstance(node, IdentifierNode):
       node_name = node.name
-      if uri in ls.symbol_table_cache:
+      # Check local declarations first so locals/params shadowing globals are
+      # not misclassified as global functions, structs, or enums.
+      ast = ls.ast_cache.get(uri)
+      local_decl = find_local_decl(ast, node.name, line) if ast is not None else None
+      if isinstance(local_decl, ParameterNode):
+        category = "parameter"
+      elif local_decl is not None:
+        category = "variable"
+      elif uri in ls.symbol_table_cache:
         sym = ls.symbol_table_cache[uri].lookup(node.name)
         if isinstance(sym, VariableSymbol):
           category = "parameter" if sym.is_parameter else "variable"
@@ -257,7 +303,7 @@ class HoverProvider:
           a.name == "extern" for a in getattr(node, "annotations", [])
       )
       category = "extern variable" if is_extern else "variable"
-      node_name = node.name
+      node_name = cls._match_binding_name(node, line, col) or node.name
     elif isinstance(node, FuncDeclNode):
       is_export = any(
           a.name == "export" for a in getattr(node, "annotations", [])
@@ -266,14 +312,7 @@ class HoverProvider:
       node_name = node.name
     elif isinstance(node, HeaderBindingNode):
       category = "variable"
-      node_name = node.let_name
-      for info in getattr(node, "bindings_info", []) or []:
-        b_line = info.get("line")
-        b_col = info.get("column")
-        b_len = info.get("length", 0)
-        if b_line == line and b_col is not None and b_col <= col < b_col + b_len:
-          node_name = info.get("name", node_name)
-          break
+      node_name = cls._match_binding_name(node, line, col) or node.let_name
     elif isinstance(node, ForNode):
       category, node_name = "variable", node.loop_var
     elif isinstance(node, BasicTypeNode):
@@ -376,9 +415,14 @@ class HoverProvider:
     ast = ls.ast_cache[uri]
     node_types = ls.node_types_cache[uri]
 
-    # LSP is 0-based; parser/type checker line numbers are 1-based.
+    # LSP is 0-based UTF-16; parser/type checker line numbers are 1-based code points.
     line = params.position.line + 1
-    col = params.position.character
+    line_text = get_doc_line(ls, uri, line)
+    col = (
+        utf16_to_codepoint(line_text, params.position.character)
+        if line_text is not None
+        else params.position.character
+    )
 
     if find_node_fn is None:
       find_node_fn = find_node_at_position

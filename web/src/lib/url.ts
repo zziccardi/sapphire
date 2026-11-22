@@ -16,7 +16,11 @@ export function withBase(path: string, base: string = import.meta.env.BASE_URL):
  */
 export function stripBase(pathname: string, base: string = import.meta.env.BASE_URL): string {
   const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-  if (cleanBase && cleanBase !== '/' && pathname.startsWith(cleanBase)) {
+  if (
+    cleanBase &&
+    cleanBase !== '/' &&
+    (pathname === cleanBase || pathname.startsWith(`${cleanBase}/`))
+  ) {
     const rest = pathname.slice(cleanBase.length);
     return rest.startsWith('/') ? rest : `/${rest}`;
   }

@@ -320,6 +320,7 @@ class DeclVisitorMixin:
       if p.name == "self":
         continue
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
+    self._on_parameters_defined(func_decl.parameters, resolved_params)
 
     # Reject base initializers on non-init methods
     if func_decl.base_initializers and func_decl.name != "__init__":
@@ -447,6 +448,12 @@ class DeclVisitorMixin:
       if fn_type is not None:
         self._check_parameter_defaults(member.parameters, fn_type.param_types)
 
+  def _on_parameters_defined(
+      self, parameters: list, resolved_params: list
+  ) -> None:
+    """Optional hook invoked inside a function/method scope after parameters are defined."""
+    pass
+
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
     self._check_no_explicit_self(node.parameters, node)
     self._check_duplicate_params(node.parameters, node)
@@ -471,6 +478,7 @@ class DeclVisitorMixin:
 
     for p, ptype in zip(node.parameters, resolved_params):
       self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True))
+    self._on_parameters_defined(node.parameters, resolved_params)
 
     param_mutabilities = [p.is_mutable for p in node.parameters]
     ret_types = self._resolve_return_types(node)

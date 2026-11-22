@@ -30,34 +30,32 @@ def parse_antlr_grammar():
   rule_pattern = re.compile(r"^([A-Z_]+)\s*:\s*'([^']+)'\s*;", re.MULTILINE)
   matches = rule_pattern.findall(content)
 
-  keywords = []
-  types = ["void"]  # 'void' might not be in lexer rules but standard in types
-  constants = []
+  control_words = set()
+  types = {"void", "String"}  # Built-in types not declared as lexer keyword tokens
+  constants = set()
 
-  control_words = {
-      "if", "else", "guard", "while", "for", "in", "break", "continue",
-      "return", "match", "yield", "clone", "move", "import", "export", "as"
+  modifier_words = {
+      "static", "proto", "struct", "enum", "impl", "trait", "func", "let", "var"
   }
-  modifier_words = {"static", "proto", "struct", "enum", "impl", "trait", "func", "let", "var"}
+  type_words = {"int", "float", "bool", "String", "void"}
+  constant_words = {"true", "false", "none", "self"}
 
-  for name, val in matches:
-    if val.isalnum():
-      if val in control_words:
-        keywords.append(val)
-      elif val in modifier_words:
-        # These are also added as keywords in VS Code scope but under storage category
-        pass
-      elif val in {"int", "float", "bool", "string", "none"}:
-        if val == "none":
-          constants.append(val)
-        else:
-          types.append(val)
-      elif val in {"true", "false", "self"}:
-        constants.append(val)
+  for _, val in matches:
+    if not val.isalnum():
+      continue
+    if val in modifier_words:
+      continue
+    elif val in type_words:
+      types.add(val)
+    elif val in constant_words:
+      constants.add(val)
+    else:
+      # Dynamically include any control/operator keyword defined in Sapphire.g4
+      control_words.add(val)
 
   return {
-      "control": sorted(list(control_words)),
-      "modifiers": sorted(list(modifier_words)),
+      "control": sorted(control_words),
+      "modifiers": sorted(modifier_words),
       "types": sorted(types),
       "constants": sorted(constants),
   }
@@ -97,6 +95,42 @@ def main(quiet: bool = False):
           "strings": {
               "patterns": [
                   {
+                      "name": "string.interpolated.sapphire",
+                      "begin": "f\"",
+                      "beginCaptures": {
+                          "0": {"name": "punctuation.definition.string.begin.sapphire"}
+                      },
+                      "end": "\"",
+                      "endCaptures": {
+                          "0": {"name": "punctuation.definition.string.end.sapphire"}
+                      },
+                      "patterns": [
+                          {
+                              "name": "constant.character.escape.sapphire",
+                              "match": "\\\\.|\\{\\{|\\}\\}"
+                          },
+                          {
+                              "name": "meta.interpolation.sapphire",
+                              "begin": "\\{",
+                              "beginCaptures": {
+                                  "0": {"name": "punctuation.section.interpolation.begin.sapphire"}
+                              },
+                              "end": "\\}",
+                              "endCaptures": {
+                                  "0": {"name": "punctuation.section.interpolation.end.sapphire"}
+                              },
+                              "patterns": [
+                                  {"include": "#interpolation-braces"},
+                                  {"include": "#strings"},
+                                  {"include": "#numbers"},
+                                  {"include": "#keywords"},
+                                  {"include": "#types"},
+                                  {"include": "#identifiers"}
+                              ]
+                          }
+                      ]
+                  },
+                  {
                       "name": "string.quoted.double.sapphire",
                       "begin": "\"",
                       "end": "\"",
@@ -107,6 +141,18 @@ def main(quiet: bool = False):
                           }
                       ]
                   }
+              ]
+          },
+          "interpolation-braces": {
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [
+                  {"include": "#interpolation-braces"},
+                  {"include": "#strings"},
+                  {"include": "#numbers"},
+                  {"include": "#keywords"},
+                  {"include": "#types"},
+                  {"include": "#identifiers"}
               ]
           },
           "numbers": {
@@ -160,6 +206,7 @@ def main(quiet: bool = False):
   os.makedirs(OUTPUT_DIR, exist_ok=True)
   with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
     json.dump(tm_grammar, f, indent=2)
+    f.write("\n")
 
   if not quiet:
     print(f"TextMate grammar successfully written to: {OUTPUT_FILE}")

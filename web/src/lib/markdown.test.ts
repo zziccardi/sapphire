@@ -34,10 +34,64 @@ describe('markdown helpers', () => {
     expect(result.title).toBe('Main Title');
     expect(result.headings).toEqual([
       { depth: 2, text: 'First Section', slug: 'first-section' },
-      { depth: 2, text: 'Using Ref Safely', slug: 'using-ref-safely' },
+      { depth: 2, text: 'Using Ref<T> Safely', slug: 'using-reft-safely' },
       { depth: 2, text: 'Alert Ignored', slug: 'alert-ignored' },
     ]);
     expect(result.html).toContain('class="shiki');
     expect(result.html).toContain('href="/docs/spec"');
+  });
+
+  it('preserves Coroutine<T> and __del__ heading slugs matching cross-doc anchors', async () => {
+    const md = [
+      '### Coroutines (`Coroutine<T>`)',
+      '### Deterministic destructors (`__del__`)',
+    ].join('\n');
+    const result = await renderMarkdownString(md);
+    expect(result.headings).toEqual([
+      { depth: 3, text: 'Coroutines (Coroutine<T>)', slug: 'coroutines-coroutinet' },
+      {
+        depth: 3,
+        text: 'Deterministic destructors (__del__)',
+        slug: 'deterministic-destructors-__del__',
+      },
+    ]);
+  });
+
+  it('rewrites relative .py and .sp links to GitHub and sanitizes unsafe URIs', async () => {
+    expect(rewriteMarkdownHref('src/parser/ast.py')).toBe(
+      'https://github.com/zziccardi/sapphire/blob/main/src/parser/ast.py',
+    );
+    expect(rewriteMarkdownHref('../samples/overview.sp')).toBe(
+      'https://github.com/zziccardi/sapphire/blob/main/samples/overview.sp',
+    );
+    expect(rewriteMarkdownHref('javascript:alert(1)')).toBe('#');
+    expect(rewriteMarkdownHref('  JaVaScRiPt:alert(1)')).toBe('#');
+
+    const md = '[bad](javascript:alert(1) "a\\" onmouseover=\\"x")';
+    const result = await renderMarkdownString(md);
+    expect(result.html).toContain('href="#"');
+    expect(result.html).not.toContain('javascript:');
+    expect(result.html).not.toContain('" onmouseover="');
+  });
+
+  it('renders json, c, txt fences and preserves $&, $$, and $\' inside code blocks', async () => {
+    const md = [
+      '```json',
+      '{"pattern": "$& $$ $\' $` $1"}',
+      '```',
+      '```c',
+      'int main(void) { return 0; }',
+      '```',
+      '```txt',
+      'plain text $& ok',
+      '```',
+    ].join('\n');
+    const result = await renderMarkdownString(md);
+    expect(result.html).not.toContain('SAPPHIRE_CODE_BLOCK_');
+    expect(result.html).toContain('$&#x26;');
+    expect(result.html).toContain('$$');
+    expect(result.html).toContain("$'");
+    expect(result.html).toContain('$`');
+    expect(result.html).toContain('plain text');
   });
 });

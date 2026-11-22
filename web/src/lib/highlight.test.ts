@@ -19,4 +19,15 @@ describe('Sapphire Shiki highlighter', () => {
     expect(py).toContain('def');
     expect(lua).toContain('local');
   });
+
+  it('highlights json, c, txt, and Sapphire f-strings with nested quotes', async () => {
+    const jsonHtml = await highlightCode('{"a": 1}', 'json');
+    const cHtml = await highlightCode('int x = 0;', 'c');
+    const txtHtml = await highlightCode('plain', 'txt');
+    const fstrHtml = await highlightCode('let s = f"val={m["k"]}";', 'sapphire');
+    expect(jsonHtml).toContain('class="shiki');
+    expect(cHtml).toContain('class="shiki');
+    expect(txtHtml).toContain('plain');
+    expect(fstrHtml).toContain('class="shiki');
+  });
 });
