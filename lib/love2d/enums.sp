@@ -6,6 +6,7 @@ export {
   WrapMode,
   AlignMode,
   ArcMode,
+  HintingMode,
   KeyCode,
   GamepadButton,
   GamepadAxis,
@@ -38,6 +39,13 @@ enum ArcMode {
   Pie = "pie",
   Open = "open",
   Closed = "closed",
+}
+
+enum HintingMode {
+  Normal = "normal",
+  Light = "light",
+  Mono = "mono",
+  None = "none",
 }
 
 enum KeyCode {
