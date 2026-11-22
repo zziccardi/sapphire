@@ -188,6 +188,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_trait_in_nested_map": 73,
         "test_optional_trait_field": 50,
         "test_nested_trait_map_literal": 73,
+        "test_inherited_trait_partial_override": 70,
     },
     "feature_interactions_test.sp": {
         "test_struct_with_enum_matching_in_loop": 200,

@@ -9502,6 +9502,75 @@ class TestTypeChecker(unittest.TestCase):
       func f(x: math.TestCase) {}
       """)
 
+  def test_trait_inheritance_partial_override_and_multiparent_conflict(self):
+    """Verifies transitive trait inheritance, partial overrides, and multi-parent conflicts."""
+    # 1. Transitive inheritance + partial override in Child
+    self._check("""
+    trait Entity {
+      func id(): int;
+      func tag(): String;
+    }
+    struct Base {
+      var eid: int = 1;
+    }
+    impl Entity for Base {
+      func id(): int { return self.eid; }
+      func tag(): String { return "base"; }
+    }
+    struct Mid: Base {}
+    struct Leaf: Mid {}
+    impl Entity for Leaf {
+      func tag(): String { return "leaf"; }
+    }
+    func inspect(e: Entity): int {
+      let _t = e.tag();
+      return e.id();
+    }
+    func main() {
+      let m = Mid {};
+      let l = Leaf { eid = 7 };
+      let _a = inspect(m);
+      let _b = inspect(l);
+    }
+    """)
+
+    # 2. Multi-parent conflict on same trait method without override -> error
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      trait Greeter {
+        func greet(): String;
+      }
+      struct A {}
+      impl Greeter for A {
+        func greet(): String { return "A"; }
+      }
+      struct B {}
+      impl Greeter for B {
+        func greet(): String { return "B"; }
+      }
+      struct C: A, B {}
+      """)
+    self.assertIn("Ambiguous inherited trait method 'greet'", str(ctx.exception))
+
+    # 3. Disambiguating multi-parent conflict via override -> valid
+    self._check("""
+    trait Greeter {
+      func greet(): String;
+    }
+    struct A {}
+    impl Greeter for A {
+      func greet(): String { return "A"; }
+    }
+    struct B {}
+    impl Greeter for B {
+      func greet(): String { return "B"; }
+    }
+    struct C: A, B {}
+    impl Greeter for C {
+      func greet(): String { return A.greet(self); }
+    }
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -192,6 +192,7 @@ class TypeResolverMixin:
             self.error(f"Cannot implement undefined trait '{decl.trait_name}'.")
             continue
           struct_type.implemented_traits.add(trait_type.name)
+          struct_type.implemented_trait_types[trait_type.name] = trait_type
 
         for member in decl.members:
           if trait_type and member.func_decl.name in trait_type.methods:
@@ -276,22 +277,34 @@ class TypeResolverMixin:
           if trait_type:
             pass
 
-    # Propagate nominal trait implementations to child structs
+    # Propagate nominal trait implementations to child structs (including
+    # transitively across imported parent modules via parent_types).
     for decl in program.declarations:
       if isinstance(decl, StructDeclNode) and decl.parent_names:
         child_type = self.symbol_table.lookup_type(decl.name)
         if isinstance(child_type, StructType):
-          visited = set()
-          stack = list(decl.parent_names)
+          visited_ids: Set[int] = set()
+          stack: List[StructType] = list(child_type.parent_types)
+          if not stack:
+            for p_name in decl.parent_names:
+              p_type = self.symbol_table.lookup_type(p_name)
+              if isinstance(p_type, StructType):
+                stack.append(p_type)
           while stack:
-            p_name = stack.pop()
-            if p_name in visited:
+            p_type = stack.pop()
+            if id(p_type) in visited_ids:
               continue
-            visited.add(p_name)
-            p_type = self.symbol_table.lookup_type(p_name)
-            if isinstance(p_type, StructType):
-              child_type.implemented_traits.update(p_type.implemented_traits)
-              stack.extend(p_type.parent_names)
+            visited_ids.add(id(p_type))
+            child_type.implemented_traits.update(p_type.implemented_traits)
+            for t_name, t_obj in p_type.implemented_trait_types.items():
+              child_type.implemented_trait_types.setdefault(t_name, t_obj)
+            if p_type.parent_types:
+              stack.extend(p_type.parent_types)
+            else:
+              for gp_name in p_type.parent_names:
+                gp_type = self.symbol_table.lookup_type(gp_name)
+                if isinstance(gp_type, StructType):
+                  stack.append(gp_type)
 
   def _resolve_return_types(self, node: Any) -> List[Type]:
     if isinstance(node, FunctionTypeNode):

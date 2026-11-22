@@ -317,6 +317,7 @@ class StructType(Type):
     self.fields: Dict[str, StructField] = {}
     self.methods: Dict[str, StructMethod] = {}
     self.implemented_traits: Set[str] = set()
+    self.implemented_trait_types: Dict[str, "TraitType"] = {}
     self.is_cloned = False  # Set during clone-tracking analysis
     self.is_prototype = is_prototype
     self.comments = comments or ""
@@ -417,6 +418,10 @@ class StructType(Type):
     """Returns True if this struct nominally implements the given trait (directly or via parent structs)."""
     if trait.name in self.implemented_traits:
       return True
+    if self.parent_types:
+      for parent in self.parent_types:
+        if isinstance(parent, StructType) and parent.implements_trait(trait, symbol_table):
+          return True
     if self.parent_names and symbol_table:
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)

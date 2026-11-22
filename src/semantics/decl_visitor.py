@@ -105,8 +105,37 @@ class DeclVisitorMixin:
           )
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
-    # Fields already verified in pre-pass
-    pass
+    struct_type = self.symbol_table.lookup_type(node.name)
+    if not isinstance(struct_type, StructType) or len(struct_type.parent_types) <= 1:
+      return
+    for trait_name in sorted(struct_type.implemented_traits):
+      trait_type = struct_type.implemented_trait_types.get(trait_name)
+      if not isinstance(trait_type, TraitType):
+        t_lookup = self.symbol_table.lookup_type(trait_name)
+        trait_type = t_lookup if isinstance(t_lookup, TraitType) else None
+      if not isinstance(trait_type, TraitType):
+        continue
+      for m_name in trait_type.methods:
+        if m_name in struct_type.methods:
+          continue
+        providers: List[Tuple[StructType, StructMethod]] = []
+        for parent in struct_type.parent_types:
+          m = parent.get_method(m_name, self.symbol_table)
+          if m is not None:
+            providers.append((parent, m))
+        if len(providers) > 1:
+          first_parent, first_method = providers[0]
+          for other_parent, other_method in providers[1:]:
+            if other_method is not first_method:
+              self.error(
+                  f"Ambiguous inherited trait method '{m_name}' from trait "
+                  f"'{trait_name}' in struct '{node.name}' (inherited from "
+                  f"'{first_parent.name}' and '{other_parent.name}'). "
+                  f"Override '{m_name}' in 'impl {trait_name} for {node.name}' "
+                  "to disambiguate.",
+                  node=node,
+              )
+              break
 
   def visit_EnumDeclNode(self, node: EnumDeclNode) -> None:
     # Members already verified in pre-pass
@@ -172,13 +201,15 @@ class DeclVisitorMixin:
                 if trait_type_map
                 else trait_sig
             )
-            if trait_method_name not in struct_type.methods:
+            impl_method = struct_type.get_method(
+                trait_method_name, self.symbol_table
+            )
+            if impl_method is None:
               self.error(
                   f"Struct '{node.struct_name}' does not implement trait method "
                   f"'{trait_method_name}' of '{node.trait_name}'."
               )
             else:
-              impl_method = struct_type.methods[trait_method_name]
               impl_sig = impl_method.method_type
               if impl_sig != expected_sig:
                 self.error(

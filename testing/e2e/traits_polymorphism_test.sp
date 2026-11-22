@@ -126,3 +126,43 @@ func test_nested_trait_map_literal(): int {
   let b = grid.get(3)?.get(4)?.greet() ?? 0;
   return a + b;
 }
+
+trait Named {
+  func label(): int;
+  func bonus(): int;
+}
+
+struct BaseAgent {
+  var base_val: int = 10;
+}
+
+impl Named for BaseAgent {
+  func label(): int {
+    return self.base_val;
+  }
+
+  func bonus(): int {
+    return 5;
+  }
+}
+
+struct SubAgent: BaseAgent {}
+
+struct CustomAgent: SubAgent {}
+
+impl Named for CustomAgent {
+  func bonus(): int {
+    return BaseAgent.bonus(self) + 20;
+  }
+}
+
+func eval_named(n: Named): int {
+  return n.label() + n.bonus();
+}
+
+@test
+func test_inherited_trait_partial_override(): int {
+  let s = SubAgent { base_val = 10 };
+  let c = CustomAgent { base_val = 30 };
+  return eval_named(s) + eval_named(c);
+}
