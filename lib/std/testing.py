@@ -173,7 +173,7 @@ def assert_ne(actual, expected, msg: str = "", _caller=None):
 def assert_almost_eq(a: float, b: float, eps: float = 1e-5, msg: str = "",
                      _caller=None):
   ctx = get_active_context()
-  if abs(a - b) > eps:
+  if not (abs(a - b) <= eps):
     ctx.record_failure(
         _format_msg(f"Expected {a} to almost equal {b} (eps={eps})", msg),
         fatal=True,
@@ -249,7 +249,7 @@ def expect_ne(actual, expected, msg: str = "", _caller=None):
 def expect_almost_eq(a: float, b: float, eps: float = 1e-5, msg: str = "",
                      _caller=None):
   ctx = get_active_context()
-  if abs(a - b) > eps:
+  if not (abs(a - b) <= eps):
     ctx.record_failure(
         _format_msg(f"Expected {a} to almost equal {b} (eps={eps})", msg),
         fatal=False,

@@ -731,7 +731,7 @@ end
     esc_lua_fn = _escape_lua_string(_mangle_lua_name(fn_name))
     lua_script_lines.append(f'''
   do
-    local ctx = testing.TestContext.new("{esc_fn}")
+    local ctx = testing.TestContext.init("{esc_fn}")
     testing.set_active_context(ctx)
     local fn = (target_mod and (target_mod["{esc_lua_fn}"] or target_mod["{esc_fn}"]))
         or _G["{esc_lua_fn}"] or _G["{esc_fn}"]
@@ -785,7 +785,7 @@ end
       esc_full = _escape_lua_string(full_name)
       lua_script_lines.append(f'''
   do
-    local ctx = testing.TestContext.new("{esc_full}")
+    local ctx = testing.TestContext.init("{esc_full}")
     testing.set_active_context(ctx)
     local struct_cls = (target_mod and (target_mod["{esc_lua_struct}"] or target_mod["{esc_struct}"]))
         or _G["{esc_lua_struct}"] or _G["{esc_struct}"]

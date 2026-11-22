@@ -19,12 +19,6 @@ struct Color {
 }
 
 trait Image {
-  func draw(x: float, y: float);
-
-  @export("draw")
-  func drawTransformed(x: float, y: float, r: float = 0.0,
-                       sx: float = 1.0, sy: float = 1.0);
-
   func getWidth(): float;
   func getHeight(): float;
   func getDimensions(): float, float;
@@ -53,7 +47,7 @@ trait Graphics {
   static func present();
 
   @export("draw")
-  static func drawImage(image: Image, quad: Quad? = none,
+  static func drawImage(image: Image, quad: Quad,
                         x: float = 0.0, y: float = 0.0, r: float = 0.0,
                         sx: float = 1.0, sy: float = 1.0);
 
@@ -63,7 +57,7 @@ trait Graphics {
                           sx: float = 1.0, sy: float = 1.0);
 
   @export("draw")
-  static func drawCanvas(canvas: Canvas, quad: Quad? = none,
+  static func drawCanvas(canvas: Canvas, quad: Quad,
                          x: float = 0.0, y: float = 0.0, r: float = 0.0,
                          sx: float = 1.0, sy: float = 1.0);
 
@@ -89,10 +83,10 @@ trait Graphics {
   static func line(x1: float, y1: float, x2: float, y2: float);
   static func print(text: String, x: float, y: float);
   static func printf(text: String, x: float, y: float, limit: float,
-                     align: String = "left");
+                     align: enums.AlignMode = enums.AlignMode.Left);
 
   static func newImage(path: String): Image;
-  static func newCanvas(width: float = 0.0, height: float = 0.0): Canvas;
+  static func newCanvas(width: float? = none, height: float? = none): Canvas;
   static func newFont(path: String, size: int = 12): Font;
   static func newQuad(x: float, y: float, w: float, h: float,
                       sw: float, sh: float): Quad;

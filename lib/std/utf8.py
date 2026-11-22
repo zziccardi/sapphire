@@ -11,21 +11,45 @@ def size(s: str) -> Optional[int]:
     return None
 
 
+def _is_utf8_cont(b: int) -> bool:
+  return 0x80 <= b <= 0xBF
+
+
 def offset(s: str, n: int, i: Optional[int] = None) -> Optional[int]:
-  if i is None:
-    i = 1 if n >= 0 else len(s.encode("utf-8")) + 1
   raw = s.encode("utf-8")
-  if i < 0:
-    i = len(raw) + 1 + i
-  if i < 1 or i > len(raw) + 1:
+  slen = len(raw)
+  if i is None:
+    i = 1 if n >= 0 else slen + 1
+  elif i < 0:
+    i = slen + 1 + i
+  if i < 1 or i > slen + 1:
     return None
-  prefix_chars = len(raw[: i - 1].decode("utf-8", errors="ignore"))
-  target_char = prefix_chars + (n - 1 if n > 0 else n)
   if n == 0:
+    while i > 1 and i <= slen and _is_utf8_cont(raw[i - 1]):
+      i -= 1
     return i
-  if target_char < 0 or target_char > len(s):
+  if i <= slen and _is_utf8_cont(raw[i - 1]):
     return None
-  return len(s[:target_char].encode("utf-8")) + 1
+  pos = i
+  if n > 0:
+    rem = n - 1
+    while rem > 0:
+      if pos > slen:
+        return None
+      pos += 1
+      while pos <= slen and _is_utf8_cont(raw[pos - 1]):
+        pos += 1
+      rem -= 1
+    return pos
+  rem = -n
+  while rem > 0:
+    if pos <= 1:
+      return None
+    pos -= 1
+    while pos > 1 and _is_utf8_cont(raw[pos - 1]):
+      pos -= 1
+    rem -= 1
+  return pos
 
 
 def sub(s: str, start_char: int, end_char: Optional[int] = None) -> str:

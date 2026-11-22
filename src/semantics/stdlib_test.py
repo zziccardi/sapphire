@@ -123,3 +123,154 @@ class TestStdlibModules(unittest.TestCase):
     self.assertGreaterEqual(t2, t1)
     # Test zero sleep branch
     py_time.sleep(0.0)
+    # NaN sleep must return immediately
+    py_time.sleep(float("nan"))
+
+  def _run_lua(self, script: str) -> str:
+    import shutil
+    import subprocess
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    self.assertIsNotNone(lua_bin)
+    full_script = f'package.path = "{_LIB_DIR}/?.lua;" .. package.path\n' + script
+    proc = subprocess.run(
+        [lua_bin, "-e", full_script],
+        capture_output=True, text=True, timeout=10,
+    )
+    if proc.returncode != 0:
+      self.fail(f"Lua script failed:\n{proc.stderr}\nScript:\n{script}")
+    return proc.stdout.strip()
+
+  def test_testing_module_fixes_python_and_lua(self):
+    """Verifies NaN almost_eq failure, Lua standalone TestContext.init, is_none, and deep_eq."""
+    import std.testing as py_testing
+    ctx = py_testing.TestContext("nan_check")
+    py_testing.set_active_context(ctx)
+    with self.assertRaises(py_testing.TestFailure):
+      py_testing.assert_almost_eq(float("nan"), 0.0)
+    py_testing.expect_almost_eq(float("nan"), 0.0)
+    self.assertEqual(len(ctx.failures), 2)
+
+    out = self._run_lua("""
+      local testing = require("std.testing")
+      -- Standalone context creation uses testing.TestContext.init without global error
+      testing.set_active_context(nil)
+      local ctx = testing.get_active_context()
+      assert(ctx ~= nil and ctx.name == "standalone")
+      assert(testing.TestContext.new == nil)
+      assert(testing.TestCase.new == nil)
+
+      -- Tables are NOT none
+      testing.assert_not_none({1, 2})
+      testing.assert_not_none({})
+      testing.assert_none(nil)
+
+      -- Deep structural equality on arrays and maps
+      testing.assert_eq({1, {2, 3}}, {1, {2, 3}})
+      testing.assert_ne({1, 2}, {1, 3})
+      testing.expect_eq({a = 1, b = {c = 2}}, {a = 1, b = {c = 2}})
+
+      -- NaN must fail assert_almost_eq and expect_almost_eq
+      local nan = 0 / 0
+      local ok = pcall(testing.assert_almost_eq, nan, 0.0)
+      assert(not ok, "assert_almost_eq(nan, 0.0) must fail")
+      local before = #ctx.failures
+      testing.expect_almost_eq(nan, 0.0)
+      assert(#ctx.failures == before + 1, "expect_almost_eq(nan, 0.0) must record failure")
+      print("OK")
+    """)
+    self.assertEqual(out, "OK")
+
+  def test_utf8_validation_and_offset_parity(self):
+    """Verifies UTF-8 offset snapping/continuation rejection and _pure_utf8.len RFC 3629 validation."""
+    import std.utf8 as py_utf8
+    self.assertEqual(py_utf8.offset("café", -1), 4)
+    self.assertEqual(py_utf8.offset("café", 0, 5), 4)
+    self.assertIsNone(py_utf8.offset("café", 1, 5))
+
+    out = self._run_lua(r"""
+      local u = require("std.utf8")
+      local p = u._pure_utf8
+      -- Valid ASCII and multi-byte
+      assert(p.len("caf\xC3\xA9") == 4)
+      -- Reject overlong 2/3/4-byte sequences
+      assert(p.len("\xC0\xAF") == nil)
+      assert(p.len("\xE0\x80\xAF") == nil)
+      assert(p.len("\xF0\x80\x80\xAF") == nil)
+      -- Reject UTF-16 surrogates (U+D800)
+      assert(p.len("\xED\xA0\x80") == nil)
+      -- Reject > U+10FFFF and invalid lead bytes
+      assert(p.len("\xF4\x90\x80\x80") == nil)
+      assert(p.len("\xF5\x80\x80\x80") == nil)
+      assert(p.len("\xFF") == nil)
+      -- pcall-safe offset on continuation byte returns nil (no crash)
+      assert(u.offset("caf\xC3\xA9", 0, 5) == 4)
+      assert(u.offset("caf\xC3\xA9", 1, 5) == nil)
+      assert(u.offset("caf\xC3\xA9", -1) == 4)
+      print("OK")
+    """)
+    self.assertEqual(out, "OK")
+
+  def test_time_and_fs_lua_edge_cases(self):
+    """Verifies Lua time.sleep(NaN), time.now() epoch with Love2D mock, and fs.remove_file on directory."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      out = self._run_lua(f"""
+        local time_mod = require("std.time")
+        local fs_mod = require("std.fs")
+        -- NaN sleep returns immediately
+        time_mod.sleep(0 / 0)
+        -- Mock Love2D uptime timer: time.now() must still return Unix epoch (> 1.5e9)
+        _G.love = {{ timer = {{ getTime = function() return 1.25 end }} }}
+        local now = time_mod.now()
+        assert(now > 1500000000, "Expected epoch timestamp, got " .. tostring(now))
+        -- fs.remove_file must refuse to remove a directory
+        local removed = fs_mod.remove_file("{tmp_dir}")
+        assert(removed == false, "remove_file must return false on directory")
+        print("OK")
+      """)
+      self.assertEqual(out, "OK")
+      self.assertTrue(os.path.isdir(tmp_dir))
+
+  def test_love2d_bindings_type_checking(self):
+    """Verifies updated Love2D graphics and LoveEngine.joystick bindings."""
+    from src.common.errors import SapphireTypeError
+
+    valid_code = """
+    import lib.love2d.love2d as love2d;
+    import lib.love2d.enums as enums;
+
+    func check() {
+      let name = love2d.love.joystick.getName();
+      let c = love2d.love.graphics.newCanvas();
+      let c2 = love2d.love.graphics.newCanvas(320.0, 240.0);
+      love2d.love.graphics.printf("Hello", 0.0, 0.0, 200.0, enums.AlignMode.Center);
+      let img = love2d.love.graphics.newImage("sprite.png");
+      let q = love2d.love.graphics.newQuad(0.0, 0.0, 16.0, 16.0, 64.0, 64.0);
+      love2d.love.graphics.drawImage(img, q, 10.0, 20.0);
+      love2d.love.graphics.drawImageAt(img, 10.0, 20.0);
+    }
+    """
+    ast = self._parse_and_check(valid_code)
+    self.assertIsNotNone(ast)
+
+    # Nonexistent Image.draw must be rejected
+    bad_img_draw = """
+    import lib.love2d.love2d as love2d;
+    func check() {
+      let img = love2d.love.graphics.newImage("sprite.png");
+      img.draw(1.0, 2.0);
+    }
+    """
+    with self.assertRaises(SapphireTypeError):
+      self._parse_and_check(bad_img_draw)
+
+    # drawImage requires non-optional Quad (not none)
+    bad_quad = """
+    import lib.love2d.love2d as love2d;
+    func check() {
+      let img = love2d.love.graphics.newImage("sprite.png");
+      love2d.love.graphics.drawImage(img, none, 0.0, 0.0);
+    }
+    """
+    with self.assertRaises(SapphireTypeError):
+      self._parse_and_check(bad_quad)
+

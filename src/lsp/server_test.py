@@ -2253,7 +2253,7 @@ func run() {
       ))
       self.assertIsNotNone(def_res)
       self.assertEqual(def_res.uri, graphics_uri)
-      self.assertEqual(def_res.range.start.line, 51)  # line 52 in 1-based indexing
+      self.assertEqual(def_res.range.start.line, 45)  # line 46 in 1-based indexing
 
       enums_file = os.path.join(repo_root, "lib", "love2d", "enums.sp")
       enums_uri = from_fs_path(enums_file)

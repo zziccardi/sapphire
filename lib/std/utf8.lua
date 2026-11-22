@@ -17,21 +17,42 @@ function _pure_utf8.len(s)
   local n = #s
   while i <= n do
     local b = s:byte(i)
-    local seq_len = 1
-    if b >= 0xF0 and b <= 0xF4 then
-      seq_len = 4
-    elseif b >= 0xE0 then
-      seq_len = 3
-    elseif b >= 0xC2 then
+    local seq_len
+    if b <= 0x7F then
+      seq_len = 1
+    elseif b >= 0xC2 and b <= 0xDF then
       seq_len = 2
-    elseif b >= 0x80 then
+    elseif b >= 0xE0 and b <= 0xEF then
+      seq_len = 3
+    elseif b >= 0xF0 and b <= 0xF4 then
+      seq_len = 4
+    else
       return nil, i
     end
     if i + seq_len - 1 > n then
       return nil, i
     end
-    for k = 1, seq_len - 1 do
-      if not _is_utf8_cont(s:byte(i + k)) then
+    if seq_len == 2 then
+      if not _is_utf8_cont(s:byte(i + 1)) then
+        return nil, i
+      end
+    elseif seq_len == 3 then
+      local b2 = s:byte(i + 1)
+      local b3 = s:byte(i + 2)
+      if not _is_utf8_cont(b2) or not _is_utf8_cont(b3) then
+        return nil, i
+      end
+      if (b == 0xE0 and b2 < 0xA0) or (b == 0xED and b2 > 0x9F) then
+        return nil, i
+      end
+    elseif seq_len == 4 then
+      local b2 = s:byte(i + 1)
+      local b3 = s:byte(i + 2)
+      local b4 = s:byte(i + 3)
+      if not _is_utf8_cont(b2) or not _is_utf8_cont(b3) or not _is_utf8_cont(b4) then
+        return nil, i
+      end
+      if (b == 0xF0 and b2 < 0x90) or (b == 0xF4 and b2 > 0x8F) then
         return nil, i
       end
     end
@@ -111,6 +132,19 @@ local function _get_utf8()
   return _pure_utf8
 end
 
+local function _safe_offset(u, s, n, i)
+  local ok, res
+  if i == nil then
+    ok, res = pcall(u.offset, s, n)
+  else
+    ok, res = pcall(u.offset, s, n, i)
+  end
+  if not ok then
+    return nil
+  end
+  return res
+end
+
 function utf8_mod.size(s)
   local u = _get_utf8()
   if not u then
@@ -125,10 +159,7 @@ function utf8_mod.offset(s, n, i)
   if not u then
     return nil
   end
-  if i == nil then
-    return u.offset(s, n)
-  end
-  return u.offset(s, n, i)
+  return _safe_offset(u, s, n, i)
 end
 
 function utf8_mod.sub(s, start_char, end_char)
@@ -168,11 +199,13 @@ function utf8_mod.sub(s, start_char, end_char)
     if j > len then j = len end
   end
   if j <= i then return "" end
-  local byte_start = u.offset(s, i + 1)
+  local byte_start = _safe_offset(u, s, i + 1)
   if not byte_start then return "" end
-  local byte_end_next = u.offset(s, j + 1)
+  local byte_end_next = _safe_offset(u, s, j + 1)
   local byte_end = byte_end_next and (byte_end_next - 1) or #s
   return s:sub(byte_start, byte_end)
 end
+
+utf8_mod._pure_utf8 = _pure_utf8
 
 return utf8_mod
