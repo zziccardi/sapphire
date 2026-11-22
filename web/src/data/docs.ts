@@ -5,17 +5,24 @@ export interface DocPageMeta {
   slug: string;
   file: string;
   title: string;
-  group: 'Getting Started' | 'Language Reference' | 'Compiler & Testing';
+  group: 'Getting Started' | 'Language Reference' | 'Compiler & Contributing';
   summary: string;
 }
 
 export const DOC_PAGES: DocPageMeta[] = [
   {
-    slug: 'development',
-    file: 'development.md',
-    title: 'Developer Setup & CLI',
+    slug: 'quickstart',
+    file: 'quickstart.md',
+    title: 'Quickstart',
     group: 'Getting Started',
-    summary: 'Environment setup, pipenv commands, ANTLR regeneration, and transpiler CLI usage.',
+    summary: 'Install the CLI and VS Code extension, run your first program, and launch a Love2D project.',
+  },
+  {
+    slug: 'host-interop',
+    file: 'host_interop.md',
+    title: 'Host Interop & Love2D',
+    group: 'Getting Started',
+    summary: 'Bind Lua and Python host APIs with @extern/@export, use lib.love2d, live hot-reload, and source maps.',
   },
   {
     slug: 'style-guide',
@@ -43,21 +50,28 @@ export const DOC_PAGES: DocPageMeta[] = [
     file: 'stdlib.md',
     title: 'Standard Library',
     group: 'Language Reference',
-    summary: 'Modules under lib/std/ including math, testing, utf8, and utilities.',
+    summary: 'Standard modules (fs, math, os, testing, time, utf8) and built-in Love2D bindings (lib.love2d).',
   },
   {
     slug: 'compiler',
     file: 'compiler.md',
     title: 'Compiler Architecture',
-    group: 'Compiler & Testing',
+    group: 'Compiler & Contributing',
     summary: 'ANTLR4 parser, AST, semantic passes, arena escape checker, and code generators.',
   },
   {
     slug: 'testing',
     file: 'testing.md',
     title: 'Testing Framework',
-    group: 'Compiler & Testing',
+    group: 'Compiler & Contributing',
     summary: 'Writing @test functions and running suites with sapphire test.',
+  },
+  {
+    slug: 'development',
+    file: 'development.md',
+    title: 'Contributor Setup & CLI',
+    group: 'Compiler & Contributing',
+    summary: 'Contributor environment setup, pipenv commands, ANTLR regeneration, and packaging.',
   },
 ];
 

@@ -9,7 +9,19 @@
   source of truth rather than duplicating content in `web/`.
 - **Astro whitespace**: Use explicit `{' '}` between inline text and adjacent
   tags (`<span>`, `<code>`) across newlines so Astro does not collapse spaces.
+- **Positioning & copy**: Lead with basic context ("statically typed
+  general-purpose language") and core syntax before diving into technical or
+  host-specific details. Brand integration generically as **host interop / host
+  environments** with Love2D as one built-in example (never refer to Love2D as
+  a language). Omit the `5.1` version from `Lua` in marketing/UI copy.
+- **Nav, ordering & Playground scope**: Keep top-level nav labels as nouns
+  (`Docs`, `Examples`, `Comparisons`, `Playground`) and list language
+  comparisons alphabetically (`C++`, `Lua`, `Rust`, `Swift`). Keep `/playground`
+  strictly for runnable programs; present non-runnable host-environment samples
+  on `/examples` (e.g., with a generated-output toggle).
 - **Theme & Diagrams**: Dark mode is controlled via `[data-theme="dark"]` on
   `<html>`. Dynamic client-side widgets (such as Mermaid diagrams) must observe
   `data-theme` changes and re-render accordingly.
-- **Verification**: Run `npm test` and `npm run build` in `web/` after changes.
+- **Verification**: Run `npm test` and `npm run build` in `web/` after changes,
+  and verify embedded Sapphire snippets (e.g., in `index.astro`) with
+  `pipenv run sapphire check`.
