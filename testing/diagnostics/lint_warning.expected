@@ -1,0 +1,14 @@
+EXIT_CODE: 0
+--- STDOUT ---
+Reading source file: lint_warning.sp...
+Parsing program to Parse Tree...
+Building AST...
+Running Semantic Analysis & Type Checker...
+
+Semantic Analysis completed successfully with 0 errors!
+--- STDERR ---
+
+Warnings:
+Warning: lint_warning.sp:2:5 - Double lookup on map via '.contains(...)' followed by indexing/'.get(...)'. Prefer 'if let v ?= <map>.get(<key>)' for a single lookup.
+  Line 2:    if m.contains(k) {
+                ^^^^^^^^^^^^^

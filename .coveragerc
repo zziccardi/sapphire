@@ -1,4 +1,5 @@
 [run]
+branch = True
 source =
     src
     tools/vscode-extension/scripts
@@ -12,6 +13,7 @@ omit =
     /private/var/*
 
 [report]
+show_missing = True
 omit =
     src/parser/gen/*
     src/run_*.py

@@ -58,6 +58,9 @@ jobs:
           python3 tools/vscode-extension/scripts/generate_grammar.py
           git diff --exit-code tools/vscode-extension/syntaxes/sapphire.tmLanguage.json
 
+      - name: Run linter
+        run: pipenv run lint
+
       - name: Run Python unit tests
         run: pipenv run test
 
@@ -69,6 +72,9 @@ jobs:
 
       - name: Run Sapphire native E2E test runner (Lua)
         run: pipenv run sapphire test -t lua
+
+      - name: Run Lua stdlib coverage report
+        run: pipenv run coverage-lua
 
       - name: Verify sample programs
         run: pipenv run check-samples

@@ -1,0 +1,10 @@
+EXIT_CODE: 1
+--- STDOUT ---
+Reading source file: syntax_error.sp...
+Parsing program to Parse Tree...
+--- STDERR ---
+
+Syntax Analysis failed with errors:
+Syntax Error: syntax_error.sp:2:15 - mismatched input ';' expecting {'clone', 'move', 'none', 'match', 'true', 'false', 'self', '+', '-', '!', '(', '{', '[', IDENTIFIER, INT_LIT, FLOAT_LIT, STRING_LIT, INTERPOLATED_STRING_LIT}
+  Line 2:    let x: int = ;
+                          ^

@@ -2135,8 +2135,8 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(b)", py_code)
     self.assertNotIn("_sapphire_del(a)", py_code)
 
-  def test_destructor_move_into_function_suppresses_source_destructor(self):
-    """Verifies move into function suppresses caller destructor in Python."""
+  def test_destructor_move_into_function_destroys_once_after_call(self):
+    """Verifies move into borrowed function destroys source once after call (no leak or double-drop)."""
     code = """
     struct Resource {
       var id: int;
@@ -2153,7 +2153,9 @@ class TestPythonTranspiler(unittest.TestCase):
     py_code = self._transpile(code)
     test_idx = py_code.index("def test():")
     test_body = py_code[test_idx:]
-    self.assertNotIn("_sapphire_del(a)", test_body)
+    self.assertEqual(test_body.count("_sapphire_del(a)"), 1)
+    self.assertLess(test_body.index("consume(a)"), test_body.index("_sapphire_del(a)"))
+    self.assertLess(test_body.index("_sapphire_del(a)"), test_body.index("a = None"))
 
   def test_destructor_move_reinitialization(self):
     """Verifies that reinitializing a moved variable restores its destructor."""

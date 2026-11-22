@@ -174,6 +174,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_arena_lifo_proto_destructors": 752,
         "test_arena_reassignment_destroys_old": 394,
         "test_struct_owned_arena_and_field_teardown": 68,
+        "test_move_into_borrowed_call_destroys_deterministically": 337,
     },
     "generics_test.sp": {
         "test_generic_struct_int": 42,
@@ -237,5 +238,10 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_dynamic_array_negative_indexing": 500,
         "test_fixed_array_assignment_to_dynamic": 3,
         "test_fixed_array_mutation_with_negative_index": 99,
+    },
+    "soundness_interactions_test.sp": {
+        "test_loop_reinit_and_conditional_move_drop_flags": 123,
+        "test_shared_weak_ref_upgrade_in_closure": 142,
+        "test_proto_nested_struct_cow_isolation": 100350,
     },
 }

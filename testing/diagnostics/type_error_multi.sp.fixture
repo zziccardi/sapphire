@@ -1,0 +1,5 @@
+func multi_err(a: int): int {
+  let x: int = "not_an_int";
+  let y: bool = 123;
+  return x + a;
+}

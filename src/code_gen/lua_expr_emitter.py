@@ -344,6 +344,8 @@ class LuaExprMixin:
         self.emit(")")
       return
 
+    self._record_consumed_call_moves(node.arguments)
+
     resolved_exprs = getattr(node, "_resolved_arguments", None)
     if resolved_exprs is None:
       resolved_exprs = [arg.expr for arg in node.arguments]

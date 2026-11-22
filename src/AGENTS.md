@@ -59,9 +59,10 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
 * **Cross-backend parity**: For every new language feature or stdlib API, run both `pipenv run sapphire test` and `pipenv run sapphire test -t lua`, and add parity tests in `src/code_gen/transpiler_parity_test.py` covering edge values (`none`, `false`, `0`, `NaN`, negative indices, Unicode) plus negative compile-time tests for new semantic rules.
 * **Runnable sample execution**: Non-host-bound scripts in `samples/` must execute cleanly with exit code 0 in `samples_compilation_test.py`.
 * **Standard library & negative runtime coverage**: Additions to `lib/std/` require unit tests for happy paths and boundary values. Verify runtime safety guards (`.get()` bounds checks, nil coalescing, coroutine exhaustion) in `testing/e2e/negative_runtime_test.sp`.
-* **Cross-backend integration commands**:
+* **Modular test files**: Add new unit/regression tests to pass-specific modules (e.g., `*_visitor_test.py`, `*_emitter_test.py`, `soundness_matrix_test.py`, `diagnostics_golden_test.py`) rather than growing monolithic files (`type_checker_test.py`, `python_transpiler_test.py`, `lua_transpiler_test.py`). Use `.sp.fixture` (not `.sp`) for intentionally failing CLI fixtures so `sapphire test` workspace discovery skips them.
+* **Cross-backend integration & verification commands**:
   ```bash
-  pipenv run python -m unittest src/code_gen/python_transpiler_test.py
-  pipenv run python -m unittest src/code_gen/lua_transpiler_test.py
+  pipenv run test-fast
+  pipenv run coverage && pipenv run coverage-lua
   pipenv run sapphire test && pipenv run sapphire test -t lua
   ```

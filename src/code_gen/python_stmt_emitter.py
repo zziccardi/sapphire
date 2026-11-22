@@ -1034,6 +1034,7 @@ class PythonStmtMixin:
         self.emit(f"{tmp_name} = ")
         self.visit(expr)
 
+      self._drain_pending_destroy_moved_vars()
       for var_name in destructors_to_run:
         if (
             var_name not in self.moved_vars
@@ -1047,6 +1048,7 @@ class PythonStmtMixin:
       self.emit("return " + ", ".join(ret_tmps))
       self._pending_null_vars.clear()
       self._pending_unconditional_null_vars.clear()
+      self._pending_destroy_moved_vars.clear()
       return
 
     for var_name in destructors_to_run:
@@ -1069,6 +1071,7 @@ class PythonStmtMixin:
         self.visit(expr)
     self._pending_null_vars.clear()
     self._pending_unconditional_null_vars.clear()
+    self._pending_destroy_moved_vars.clear()
 
   def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
     self._lift_match_expressions(node.subject)

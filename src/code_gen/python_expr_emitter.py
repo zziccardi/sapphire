@@ -157,6 +157,7 @@ class PythonExprMixin:
       return
 
     if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+      self._record_consumed_call_moves(node.arguments)
       member_name = getattr(node.callee, "target_name", None) or self._mangle_name(node.callee.member)
       r_tmp = self._next_temp_name("_r")
       self.emit(f"((lambda {r_tmp}: {r_tmp}.")
@@ -172,6 +173,9 @@ class PythonExprMixin:
       self.visit(node.callee.receiver)
       self.emit("))")
       return
+
+    if not self._is_struct_constructor_call(node):
+      self._record_consumed_call_moves(node.arguments)
 
     if node.arena_expr:
       self.visit(node.arena_expr)

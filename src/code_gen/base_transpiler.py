@@ -359,12 +359,55 @@ class BaseTranspiler(ABC):
       ):
         pending_uncond.append(m_name)
 
+  def _is_struct_constructor_call(self, node: CallNode) -> bool:
+    """Returns True if *node* invokes a struct constructor (which takes ownership of args)."""
+    if getattr(node, "_is_struct_constructor", False):
+      return True
+    if isinstance(node.callee, IdentifierNode):
+      name = node.callee.name
+      if name in getattr(self, "known_structs", ()) or name in getattr(
+          self, "struct_parent_names", ()
+      ):
+        return True
+    return False
+
+  def _record_consumed_call_moves(self, args: List[Any]) -> None:
+    """Schedules deterministic teardown for destructible vars moved into borrowed calls."""
+    pending_del = getattr(self, "_pending_destroy_moved_vars", None)
+    if pending_del is None:
+      pending_del = []
+      self._pending_destroy_moved_vars = pending_del
+    for arg in args:
+      expr = arg.expr if hasattr(arg, "expr") else arg
+      if isinstance(expr, MoveNode):
+        m_name = (
+            self._resolve_var_name(expr.name)
+            if hasattr(self, "_resolve_var_name")
+            else self._identifier_map.get(expr.name, self._mangle_name(expr.name))
+        )
+        if self._is_active_destructible_var(m_name) and m_name not in pending_del:
+          pending_del.append(m_name)
+
+  def _drain_pending_destroy_moved_vars(
+      self, exclude: Optional[Set[str]] = None
+  ) -> None:
+    """Emits destructors for destructible vars moved into borrowed calls."""
+    pending_del = getattr(self, "_pending_destroy_moved_vars", None)
+    if not pending_del:
+      return
+    for var_name in list(pending_del):
+      if not exclude or var_name not in exclude:
+        self.newline()
+        self._emit_destructor_call(var_name)
+    pending_del.clear()
+
   def _drain_pending_null_vars(
       self,
       null_literal: str,
       exclude: Optional[Set[str]] = None,
   ) -> None:
-    """Emits post-statement drop-flag clearing (`v = None` / `v = nil`) for moved vars."""
+    """Emits post-statement teardown & drop-flag clearing (`v = None` / `v = nil`) for moved vars."""
+    self._drain_pending_destroy_moved_vars(exclude=exclude)
     for attr in ("_pending_null_vars", "_pending_unconditional_null_vars"):
       pending = getattr(self, attr, None)
       if not pending:

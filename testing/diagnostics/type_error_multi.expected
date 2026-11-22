@@ -1,0 +1,15 @@
+EXIT_CODE: 1
+--- STDOUT ---
+Reading source file: type_error_multi.sp...
+Parsing program to Parse Tree...
+Building AST...
+Running Semantic Analysis & Type Checker...
+--- STDERR ---
+
+Semantic Analysis failed with errors:
+Semantic Error: type_error_multi.sp:2:2 - Cannot assign expression of type 'String' to variable 'x' of type 'int'.
+  Line 2:    let x: int = "not_an_int";
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Semantic Error: type_error_multi.sp:3:2 - Cannot assign expression of type 'int' to variable 'y' of type 'bool'.
+  Line 3:    let y: bool = 123;
+             ^^^^^^^^^^^^^^^^^^

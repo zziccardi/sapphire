@@ -1,0 +1,4 @@
+func broken(): int {
+  let x: int = ;
+  return x;
+}

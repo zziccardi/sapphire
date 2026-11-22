@@ -2026,8 +2026,8 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_sapphire_del(b)", lua_code)
     self.assertNotIn("_sapphire_del(a)", lua_code)
 
-  def test_destructor_move_into_function_suppresses_source_destructor(self):
-    """Verifies move into function suppresses caller destructor in Lua."""
+  def test_destructor_move_into_function_destroys_once_after_call(self):
+    """Verifies move into borrowed function destroys source once after call (no leak or double-drop)."""
     code = """
     struct Resource {
       var id: int;
@@ -2044,7 +2044,9 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_code = self._transpile(code)
     test_idx = lua_code.index("function test()")
     test_body = lua_code[test_idx:]
-    self.assertNotIn("_sapphire_del(a)", test_body)
+    self.assertEqual(test_body.count("_sapphire_del(a)"), 1)
+    self.assertLess(test_body.index("consume(a)"), test_body.index("_sapphire_del(a)"))
+    self.assertLess(test_body.index("_sapphire_del(a)"), test_body.index("a = nil"))
 
   def test_destructor_move_reinitialization(self):
     """Verifies reinitializing a moved variable restores its destructor."""
