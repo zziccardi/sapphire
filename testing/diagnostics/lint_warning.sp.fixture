@@ -1,0 +1,6 @@
+func double_lookup(m: Map<String, int>, k: String): int {
+  if m.contains(k) {
+    return m[k];
+  }
+  return 0;
+}

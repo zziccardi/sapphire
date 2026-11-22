@@ -1,0 +1,12 @@
+import std.testing as t;
+
+@test
+func test_soft_and_fatal_failures() {
+  t.expect_eq(2 + 2, 5, "math mismatch");
+  t.assert_true(false, "fatal stop");
+}
+
+@test
+func test_passing_case() {
+  t.assert_eq(10, 10);
+}

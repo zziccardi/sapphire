@@ -1,0 +1,18 @@
+EXIT_CODE: 1
+--- STDOUT ---
+Running Sapphire tests in target 'lua'...
+
+[ FAIL ] test_soft_and_fatal_failures (runtime_failure.sp:6)
+  Expected: 5
+  Actual:   4
+  Message:  math mismatch
+  Line 6:  t.assert_true(false, "fatal stop");
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Expected: true
+  Actual:   false
+  Message:  fatal stop
+  Line 6:  t.assert_true(false, "fatal stop");
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[ PASS ] test_passing_case (runtime_failure.sp)
+
+Test Result: 1 passed, 1 failed in <TIME>
