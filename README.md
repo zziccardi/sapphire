@@ -245,8 +245,10 @@ sapphire check samples/overview.sp -t lua --json
 
 ## Repository structure
 
-* `docs/`: Core documentation including the [language spec](docs/SPEC.md),
-  [style guide](docs/style_guide.md),
+* `docs/`: Core documentation including the [quickstart guide](docs/quickstart.md),
+  [host interop & Love2D guide](docs/host_interop.md),
+  [language spec](docs/SPEC.md), [style guide](docs/style_guide.md),
+  [Lua comparison](docs/lua_comparison.md),
   [Rust comparison](docs/rust_comparison.md),
   [C++ comparison](docs/cpp_comparison.md),
   [Swift comparison](docs/swift_comparison.md),
