@@ -2414,6 +2414,26 @@ class TestLuaTranspiler(unittest.TestCase):
     })
     self.assertEqual(out, "7:none:end|was_none")
 
+  def test_love2d_new_font_sized_export_lua(self):
+    """Verifies love.graphics.newFontSized emits love.graphics.newFont(size[, hinting])."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics;
+    import lib.love2d.love2d;
+
+    @extern
+    var love: love2d.LoveEngine;
+
+    func load_fonts(): graphics.Font, graphics.Font {
+      let f1 = love.graphics.newFontSized(16);
+      let f2 = love.graphics.newFontSized(8, enums.HintingMode.Mono);
+      return f1, f2;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("love.graphics.newFont(16)", lua_code)
+    self.assertIn("love.graphics.newFont(8, enums.HintingMode.Mono)", lua_code)
+
   def test_reordered_named_args_preserve_left_to_right_eval_order_lua(self):
     """Verifies left-to-right side effects across expr, multi-return, and stmt calls."""
     out = self._run_lua_project({

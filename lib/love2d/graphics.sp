@@ -88,6 +88,12 @@ trait Graphics {
   static func newImage(path: String): Image;
   static func newCanvas(width: float? = none, height: float? = none): Canvas;
   static func newFont(path: String, size: int = 12): Font;
+
+  @export("newFont")
+  static func newFontSized(
+      size: int,
+      hinting: enums.HintingMode = enums.HintingMode.Normal): Font;
+
   static func newQuad(x: float, y: float, w: float, h: float,
                       sw: float, sh: float): Quad;
 

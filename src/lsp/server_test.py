@@ -2277,7 +2277,7 @@ func run() {
       self.assertIsNotNone(def_enum_type)
       self.assertTrue(def_enum_type.uri.startswith("file:///"))
       self.assertEqual(def_enum_type.uri, enums_uri)
-      self.assertEqual(def_enum_type.range.start.line, 13)  # line 14 in enums.sp: 'enum DrawMode {'
+      self.assertEqual(def_enum_type.range.start.line, 14)  # line 15 in enums.sp: 'enum DrawMode {'
 
   def test_hover_parameter_default_values(self):
     """Verifies that hover on functions/methods displays default values for parameters."""
