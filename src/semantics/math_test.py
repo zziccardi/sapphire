@@ -122,6 +122,13 @@ class TestMathModule(unittest.TestCase):
     self.assertEqual(std_math.safe_div__int(-7, 2), -3)
     self.assertEqual(std_math.safe_div__int(7, -2), -3)
     self.assertEqual(std_math.safe_div__int(-7, -2), 3)
+    self.assertEqual(std_math.safe_div(7, 2), 3)
+    self.assertEqual(std_math.safe_div__float(5.0, 2.0), 2.5)
+    self.assertIsNone(std_math.safe_div__float(5.0, 0.0))
+    self.assertTrue(_pymath.isnan(std_math.pow(float("nan"), 2.0)))
+    self.assertTrue(_pymath.isnan(std_math.pow(2.0, float("nan"))))
+    self.assertEqual(std_math.pow(1e200, 2.0), float("inf"))
+    self.assertEqual(std_math.pow(-1e200, 3.0), float("-inf"))
 
   def test_math_numeric_generic_constraints(self):
     """Verifies pow, ceil, and floor reject non-numeric type instantiations."""
