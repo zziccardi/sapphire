@@ -28,14 +28,53 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
   """AST visitor to transpile Sapphire code to Python."""
 
   def _mangle_name(self, name: str) -> str:
-    """Mangles Sapphire identifiers that collide with Python reserved keywords."""
+    """Mangles Sapphire identifiers that collide with Python reserved keywords.
+
+    Uses a strict bijection (`pass` -> `pass_`, `pass_` -> `pass__`, ...) so
+    user identifiers ending in `_` never collide with mangled reserved words.
+    """
     if not name:
       return name
     if name in ("self", "__init__", "__del__", "main"):
       return name
-    if name in PYTHON_RESERVED_WORDS:
+    stripped = name.rstrip("_")
+    if stripped in PYTHON_RESERVED_WORDS:
       return f"{name}_"
     return name
+
+  def _mangle_dotted(self, name: str) -> str:
+    """Mangles each segment of a dotted identifier (e.g. `mod.class` -> `mod.class_`)."""
+    if not name:
+      return name
+    if "." in name:
+      return ".".join(self._mangle_name(part) for part in name.split("."))
+    return self._mangle_name(name)
+
+  def _resolve_var_name(self, raw_name: str) -> str:
+    """Resolves a Sapphire variable name through lexical shadowing and keyword mangling."""
+    if raw_name in self._identifier_map:
+      return self._identifier_map[raw_name]
+    return self._mangle_name(raw_name)
+
+  def _declare_local_var(self, raw_name: str) -> str:
+    """Declares a local variable in the current lexical scope, alpha-renaming if shadowed."""
+    mangled = self._mangle_name(raw_name)
+    if not self._lexical_scopes:
+      return mangled
+    enclosing_has = any(raw_name in scope for scope in self._lexical_scopes[:-1])
+    clashes_func_global = mangled in self._current_func_globals
+    if enclosing_has or clashes_func_global:
+      py_name = self._next_temp_name(f"_{mangled}_s")
+      self._identifier_map[raw_name] = py_name
+    else:
+      py_name = mangled
+      if raw_name in self._identifier_map:
+        self._identifier_map.pop(raw_name, None)
+    self._lexical_scopes[-1].add(raw_name)
+    if self._loop_vars_stack:
+      if py_name not in self._loop_vars_stack[-1]:
+        self._loop_vars_stack[-1].append(py_name)
+    return py_name
 
   def __init__(self, test_mode: bool = False, use_runtime_module: bool = False):
     self.code: List[str] = []
@@ -47,7 +86,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self.struct_traits: Dict[str, Set[str]] = {}
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = {"Arena"}
+    self.structs_with_destructor: Set[str] = {"Arena", "Ref", "SharedRef"}
     self.proto_structs: Set[str] = set()
     self.struct_destructible_fields: Dict[str, List[str]] = {}
     self.struct_parent_names: Dict[str, List[str]] = {}
@@ -56,11 +95,23 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._branch_depth: int = 0
     self._var_branch_depth: Dict[str, int] = {}
     self._pending_null_vars: List[str] = []
-    self.func_return_types: Dict[str, str] = {}
-    self.method_return_types: Dict[str, str] = {}
+    self._pending_unconditional_null_vars: List[str] = []
+    self.func_return_types: Dict[str, Any] = {}
+    self.method_return_types: Dict[Any, Any] = {}
     self.variable_types: Dict[str, str] = {}
     self.clone_helper_counter = 0
     self._identifier_map: Dict[str, str] = {}
+    self._lexical_scopes: List[Set[str]] = []
+    self._current_func_globals: Set[str] = set()
+    self._loop_vars_stack: List[List[str]] = []
+    self._lifted_matches: Dict[int, str] = {}
+    self._lifted_lambdas: Dict[int, str] = {}
+    self._lifted_clones: Dict[int, str] = {}
+    self._lifted_short_circuits: Dict[int, str] = {}
+    self._temp_name_counters: Dict[str, int] = {}
+    self._current_match_target: Optional[str] = None
+    self._current_match_done_flag: Optional[str] = None
+    self._match_loop_depth: int = 0
     self.extern_vars: Dict[str, str] = {}
     self.global_vars: Set[str] = set()
     # Source line map: Python output line -> Sapphire source line
@@ -83,6 +134,19 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     temp.method_return_types = self.method_return_types
     temp.variable_types = self.variable_types
     temp._identifier_map = self._identifier_map
+    temp._lexical_scopes = self._lexical_scopes
+    temp._current_func_globals = self._current_func_globals
+    temp._loop_vars_stack = self._loop_vars_stack
+    temp._lifted_matches = self._lifted_matches
+    temp._lifted_lambdas = self._lifted_lambdas
+    temp._lifted_clones = self._lifted_clones
+    temp._lifted_short_circuits = self._lifted_short_circuits
+    temp._temp_name_counters = self._temp_name_counters
+    temp._pending_null_vars = self._pending_null_vars
+    temp._pending_unconditional_null_vars = self._pending_unconditional_null_vars
+    temp._branch_depth = self._branch_depth
+    temp._var_branch_depth = self._var_branch_depth
+    temp.destructor_stack = self.destructor_stack
     temp.extern_vars = self.extern_vars
     temp.global_vars = self.global_vars
     temp.moved_vars = self.moved_vars
@@ -98,19 +162,57 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     if sp_line and sp_line > 0:
       self._line_map[self._py_lineno] = sp_line
 
+  @staticmethod
+  def _is_const_default_expr(expr: Any) -> bool:
+    """Returns True if *expr* is an immutable literal safe as a Python def default."""
+    if isinstance(expr, LiteralNode):
+      return True
+    if isinstance(expr, UnaryOpNode) and isinstance(expr.expr, LiteralNode):
+      return True
+    return False
+
   def _format_param(self, p) -> str:
     pname = self._mangle_name(p.name)
     if p.default_expr:
-      temp = self._make_expr_transpiler()
-      temp.visit(p.default_expr)
-      return f"{pname}={temp.get_output()}"
+      if self._is_const_default_expr(p.default_expr):
+        temp = self._make_expr_transpiler()
+        temp.visit(p.default_expr)
+        return f"{pname}={temp.get_output()}"
+      return f"{pname}=_SP_UNSET"
     return pname
+
+  def _emit_deferred_default_inits(self, parameters: List[Any]) -> None:
+    """Emits runtime initialization for non-literal default parameters inside the body."""
+    for p in parameters:
+      if p.name == "self" or not p.default_expr:
+        continue
+      if self._is_const_default_expr(p.default_expr):
+        continue
+      pname = self._mangle_name(p.name)
+      self.newline()
+      self.emit(f"if {pname} is _SP_UNSET:")
+      self.indent()
+      self._lift_match_expressions(p.default_expr)
+      self.newline()
+      self.emit(f"{pname} = ")
+      self._emit_value_expr(p.default_expr)
+      self._drain_pending_null_vars("None")
+      self.dedent()
 
   def transpile(self, program: ProgramNode) -> str:
     """Entry point to transpile a ProgramNode AST into Python source code string."""
     self.code = []
     self._py_lineno = 1
     self._line_map = {}
+    self._lifted_matches = {}
+    self._lifted_lambdas = {}
+    self._lifted_clones = {}
+    self._lifted_short_circuits = {}
+    self._temp_name_counters = {}
+    self._lexical_scopes = []
+    self._identifier_map = {}
+    self._current_func_globals = set()
+    self._loop_vars_stack = []
 
     # 1. Output runtime preamble or shared runtime module import
     preamble = PYTHON_RUNTIME_MODULE_IMPORT if self.use_runtime_module else PYTHON_RUNTIME_PREAMBLE
@@ -200,23 +302,25 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self.newline()
     is_string_enum = any(isinstance(m.value, str) for m in node.members)
     base_class = "str, Enum" if is_string_enum else "IntEnum"
-    self.emit(f"class {node.name}({base_class}):")
+    self.emit(f"class {self._mangle_name(node.name)}({base_class}):")
     self.indent()
     if not node.members:
       self.newline()
       self.emit("pass")
     else:
-      current_val: Union[int, str] = 0
+      current_val: Any = 0
       for member in node.members:
         self.newline()
+        m_name = self._mangle_name(member.name)
         if member.value is not None:
           current_val = member.value
-        elif is_string_enum and isinstance(current_val, str):
+        elif is_string_enum:
           current_val = member.name
         if isinstance(current_val, str):
-          self.emit(f'{member.name} = "{current_val}"')
+          escaped = current_val.replace("\\", "\\\\").replace('"', '\\"')
+          self.emit(f'{m_name} = "{escaped}"')
         else:
-          self.emit(f"{member.name} = {current_val}")
+          self.emit(f"{m_name} = {current_val}")
           current_val += 1
     self.dedent()
     self.newline()
@@ -231,7 +335,19 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self.newline()
 
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
-    exported_names = [f'"{self._mangle_name(spec.exported_name)}"' for spec in node.specifiers]
+    exported_names = []
+    for spec in node.specifiers:
+      exp_name = self._mangle_name(spec.exported_name)
+      exported_names.append(f'"{exp_name}"')
+      if spec.module_prefix:
+        src_expr = f"{self._mangle_dotted(spec.module_prefix)}.{self._mangle_name(spec.symbol)}"
+        self.newline()
+        self.emit(f"{exp_name} = {src_expr}")
+      elif spec.alias:
+        orig_name = self._mangle_name(spec.symbol)
+        if exp_name != orig_name:
+          self.newline()
+          self.emit(f"{exp_name} = {orig_name}")
     self.newline()
     self.emit(f"__all__ = [{', '.join(exported_names)}]")
     self.newline()
@@ -241,19 +357,17 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     traits = self.struct_traits.get(node.name, set())
     is_test_case = any("TestCase" in t for t in traits)
     test_base = f"{getattr(self, 'testing_alias', 'testing')}.TestCase"
+    cls_name = self._mangle_name(node.name)
 
-    if node.parent_names:
-      parents = list(node.parent_names)
-      if is_test_case and test_base not in parents:
-        parents.append(test_base)
-      parent_class = ", ".join(parents)
-    else:
-      if is_test_case:
-        parent_class = test_base
-      else:
-        parent_class = "SapphireObject" if is_proto else "object"
+    parents: List[str] = [self._mangle_dotted(p) for p in (node.parent_names or [])]
+    if is_proto and not any(p in self.proto_structs for p in (node.parent_names or [])):
+      parents.append("SapphireObject")
+    if is_test_case and test_base not in parents:
+      parents.append(test_base)
+    parent_class = ", ".join(parents) if parents else ("SapphireObject" if is_proto else "object")
+
     self.newline()
-    self.emit(f"class {node.name}({parent_class}):")
+    self.emit(f"class {cls_name}({parent_class}):")
     self.indent()
 
     methods = self.struct_methods.get(node.name, [])
@@ -264,14 +378,18 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.emit("def __init__(self, *args, proto=None, **kwargs):")
       self.indent()
       self.newline()
-      self.emit("super().__init__(proto=proto)")
+      self.emit("SapphireObject.__init__(self, proto=proto)")
       self.newline()
       self.emit("if proto is None:")
       self.indent()
       if node.parent_names:
         for p in node.parent_names:
+          p_m = self._mangle_dotted(p)
           self.newline()
-          self.emit(f"{p}.__init__(self, *args, **kwargs)")
+          if has_init:
+            self.emit(f"{p_m}.__init__(self)")
+          else:
+            self.emit(f"{p_m}.__init__(self, *args, **kwargs)")
       for f in node.fields:
         default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
         if default_expr:
@@ -279,19 +397,23 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           temp = self._make_expr_transpiler()
           temp.visit(default_expr)
           self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
-      self.newline()
-      self.emit("for k, v in kwargs.items():")
-      self.indent()
-      self.newline()
-      self.emit("setattr(self, k, v)")
-      self.dedent()
-      if has_init:
+      if not has_init:
         self.newline()
-        self.emit(f"if type(self)._init_sapphire is {node.name}._init_sapphire:")
+        self.emit("for k, v in kwargs.items():")
+        self.indent()
+        self.newline()
+        self.emit("setattr(self, k, v)")
+        self.dedent()
+      else:
+        self.newline()
+        self.emit(f"if type(self)._init_sapphire is {cls_name}._init_sapphire:")
         self.indent()
         self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
         self.dedent()
+      if not node.parent_names and not node.fields and has_init is False:
+        # kwargs loop was already emitted above
+        pass
       self.dedent()
       self.dedent()
     else:
@@ -299,8 +421,12 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.indent()
       if node.parent_names:
         for p in node.parent_names:
+          p_m = self._mangle_dotted(p)
           self.newline()
-          self.emit(f"{p}.__init__(self, *args, **kwargs)")
+          if has_init:
+            self.emit(f"{p_m}.__init__(self)")
+          else:
+            self.emit(f"{p_m}.__init__(self, *args, **kwargs)")
       for f in node.fields:
         default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
         if default_expr:
@@ -308,15 +434,16 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           temp = self._make_expr_transpiler()
           temp.visit(default_expr)
           self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
-      self.newline()
-      self.emit("for k, v in kwargs.items():")
-      self.indent()
-      self.newline()
-      self.emit("setattr(self, k, v)")
-      self.dedent()
-      if has_init:
+      if not has_init:
         self.newline()
-        self.emit(f"if type(self)._init_sapphire is {node.name}._init_sapphire:")
+        self.emit("for k, v in kwargs.items():")
+        self.indent()
+        self.newline()
+        self.emit("setattr(self, k, v)")
+        self.dedent()
+      else:
+        self.newline()
+        self.emit(f"if type(self)._init_sapphire is {cls_name}._init_sapphire:")
         self.indent()
         self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
@@ -355,14 +482,30 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           self.emit("def __del__(self):")
           self.indent()
           self.newline()
-          self.emit("if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):")
+          self.emit("_sp_destroyed = object.__getattribute__(self, '__dict__').setdefault('_sapphire_destroyed_classes_', set())")
+          self.newline()
+          self.emit(f"if '{cls_name}' in _sp_destroyed:")
           self.indent()
           self.newline()
           self.emit("return")
           self.dedent()
           self.newline()
-          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+          self.emit(f"_sp_destroyed.add('{cls_name}')")
+          self.newline()
+          self.emit("try:")
+          self.indent()
           self._emit_struct_auto_teardown(node.name, call_parents=True)
+          self.dedent()
+          self.newline()
+          self.emit("finally:")
+          self.indent()
+          self.newline()
+          self.emit(f"if type(self) is {cls_name}:")
+          self.indent()
+          self.newline()
+          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+          self.dedent()
+          self.dedent()
           self.dedent()
     finally:
       self._current_struct_name = old_struct_name
@@ -374,18 +517,20 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self, struct_name: str, call_parents: bool = True
   ) -> None:
     """Emits LIFO `_sapphire_del` calls for destructible fields and parents."""
+    emitted = False
     for f_name in reversed(self.struct_destructible_fields.get(struct_name, [])):
       self.newline()
       self.emit(f"_sapphire_del(getattr(self, '{self._mangle_name(f_name)}', None))")
+      emitted = True
     if call_parents:
       for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
         if p_name in self.structs_with_destructor:
           self.newline()
-          self.emit("object.__setattr__(self, '_sapphire_disposed_', False)")
-          self.newline()
-          self.emit(f"{p_name}.__del__(self)")
-          self.newline()
-          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+          self.emit(f"{self._mangle_dotted(p_name)}.__del__(self)")
+          emitted = True
+    if not emitted:
+      self.newline()
+      self.emit("pass")
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
     # Fields are dynamically initialized in __init__, so we do not declare them at class level.
@@ -412,88 +557,122 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     # Python parameter formatting
     params = []
     raw_params = []
+    param_raw_names: Set[str] = set()
     if node.modifier != "static":
       params.append("self")
       raw_params.append("self")
+      param_raw_names.add("self")
     for p in func.parameters:
       if p.name != "self":
         params.append(self._format_param(p))
         raw_params.append(self._mangle_name(p.name))
+        param_raw_names.add(p.name)
 
-    if is_coroutine_func(func):
-      self.emit(f"def {func_name}({', '.join(params)}):")
-      self.indent()
-      self.newline()
-      self.emit(f"def _gen_{func_name}({', '.join(raw_params)}):")
-      self.indent()
-      assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
-      if assigned_globals:
-        self.newline()
-        self.emit(f"global {', '.join(sorted(assigned_globals))}")
-      self.visit(func.body)
-      self.dedent()
-      self.newline()
-      if raw_params:
-        self.emit(f"return _SapphireCoroutine(_gen_{func_name}, {', '.join(raw_params)})")
-      else:
-        self.emit(f"return _SapphireCoroutine(_gen_{func_name})")
-      self.dedent()
-    else:
-      self.emit(f"def {func_name}({', '.join(params)}):")
-      self.indent()
-      if func.name == "__del__":
-        self.newline()
-        self.emit("if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):")
+    prev_scopes = self._lexical_scopes
+    prev_id_map = self._identifier_map
+    prev_func_globals = self._current_func_globals
+    prev_loop_vars = self._loop_vars_stack
+    assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
+    self._lexical_scopes = [set(param_raw_names)]
+    self._identifier_map = {}
+    self._current_func_globals = set(assigned_globals)
+    self._loop_vars_stack = []
+    try:
+      if is_coroutine_func(func):
+        self.emit(f"def {func_name}({', '.join(params)}):")
         self.indent()
+        self._emit_deferred_default_inits(func.parameters)
         self.newline()
-        self.emit("return")
-        self.dedent()
-        self.newline()
-        self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
-      assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
-      if assigned_globals:
-        self.newline()
-        self.emit(f"global {', '.join(sorted(assigned_globals))}")
-      if func.name == "__init__" and getattr(func, "base_initializers", None):
-        for base_init in func.base_initializers:
+        self.emit(f"def _gen_{func_name}({', '.join(raw_params)}):")
+        self.indent()
+        if assigned_globals:
           self.newline()
-          args_list = ["self"]
-          for arg in base_init.arguments:
-            temp = self._make_expr_transpiler()
-            temp.visit(arg.expr)
-            val = temp.get_output()
-            if arg.name:
-              args_list.append(f"{self._mangle_name(arg.name)}={val}")
-            else:
-              args_list.append(val)
-          self.emit(f"{base_init.callee.name}._init_sapphire({', '.join(args_list)})")
-      cur_struct = getattr(self, "_current_struct_name", None)
-      has_auto_teardown = (
-          func.name == "__del__"
-          and cur_struct
-          and cur_struct not in self.proto_structs
-          and bool(
-              self.struct_destructible_fields.get(cur_struct)
-              or any(
-                  p in self.structs_with_destructor
-                  for p in self.struct_parent_names.get(cur_struct, [])
-              )
-          )
-      )
-      if has_auto_teardown:
-        self.newline()
-        self.emit("try:")
-        self.indent()
+          self.emit(f"global {', '.join(sorted(assigned_globals))}")
         self.visit(func.body)
+        self.newline()
+        self.emit("if False: yield")
         self.dedent()
         self.newline()
-        self.emit("finally:")
-        self.indent()
-        self._emit_struct_auto_teardown(cur_struct, call_parents=True)
+        if raw_params:
+          self.emit(f"return _SapphireCoroutine(_gen_{func_name}, {', '.join(raw_params)})")
+        else:
+          self.emit(f"return _SapphireCoroutine(_gen_{func_name})")
         self.dedent()
       else:
-        self.visit(func.body)
-      self.dedent()
+        self.emit(f"def {func_name}({', '.join(params)}):")
+        self.indent()
+        cur_struct = getattr(self, "_current_struct_name", None)
+        cur_cls = self._mangle_name(cur_struct) if cur_struct else ""
+        if func.name == "__del__":
+          self.newline()
+          self.emit("_sp_destroyed = object.__getattribute__(self, '__dict__').setdefault('_sapphire_destroyed_classes_', set())")
+          self.newline()
+          self.emit(f"if '{cur_cls}' in _sp_destroyed:")
+          self.indent()
+          self.newline()
+          self.emit("return")
+          self.dedent()
+          self.newline()
+          self.emit(f"_sp_destroyed.add('{cur_cls}')")
+        if assigned_globals:
+          self.newline()
+          self.emit(f"global {', '.join(sorted(assigned_globals))}")
+        self._emit_deferred_default_inits(func.parameters)
+        if func.name == "__init__" and getattr(func, "base_initializers", None):
+          for base_init in func.base_initializers:
+            self.newline()
+            args_list = ["self"]
+            for arg in base_init.arguments:
+              temp = self._make_expr_transpiler()
+              temp.visit(arg.expr)
+              val = temp.get_output()
+              if arg.name:
+                args_list.append(f"{self._mangle_name(arg.name)}={val}")
+              else:
+                args_list.append(val)
+            self.emit(f"{self._mangle_dotted(base_init.callee.name)}._init_sapphire({', '.join(args_list)})")
+        has_auto_teardown = (
+            func.name == "__del__"
+            and cur_struct
+            and cur_struct not in self.proto_structs
+            and bool(
+                self.struct_destructible_fields.get(cur_struct)
+                or any(
+                    p in self.structs_with_destructor
+                    for p in self.struct_parent_names.get(cur_struct, [])
+                )
+            )
+        )
+        if func.name == "__del__":
+          self.newline()
+          self.emit("try:")
+          self.indent()
+          self.visit(func.body)
+          self.dedent()
+          self.newline()
+          self.emit("finally:")
+          self.indent()
+          if has_auto_teardown:
+            self._emit_struct_auto_teardown(cur_struct, call_parents=True)
+          self.newline()
+          if cur_cls:
+            self.emit(f"if type(self) is {cur_cls}:")
+            self.indent()
+            self.newline()
+            self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+            self.dedent()
+          else:
+            self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+          self.dedent()
+        else:
+          self.visit(func.body)
+        self.dedent()
+    finally:
+      self._lexical_scopes = prev_scopes
+      self._identifier_map = prev_id_map
+      self._current_func_globals = prev_func_globals
+      self._loop_vars_stack = prev_loop_vars
+
     export_ann = next(
         (a for a in getattr(func, "annotations", []) if a.name == "export"),
         None,
@@ -507,12 +686,12 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
   def _find_assigned_globals(
       self, node: Any, local_params: Optional[Set[str]] = None
   ) -> Set[str]:
-    """Finds all global variables that are assigned to within node without local shadowing."""
+    """Finds all global variables assigned within *node* without lexical local shadowing."""
     if not self.global_vars:
       return set()
 
     local_vars = set(local_params) if local_params else set()
-    assigned = set()
+    assigned: Set[str] = set()
 
     def _collect_locals_and_assignments(n: Any, current_locals: Set[str]) -> None:
       if n is None:
@@ -520,28 +699,71 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       if isinstance(n, (FuncDeclNode, LambdaNode)):
         return
 
+      if isinstance(n, BlockNode):
+        block_locals = set(current_locals)
+        for stmt in n.statements:
+          _collect_locals_and_assignments(stmt, block_locals)
+        return
+
+      if isinstance(n, IfNode):
+        bindings = getattr(
+            n,
+            "bindings",
+            [n.init_binding] if getattr(n, "init_binding", None) else [],
+        )
+        branch_locals = set(current_locals)
+        for b in bindings:
+          _collect_locals_and_assignments(b.expr, branch_locals)
+          for name in getattr(b, "let_names", [b.let_name]):
+            if name:
+              branch_locals.add(name)
+              branch_locals.add(self._mangle_name(name))
+        if n.condition:
+          _collect_locals_and_assignments(n.condition, branch_locals)
+        _collect_locals_and_assignments(n.then_block, set(branch_locals))
+        if n.else_block:
+          _collect_locals_and_assignments(n.else_block, set(current_locals))
+        return
+
+      if isinstance(n, ForNode):
+        _collect_locals_and_assignments(n.iterable, current_locals)
+        loop_locals = set(current_locals)
+        if n.val_var:
+          loop_locals.add(n.val_var)
+          loop_locals.add(self._mangle_name(n.val_var))
+        if getattr(n, "key_var", None):
+          loop_locals.add(n.key_var)
+          loop_locals.add(self._mangle_name(n.key_var))
+        _collect_locals_and_assignments(n.block, loop_locals)
+        return
+
+      if isinstance(n, WhileNode):
+        _collect_locals_and_assignments(n.condition, current_locals)
+        _collect_locals_and_assignments(n.block, set(current_locals))
+        return
+
       if isinstance(n, VarDeclNode):
+        for expr in (n.exprs or []):
+          _collect_locals_and_assignments(expr, current_locals)
         for name in n.names:
           current_locals.add(name)
-      elif isinstance(n, ForNode):
-        if n.val_var:
-          current_locals.add(n.val_var)
-        if getattr(n, "key_var", None):
-          current_locals.add(n.key_var)
-      elif isinstance(n, HeaderBindingNode):
-        if getattr(n, "let_names", None):
-          for name in n.let_names:
-            current_locals.add(name)
-        elif getattr(n, "let_name", None):
-          current_locals.add(n.let_name)
-      elif isinstance(n, GuardClauseNode):
-        if n.binding:
-          if getattr(n.binding, "let_names", None):
-            for name in n.binding.let_names:
-              current_locals.add(name)
-          elif getattr(n.binding, "let_name", None):
-            current_locals.add(n.binding.let_name)
-      elif isinstance(n, AssignmentNode):
+          current_locals.add(self._mangle_name(name))
+        return
+
+      if isinstance(n, GuardStmtNode):
+        for clause in n.clauses:
+          if clause.binding:
+            _collect_locals_and_assignments(clause.binding.expr, current_locals)
+            for name in getattr(clause.binding, "let_names", [clause.binding.let_name]):
+              if name:
+                current_locals.add(name)
+                current_locals.add(self._mangle_name(name))
+          elif clause.condition:
+            _collect_locals_and_assignments(clause.condition, current_locals)
+        _collect_locals_and_assignments(n.else_block, set(current_locals))
+        return
+
+      if isinstance(n, AssignmentNode):
         targets = getattr(n, "targets", [])
         if not targets and getattr(n, "target", None):
           targets = [n.target]
@@ -577,33 +799,52 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     fn_name = self._mangle_name(node.name)
     params = [self._format_param(p) for p in node.parameters]
     raw_params = [self._mangle_name(p.name) for p in node.parameters]
-    if is_coroutine_func(node):
-      self.emit(f"def {fn_name}({', '.join(params)}):")
-      self.indent()
-      self.newline()
-      self.emit(f"def _gen_{fn_name}({', '.join(raw_params)}):")
-      self.indent()
-      assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
-      if assigned_globals:
+    param_raw_names = {p.name for p in node.parameters}
+
+    prev_scopes = self._lexical_scopes
+    prev_id_map = self._identifier_map
+    prev_func_globals = self._current_func_globals
+    prev_loop_vars = self._loop_vars_stack
+    assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
+    self._lexical_scopes = [set(param_raw_names)]
+    self._identifier_map = {}
+    self._current_func_globals = set(assigned_globals)
+    self._loop_vars_stack = []
+    try:
+      if is_coroutine_func(node):
+        self.emit(f"def {fn_name}({', '.join(params)}):")
+        self.indent()
+        self._emit_deferred_default_inits(node.parameters)
         self.newline()
-        self.emit(f"global {', '.join(sorted(assigned_globals))}")
-      self.visit(node.body)
-      self.dedent()
-      self.newline()
-      if raw_params:
-        self.emit(f"return _SapphireCoroutine(_gen_{fn_name}, {', '.join(raw_params)})")
+        self.emit(f"def _gen_{fn_name}({', '.join(raw_params)}):")
+        self.indent()
+        if assigned_globals:
+          self.newline()
+          self.emit(f"global {', '.join(sorted(assigned_globals))}")
+        self.visit(node.body)
+        self.newline()
+        self.emit("if False: yield")
+        self.dedent()
+        self.newline()
+        if raw_params:
+          self.emit(f"return _SapphireCoroutine(_gen_{fn_name}, {', '.join(raw_params)})")
+        else:
+          self.emit(f"return _SapphireCoroutine(_gen_{fn_name})")
+        self.dedent()
       else:
-        self.emit(f"return _SapphireCoroutine(_gen_{fn_name})")
-      self.dedent()
-    else:
-      self.emit(f"def {fn_name}({', '.join(params)}):")
-      self.indent()
-      assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
-      if assigned_globals:
-        self.newline()
-        self.emit(f"global {', '.join(sorted(assigned_globals))}")
-      self.visit(node.body)
-      self.dedent()
+        self.emit(f"def {fn_name}({', '.join(params)}):")
+        self.indent()
+        if assigned_globals:
+          self.newline()
+          self.emit(f"global {', '.join(sorted(assigned_globals))}")
+        self._emit_deferred_default_inits(node.parameters)
+        self.visit(node.body)
+        self.dedent()
+    finally:
+      self._lexical_scopes = prev_scopes
+      self._identifier_map = prev_id_map
+      self._current_func_globals = prev_func_globals
+      self._loop_vars_stack = prev_loop_vars
 
     export_ann = next((a for a in getattr(node, "annotations", []) if a.name == "export"), None)
     if export_ann:
@@ -626,11 +867,23 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.emit(f"{target_path} = {fn_name}")
 
   def _visit_statements(self, statements: List[StmtNode]) -> None:
-    for stmt in statements:
+    done_flag = getattr(self, "_current_match_done_flag", None)
+    guarded_depth = 0
+    for idx, stmt in enumerate(statements):
       self.visit(stmt)
       if not isinstance(stmt, ReturnNode):
         self._drain_pending_null_vars("None")
-
+      if (
+          done_flag
+          and idx < len(statements) - 1
+          and self._stmt_contains_match_yield(stmt)
+      ):
+        self.newline()
+        self.emit(f"if not {done_flag}:")
+        self.indent()
+        guarded_depth += 1
+    for _ in range(guarded_depth):
+      self.dedent()
 
 
 Transpiler = PythonTranspiler

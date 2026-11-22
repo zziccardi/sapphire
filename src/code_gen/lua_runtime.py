@@ -471,6 +471,12 @@ local _sapphire_cast_int = function(v)
   return n and math.floor(n) or 0
 end
 
+local _sapphire_div = function(a, b)
+  if b == 0 then error("division by zero") end
+  local q = a / b
+  if q >= 0 then return math.floor(q) else return math.ceil(q) end
+end
+
 local _sapphire_enum_from = function(enum_tbl, val)
   if val == nil or enum_tbl == nil then return nil end
   for name, value in pairs(enum_tbl) do

@@ -341,11 +341,14 @@ class StructType(Type):
     """Returns True if this struct or any ancestor struct defines '__del__'."""
     if "__del__" in self.methods:
       return True
+    seen = set() if _seen is None else set(_seen)
+    if self.name in seen:
+      return False
+    seen.add(self.name)
+    for parent in self.parent_types:
+      if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
+        return True
     if self.parent_names and symbol_table:
-      seen = set() if _seen is None else set(_seen)
-      if self.name in seen:
-        return False
-      seen.add(self.name)
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)
         if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):

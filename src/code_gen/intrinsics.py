@@ -25,6 +25,90 @@ def is_builtin_module(import_path: str) -> bool:
   )
 
 
+def _is_trivial_expr(expr: Any) -> bool:
+  """Returns True if *expr* has no observable evaluation-order side effects."""
+  return isinstance(expr, (LiteralNode, IdentifierNode))
+
+
+def emit_in_call_order(
+    target: str,
+    transpiler: Any,
+    node: CallNode,
+    canonical_exprs: List[Any],
+    emit_fn: Callable[[List[Any]], None],
+) -> None:
+  """Emits an intrinsic call while preserving left-to-right source evaluation order.
+
+  When named arguments reorder non-trivial expressions relative to canonical
+  parameter order, evaluates the receiver and arguments in source order inside
+  an immediately-invoked function and passes the bound temporaries to `emit_fn`.
+  """
+  source_exprs = [arg.expr for arg in node.arguments]
+  source_pos = {id(expr): idx for idx, expr in enumerate(source_exprs)}
+  emitted_positions = [
+      source_pos[id(e)]
+      for e in canonical_exprs
+      if e is not None and id(e) in source_pos
+  ]
+  is_reordered = any(
+      emitted_positions[i] > emitted_positions[i + 1]
+      for i in range(len(emitted_positions) - 1)
+  )
+  if not is_reordered or not any(not _is_trivial_expr(e) for e in source_exprs):
+    emit_fn(canonical_exprs)
+    return
+
+  next_tmp = getattr(transpiler, "_next_temp_name", None)
+  params: List[str] = []
+  source_vals: List[Any] = []
+  has_recv = isinstance(node.callee, MemberAccessNode)
+  orig_recv = node.callee.receiver if has_recv else None
+
+  if has_recv:
+    recv_tmp = next_tmp("_ir") if next_tmp else "_ir_1"
+    params.append(recv_tmp)
+    source_vals.append(orig_recv)
+
+  expr_map: Dict[int, IdentifierNode] = {}
+  for idx, expr in enumerate(source_exprs):
+    arg_tmp = next_tmp("_ia") if next_tmp else f"_ia_{idx + 1}"
+    params.append(arg_tmp)
+    source_vals.append(expr)
+    expr_map[id(expr)] = IdentifierNode(arg_tmp)
+
+  rewritten = [
+      expr_map[id(e)] if (e is not None and id(e) in expr_map) else e
+      for e in canonical_exprs
+  ]
+
+  if has_recv:
+    node.callee.receiver = IdentifierNode(params[0])
+  try:
+    if target == "python":
+      transpiler.emit(f"((lambda {', '.join(params)}: ")
+      emit_fn(rewritten)
+      transpiler.emit(")(")
+      for idx, val in enumerate(source_vals):
+        if idx > 0:
+          transpiler.emit(", ")
+        transpiler.visit(val)
+      transpiler.emit("))")
+    elif target == "lua":
+      transpiler.emit(f"(function({', '.join(params)}) return ")
+      emit_fn(rewritten)
+      transpiler.emit(" end)(")
+      for idx, val in enumerate(source_vals):
+        if idx > 0:
+          transpiler.emit(", ")
+        transpiler.visit(val)
+      transpiler.emit(")")
+    else:
+      emit_fn(canonical_exprs)
+  finally:
+    if has_recv:
+      node.callee.receiver = orig_recv
+
+
 class IntrinsicRegistry:
   """Registry for target-specific code generation emitters for intrinsic operations."""
 
@@ -72,7 +156,33 @@ class IntrinsicRegistry:
     if category and method:
       handler = cls._handlers.get((category, method, target))
       if handler:
-        handler(transpiler, node)
+        if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+          next_tmp = getattr(transpiler, "_next_temp_name", None)
+          tmp_name = next_tmp("_opt") if next_tmp else "_opt_recv"
+          orig_recv = node.callee.receiver
+          node.callee.receiver = IdentifierNode(tmp_name)
+          try:
+            if target == "python":
+              transpiler.emit(f"((lambda {tmp_name}: ")
+              handler(transpiler, node)
+              transpiler.emit(f" if {tmp_name} is not None else None)(")
+              transpiler.visit(orig_recv)
+              transpiler.emit("))")
+            elif target == "lua":
+              transpiler.emit(
+                  f"(function({tmp_name}) if {tmp_name} ~= nil then return "
+              )
+              handler(transpiler, node)
+              transpiler.emit(" end return nil end)(")
+              transpiler.visit(orig_recv)
+              transpiler.emit(")")
+            else:
+              node.callee.receiver = orig_recv
+              handler(transpiler, node)
+          finally:
+            node.callee.receiver = orig_recv
+        else:
+          handler(transpiler, node)
         return True
 
     return False
@@ -123,23 +233,31 @@ def _resolve_range_args(node: CallNode) -> List[ASTNode]:
 @IntrinsicRegistry.register("global", "range", "python")
 def _emit_range_py(transpiler: Any, node: CallNode) -> None:
   args = _resolve_range_args(node)
-  transpiler.emit("range(")
-  for idx, expr in enumerate(args):
-    if idx > 0:
-      transpiler.emit(", ")
-    transpiler.visit(expr)
-  transpiler.emit(")")
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.emit("range(")
+    for idx, expr in enumerate(exprs):
+      if idx > 0:
+        transpiler.emit(", ")
+      transpiler.visit(expr)
+    transpiler.emit(")")
+
+  emit_in_call_order("python", transpiler, node, args, _emit)
 
 
 @IntrinsicRegistry.register("global", "range", "lua")
 def _emit_range_lua(transpiler: Any, node: CallNode) -> None:
   args = _resolve_range_args(node)
-  transpiler.emit("_sapphire_range(")
-  for idx, expr in enumerate(args):
-    if idx > 0:
-      transpiler.emit(", ")
-    transpiler.visit(expr)
-  transpiler.emit(")")
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.emit("_sapphire_range(")
+    for idx, expr in enumerate(exprs):
+      if idx > 0:
+        transpiler.emit(", ")
+      transpiler.visit(expr)
+    transpiler.emit(")")
+
+  emit_in_call_order("lua", transpiler, node, args, _emit)
 
 
 def _resolve_assert_args(node: CallNode) -> Tuple[Any, Any]:
@@ -159,26 +277,35 @@ def _resolve_assert_args(node: CallNode) -> Tuple[Any, Any]:
 @IntrinsicRegistry.register("global", "assert", "python")
 def _emit_assert_py(transpiler: Any, node: CallNode) -> None:
   cond_expr, msg_expr = _resolve_assert_args(node)
-  transpiler.emit("assert ")
-  transpiler.visit(cond_expr)
-  transpiler.emit(", ")
-  if msg_expr is not None:
-    transpiler.visit(msg_expr)
-  else:
-    transpiler.emit('"assertion failed"')
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.emit("_sapphire_assert(")
+    transpiler.visit(exprs[0])
+    transpiler.emit(", ")
+    if exprs[1] is not None:
+      transpiler.visit(exprs[1])
+    else:
+      transpiler.emit('"assertion failed"')
+    transpiler.emit(")")
+
+  emit_in_call_order("python", transpiler, node, [cond_expr, msg_expr], _emit)
 
 
 @IntrinsicRegistry.register("global", "assert", "lua")
 def _emit_assert_lua(transpiler: Any, node: CallNode) -> None:
   cond_expr, msg_expr = _resolve_assert_args(node)
-  transpiler.emit("assert(")
-  transpiler.visit(cond_expr)
-  transpiler.emit(", ")
-  if msg_expr is not None:
-    transpiler.visit(msg_expr)
-  else:
-    transpiler.emit('"assertion failed"')
-  transpiler.emit(")")
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.emit("assert(")
+    transpiler.visit(exprs[0])
+    transpiler.emit(", ")
+    if exprs[1] is not None:
+      transpiler.visit(exprs[1])
+    else:
+      transpiler.emit('"assertion failed"')
+    transpiler.emit(")")
+
+  emit_in_call_order("lua", transpiler, node, [cond_expr, msg_expr], _emit)
 
 
 # ==============================================================================
@@ -312,26 +439,34 @@ def _resolve_slice_args(node: CallNode) -> Tuple[Any, Any]:
 @IntrinsicRegistry.register("String", "slice", "python")
 def _emit_str_slice_py(transpiler: Any, node: CallNode) -> None:
   start_expr, end_expr = _resolve_slice_args(node)
-  transpiler.visit(node.callee.receiver)
-  transpiler.emit("[")
-  transpiler.visit(start_expr)
-  transpiler.emit(":")
-  if end_expr is not None:
-    transpiler.visit(end_expr)
-  transpiler.emit("]")
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.visit(node.callee.receiver)
+    transpiler.emit("[")
+    transpiler.visit(exprs[0])
+    transpiler.emit(":")
+    if exprs[1] is not None:
+      transpiler.visit(exprs[1])
+    transpiler.emit("]")
+
+  emit_in_call_order("python", transpiler, node, [start_expr, end_expr], _emit)
 
 
 @IntrinsicRegistry.register("String", "slice", "lua")
 def _emit_str_slice_lua(transpiler: Any, node: CallNode) -> None:
   start_expr, end_expr = _resolve_slice_args(node)
-  transpiler.emit("_sapphire_string_slice(")
-  transpiler.visit(node.callee.receiver)
-  transpiler.emit(", ")
-  transpiler.visit(start_expr)
-  if end_expr is not None:
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.emit("_sapphire_string_slice(")
+    transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
-    transpiler.visit(end_expr)
-  transpiler.emit(")")
+    transpiler.visit(exprs[0])
+    if exprs[1] is not None:
+      transpiler.emit(", ")
+      transpiler.visit(exprs[1])
+    transpiler.emit(")")
+
+  emit_in_call_order("lua", transpiler, node, [start_expr, end_expr], _emit)
 
 
 @IntrinsicRegistry.register("String", "split", "python")
@@ -356,10 +491,10 @@ def _emit_str_split_lua(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "contains", "python")
 def _emit_str_contains_py(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("(")
-  transpiler.visit(node.arguments[0].expr)
-  transpiler.emit(" in ")
+  transpiler.emit("_sapphire_string_contains(")
   transpiler.visit(node.callee.receiver)
+  transpiler.emit(", ")
+  transpiler.visit(node.arguments[0].expr)
   transpiler.emit(")")
 
 
@@ -386,9 +521,7 @@ def _emit_str_find_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "find", "lua")
 def _emit_str_find_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_string_find(")
-  transpiler.visit(node.callee.receiver)
-  args_by_param = [None, None, None]
+  args_by_param: List[Any] = [None, None, None]
   param_names = ["sub", "start", "reverse"]
   for idx, arg in enumerate(node.arguments):
     if arg.name and arg.name in param_names:
@@ -398,13 +531,19 @@ def _emit_str_find_lua(transpiler: Any, node: CallNode) -> None:
       args_by_param[idx] = arg.expr
   while args_by_param and args_by_param[-1] is None:
     args_by_param.pop()
-  for p_expr in args_by_param:
-    transpiler.emit(", ")
-    if p_expr is None:
-      transpiler.emit("nil")
-    else:
-      transpiler.visit(p_expr)
-  transpiler.emit(")")
+
+  def _emit(exprs: List[Any]) -> None:
+    transpiler.emit("_sapphire_string_find(")
+    transpiler.visit(node.callee.receiver)
+    for p_expr in exprs:
+      transpiler.emit(", ")
+      if p_expr is None:
+        transpiler.emit("nil")
+      else:
+        transpiler.visit(p_expr)
+    transpiler.emit(")")
+
+  emit_in_call_order("lua", transpiler, node, args_by_param, _emit)
 
 
 @IntrinsicRegistry.register("String", "to_int", "python")

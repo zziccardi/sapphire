@@ -2728,5 +2728,584 @@ class TestSharedFixtures(unittest.TestCase):
       locals()[_name] = _make_fixture_test(_fixture_file.name)
 
 
+class TestPhase5PythonFixes(unittest.TestCase):
+  """Regression tests for Phase 5 shared codegen & Python backend/runtime fixes."""
+
+  def _run(self, source: str, func_name: str = "run") -> object:
+    from src.semantics.type_checker import TypeChecker
+
+    lexer = SapphireLexer(InputStream(source))
+    tokens = CommonTokenStream(lexer)
+    parser = SapphireParser(tokens)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+    TypeChecker().check(ast)
+    py_code = PythonTranspiler(test_mode=True).transpile(ast)
+    ns: dict = {}
+    exec(compile(py_code, "<sapphire>", "exec"), ns)
+    return ns[func_name]()
+
+  def test_integer_division_and_compound_div_assign(self):
+    src = """
+    func run(): [int] {
+      var a = -7;
+      a /= 2;
+      var b = 7;
+      b /= -2;
+      let c = -7 / -2;
+      let d = 17 / 4;
+      let f = 7.0 / 2.0;
+      let f_ok = f == 3.5 ? 1 : 0;
+      return [a, b, c, d, f_ok];
+    }
+    """
+    self.assertEqual(self._run(src), [-3, -3, 3, 4, 1])
+
+  def test_value_copy_semantics_on_assignment_and_var_decl(self):
+    src = """
+    struct Point {
+      var x: int = 0;
+      var y: int = 0;
+    }
+
+    proto Hero {
+      var hp: int = 100;
+    }
+
+    func run(): [int] {
+      let p1 = Point { x = 1, y = 2 };
+      var p2 = p1;
+      p2.x = 99;
+
+      let a1 = [1, 2];
+      var a2 = a1;
+      a2.push(3);
+
+      let m1 = {"k": 10};
+      var m2 = m1;
+      m2["k"] = 77;
+
+      var arena = Arena();
+      var h1 = Hero { hp = 50 } in arena;
+      var h2 = h1;
+      h2.hp = 10;
+
+      return [p1.x, p2.x, a1.size(), a2.size(), m1["k"], m2["k"], h1.hp, h2.hp];
+    }
+    """
+    self.assertEqual(self._run(src), [1, 99, 2, 3, 10, 77, 10, 10])
+
+  def test_lazy_cow_proxy_collections_underscore_fields_enums_and_map_keys(self):
+    src = """
+    enum Role {
+      Warrior = "warrior",
+      Mage = "mage",
+    }
+
+    struct Stats {
+      var _hp: int = 10;
+    }
+
+    proto Unit {
+      var stats: Stats = Stats { _hp = 10 };
+      var items: [int] = [1, 2];
+      var scores: [String: int] = {"a": 10, "keys": 5, "get": 9};
+      var role: Role = Role.Warrior;
+    }
+
+    func run(): [int] {
+      var arena = Arena();
+      let base = Unit {} in arena;
+      var c = clone base {} in arena;
+      c.items.push(3);
+      let got_a = c.scores.get("a") ?? -1;
+      let got_keys = c.scores.get("keys") ?? -1;
+      let keys_count = c.scores.keys().size();
+      c.scores.remove("a");
+      let base_has_a = base.scores.contains("a") ? 1 : 0;
+      let clone_has_a = c.scores.contains("a") ? 1 : 0;
+      c.scores.clear();
+      let base_sz = base.scores.size();
+      let clone_sz = c.scores.size();
+      c.stats._hp = 99;
+      let role_ok = c.role == Role.Warrior ? 1 : 0;
+      return [
+        base.items.size(),
+        c.items.size(),
+        got_a,
+        got_keys,
+        keys_count,
+        base_has_a,
+        clone_has_a,
+        base_sz,
+        clone_sz,
+        base.stats._hp,
+        c.stats._hp,
+        role_ok,
+      ];
+    }
+    """
+    self.assertEqual(
+        self._run(src),
+        [2, 3, 10, 5, 3, 1, 0, 3, 0, 10, 99, 1],
+    )
+
+  def test_array_join_and_string_concat_use_sapphire_string_from(self):
+    src = """
+    enum Color { Red = "red", Blue = "blue" }
+
+    func run(): String {
+      let arr = [true, false];
+      let j = arr.join(",");
+      let s = "flag=" + true + ",c=" + Color.Red;
+      return j + "|" + s;
+    }
+    """
+    self.assertEqual(self._run(src), "true,false|flag=true,c=red")
+
+  def test_raii_conditional_move_return_and_unconditional_move_reinit(self):
+    src = """
+    var log: [int] = [];
+
+    struct Res {
+      var id: int = 0;
+    }
+    impl Res {
+      func __del__() {
+        log.push(self.id);
+      }
+    }
+
+    struct Box {
+      var r: Res;
+    }
+
+    func make_box(flag: bool): Box {
+      var r = Res { id = 1 };
+      if flag {
+        return Box { r = move r };
+      }
+      return Box { r = Res { id = 2 } };
+    }
+
+    func cond_reinit(flag: bool) {
+      var a = Res { id = 10 };
+      let b = move a;
+      if flag {
+        a = Res { id = 20 };
+      }
+    }
+
+    func run(): [int] {
+      log = [];
+      let b1 = make_box(true);
+      let after_b1 = log.size();
+      let b2 = make_box(false);
+      cond_reinit(false);
+      cond_reinit(true);
+      return [after_b1, log.size()];
+    }
+    """
+    # after_b1 == 0 (r was moved into Box, NOT destroyed on early return!).
+    # b2 destroys id=1 (1); cond_reinit(false) destroys b=10 (2);
+    # cond_reinit(true) destroys b=10 and a=20 (4); total before return = 4.
+    self.assertEqual(self._run(src), [0, 4])
+
+  def test_diamond_inheritance_destructor_runs_base_once(self):
+    src = """
+    var log: [String] = [];
+
+    struct Base {}
+    impl Base { func __del__() { log.push("Base"); } }
+
+    struct Left: Base {}
+    impl Left { func __del__() { log.push("Left"); } }
+
+    struct Right: Base {}
+    impl Right { func __del__() { log.push("Right"); } }
+
+    struct Bottom: Left, Right {}
+    impl Bottom { func __del__() { log.push("Bottom"); } }
+
+    func run(): [String] {
+      log = [];
+      if true {
+        let b = Bottom {};
+      }
+      return log;
+    }
+    """
+    self.assertEqual(self._run(src), ["Bottom", "Right", "Base", "Left"])
+
+  def test_smart_refs_deterministic_raii_and_weak_ref_expiry(self):
+    src = """
+    var drops: [int] = [];
+
+    struct Res { var id: int = 0; }
+    impl Res { func __del__() { drops.push(self.id); } }
+
+    func run(): [int] {
+      drops = [];
+      if true {
+        let r = Ref(Res { id = 1 });
+      }
+      let after_unique = drops.size();
+
+      var w: WeakRef<Res>? = none;
+      var alive_mid = 0;
+      if true {
+        let s1 = SharedRef(Res { id = 2 });
+        w = s1.downgrade();
+        if true {
+          let s2 = s1.share();
+        }
+        if let u ?= w?.upgrade() {
+          alive_mid = u.id;
+        }
+      }
+      let after_shared = drops.size();
+      var alive_after = 0;
+      if let u2 ?= w?.upgrade() {
+        alive_after = u2.id;
+      }
+      return [after_unique, alive_mid, after_shared, alive_after];
+    }
+    """
+    self.assertEqual(self._run(src), [1, 2, 2, 0])
+
+  def test_raii_lambda_isolation_guard_if_let_and_short_circuit_moves(self):
+    src = """
+    var drops: [int] = [];
+
+    struct Res { var id: int = 0; }
+    impl Res { func __del__() { drops.push(self.id); } }
+
+    func maybe_res(ok: bool, id: int): Res? {
+      if ok { return Res { id = id }; }
+      return none;
+    }
+
+    func test_guard(): int {
+      guard let r ?= maybe_res(true, 30) else { return -1; }
+      return r.id;
+    }
+
+    func run(): [int] {
+      drops = [];
+      // 1. Block lambda must not destroy outer RAII local
+      var lambda_ok = 0;
+      if true {
+        let outer = Res { id = 10 };
+        let fn = (x: int) -> int { return x + outer.id; };
+        lambda_ok = fn(5);
+      }
+      let d1 = drops.size();
+
+      // 2. if let ...; false_cond must destroy owned unwrapped Res
+      if let r ?= maybe_res(true, 20); r.id == 999 {
+        lambda_ok += 1;
+      }
+      let d2 = drops.size();
+
+      // 3. guard let owned Res destroyed on scope exit
+      let g_id = test_guard();
+      let d3 = drops.size();
+
+      // 4. Conditional move in ternary only destroys untaken var on scope exit
+      if true {
+        var a = Res { id = 41 };
+        var b = Res { id = 42 };
+        let chosen = true ? move a : move b;
+      }
+      let d4 = drops.size();
+
+      // 5. Array.get borrowed view must NOT destroy element on if-let exit
+      let arr = [Res { id = 50 }];
+      var before_arr_drop = 0;
+      if let item ?= arr.get(0) {
+        before_arr_drop = drops.size();
+      }
+      let after_borrowed_unwrap = drops.size();
+
+      return [lambda_ok, d1, d2, g_id, d3, d4, before_arr_drop, after_borrowed_unwrap];
+    }
+    """
+    self.assertEqual(self._run(src), [15, 1, 2, 30, 3, 5, 5, 5])
+
+  def test_match_constants_early_yield_lifting_and_non_mutating_ast(self):
+    from src.semantics.type_checker import TypeChecker
+
+    src = """
+    let TARGET: int = 42;
+
+    func classify(x: int, flag: bool): String {
+      var side = 0;
+      let res = match x {
+        TARGET -> "hit_const",
+        1 + 1 -> {
+          if flag {
+            yield "early";
+          }
+          side = 1;
+          yield "late";
+        },
+        3 -> {
+          for i in range(5) {
+            if i == 2 {
+              yield "from_loop";
+            }
+          }
+          yield "never";
+        },
+        ... -> "other",
+      };
+      return res + ":" + side;
+    }
+
+    func lifting_gauntlet(): [int] {
+      // match in match subject
+      let s1 = match (match 1 { 1 -> 10, ... -> 0 }) {
+        10 -> 100,
+        ... -> 0,
+      };
+      // match in shorthand lambda
+      let fn = (n: int) -> match n { 1 -> 11, ... -> 22 };
+      let s2 = fn(1) + fn(9);
+      // match in while condition
+      var idx = 0;
+      var acc = 0;
+      while (match idx { 0 -> true, 1 -> true, ... -> false }) {
+        acc += idx + 1;
+        idx += 1;
+      }
+      // match in if-let condition referencing bound var
+      let opt: int? = 2;
+      var s4 = 0;
+      if let v ?= opt; (match v { 2 -> true, ... -> false }) {
+        s4 = v * 10;
+      }
+      // match in short-circuiting ternary (untaken branch must NOT run)
+      var touched = 0;
+      let s5 = true ? 7 : (match 1 {
+        1 -> { touched = 1; yield 99; },
+        ... -> 0,
+      });
+      return [s1, s2, acc, s4, s5, touched];
+    }
+
+    func run(): String {
+      let a = classify(42, false);
+      let b = classify(2, true);
+      let c = classify(2, false);
+      let d = classify(3, false);
+      let g = lifting_gauntlet();
+      return a + "|" + b + "|" + c + "|" + d + "|" + g.join(",");
+    }
+    """
+    lexer = SapphireLexer(InputStream(src))
+    tokens = CommonTokenStream(lexer)
+    ast = ASTBuilder().visit(SapphireParser(tokens).program())
+    TypeChecker().check(ast)
+    # Transpiling the SAME AST twice must produce identical, working code (no AST mutation!)
+    py1 = PythonTranspiler(test_mode=True).transpile(ast)
+    py2 = PythonTranspiler(test_mode=True).transpile(ast)
+    self.assertEqual(py1, py2)
+    ns: dict = {}
+    exec(compile(py1, "<sapphire>", "exec"), ns)
+    self.assertEqual(
+        ns["run"](),
+        "hit_const:0|early:0|late:1|from_loop:0|100,33,3,20,7,0",
+    )
+
+  def test_clone_init_block_proto_inheritance_has_init_kwargs_and_coroutines(self):
+    src = """
+    var base_inits: int = 0;
+
+    struct PlainBase {
+      var x: int = 5;
+    }
+
+    proto ProtoChildOfStruct: PlainBase {
+      var y: int = 10;
+    }
+
+    func bump_base(): int {
+      base_inits += 1;
+      return 7;
+    }
+
+    proto ProtoParent {
+      var tag: int = bump_base();
+    }
+
+    proto ProtoChild: ProtoParent {
+      var extra: int = 2;
+    }
+
+    struct WithInitAndMethod {
+      var flag: bool = false;
+    }
+    impl WithInitAndMethod {
+      func __init__(reset: bool) {
+        self.flag = reset;
+      }
+      var func reset(): int {
+        self.flag = false;
+        return 42;
+      }
+    }
+
+    struct Nested { var v: int = 1; }
+    proto Entity {
+      var hp: int = 10;
+      var nested: Nested = Nested { v = 3 };
+      var arr: [int] = [1, 2];
+    }
+
+    func yieldless(): Coroutine<int> {
+      let x = 1;
+    }
+
+    func with_mut_default(var items: [int] = [1]): int {
+      items.push(2);
+      return items.size();
+    }
+
+    func run(): [int] {
+      base_inits = 0;
+      var arena = Arena();
+      let p1 = ProtoChildOfStruct {} in arena;
+      let p2 = clone p1 { self.y = 20; } in arena;
+      let pc = ProtoChild {} in arena;
+      var w = WithInitAndMethod(reset = true);
+      let reset_ret = w.reset();
+
+      let e1 = Entity {} in arena;
+      let e2 = clone e1 {
+        self.hp += 5;
+        self.nested.v = 99;
+        self.arr[0] = 77;
+      } in arena;
+
+      var co = yieldless();
+      let step_none = co.step() == none ? 1 : 0;
+      let done = co.is_done() ? 1 : 0;
+
+      let d1 = with_mut_default();
+      let d2 = with_mut_default();
+
+      return [
+        p2.x, p2.y, base_inits, reset_ret,
+        e1.hp, e2.hp, e1.nested.v, e2.nested.v, e1.arr[0], e2.arr[0],
+        step_none, done, d1, d2,
+      ];
+    }
+    """
+    self.assertEqual(
+        self._run(src),
+        [5, 20, 1, 42, 10, 15, 3, 99, 1, 77, 1, 1, 2, 2],
+    )
+
+  def test_shadowing_nonlocal_loop_closures_writebacks_and_syntax(self):
+    src = """
+    var g: int = 100;
+
+    enum Label {
+      First,
+      Second = "two",
+    }
+
+    struct Holder {
+      var opt: int? = 5;
+    }
+
+    func run(): [int] {
+      // 1. Block-scoped shadowing + global assignment in same function
+      g = 100;
+      var x = 1;
+      if true {
+        var x = x + 10;
+        x += 1;
+        var g = 5;
+        g += 1;
+      }
+      g += 1;
+
+      // 2. nonlocal in lifted block lambda
+      var count = 0;
+      let inc = () -> int {
+        count += 3;
+        return count;
+      };
+      let c1 = inc();
+      let c2 = inc();
+
+      // 3. Loop closure capture (shorthand & block lambdas)
+      var fns: [() -> int] = [];
+      for i in range(3) {
+        let f: () -> int = () -> i;
+        fns.push(f);
+      }
+      var loop_sum = 0;
+      for f in fns {
+        loop_sum += f();
+      }
+
+      // 4. if var writebacks (plain var & struct field) + for var primitive writeback
+      var opt_v: int? = 10;
+      if var v ?= opt_v {
+        v += 5;
+      }
+      var h = Holder { opt = 20 };
+      if var fv ?= h.opt {
+        fv = 33;
+      }
+      var nums = [1, 2, 3];
+      for var n in nums {
+        n *= 10;
+      }
+
+      // 5. Optional chaining on String/Array/Map intrinsics + OptionalTypeNode cast + assert in lambda
+      let os: String? = "hi";
+      let none_s: String? = none;
+      let s_len = os?.size() ?? -1;
+      let none_len = none_s?.size() ?? -1;
+      let cast_opt: float? = (5 as float?);
+      let cast_ok = (cast_opt ?? 0.0) == 5.0 ? 1 : 0;
+      let check = (ok: bool) -> int { assert(ok, "bad"); return 1; };
+      let assert_ok = check(true);
+      let label_ok = (Label.First as String) == "First" ? 1 : 0;
+      let cr_len = f"a\rb".size();
+
+      return [
+        x, g, c1, c2, loop_sum,
+        opt_v ?? -1, h.opt ?? -1,
+        nums[0] + nums[1] + nums[2],
+        s_len, none_len, cast_ok, assert_ok, label_ok, cr_len,
+      ];
+    }
+    """
+    self.assertEqual(
+        self._run(src),
+        [1, 101, 3, 6, 3, 15, 33, 60, 2, -1, 1, 1, 1, 3],
+    )
+
+  def test_export_alias_and_reexport_bindings(self):
+    from src.parser.ast import ExportSpecifierNode, ExportStmtNode, FuncDeclNode, BlockNode, ProgramNode
+
+    fn = FuncDeclNode("helper", [], None, BlockNode([]))
+    exp = ExportStmtNode([
+        ExportSpecifierNode("helper", alias="public_helper"),
+        ExportSpecifierNode("DrawMode", module_prefix="enums"),
+        ExportSpecifierNode("Align", module_prefix="enums", alias="TextAlign"),
+    ])
+    prog = ProgramNode([fn], export_block=exp)
+    py_code = PythonTranspiler().transpile(prog)
+    self.assertIn("public_helper = helper", py_code)
+    self.assertIn("DrawMode = enums.DrawMode", py_code)
+    self.assertIn("TextAlign = enums.Align", py_code)
+    self.assertIn('__all__ = ["public_helper", "DrawMode", "TextAlign"]', py_code)
+
+
 if __name__ == "__main__":
   unittest.main()

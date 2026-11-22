@@ -209,11 +209,27 @@ class LuaStmtMixin:
       if isinstance(node.target, IdentifierNode):
         self.moved_vars.discard(self._mangle_name(node.target.name))
       raw_op = node.op[:-1]
-      self.visit(node.target)
-      self.emit(" = ")
-      self.visit(node.target)
-      self.emit(f" {raw_op} ")
-      self.visit(node.expr)
+      from src.semantics.types import PrimitiveType
+      is_int_div = (
+          node.op == "/="
+          and isinstance(getattr(node.target, "inferred_type", None), PrimitiveType)
+          and node.target.inferred_type.name == "int"
+          and isinstance(getattr(node.expr, "inferred_type", None), PrimitiveType)
+          and node.expr.inferred_type.name == "int"
+      )
+      if is_int_div:
+        self.visit(node.target)
+        self.emit(" = _sapphire_div(")
+        self.visit(node.target)
+        self.emit(", ")
+        self.visit(node.expr)
+        self.emit(")")
+      else:
+        self.visit(node.target)
+        self.emit(" = ")
+        self.visit(node.target)
+        self.emit(f" {raw_op} ")
+        self.visit(node.expr)
       wb_map = getattr(self, "_unwrap_writebacks", {})
       if isinstance(node.target, IdentifierNode) and node.target.name in wb_map:
         wb_recv, wb_key, is_arr = wb_map[node.target.name]

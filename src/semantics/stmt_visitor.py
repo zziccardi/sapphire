@@ -349,7 +349,11 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     """Type-checks single and multi-target assignments."""
-    target_types = [self._check_lvalue(t) for t in node.targets]
+    target_types = []
+    for t in node.targets:
+      t_type = self._check_lvalue(t)
+      t.inferred_type = t_type
+      target_types.append(t_type)
 
     old_expected = self.expected_type
     pre_rhs_errors = len(self.errors)

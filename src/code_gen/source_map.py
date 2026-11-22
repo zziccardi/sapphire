@@ -112,6 +112,8 @@ class SourceMapBuilder:
 
     lines_mappings: Dict[int, List[MappingEntry]] = {}
     for m in sorted_mappings:
+      if m.gen_line <= 0:
+        continue
       lines_mappings.setdefault(m.gen_line, []).append(m)
 
     max_line = max(lines_mappings.keys()) if lines_mappings else 0
@@ -165,7 +167,7 @@ class SourceMapBuilder:
   def to_v3_dict(self, generated_filename: str) -> Dict[str, Any]:
     """Returns the V3 Source Map as a python dictionary."""
     sources_content_list = [
-        self.sources_content.get(src, "") for src in self.sources
+        self.sources_content.get(src, None) for src in self.sources
     ]
     return {
         "version": 3,

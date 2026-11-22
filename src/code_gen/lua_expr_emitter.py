@@ -67,6 +67,27 @@ class LuaExprMixin:
       self.emit(" end end)())")
       return
 
+    if node.op == "/":
+      from src.semantics.types import PrimitiveType
+      lt = getattr(node.left, "inferred_type", None)
+      rt = getattr(node.right, "inferred_type", None)
+      it = getattr(node, "inferred_type", None)
+      if (
+          (
+              isinstance(lt, PrimitiveType)
+              and lt.name == "int"
+              and isinstance(rt, PrimitiveType)
+              and rt.name == "int"
+          )
+          or (isinstance(it, PrimitiveType) and it.name == "int")
+      ):
+        self.emit("_sapphire_div(")
+        self.visit(node.left)
+        self.emit(", ")
+        self.visit(node.right)
+        self.emit(")")
+        return
+
     op_map = {"&&": "and", "||": "or", "!=": "~="}
     op = op_map.get(node.op, node.op)
 
