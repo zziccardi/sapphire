@@ -442,6 +442,7 @@ class BaseTranspiler(ABC):
 
   def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
     """Collects struct methods, traits, return types, and destructors from program declarations."""
+    self.struct_default_trait_methods: Dict[str, List[Any]] = {}
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
         continue
@@ -460,6 +461,13 @@ class BaseTranspiler(ABC):
             ret_names = get_return_type_names(m.func_decl)
             if ret_names:
               self.method_return_types[(decl.struct_name, m.func_decl.name)] = ret_names
+        default_bindings = getattr(decl, "default_trait_members", None)
+        if default_bindings:
+          self.struct_default_trait_methods.setdefault(decl.struct_name, []).extend(default_bindings)
+          for _trait_ref, m_name, _modifier, trait_member in default_bindings:
+            ret_names = get_return_type_names(trait_member)
+            if ret_names:
+              self.method_return_types[(decl.struct_name, m_name)] = ret_names
       elif isinstance(decl, FuncDeclNode):
         ret_names = get_return_type_names(decl)
         if ret_names:

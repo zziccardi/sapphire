@@ -1117,10 +1117,30 @@ func update_actor(actor: Actor): Actor {
 }
 ```
 
-* **Explicit nominal conformance**: Any struct with an explicit
-  `impl Trait for Struct` declaration (or inheriting from a parent struct that
-  nominally implements the trait) is implicitly assignable to targets expecting
-  the trait type or `Trait?`.
+* **Explicit nominal conformance & transitive inheritance**: Any struct with an
+  explicit `impl Trait for Struct` declaration—or inheriting from a parent
+  struct that nominally implements the trait (including transitively across
+  modules)—is implicitly assignable to targets expecting the trait type or
+  `Trait?`.
+* **Partial trait overrides**: A child struct (`struct Child: Parent`) may
+  write an `impl Trait for Child { ... }` block containing *only* the methods
+  it overrides; non-overridden methods are satisfied by inherited parent
+  implementations (and may still call `Parent.method(self, ...)`).
+* **Multi-parent trait conflict resolution**: If `struct Child: Parent1,
+  Parent2` inherits conflicting implementations of the same trait method from
+  multiple parents, the compiler rejects the ambiguity until `Child`
+  explicitly overrides the method in `impl Trait for Child`.
+* **Default trait method bodies**: Trait methods may provide a default body
+  block (`func on_enter() {}` or `func total(): int { return self.raw(); }`)
+  instead of a trailing `;`. Default bodies are type-checked once at the trait
+  definition with `self` typed as the trait itself (respecting `var func` vs.
+  immutable `func` mutability). Structs implementing the trait inherit any
+  default methods they do not override. Overriding a default method must appear
+  inside `impl Trait for Struct` (defining the same name in an inherent
+  `impl Struct` is a compile-time error). Method resolution follows strict
+  precedence: `Child impl Trait` > `Parent impl Trait` > `Trait default`. In
+  native AOT compilation, default methods monomorphize per implementing struct
+  with zero runtime vtable overhead.
 * **Interface erasure**: Values viewed through a trait type can only access
   methods defined on that trait.
 

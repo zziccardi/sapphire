@@ -270,9 +270,9 @@ class ImplBlockNode(DeclNode):
 
 
 class TraitMemberNode(ASTNode):
-  """Represents a method signature inside a trait declaration."""
+  """Represents a method signature (and optional default body) inside a trait declaration."""
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, modifier: Optional[str] = None, return_type: Optional[TypeNode] = None, annotations: Optional[List[AnnotationNode]] = None, type_params: Optional[List[str]] = None):
+  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, modifier: Optional[str] = None, return_type: Optional[TypeNode] = None, annotations: Optional[List[AnnotationNode]] = None, type_params: Optional[List[str]] = None, body: Optional["BlockNode"] = None):
     self.name = name
     self.parameters = parameters
     if return_types is not None:
@@ -287,6 +287,7 @@ class TraitMemberNode(ASTNode):
     self.modifier = modifier
     self.annotations = annotations or []
     self.type_params = type_params or []
+    self.body = body
 
   @property
   def return_type(self) -> Optional[TypeNode]:

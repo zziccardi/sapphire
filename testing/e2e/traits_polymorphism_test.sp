@@ -126,3 +126,100 @@ func test_nested_trait_map_literal(): int {
   let b = grid.get(3)?.get(4)?.greet() ?? 0;
   return a + b;
 }
+
+trait Named {
+  func label(): int;
+  func bonus(): int;
+}
+
+struct BaseAgent {
+  var base_val: int = 10;
+}
+
+impl Named for BaseAgent {
+  func label(): int {
+    return self.base_val;
+  }
+
+  func bonus(): int {
+    return 5;
+  }
+}
+
+struct SubAgent: BaseAgent {}
+
+struct CustomAgent: SubAgent {}
+
+impl Named for CustomAgent {
+  func bonus(): int {
+    return BaseAgent.bonus(self) + 20;
+  }
+}
+
+func eval_named(n: Named): int {
+  return n.label() + n.bonus();
+}
+
+@test
+func test_inherited_trait_partial_override(): int {
+  let s = SubAgent { base_val = 10 };
+  let c = CustomAgent { base_val = 30 };
+  return eval_named(s) + eval_named(c);
+}
+
+trait Scorable {
+  func raw(): int;
+
+  func bonus(): int {
+    return 10;
+  }
+
+  func total(): int {
+    return self.raw() + self.bonus();
+  }
+}
+
+struct PlainScore {
+  var v: int;
+}
+
+impl Scorable for PlainScore {
+  func raw(): int {
+    return self.v;
+  }
+}
+
+struct ParentScore {
+  var v: int;
+}
+
+impl Scorable for ParentScore {
+  func raw(): int {
+    return self.v;
+  }
+
+  func bonus(): int {
+    return 25;
+  }
+}
+
+struct ChildScore: ParentScore {}
+
+impl Scorable for ChildScore {
+  func raw(): int {
+    return self.v * 2;
+  }
+}
+
+func read_score(s: Scorable): int {
+  return s.total();
+}
+
+@test
+func test_trait_default_method_and_override(): int {
+  let a = PlainScore { v = 5 };
+  let b = ParentScore { v = 5 };
+  let c = ChildScore { v = 5 };
+  // a: 5 + 10 = 15, b: 5 + 25 = 30, c: (5*2) + 25 (Parent override > Trait default) = 35
+  return read_score(a) + read_score(b) + read_score(c) + a.total();
+}
