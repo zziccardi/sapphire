@@ -18,8 +18,9 @@ def _emit_arr_size_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "size", "lua")
 def _emit_arr_size_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("#")
+  transpiler.emit("_SP_RT._sapphire_array_size(")
   transpiler.visit(node.callee.receiver)
+  transpiler.emit(")")
 
 
 @IntrinsicRegistry.register("Array", "empty", "python")
@@ -31,9 +32,9 @@ def _emit_arr_empty_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "empty", "lua")
 def _emit_arr_empty_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("(#")
+  transpiler.emit("_SP_RT._sapphire_array_empty(")
   transpiler.visit(node.callee.receiver)
-  transpiler.emit(" == 0)")
+  transpiler.emit(")")
 
 
 @IntrinsicRegistry.register("Array", "get", "python")
@@ -47,7 +48,7 @@ def _emit_arr_get_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "get", "lua")
 def _emit_arr_get_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_get(")
+  transpiler.emit("_SP_RT._sapphire_array_get(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -88,7 +89,7 @@ def _emit_arr_map_lua(transpiler: Any, node: CallNode) -> None:
       in_place_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_array_map(")
+    transpiler.emit("_SP_RT._sapphire_array_map(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -134,7 +135,7 @@ def _emit_arr_filter_lua(transpiler: Any, node: CallNode) -> None:
       in_place_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_array_filter(")
+    transpiler.emit("_SP_RT._sapphire_array_filter(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -190,7 +191,7 @@ def _emit_arr_reduce_lua(transpiler: Any, node: CallNode) -> None:
       reverse_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_array_reduce(")
+    transpiler.emit("_SP_RT._sapphire_array_reduce(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -217,7 +218,7 @@ def _emit_arr_contains_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "contains", "lua")
 def _emit_arr_contains_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_contains(")
+  transpiler.emit("_SP_RT._sapphire_array_contains(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -236,7 +237,7 @@ def _emit_arr_reverse_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "reverse", "lua")
 def _emit_arr_reverse_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_reverse(")
+  transpiler.emit("_SP_RT._sapphire_array_reverse(")
   transpiler.visit(node.callee.receiver)
   if node.arguments:
     transpiler.emit(", ")
@@ -294,7 +295,7 @@ def _emit_arr_sort_lua(transpiler: Any, node: CallNode) -> None:
       in_place_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_array_sort(")
+    transpiler.emit("_SP_RT._sapphire_array_sort(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     if exprs[0] is not None:
@@ -328,7 +329,7 @@ def _emit_arr_join_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "join", "lua")
 def _emit_arr_join_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_join(")
+  transpiler.emit("_SP_RT._sapphire_array_join(")
   transpiler.visit(node.callee.receiver)
   if node.arguments:
     transpiler.emit(", ")
@@ -347,7 +348,7 @@ def _emit_arr_push_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "push", "lua")
 def _emit_arr_push_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_push(")
+  transpiler.emit("_SP_RT._sapphire_array_push(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -363,7 +364,7 @@ def _emit_arr_pop_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "pop", "lua")
 def _emit_arr_pop_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_pop(")
+  transpiler.emit("_SP_RT._sapphire_array_pop(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -401,7 +402,7 @@ def _emit_arr_insert_lua(transpiler: Any, node: CallNode) -> None:
       element_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_array_insert(")
+    transpiler.emit("_SP_RT._sapphire_array_insert(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -423,7 +424,7 @@ def _emit_arr_remove_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "remove", "lua")
 def _emit_arr_remove_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_remove(")
+  transpiler.emit("_SP_RT._sapphire_array_remove(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -439,7 +440,7 @@ def _emit_arr_clear_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Array", "clear", "lua")
 def _emit_arr_clear_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_array_clear(")
+  transpiler.emit("_SP_RT._sapphire_array_clear(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -477,7 +478,7 @@ def _emit_arr_swap_lua(transpiler: Any, node: CallNode) -> None:
       j_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_array_swap(")
+    transpiler.emit("_SP_RT._sapphire_array_swap(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -502,7 +503,7 @@ def _emit_map_size_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "size", "lua")
 def _emit_map_size_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_size(")
+  transpiler.emit("_SP_RT._sapphire_map_size(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -516,7 +517,7 @@ def _emit_map_empty_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "empty", "lua")
 def _emit_map_empty_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_empty(")
+  transpiler.emit("_SP_RT._sapphire_map_empty(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -532,7 +533,7 @@ def _emit_map_contains_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "contains", "lua")
 def _emit_map_contains_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_contains(")
+  transpiler.emit("_SP_RT._sapphire_map_contains(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -550,7 +551,7 @@ def _emit_map_get_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "get", "lua")
 def _emit_map_get_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_get(")
+  transpiler.emit("_SP_RT._sapphire_map_get(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -566,7 +567,7 @@ def _emit_map_keys_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "keys", "lua")
 def _emit_map_keys_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_keys(")
+  transpiler.emit("_SP_RT._sapphire_map_keys(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -580,7 +581,7 @@ def _emit_map_values_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "values", "lua")
 def _emit_map_values_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_values(")
+  transpiler.emit("_SP_RT._sapphire_map_values(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -618,7 +619,7 @@ def _emit_map_insert_lua(transpiler: Any, node: CallNode) -> None:
       val_expr = arg.expr
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_map_insert(")
+    transpiler.emit("_SP_RT._sapphire_map_insert(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -640,7 +641,7 @@ def _emit_map_remove_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "remove", "lua")
 def _emit_map_remove_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_remove(")
+  transpiler.emit("_SP_RT._sapphire_map_remove(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -656,6 +657,6 @@ def _emit_map_clear_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Map", "clear", "lua")
 def _emit_map_clear_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_map_clear(")
+  transpiler.emit("_SP_RT._sapphire_map_clear(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")

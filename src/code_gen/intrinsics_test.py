@@ -38,7 +38,7 @@ class TestIntrinsicRegistry(unittest.TestCase):
     mock_transpiler.reset_mock()
     handled_lua = IntrinsicRegistry.try_emit("lua", mock_transpiler, call)
     self.assertTrue(handled_lua)
-    mock_transpiler.emit.assert_any_call("(#")
+    mock_transpiler.emit.assert_any_call("_SP_RT._sapphire_string_size(")
 
   def test_range_python_named_and_positional_variants(self):
     from src.parser.ast import ArgumentNode, LiteralNode

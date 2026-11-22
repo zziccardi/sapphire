@@ -182,7 +182,10 @@ class SemanticParityTest(unittest.TestCase):
         try:
           lua_result = int(raw)
         except ValueError:
-          lua_result = float(raw)
+          try:
+            lua_result = float(raw)
+          except ValueError:
+            lua_result = raw
     finally:
       os.unlink(tmp_path)
 
@@ -419,6 +422,516 @@ class SemanticParityTest(unittest.TestCase):
     self.assertEqual(
         missing, {},
         f"Unregistered @test functions in testing/e2e/: {missing}",
+    )
+
+  def test_optional_array_and_map_none_elements_parity(self):
+    """Verifies [T?] arrays and [K: V?] maps preserve none elements identically in Python and Lua."""
+    code = """
+    @test
+    func test_opt_collections(): int {
+      var arr: [int?] = [10, none, 30, none];
+      arr.push(none);
+      arr.push(50);
+      let popped = arr.pop();
+      var sum = 0;
+      var nones = 0;
+      for item in arr {
+        if let v ?= item {
+          sum += v;
+        } else {
+          nones += 1;
+        }
+      }
+      let has_none = arr.contains(none);
+      let s0 = arr.size();
+
+      var m: [String: int?] = {"a": 1, "b": none};
+      m["c"] = none;
+      let ms = m.size();
+      let has_b = m.contains("b");
+      let bv = m["b"] ?? 7;
+
+      if has_none && has_b && popped == 50 {
+        return sum + nones * 100 + s0 * 1000 + ms * 10000 + bv;
+      }
+      return -1;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_opt_collections")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(py_val, 40 + 300 + 5000 + 30000 + 7)
+
+  def test_optional_defaults_and_struct_proto_none_overrides_parity(self):
+    """Verifies explicit none overrides defaults in functions, constructors, structs, and protos."""
+    code = """
+    func greet(name: String? = "World", title: String? = "Dr"): String {
+      let n = name ?? "NONE";
+      let t = title ?? "NOTITLE";
+      return t + ":" + n;
+    }
+
+    struct OptBox {
+      var a: int?;
+      var b: int;
+    }
+    impl OptBox {
+      func __init__(a: int? = 99, b: int = 1) {
+        self.a = a;
+        self.b = b;
+      }
+    }
+
+    struct Config {
+      var name: String? = "default";
+    }
+
+    proto Node {
+      var tag: String? = "base";
+    }
+
+    @test
+    func test_none_overrides(): String {
+      let g1 = greet();
+      let g2 = greet(none);
+      let g3 = greet(title = "Ms");
+      let g4 = greet(none, none);
+
+      let b1 = OptBox(none, 42);
+      let b2 = OptBox(b = 7);
+      let cfg = Config { name = none };
+
+      var arena = Arena();
+      let p = Node {} in arena;
+      var c = clone p in arena;
+      c.tag = none;
+
+      let s_b1 = String.from(b1.a ?? -1) + "," + String.from(b1.b);
+      let s_b2 = String.from(b2.a ?? -1) + "," + String.from(b2.b);
+      let s_cfg = cfg.name ?? "NIL";
+      let s_p = p.tag ?? "NIL";
+      let s_c = c.tag ?? "NIL";
+      return g1 + "|" + g2 + "|" + g3 + "|" + g4 + "|" + s_b1 + "|" + s_b2 + "|" + s_cfg + "|" + s_p + "|" + s_c;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_none_overrides")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(
+        py_val,
+        "Dr:World|Dr:NONE|Ms:World|NOTITLE:NONE|-1,42|99,7|NIL|base|NIL",
+    )
+
+  def test_cow_proxy_and_smart_ref_collections_and_raii_parity(self):
+    """Verifies CoW proxy collections, Ref/SharedRef collections, SharedRef(Ref(false)), and WeakRef expiry."""
+    code = """
+    var destroyed: int = 0;
+
+    struct Tracked {
+      var id: int;
+    }
+    impl Tracked {
+      func __del__() {
+        destroyed += self.id;
+      }
+    }
+
+    proto Bag {
+      var items: [int] = [1, 2];
+      var scores: [String: int] = {"a": 10};
+    }
+
+    @test
+    func test_cow_and_refs(): int {
+      var arena = Arena();
+      let p = Bag {} in arena;
+      var c = clone p in arena;
+      c.items.push(3);
+      c.scores.insert("b", 20);
+      c.scores.remove("a");
+
+      let p_sz = p.items.size();
+      let c_sz = c.items.size();
+      let p_has_a = p.scores.get("a") ?? 0;
+      let c_has_a = c.scores.get("a") ?? 0;
+      let c_b = c.scores.get("b") ?? 0;
+
+      let r_arr = Ref([10, 20, 30]);
+      let r_map = Ref({"k": 5});
+      let r_bool = Ref(false);
+      let s_bool = SharedRef(move r_bool);
+
+      var weak: WeakRef<Tracked>? = none;
+      var alive_before = 0;
+      {
+        let sr1 = SharedRef(Tracked { id = 7 });
+        let sr2 = sr1.share();
+        weak = sr1.downgrade();
+        if let up ?= weak?.upgrade() {
+          alive_before = up.id;
+        }
+      }
+      var alive_after = 0;
+      if let up2 ?= weak?.upgrade() {
+        alive_after = up2.id;
+      }
+
+      if p_sz == 2 && c_sz == 3 && p_has_a == 10 && c_has_a == 0 && c_b == 20 && alive_after == 0 {
+        return r_arr.size() + r_map.size() + r_arr[1] + alive_before + destroyed * 100;
+      }
+      return -1;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_cow_and_refs")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(py_val, 3 + 1 + 20 + 7 + 700)
+
+  def test_structural_equality_and_value_copy_semantics_parity(self):
+    """Verifies structural ==/!= on arrays/maps and shallow value copy on assignment."""
+    code = """
+    struct Point {
+      var x: int = 0;
+      var y: int = 0;
+    }
+
+    @test
+    func test_val_semantics(): int {
+      var a1 = [1, 2, 3];
+      var a2 = a1;
+      let eq1 = (a1 == a2);
+      a2[0] = 99;
+      let neq1 = (a1 != a2);
+
+      var m1 = {"k": 10};
+      var m2 = m1;
+      let eq2 = (m1 == m2);
+      m2["k"] = 20;
+      let neq2 = (m1 != m2);
+
+      var p1 = Point { x = 5, y = 6 };
+      var p2 = p1;
+      p2.x = 50;
+
+      if eq1 && neq1 && eq2 && neq2 {
+        return a1[0] + m1["k"] + p1.x + p2.x;
+      }
+      return -1;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_val_semantics")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(py_val, 1 + 10 + 5 + 50)
+
+  def test_casts_utf8_strings_and_enum_from_parity(self):
+    """Verifies casts, UTF-8 String helpers, strict to_int/to_float, and Enum.from order."""
+    code = """
+    enum Mix {
+      First = "Second",
+      Second = "Other"
+    }
+
+    enum AutoStr {
+      Alpha,
+      Beta = "B"
+    }
+
+    @test
+    func test_casts_and_strings(): int {
+      let b0 = 0 as bool;
+      let b1 = 1 as bool;
+      let i_neg = -3.9 as int;
+      let f_true = true as float;
+      let i_false = false as int;
+      let opt_i: int? = 5 as int?;
+
+      let u = "café";
+      let u_sz = u.size();
+      let u_sl = u.slice(-1);
+      let f_neg = "abc".find("b", -2) ?? -1;
+      let f_emp_rev = "abc".find("", reverse = true) ?? -1;
+      let stripped = "abc".strip("");
+      let bad_i = "3.14".to_int() ?? -9;
+      let bad_f = "0x10".to_float() ?? -9.0;
+
+      let m_val = Mix.from("Second");
+      let auto_a = AutoStr.Alpha;
+
+      if !b0 && b1 && i_neg == -3 && f_true == 1.0 && i_false == 0
+         && opt_i == 5 && u_sz == 4 && u_sl == "é" && f_neg == 1
+         && f_emp_rev == 3 && stripped == "abc" && bad_i == -9
+         && bad_f == -9.0 && m_val == Mix.First && auto_a == AutoStr.from("Alpha") {
+        return 1;
+      }
+      return 0;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_casts_and_strings")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(py_val, 1)
+
+  def test_dead_code_after_terminators_and_multi_return_raii_parity(self):
+    """Verifies dead code after return/break/continue, multi-return with RAII, and bounded multi-yield match."""
+    code = """
+    var del_count: int = 0;
+
+    struct Guard {
+      var id: int;
+    }
+    impl Guard {
+      func __del__() {
+        del_count += 1;
+      }
+    }
+
+    func pair_vals(): int, int? {
+      return 11, none;
+    }
+
+    func with_raii_multi(): int, int? {
+      let g = Guard { id = 1 };
+      return pair_vals();
+      let dead = 99;
+    }
+
+    @test
+    func test_terminators_and_multi(): int {
+      var acc = 0;
+      for i in range(5) {
+        if i == 1 {
+          continue;
+          acc += 100;
+        }
+        if i == 3 {
+          break;
+          acc += 200;
+        }
+        acc += i;
+      }
+      let a, b = with_raii_multi();
+      let no_int: int? = none;
+      let opt_one: int? = 1;
+      let x, y = match a {
+        11 -> { yield 20, no_int; },
+        ... -> { yield 0, opt_one; }
+      };
+      return acc + a + (b ?? 5) + x + (y ?? 3) + del_count * 100;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_terminators_and_multi")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(py_val, 2 + 11 + 5 + 20 + 3 + 100)
+
+  def test_lambda_clone_guard_and_diamond_raii_parity(self):
+    """Verifies lambda return RAII isolation, clone RAII cleanup, guard/if-cond RAII, and diamond __del__."""
+    code = """
+    var log: [String] = [];
+
+    struct Base {}
+    impl Base {
+      func __del__() {
+        log.push("Base");
+      }
+    }
+    struct Left: Base {}
+    struct Right: Base {}
+    struct Diamond: Left, Right {}
+
+    struct Res {
+      var tag: String;
+    }
+    impl Res {
+      func __del__() {
+        log.push(self.tag);
+      }
+    }
+
+    proto P {
+      var x: int = 1;
+    }
+
+    func make_opt_res(tag: String): Res? {
+      return Res { tag = tag };
+    }
+
+    func test_guard_raii(): int {
+      guard let r ?= make_opt_res("G") else {
+        return 0;
+      }
+      return 1;
+    }
+
+    @test
+    func test_raii_edge_cases(): String {
+      {
+        let outer = Res { tag = "Outer" };
+        let fn = (x: int) -> int {
+          return x + 1;
+        };
+        let v = fn(10);
+        log.push("AfterLam:" + String.from(v));
+      }
+      {
+        var arena = Arena();
+        let p = P {} in arena;
+        let c = clone p {
+          let tmp = Res { tag = "CloneTmp" };
+          self.x = 2;
+        } in arena;
+        log.push("AfterClone:" + String.from(c.x));
+      }
+      {
+        let d = Diamond {};
+      }
+      if let r ?= make_opt_res("IfFail"); false {
+        log.push("Unreachable");
+      }
+      test_guard_raii();
+      return log.join(",");
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_raii_edge_cases")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(
+        py_val,
+        "AfterLam:11,Outer,CloneTmp,AfterClone:2,Base,IfFail,G",
+    )
+
+  def test_match_lifting_gauntlet_parity(self):
+    """Verifies match lifting in subjects, arms, while, guard, if-let, short-circuits, early yield, and lambdas."""
+    code = """
+    @test
+    func test_match_gauntlet(): int {
+      // Match in match subject + nested match in arm
+      let a = match (match 1 { 1 -> 2, ... -> 0 }) {
+        2 -> match 3 { 3 -> 30, ... -> 0 },
+        ... -> 0
+      };
+
+      // Early yield in block arm with if and for loop
+      let b = match 1 {
+        1 -> {
+          var s = 0;
+          for i in range(5) {
+            if i == 2 {
+              yield s + 100;
+            }
+            s += i;
+          }
+          yield 999;
+        },
+        ... -> { yield 0; }
+      };
+
+      // Match in while condition
+      var n = 3;
+      var w_sum = 0;
+      while (match n { 0 -> false, ... -> true }) {
+        w_sum += n;
+        n -= 1;
+      }
+
+      // Match in short-circuit ?? and ternary (skipped branch must not run side-effect)
+      var side = 0;
+      let opt_v: int? = 5;
+      let c = opt_v ?? (match 1 { 1 -> { side += 1; yield 99; }, ... -> { yield 0; } });
+      let d = true ? 7 : (match 1 { 1 -> { side += 1; yield 88; }, ... -> { yield 0; } });
+
+      // Match in shorthand lambda
+      let f = (x: int) -> match x { 1 -> 10, ... -> 20 };
+
+      // Match in if-let condition
+      var if_res = 0;
+      let m_opt: int? = 4;
+      if let v ?= m_opt; (match v { 4 -> true, ... -> false }) {
+        if_res = v;
+      }
+
+      return a + b + w_sum + c + d + f(1) + if_res + side * 1000;
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_match_gauntlet")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(py_val, 30 + 101 + 6 + 5 + 7 + 10 + 4)
+
+  def test_string_ops_fn_fields_coro_fields_single_eval_and_writebacks_parity(self):
+    """Verifies string +=/+, fn-typed struct fields, coro struct/opt fields, single-eval, and if/for var writebacks."""
+    code = """
+    func gen(start: int): Coroutine<int> {
+      yield start;
+      yield start + 1;
+    }
+
+    struct Holder {
+      var cb: (int) -> int;
+      var co: Coroutine<int>;
+      var opt_val: int?;
+    }
+
+    var eval_count: int = 0;
+    func bump_idx(): int {
+      eval_count += 1;
+      return 0;
+    }
+
+    @test
+    func test_misc_parity(): String {
+      var s = "hi";
+      s += " ";
+      s += "there";
+      let s2 = "sum=" + (1 + 2) + ":" + false;
+
+      let h = Holder {
+        cb = (x: int) -> x * 3,
+        co = gen(10),
+        opt_val = 5
+      };
+      let cb_res = h.cb(4);
+      let co1 = h.co.step() ?? 0;
+      var opt_co: Coroutine<int>? = gen(20);
+      let co2 = opt_co?.step() ?? 0;
+
+      // Non-call expression statements
+      42;
+      cb_res + co1;
+
+      // Single-evaluation compound assignment on indexed array
+      var arr = [10, 20];
+      arr[bump_idx()] += 5;
+
+      // Plain var, struct field, multi-binding if var, and for var writebacks
+      var opt_num: int? = 3;
+      if var n ?= opt_num {
+        n += 7;
+      }
+      var mh = Holder { cb = (x: int) -> x, co = gen(0), opt_val = 8 };
+      if var fv ?= mh.opt_val {
+        fv += 2;
+      }
+      var a_opt: int? = 1;
+      var b_opt: int? = 2;
+      if var x ?= a_opt; var y ?= b_opt {
+        x += 10;
+        y += 20;
+      }
+      for var elem in arr {
+        elem += 1;
+      }
+      var mp = {"a": 1, "b": 2};
+      for var k, v in mp {
+        v += 10;
+      }
+
+      return s + "|" + s2 + "|" + String.from(cb_res) + "|" + String.from(co1)
+        + "|" + String.from(co2) + "|" + String.from(eval_count)
+        + "|" + String.from(arr[0]) + "," + String.from(arr[1])
+        + "|" + String.from(opt_num ?? 0) + "|" + String.from(mh.opt_val ?? 0)
+        + "|" + String.from(a_opt ?? 0) + "," + String.from(b_opt ?? 0)
+        + "|" + String.from(mp["a"]) + "," + String.from(mp["b"]);
+    }
+    """
+    py_val, lua_val = self._execute_both(code, "test_misc_parity")
+    self.assertEqual(py_val, lua_val)
+    self.assertEqual(
+        py_val,
+        "hi there|sum=3:false|12|10|20|1|16,21|10|10|11,22|11,12",
     )
 
 

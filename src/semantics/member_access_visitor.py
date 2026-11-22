@@ -286,6 +286,7 @@ class MemberAccessVisitorMixin:
           receiver_type is self.symbol_table.testcase_trait
           or receiver_type.name == "TestCase"
       ):
+        node.is_instance_method = True
         fn_t = FunctionType([], PrimitiveType("none"))
         fn_t.is_testing_assertion = True
         return fn_t
@@ -302,6 +303,7 @@ class MemberAccessVisitorMixin:
             )
         )
     ):
+      node.is_instance_method = True
       fn_t = FunctionType([], PrimitiveType("none"))
       fn_t.is_testing_assertion = True
       return fn_t

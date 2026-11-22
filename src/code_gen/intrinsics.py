@@ -250,7 +250,7 @@ def _emit_range_lua(transpiler: Any, node: CallNode) -> None:
   args = _resolve_range_args(node)
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_range(")
+    transpiler.emit("_SP_RT._sapphire_range(")
     for idx, expr in enumerate(exprs):
       if idx > 0:
         transpiler.emit(", ")
@@ -338,7 +338,7 @@ def _emit_enum_from_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("Enum", "from", "lua")
 def _emit_enum_from_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_enum_from(")
+  transpiler.emit("_SP_RT._sapphire_enum_from(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(", ")
   transpiler.visit(node.arguments[0].expr)
@@ -359,7 +359,7 @@ def _emit_str_size_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "size", "lua")
 def _emit_str_size_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("(#")
+  transpiler.emit("_SP_RT._sapphire_string_size(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -415,7 +415,7 @@ def _emit_str_strip_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "strip", "lua")
 def _emit_str_strip_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_string_strip(")
+  transpiler.emit("_SP_RT._sapphire_string_strip(")
   transpiler.visit(node.callee.receiver)
   if node.arguments:
     transpiler.emit(", ")
@@ -457,7 +457,7 @@ def _emit_str_slice_lua(transpiler: Any, node: CallNode) -> None:
   start_expr, end_expr = _resolve_slice_args(node)
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_string_slice(")
+    transpiler.emit("_SP_RT._sapphire_string_slice(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
     transpiler.visit(exprs[0])
@@ -481,7 +481,7 @@ def _emit_str_split_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "split", "lua")
 def _emit_str_split_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_string_split(")
+  transpiler.emit("_SP_RT._sapphire_string_split(")
   transpiler.visit(node.callee.receiver)
   if node.arguments:
     transpiler.emit(", ")
@@ -533,7 +533,7 @@ def _emit_str_find_lua(transpiler: Any, node: CallNode) -> None:
     args_by_param.pop()
 
   def _emit(exprs: List[Any]) -> None:
-    transpiler.emit("_sapphire_string_find(")
+    transpiler.emit("_SP_RT._sapphire_string_find(")
     transpiler.visit(node.callee.receiver)
     for p_expr in exprs:
       transpiler.emit(", ")
@@ -561,7 +561,7 @@ def _emit_str_to_int_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "to_int", "lua")
 def _emit_str_to_int_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_string_to_int(")
+  transpiler.emit("_SP_RT._sapphire_string_to_int(")
   transpiler.visit(node.callee.receiver)
   if node.arguments:
     for arg in node.arguments:
@@ -579,7 +579,7 @@ def _emit_str_to_float_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "to_float", "lua")
 def _emit_str_to_float_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_string_to_float(")
+  transpiler.emit("_SP_RT._sapphire_string_to_float(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 
@@ -593,7 +593,7 @@ def _emit_str_to_bool_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "to_bool", "lua")
 def _emit_str_to_bool_lua(transpiler: Any, node: CallNode) -> None:
-  transpiler.emit("_sapphire_string_to_bool(")
+  transpiler.emit("_SP_RT._sapphire_string_to_bool(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
 

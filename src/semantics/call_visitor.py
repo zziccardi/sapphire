@@ -908,6 +908,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     """Attaches canonicalized argument order and eval-temp flags for codegen."""
     if not bound_slots:
       call_node._resolved_arguments = []
+      call_node._omitted_arg_slots = set()
       call_node._requires_eval_order_temps = False
       call_node._eval_order_slots = []
       return
@@ -917,6 +918,9 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
         bound_slots[i].expr if i in bound_slots else LiteralNode(None, "none")
         for i in range(max_idx + 1)
     ]
+    call_node._omitted_arg_slots = {
+        i for i in range(max_idx + 1) if i not in bound_slots
+    }
     valid_slots = [p for p in arg_param_indices if p is not None]
     is_reordered = any(
         valid_slots[k] > valid_slots[k + 1]
