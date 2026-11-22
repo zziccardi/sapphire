@@ -85,7 +85,7 @@ returnTypeList
     ;
 
 traitMember
-    : annotation* (STATIC | VAR)? FUNC IDENTIFIER typeParamList? LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
+    : annotation* (STATIC | VAR)? FUNC IDENTIFIER typeParamList? LPAREN parameterList? RPAREN (COLON returnTypeList)? (block | SEMICOLON)
     ;
 
 functionDeclaration

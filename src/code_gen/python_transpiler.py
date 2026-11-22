@@ -261,6 +261,19 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.visit(decl)
       self.newline()
 
+    # 3b. Bind default trait methods onto implementing structs
+    for struct_name, bindings in self.struct_default_trait_methods.items():
+      m_struct = self._mangle_name(struct_name)
+      for trait_ref, m_name, modifier, _member in bindings:
+        m_trait = self._mangle_dotted(trait_ref)
+        m_method = self._mangle_name(m_name)
+        self.newline()
+        if modifier == "static":
+          self.emit(f"{m_struct}.{m_method} = staticmethod({m_trait}.{m_method})")
+        else:
+          self.emit(f"{m_struct}.{m_method} = {m_trait}.{m_method}")
+      self.newline()
+
     # 4. Transpile main call
     if has_main:
       self.newline()
@@ -789,8 +802,26 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     return assigned
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
-    # Traits are compile-time monomorphic contracts and are not needed at Python runtime.
-    pass
+    default_members = [m for m in node.members if getattr(m, "body", None) is not None]
+    if not default_members:
+      # Pure abstract traits are compile-time contracts and erased at runtime.
+      return
+    cls_name = self._mangle_name(node.name)
+    self.newline()
+    self.emit(f"class {cls_name}:")
+    self.indent()
+    for member in default_members:
+      synth_func = FuncDeclNode(
+          member.name,
+          member.parameters,
+          member.return_types,
+          member.body,
+          annotations=member.annotations,
+      )
+      synth_member = ImplMemberNode(member.modifier, synth_func)
+      self.visit_ImplMemberNode(synth_member)
+    self.dedent()
+    self.newline()
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
     is_test_func = any(getattr(a, "name", "") == "test" for a in getattr(node, "annotations", []))

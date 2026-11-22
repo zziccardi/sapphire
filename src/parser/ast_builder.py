@@ -276,7 +276,8 @@ class ASTBuilder(SapphireVisitor):
     type_params = self.visitTypeParamList(ctx.typeParamList()) if ctx.typeParamList() else []
     params = self.visit(ctx.parameterList()) if ctx.parameterList() else []
     return_types = self.visit(ctx.returnTypeList()) if ctx.returnTypeList() else []
-    node = TraitMemberNode(name, params, return_types, modifier=modifier, annotations=annotations, type_params=type_params)
+    body = self.visit(ctx.block()) if ctx.block() else None
+    node = TraitMemberNode(name, params, return_types, modifier=modifier, annotations=annotations, type_params=type_params, body=body)
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line

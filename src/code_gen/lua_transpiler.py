@@ -237,6 +237,10 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       for decl in struct_decls:
         if isinstance(decl, StructDeclNode):
           forward_names.append(self._mangle_name(decl.name))
+        elif isinstance(decl, TraitDeclNode) and any(
+            getattr(m, "body", None) is not None for m in decl.members
+        ):
+          forward_names.append(self._mangle_name(decl.name))
       for decl in func_decls:
         anns = getattr(decl, "annotations", [])
         if any(a.name == "export" for a in anns):
@@ -255,6 +259,24 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     for decl in top_level_decls:
       self.visit(decl)
       self.newline()
+
+    # 3b. Bind default trait methods onto implementing structs
+    for struct_name, bindings in self.struct_default_trait_methods.items():
+      m_struct = self._mangle_name(struct_name)
+      for trait_ref, m_name, _modifier, member in bindings:
+        m_trait = self._mangle_dotted(trait_ref)
+        m_method = self._mangle_name(m_name)
+        self.emit(f"{m_struct}.{m_method} = {m_trait}.{m_method}")
+        self.newline()
+        export_ann = next(
+            (a for a in getattr(member, "annotations", []) if a.name == "export"),
+            None,
+        )
+        if export_ann and export_ann.arg:
+          alias_name = self._mangle_name(export_ann.arg)
+          if alias_name != m_method:
+            self.emit(f"{m_struct}.{alias_name} = {m_struct}.{m_method}")
+            self.newline()
 
     # 4. Transpile main invocation if present
     if has_main:
@@ -948,8 +970,27 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.newline()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
-    # Traits are compile-time contracts erased at runtime
-    pass
+    default_members = [m for m in node.members if getattr(m, "body", None) is not None]
+    if not default_members:
+      # Pure abstract traits are compile-time contracts erased at runtime
+      return
+    m_trait = self._mangle_name(node.name)
+    self.newline()
+    if self.dev_mode:
+      self.emit(f"{m_trait} = {m_trait} or {{}}")
+    else:
+      self.emit(f"{m_trait} = {{}}")
+    self.newline()
+    for member in default_members:
+      synth_func = FuncDeclNode(
+          member.name,
+          member.parameters,
+          member.return_types,
+          member.body,
+          annotations=member.annotations,
+      )
+      synth_member = ImplMemberNode(member.modifier, synth_func)
+      self._visit_ImplMemberNode_for_struct(synth_member, node.name)
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
     is_test_func = any(getattr(a, "name", "") == "test" for a in getattr(node, "annotations", []))

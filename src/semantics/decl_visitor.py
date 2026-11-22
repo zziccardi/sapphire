@@ -126,7 +126,12 @@ class DeclVisitorMixin:
         if len(providers) > 1:
           first_parent, first_method = providers[0]
           for other_parent, other_method in providers[1:]:
-            if other_method is not first_method:
+            same_default = (
+                first_method.is_trait_default
+                and other_method.is_trait_default
+                and first_method.impl_trait_name == other_method.impl_trait_name
+            )
+            if other_method is not first_method and not same_default:
               self.error(
                   f"Ambiguous inherited trait method '{m_name}' from trait "
                   f"'{trait_name}' in struct '{node.name}' (inherited from "
@@ -476,8 +481,47 @@ class DeclVisitorMixin:
       return
     for member in node.members:
       fn_type = trait_type.methods.get(member.name)
-      if fn_type is not None:
-        self._check_parameter_defaults(member.parameters, fn_type.param_types)
+      if fn_type is None:
+        continue
+      self._check_parameter_defaults(member.parameters, fn_type.param_types)
+      if getattr(member, "body", None) is None:
+        continue
+      # Type-check default trait method body once at the trait definition
+      # with `self` typed as the trait itself.
+      self.symbol_table.enter_scope()
+      old_moved_symbols = set(self.moved_symbols)
+      old_uninit_symbols = set(self.uninitialized_symbols)
+      self._restore_moved_symbols(set())
+      self.uninitialized_symbols = set()
+      old_function_scope = self.current_function_scope
+      self.current_function_scope = self.symbol_table.current_scope
+      old_current_function = self.current_function
+      old_current_struct = self.current_struct
+      self.current_struct = None
+      try:
+        if member.modifier != "static":
+          is_self_mut = member.modifier == "var"
+          self.symbol_table.define(
+              "self",
+              VariableSymbol("self", trait_type, is_mutable=is_self_mut, is_parameter=True),
+          )
+        for p, ptype in zip(member.parameters, fn_type.param_types):
+          if p.name != "self":
+            self.symbol_table.define(
+                p.name,
+                VariableSymbol(p.name, ptype, p.is_mutable, is_parameter=True),
+            )
+        self._on_parameters_defined(member.parameters, fn_type.param_types)
+        self.current_function = fn_type
+        self.visit(member.body)
+        self._check_missing_return(member, fn_type)
+      finally:
+        self.current_struct = old_current_struct
+        self.current_function = old_current_function
+        self.current_function_scope = old_function_scope
+        self._restore_moved_symbols(old_moved_symbols)
+        self.uninitialized_symbols = old_uninit_symbols
+        self.symbol_table.exit_scope()
 
   def _on_parameters_defined(
       self, parameters: list, resolved_params: list

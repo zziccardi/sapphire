@@ -9571,6 +9571,94 @@ class TestTypeChecker(unittest.TestCase):
     }
     """)
 
+  def test_trait_default_methods_semantics(self):
+    """Verifies default trait method bodies, self typing, strict override placement, and precedence."""
+    # 1. Default method calling required trait method and var func default
+    self._check("""
+    trait Counter {
+      func get(): int;
+      var func add(n: int);
+      func doubled(): int {
+        return self.get() * 2;
+      }
+      var func bump() {
+        self.add(1);
+      }
+    }
+    struct Box {
+      var v: int = 0;
+    }
+    impl Counter for Box {
+      func get(): int { return self.v; }
+      var func add(n: int) { self.v += n; }
+    }
+    func use_box() {
+      var b = Box { v = 5 };
+      b.bump();
+      let d = b.doubled();
+    }
+    """)
+
+    # 2. Immutable default method calling var func on self is rejected
+    with self.assertRaises(SemanticError) as ctx:
+      self._check("""
+      trait BadMut {
+        var func mutate();
+        func bad() {
+          self.mutate();
+        }
+      }
+      """)
+    self.assertIn("Cannot invoke mutating method 'mutate' on constant variable 'self'", str(ctx.exception))
+
+    # 3. Broken default body is rejected even with ZERO implementors
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      trait Broken {
+        func value(): int {
+          return "not_an_int";
+        }
+      }
+      """)
+    self.assertIn("Cannot return value of type 'String' for return value #1 (expected 'int').", str(ctx2.exception))
+
+    # 4. Overriding a trait default in inherent `impl Struct` is rejected
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      trait Hook {
+        func on_enter() {}
+      }
+      struct State {}
+      impl State {
+        func on_enter() {}
+      }
+      impl Hook for State {}
+      """)
+    self.assertIn("conflicts with default method of trait 'Hook'", str(ctx3.exception))
+
+    # 5. Overriding a trait default in `impl Trait for Struct` succeeds
+    self._check("""
+    trait Hook {
+      func on_enter() {}
+    }
+    struct State {}
+    impl Hook for State {
+      func on_enter() {}
+    }
+    """)
+
+    # 6. Multi-parent inheriting the same trait default does not conflict
+    self._check("""
+    trait Hook {
+      func on_enter() {}
+    }
+    struct P1 {}
+    impl Hook for P1 {}
+    struct P2 {}
+    impl Hook for P2 {}
+    struct Child: P1, P2 {}
+    """)
+
 
 if __name__ == "__main__":
   unittest.main()

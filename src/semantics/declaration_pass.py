@@ -627,6 +627,8 @@ class DeclarationPass:
           param_defaults=param_defaults,
           ast_decl=member,
       )
+      if getattr(member, "body", None) is not None:
+        trait_type.default_methods[member.name] = member
     if decl.type_params:
       checker.symbol_table.exit_scope()
 

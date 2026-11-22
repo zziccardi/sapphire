@@ -2738,6 +2738,64 @@ class TestLuaTranspiler(unittest.TestCase):
     })
     self.assertEqual(out, "Hello-A|Hello-B:M:L|Hello-B:M:L")
 
+  def test_cross_module_trait_default_methods_lua(self):
+    """Verifies cross-module default trait methods, defining-module lexical scope, and overrides in Lua."""
+    out = self._run_lua_project({
+        "hooks.sp": """
+        let PRIVATE_PREFIX = "HOOK";
+
+        trait Lifecycle {
+          func id(): String;
+
+          func label(): String {
+            return f"{PRIVATE_PREFIX}:{self.id()}";
+          }
+
+          var func on_enter() {}
+        }
+
+        export {
+          Lifecycle,
+        }
+        """,
+        "main.sp": """
+        import hooks;
+
+        struct BaseState {
+          var name: String;
+          var entered: int = 0;
+        }
+
+        impl hooks.Lifecycle for BaseState {
+          func id(): String {
+            return self.name;
+          }
+        }
+
+        struct CustomState: BaseState {}
+
+        impl hooks.Lifecycle for CustomState {
+          var func on_enter() {
+            self.entered += 1;
+          }
+        }
+
+        func run_hook(var h: hooks.Lifecycle): String {
+          h.on_enter();
+          return h.label();
+        }
+
+        func main() {
+          var b = BaseState { name = "base" };
+          var c = CustomState { name = "custom" };
+          let s1 = run_hook(b);
+          let s2 = run_hook(c);
+          print(f"{s1}|{s2}|{b.entered},{c.entered}");
+        }
+        """,
+    })
+    self.assertEqual(out, "HOOK:base|HOOK:custom|0,1")
+
   def _run_lua_code(self, lua_code: str, check: bool = True) -> subprocess.CompletedProcess:
     """Executes raw Lua code via the available Lua interpreter."""
     lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")

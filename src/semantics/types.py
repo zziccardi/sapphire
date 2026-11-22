@@ -271,10 +271,14 @@ class StructMethod:
   """Represents a method in a struct impl block."""
 
   def __init__(self, name: str, method_type: FunctionType,
-               modifier: Optional[str]):
+               modifier: Optional[str],
+               is_trait_default: bool = False,
+               impl_trait_name: Optional[str] = None):
     self.name = name
     self.method_type = method_type
     self.modifier = modifier  # 'static', 'var', or None
+    self.is_trait_default = is_trait_default
+    self.impl_trait_name = impl_trait_name
 
 
 class GenericTypeParameter(Type):
@@ -452,6 +456,7 @@ class TraitType(Type):
                defining_module: Optional[str] = None):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
+    self.default_methods: Dict[str, Any] = {}
     self.comments = comments or ""
     self.type_params = type_params or []
     self.ast_decl = ast_decl
