@@ -4,6 +4,16 @@ import { withBase } from '../../lib/url';
 
 const comparisons = [
   {
+    slug: 'cpp',
+    title: 'Sapphire vs C++',
+    tagline: 'Deterministic RAII and structural delegation without headers, vtables, or undefined behavior.',
+    highlights: [
+      'No virtual-method tables by default; traits use static monomorphization',
+      'No struct up-casting or object slicing',
+      'No throwable exceptions or invisible stack unwinding',
+    ],
+  },
+  {
     slug: 'lua',
     title: 'Sapphire vs Lua',
     tagline: 'Static typing, explicit mutability, and lexical arenas vs dynamic tables and metatables.',
@@ -24,16 +34,6 @@ const comparisons = [
     ],
   },
   {
-    slug: 'cpp',
-    title: 'Sapphire vs C++',
-    tagline: 'Deterministic RAII and structural delegation without headers, vtables, or undefined behavior.',
-    highlights: [
-      'No virtual-method tables by default; traits use static monomorphization',
-      'No struct up-casting or object slicing',
-      'No throwable exceptions or invisible stack unwinding',
-    ],
-  },
-  {
     slug: 'swift',
     title: 'Sapphire vs Swift',
     tagline: 'Familiar guard/optional ergonomics with deterministic RAII instead of ARC.',
@@ -48,7 +48,7 @@ const comparisons = [
 
 <BaseLayout
   title="Language Comparisons | Sapphire"
-  description="How Sapphire compares with Lua, Rust, C++, and Swift."
+  description="How Sapphire compares with C++, Lua, Rust, and Swift."
 >
   <section class="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8">
     <div class="max-w-2xl">
@@ -57,7 +57,7 @@ const comparisons = [
       </h1>
       <p class="mt-3 text-[var(--text-secondary)]">
         Side-by-side design trade-offs, memory models, and code examples comparing
-        Sapphire with Lua, Rust, C++, and Swift.
+        Sapphire with C++, Lua, Rust, and Swift.
       </p>
     </div>
 

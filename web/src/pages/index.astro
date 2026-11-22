@@ -227,10 +227,11 @@ sapphire test`,
         </h1>
 
         <p class="mt-6 max-w-2xl text-lg leading-relaxed text-[var(--text-secondary)]">
-          Sapphire pairs zero-vtable polymorphism, scope-bound reference safety
-          without lifetime annotations, and opt-in prototypes in lexical arenas
-          with zero-overhead Lua and Python host interop—including built-in
-          Love2D bindings and live hot-reloading.
+          Sapphire is a statically typed general-purpose language combining
+          zero-vtable polymorphism, scope-bound reference safety without
+          lifetime annotations, and opt-in prototypes in lexical arenas—with
+          zero-overhead Lua and Python host interop, including built-in Love2D
+          bindings and live hot-reloading.
         </p>
 
         <div class="mt-9 flex flex-wrap items-center justify-center gap-3.5">
@@ -309,8 +310,69 @@ sapphire test`,
     </div>
   </section>
 
+  <!-- Interactive Code Showcase -->
+  <section class="border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 py-16">
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Sapphire at a Glance</h2>
+          <p class="mt-1 text-sm text-[var(--text-secondary)]">
+            Explore core language constructs with static type checking and deterministic cleanup.
+          </p>
+        </div>
+        <a
+          href={withBase('/playground')}
+          class="text-sm font-semibold text-[var(--accent-primary)] hover:underline"
+        >
+          Open interactive playground &rarr;
+        </a>
+      </div>
+
+      <div class="mt-6">
+        <div class="flex flex-wrap gap-2" role="tablist" aria-label="Sapphire feature examples">
+          {
+            highlightedTabs.map((tab, idx) => (
+              <button
+                type="button"
+                role="tab"
+                id={`tab-${tab.id}`}
+                data-tab-target={tab.id}
+                aria-controls={`panel-${tab.id}`}
+                aria-selected={idx === 0 ? 'true' : 'false'}
+                class={`tab-btn rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+                  idx === 0
+                    ? 'border-[var(--accent-primary)] bg-[var(--accent-glow)] text-[var(--accent-primary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))
+          }
+        </div>
+
+        <div class="mt-4">
+          {
+            highlightedTabs.map((tab, idx) => (
+              <div
+                role="tabpanel"
+                id={`panel-${tab.id}`}
+                aria-labelledby={`tab-${tab.id}`}
+                data-tab-panel={tab.id}
+                class={idx === 0 ? 'block' : 'hidden'}
+              >
+                <p class="mb-3 text-sm text-[var(--text-secondary)]">{tab.summary}</p>
+                <div set:html={tab.html} />
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Built for Host Environments Spotlight -->
-  <section class="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30 py-16">
+  <section class="border-b border-[var(--border-subtle)] py-16">
     <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
       <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div class="max-w-2xl">
@@ -396,67 +458,6 @@ sapphire test`,
     </div>
   </section>
 
-  <!-- Interactive Code Showcase -->
-  <section class="border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 py-16">
-    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-      <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Sapphire at a Glance</h2>
-          <p class="mt-1 text-sm text-[var(--text-secondary)]">
-            Explore core language constructs with static type checking and deterministic cleanup.
-          </p>
-        </div>
-        <a
-          href={withBase('/playground')}
-          class="text-sm font-semibold text-[var(--accent-primary)] hover:underline"
-        >
-          Open interactive playground &rarr;
-        </a>
-      </div>
-
-      <div class="mt-6">
-        <div class="flex flex-wrap gap-2" role="tablist" aria-label="Sapphire feature examples">
-          {
-            highlightedTabs.map((tab, idx) => (
-              <button
-                type="button"
-                role="tab"
-                id={`tab-${tab.id}`}
-                data-tab-target={tab.id}
-                aria-controls={`panel-${tab.id}`}
-                aria-selected={idx === 0 ? 'true' : 'false'}
-                class={`tab-btn rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
-                  idx === 0
-                    ? 'border-[var(--accent-primary)] bg-[var(--accent-glow)] text-[var(--accent-primary)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))
-          }
-        </div>
-
-        <div class="mt-4">
-          {
-            highlightedTabs.map((tab, idx) => (
-              <div
-                role="tabpanel"
-                id={`panel-${tab.id}`}
-                aria-labelledby={`tab-${tab.id}`}
-                data-tab-panel={tab.id}
-                class={idx === 0 ? 'block' : 'hidden'}
-              >
-                <p class="mb-3 text-sm text-[var(--text-secondary)]">{tab.summary}</p>
-                <div set:html={tab.html} />
-              </div>
-            ))
-          }
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- Quickstart & Comparisons CTA -->
   <section class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="grid gap-10 lg:grid-cols-2 lg:items-center">
@@ -472,6 +473,12 @@ sapphire test`,
         </p>
         <div class="mt-6 flex flex-wrap gap-3">
           <a
+            href={withBase('/compare/cpp')}
+            class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
+          >
+            Sapphire vs C++
+          </a>
+          <a
             href={withBase('/compare/lua')}
             class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
           >
@@ -482,12 +489,6 @@ sapphire test`,
             class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
           >
             Sapphire vs Rust
-          </a>
-          <a
-            href={withBase('/compare/cpp')}
-            class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-sm font-medium hover:border-[var(--border-strong)]"
-          >
-            Sapphire vs C++
           </a>
           <a
             href={withBase('/compare/swift')}

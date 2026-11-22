@@ -5,9 +5,9 @@ import { withBase } from '../../lib/url';
 
 export function getStaticPaths() {
   return [
+    { params: { slug: 'cpp' }, props: { file: 'cpp_comparison.md', label: 'Sapphire vs C++' } },
     { params: { slug: 'lua' }, props: { file: 'lua_comparison.md', label: 'Sapphire vs Lua' } },
     { params: { slug: 'rust' }, props: { file: 'rust_comparison.md', label: 'Sapphire vs Rust' } },
-    { params: { slug: 'cpp' }, props: { file: 'cpp_comparison.md', label: 'Sapphire vs C++' } },
     { params: { slug: 'swift' }, props: { file: 'swift_comparison.md', label: 'Sapphire vs Swift' } },
   ];
 }
