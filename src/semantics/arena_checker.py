@@ -159,6 +159,48 @@ class ArenaChecker:
     return False
 
   @staticmethod
+  def type_contains_proto(
+      type_obj: Optional[Type],
+      seen: Optional[Set[str]] = None,
+  ) -> bool:
+    """Returns True if *type_obj* directly or transitively contains a proto."""
+    if type_obj is None or isinstance(type_obj, InferredType):
+      return False
+    if isinstance(type_obj, FunctionType):
+      return any(
+          ArenaChecker.type_contains_proto(rt, seen)
+          for rt in type_obj.return_types
+      )
+    if isinstance(type_obj, OptionalType):
+      return ArenaChecker.type_contains_proto(type_obj.base_type, seen)
+    if isinstance(type_obj, ArrayType):
+      return ArenaChecker.type_contains_proto(type_obj.element_type, seen)
+    if isinstance(type_obj, MapType):
+      return (
+          ArenaChecker.type_contains_proto(type_obj.key_type, seen)
+          or ArenaChecker.type_contains_proto(type_obj.value_type, seen)
+      )
+    if isinstance(type_obj, CoroutineType):
+      return ArenaChecker.type_contains_proto(type_obj.yield_type, seen)
+    if isinstance(type_obj, (RefType, SharedRefType, WeakRefType)):
+      return ArenaChecker.type_contains_proto(type_obj.inner_type, seen)
+    if isinstance(type_obj, StructType):
+      if type_obj.is_prototype:
+        return True
+      seen_set = set() if seen is None else seen
+      if type_obj.name in seen_set:
+        return False
+      seen_set.add(type_obj.name)
+      try:
+        return any(
+            ArenaChecker.type_contains_proto(f.field_type, seen_set)
+            for f in type_obj.fields.values()
+        )
+      finally:
+        seen_set.remove(type_obj.name)
+    return False
+
+  @staticmethod
   def _resolve_arena_target(
       symbol_table: SymbolTable, arena_expr: ASTNode
   ) -> Optional[Tuple[str, Optional[VariableSymbol], int]]:
@@ -628,6 +670,152 @@ class ArenaChecker:
     )
 
   @staticmethod
+  def _expr_may_carry_param_arena_ref(
+      symbol_table: SymbolTable, node: Any, checker: Any = None
+  ) -> bool:
+    """Returns True if *node* may carry a caller-stack arena ref from a param."""
+    if node is None:
+      return False
+
+    if checker is not None and not isinstance(
+        node, (StructInitializerNode, CloneNode, LambdaNode)
+    ):
+      expr_type = checker.node_types.get(node)
+      if expr_type is not None and not ArenaChecker.type_can_hold_arena_ref(
+          expr_type, is_box_check=True
+      ):
+        return False
+
+    if isinstance(node, (IdentifierNode, MoveNode)):
+      sym = symbol_table.lookup(node.name)
+      if isinstance(sym, VariableSymbol):
+        if sym.has_param_arena_ref:
+          return True
+        if sym.is_parameter and ArenaChecker.type_can_hold_arena_ref(
+            sym.symbol_type, is_box_check=True
+        ):
+          return True
+      return False
+
+    if isinstance(node, StructInitializerNode):
+      return any(
+          ArenaChecker._expr_may_carry_param_arena_ref(
+              symbol_table, arg.expr, checker
+          )
+          for arg in node.fields
+      )
+
+    if isinstance(node, CallNode):
+      if isinstance(node.callee, IdentifierNode) and node.callee.name == "Arena":
+        return False
+      if isinstance(node.callee, MemberAccessNode):
+        if ArenaChecker._expr_may_carry_param_arena_ref(
+            symbol_table, node.callee.receiver, checker
+        ):
+          return True
+      elif ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.callee, checker
+      ):
+        return True
+      return any(
+          ArenaChecker._expr_may_carry_param_arena_ref(
+              symbol_table, arg.expr, checker
+          )
+          for arg in node.arguments
+      )
+
+    if isinstance(node, CloneNode):
+      return ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.expr, checker
+      )
+
+    if isinstance(node, MemberAccessNode):
+      return ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.receiver, checker
+      )
+
+    if isinstance(node, IndexExprNode):
+      return ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.array, checker
+      )
+
+    if isinstance(node, ArrayLiteralNode):
+      return any(
+          ArenaChecker._expr_may_carry_param_arena_ref(
+              symbol_table, elem, checker
+          )
+          for elem in node.elements
+      )
+
+    if isinstance(node, MapLiteralNode):
+      return any(
+          ArenaChecker._expr_may_carry_param_arena_ref(
+              symbol_table, entry.key, checker
+          )
+          or ArenaChecker._expr_may_carry_param_arena_ref(
+              symbol_table, entry.value, checker
+          )
+          for entry in node.entries
+      )
+
+    if isinstance(node, TernaryExprNode):
+      return ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.true_expr, checker
+      ) or ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.false_expr, checker
+      )
+
+    if isinstance(node, BinaryOpNode):
+      if node.op == "??":
+        return ArenaChecker._expr_may_carry_param_arena_ref(
+            symbol_table, node.left, checker
+        ) or ArenaChecker._expr_may_carry_param_arena_ref(
+            symbol_table, node.right, checker
+        )
+      return False
+
+    if isinstance(node, (UnaryOpNode, CastExprNode)):
+      return ArenaChecker._expr_may_carry_param_arena_ref(
+          symbol_table, node.expr, checker
+      )
+
+    if isinstance(node, MatchExprNode):
+      for case in node.cases:
+        if isinstance(case.body, BlockNode):
+          for stmt in case.body.statements:
+            if isinstance(stmt, YieldNode):
+              exprs = getattr(stmt, "expressions", None) or (
+                  [stmt.expr] if getattr(stmt, "expr", None) else []
+              )
+              if any(
+                  ArenaChecker._expr_may_carry_param_arena_ref(
+                      symbol_table, ye, checker
+                  )
+                  for ye in exprs
+              ):
+                return True
+            elif isinstance(stmt, ReturnNode):
+              if any(
+                  ArenaChecker._expr_may_carry_param_arena_ref(
+                      symbol_table, re, checker
+                  )
+                  for re in stmt.expressions
+              ):
+                return True
+            elif isinstance(stmt, ExprStmtNode):
+              if ArenaChecker._expr_may_carry_param_arena_ref(
+                  symbol_table, stmt.expr, checker
+              ):
+                return True
+        elif ArenaChecker._expr_may_carry_param_arena_ref(
+            symbol_table, case.body, checker
+        ):
+          return True
+      return False
+
+    return False
+
+  @staticmethod
   def validate_arena_escape(
       symbol_table: SymbolTable,
       target_sym: VariableSymbol,
@@ -641,10 +829,16 @@ class ArenaChecker:
       in_branch = bool(checker and getattr(checker, "_branch_depth", 0) > 0)
       if not is_partial_mutation and not in_branch:
         ArenaChecker._merge_symbol_deps(target_sym, [], replace=True)
+        target_sym.has_param_arena_ref = False
       return
 
+    has_param_ref = ArenaChecker._expr_may_carry_param_arena_ref(
+        symbol_table, expr_node, checker
+    )
+
     # Module-level globals outlive all local/caller stack arenas; reject storing
-    # any proto or arena-referencing value (including borrowed parameters).
+    # any explicit proto value or value carrying a borrowed parameter that may
+    # hold a caller-stack arena reference (including behind a trait).
     is_module_global = (
         target_sym.scope_defined is not None
         and target_sym.scope_defined.parent is None
@@ -655,8 +849,8 @@ class ArenaChecker:
         and getattr(checker, "current_function", None) is not None
     ):
       expr_type = checker.node_types.get(expr_node)
-      if expr_type is not None and ArenaChecker.type_can_hold_arena_ref(
-          expr_type, is_box_check=True
+      if has_param_ref or (
+          expr_type is not None and ArenaChecker.type_contains_proto(expr_type)
       ):
         error_callback(
             f"Cannot store arena-referencing value of type '{expr_type}' "
@@ -690,9 +884,12 @@ class ArenaChecker:
             )
 
     in_branch = bool(checker and getattr(checker, "_branch_depth", 0) > 0)
-    ArenaChecker._merge_symbol_deps(
-        target_sym, deps, replace=(not is_partial_mutation and not in_branch)
-    )
+    replace = not is_partial_mutation and not in_branch
+    ArenaChecker._merge_symbol_deps(target_sym, deps, replace=replace)
+    if replace:
+      target_sym.has_param_arena_ref = has_param_ref
+    elif has_param_ref:
+      target_sym.has_param_arena_ref = True
 
   @staticmethod
   def validate_return_escape(

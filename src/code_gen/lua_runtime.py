@@ -72,8 +72,10 @@ do
   end
   _sp_install_loader()
 
-  local _SP_NONE = {}
-  local _SP_UNSET = {}
+  _G._SP_NONE = _G._SP_NONE or {}
+  _G._SP_UNSET = _G._SP_UNSET or {}
+  local _SP_NONE = _G._SP_NONE
+  local _SP_UNSET = _G._SP_UNSET
   _SP_RT._SP_NONE = _SP_NONE
   _SP_RT._SP_UNSET = _SP_UNSET
 
