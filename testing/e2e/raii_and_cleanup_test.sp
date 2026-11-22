@@ -170,3 +170,19 @@ func test_struct_owned_arena_and_field_teardown(): int {
   }
   return DROP_SUM;
 }
+
+func inspect_tracer(t: Tracer): int {
+  return t.id;
+}
+
+@test
+func test_move_into_borrowed_call_destroys_deterministically(): int {
+  DROP_SUM = 0;
+  {
+    var t1 = Tracer { id = 3, slot = 0 };
+    var t2 = Tracer { id = 7, slot = 1 };
+    let v = inspect_tracer(move t1);
+    DROP_SUM = DROP_SUM * 10 + v;
+  }
+  return DROP_SUM;
+}

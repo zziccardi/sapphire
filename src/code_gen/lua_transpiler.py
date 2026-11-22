@@ -106,6 +106,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self._var_branch_depth: Dict[str, int] = {}
     self._pending_null_vars: List[str] = []
     self._pending_unconditional_null_vars: List[str] = []
+    self._pending_destroy_moved_vars: List[str] = []
     self.func_return_types: Dict[str, List[str]] = {}
     self.method_return_types: Dict[Any, List[str]] = {}
     self.variable_types: Dict[str, str] = {}
@@ -143,6 +144,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     temp._var_branch_depth = self._var_branch_depth
     temp._pending_null_vars = self._pending_null_vars
     temp._pending_unconditional_null_vars = self._pending_unconditional_null_vars
+    temp._pending_destroy_moved_vars = self._pending_destroy_moved_vars
     temp._lifted_matches = self._lifted_matches
     temp._lifted_match_arity = self._lifted_match_arity
     temp._lifted_short_circuits = self._lifted_short_circuits

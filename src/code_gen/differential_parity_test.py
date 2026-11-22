@@ -387,14 +387,20 @@ func consume(t: Token): int {
       early_ret = rng.choice([True, False])
       reassign = rng.choice([True, False])
 
+      use_fn_consume_a = rng.choice([True, False])
+      use_fn_consume_c = rng.choice([True, False])
+
       lines = [
           "  drop_log = 0;",
           "  var a = Token { id = 1 };",
           "  var b = Token { id = 2 };",
           "  var out = 0;",
           f"  if {cond1} {{",
-          "    let moved_a = move a;",
-          "    out += moved_a.id;",
+          (
+              "    out += consume(move a);"
+              if use_fn_consume_a
+              else "    let moved_a = move a;\n    out += moved_a.id;"
+          ),
           "  }",
       ]
       if reassign:
@@ -403,16 +409,22 @@ func consume(t: Token): int {
         lines.extend([
             f"  if {cond2} {{",
             "    var c = Token { id = 4 };",
-            "    out += c.id;",
-            "    return out;",
+            (
+                "    return out + consume(move c);"
+                if use_fn_consume_c
+                else "    out += c.id;\n    return out;"
+            ),
             "  }",
         ])
       else:
         lines.extend([
             f"  if {cond2} {{",
             "    var c = Token { id = 4 };",
-            "    let moved_c = move c;",
-            "    out += moved_c.id;",
+            (
+                "    out += consume(move c);"
+                if use_fn_consume_c
+                else "    let moved_c = move c;\n    out += moved_c.id;"
+            ),
             "  }",
         ])
       lines.append("  return out;")

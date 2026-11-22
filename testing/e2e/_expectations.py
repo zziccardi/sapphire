@@ -174,6 +174,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_arena_lifo_proto_destructors": 752,
         "test_arena_reassignment_destroys_old": 394,
         "test_struct_owned_arena_and_field_teardown": 68,
+        "test_move_into_borrowed_call_destroys_deterministically": 337,
     },
     "generics_test.sp": {
         "test_generic_struct_int": 42,

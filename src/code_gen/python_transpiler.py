@@ -96,6 +96,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._var_branch_depth: Dict[str, int] = {}
     self._pending_null_vars: List[str] = []
     self._pending_unconditional_null_vars: List[str] = []
+    self._pending_destroy_moved_vars: List[str] = []
     self.func_return_types: Dict[str, Any] = {}
     self.method_return_types: Dict[Any, Any] = {}
     self.variable_types: Dict[str, str] = {}
@@ -144,6 +145,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     temp._temp_name_counters = self._temp_name_counters
     temp._pending_null_vars = self._pending_null_vars
     temp._pending_unconditional_null_vars = self._pending_unconditional_null_vars
+    temp._pending_destroy_moved_vars = self._pending_destroy_moved_vars
     temp._branch_depth = self._branch_depth
     temp._var_branch_depth = self._var_branch_depth
     temp.destructor_stack = self.destructor_stack
