@@ -14,7 +14,7 @@ export function getStaticPaths() {
 
 const { doc } = Astro.props;
 const rendered = await renderDocFile(doc.file);
-const groups = ['Getting Started', 'Language Reference', 'Compiler & Testing'] as const;
+const groups = ['Getting Started', 'Language Reference', 'Compiler & Contributing'] as const;
 const currentIndex = DOC_PAGES.findIndex((d) => d.slug === doc.slug);
 const prevDoc = currentIndex > 0 ? DOC_PAGES[currentIndex - 1] : null;
 const nextDoc =

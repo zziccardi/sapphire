@@ -6,8 +6,9 @@ import { DOC_PAGES, docFileExists } from './docs';
 
 const ALL_SITE_DOCS: Array<{ route: string; file: string }> = [
   ...DOC_PAGES.map((d) => ({ route: `/docs/${d.slug}`, file: d.file })),
-  { route: '/compare/rust', file: 'rust_comparison.md' },
   { route: '/compare/cpp', file: 'cpp_comparison.md' },
+  { route: '/compare/lua', file: 'lua_comparison.md' },
+  { route: '/compare/rust', file: 'rust_comparison.md' },
   { route: '/compare/swift', file: 'swift_comparison.md' },
 ];
 
