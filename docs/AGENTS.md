@@ -10,3 +10,8 @@
 - Relative links between docs (e.g. `SPEC.md`, `rust_comparison.md`) are
   rewritten to site routes via `DOC_LINK_MAP` in `web/src/lib/markdown.ts`;
   update that map when adding new doc pages.
+- Keep language comparisons (`*_comparison.md`) focused strictly on comparing
+  the languages themselves—not host frameworks (e.g. Love2D) or third-party
+  dialects.
+- Use `Lua 5.1` only in technical docs where the target version matters;
+  otherwise refer simply to `Lua`.
