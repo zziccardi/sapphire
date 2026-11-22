@@ -187,25 +187,26 @@ class TestStdlibModules(unittest.TestCase):
     self.assertEqual(py_utf8.offset("café", 0, 5), 4)
     self.assertIsNone(py_utf8.offset("café", 1, 5))
 
-    out = self._run_lua(r"""
+    out = self._run_lua("""
       local u = require("std.utf8")
       local p = u._pure_utf8
+      local cafe = "caf" .. string.char(0xC3, 0xA9)
       -- Valid ASCII and multi-byte
-      assert(p.len("caf\xC3\xA9") == 4)
+      assert(p.len(cafe) == 4)
       -- Reject overlong 2/3/4-byte sequences
-      assert(p.len("\xC0\xAF") == nil)
-      assert(p.len("\xE0\x80\xAF") == nil)
-      assert(p.len("\xF0\x80\x80\xAF") == nil)
+      assert(p.len(string.char(0xC0, 0xAF)) == nil)
+      assert(p.len(string.char(0xE0, 0x80, 0xAF)) == nil)
+      assert(p.len(string.char(0xF0, 0x80, 0x80, 0xAF)) == nil)
       -- Reject UTF-16 surrogates (U+D800)
-      assert(p.len("\xED\xA0\x80") == nil)
+      assert(p.len(string.char(0xED, 0xA0, 0x80)) == nil)
       -- Reject > U+10FFFF and invalid lead bytes
-      assert(p.len("\xF4\x90\x80\x80") == nil)
-      assert(p.len("\xF5\x80\x80\x80") == nil)
-      assert(p.len("\xFF") == nil)
+      assert(p.len(string.char(0xF4, 0x90, 0x80, 0x80)) == nil)
+      assert(p.len(string.char(0xF5, 0x80, 0x80, 0x80)) == nil)
+      assert(p.len(string.char(0xFF)) == nil)
       -- pcall-safe offset on continuation byte returns nil (no crash)
-      assert(u.offset("caf\xC3\xA9", 0, 5) == 4)
-      assert(u.offset("caf\xC3\xA9", 1, 5) == nil)
-      assert(u.offset("caf\xC3\xA9", -1) == 4)
+      assert(u.offset(cafe, 0, 5) == 4)
+      assert(u.offset(cafe, 1, 5) == nil)
+      assert(u.offset(cafe, -1) == 4)
       print("OK")
     """)
     self.assertEqual(out, "OK")
