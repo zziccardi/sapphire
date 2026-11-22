@@ -86,6 +86,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.current_column = 0
     self.source_file = source_file
     self.source_map_builder = source_map_builder
+    self._pending_source_mapping: Optional[Tuple[str, int, int]] = None
     self.test_mode = test_mode
     self.dev_mode = dev_mode
     self.use_runtime_module = use_runtime_module
@@ -153,6 +154,17 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
 
   def emit(self, text: str) -> None:
     """Emits text on the current line and updates line/column numbers."""
+    if self._pending_source_mapping is not None and text.strip():
+      src, orig_line, orig_col = self._pending_source_mapping
+      self._pending_source_mapping = None
+      if self.source_map_builder:
+        self.source_map_builder.add_mapping(
+            gen_line=self.current_line,
+            gen_col=self.current_column,
+            source_file=src,
+            orig_line=orig_line,
+            orig_col=orig_col,
+        )
     lines = text.split("\n")
     if len(lines) == 1:
       self.current_column += len(text)
@@ -287,12 +299,10 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     if self.source_map_builder and getattr(node, "start_line", None) is not None:
       src = getattr(node, "source_file", None) or self.source_file
       if src:
-        self.source_map_builder.add_mapping(
-            gen_line=self.current_line,
-            gen_col=self.current_column,
-            source_file=src,
-            orig_line=node.start_line,
-            orig_col=node.start_column or 0,
+        self._pending_source_mapping = (
+            src,
+            node.start_line,
+            node.start_column or 0,
         )
     method_name = f"visit_{node.__class__.__name__}"
     visitor = getattr(self, method_name, self.generic_visit)
