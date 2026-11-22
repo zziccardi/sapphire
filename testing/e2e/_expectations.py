@@ -39,7 +39,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
     },
     "arithmetic_test.sp": {
         "test_integer_arithmetic": 15,
-        "test_integer_division": 4.25,
+        "test_integer_division": 4,
         "test_modulo": 2,
         "test_negative_arithmetic": -2,
     },

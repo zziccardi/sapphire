@@ -6,13 +6,16 @@ from typing import Any, List, Optional
 from src.parser.ast import (
     ASTNode,
     AssignmentNode,
+    BinaryOpNode,
     CloneNode,
     ExprStmtNode,
     IdentifierNode,
     IndexExprNode,
+    LambdaNode,
     MemberAccessNode,
     MoveNode,
     ReturnNode,
+    TernaryExprNode,
     VarDeclNode,
     YieldNode,
 )
@@ -51,6 +54,21 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         v_type = self._resolve_type_node(val_type_node)
       sym = VariableSymbol(name, v_type, node.is_mutable)
       self.symbol_table.define(name, sym)
+      if (
+          self.current_function is not None
+          and not self._has_implicit_default_value(v_type)
+          and not (isinstance(v_type, PrimitiveType) and v_type.name == "none")
+      ):
+        self.uninitialized_symbols.add(sym)
+
+  def _is_void_call_result(self, expr_node: ASTNode, expr_type: Type) -> bool:
+    """Returns True if *expr_node* is a call returning void/none."""
+    from src.parser.ast import CallNode
+    if not isinstance(expr_node, CallNode):
+      return False
+    return isinstance(expr_type, NoneType) or (
+        isinstance(expr_type, PrimitiveType) and expr_type.name in ("none", "void")
+    )
 
   def _check_module_level_const_init(self, node: VarDeclNode) -> None:
     """Enforces compile-time constant initializers for module-level bindings."""
@@ -90,20 +108,28 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     # Propagate expected_type for single-variable lambda/literal inference.
     old_expected = self.expected_type
+    pre_rhs_errors = len(self.errors)
     if len(node.names) == 1 and node.val_types[0]:
       self.expected_type = self._resolve_type_node(node.val_types[0])
 
-    if len(node.exprs) == 1:
-      single_type = self.visit(node.exprs[0])
-      rhs_types = (
-          single_type.types
-          if isinstance(single_type, MultiReturnType)
-          else [single_type]
-      )
-    else:
-      rhs_types = [self.visit(e) for e in node.exprs]
-
-    self.expected_type = old_expected
+    try:
+      if len(node.exprs) == 1:
+        single_type = self.visit(node.exprs[0])
+        rhs_types = (
+            single_type.types
+            if isinstance(single_type, MultiReturnType)
+            else [single_type]
+        )
+      else:
+        rhs_types = []
+        for idx, e in enumerate(node.exprs):
+          if idx < len(node.val_types) and node.val_types[idx]:
+            self.expected_type = self._resolve_type_node(node.val_types[idx])
+          else:
+            self.expected_type = None
+          rhs_types.append(self.visit(e))
+    finally:
+      self.expected_type = old_expected
 
     if len(rhs_types) != len(node.names):
       self.error(
@@ -112,10 +138,23 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       )
       return
 
+    rhs_had_errors = len(self.errors) > pre_rhs_errors
+
     for i, (name, val_type_node, expr_type) in enumerate(
         zip(node.names, node.val_types, rhs_types)
     ):
-      if val_type_node:
+      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if not rhs_had_errors and self._is_void_call_result(expr_node, expr_type):
+        self.error(
+            f"Cannot assign void result of function call to variable '{name}'.",
+            node=node,
+        )
+        var_type: Type = (
+            self._resolve_type_node(val_type_node)
+            if val_type_node
+            else PrimitiveType("none")
+        )
+      elif val_type_node:
         val_type = self._resolve_type_node(val_type_node)
         if not expr_type.is_compatible(val_type):
           self.error(
@@ -147,14 +186,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         sym.is_constant_expr = True
       self.symbol_table.define(name, sym)
 
-      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
-      if isinstance(expr_node, CloneNode):
-        src_id = ArenaChecker.get_root_identifier(expr_node.expr)
-        if src_id:
-          src_sym = self.symbol_table.lookup(src_id.name)
-          if isinstance(src_sym, VariableSymbol):
-            sym.proto_ancestors.add(src_sym.name)
-            sym.proto_ancestors.update(src_sym.proto_ancestors)
+      self._propagate_binding_metadata(sym, expr_node, replace=False)
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       ArenaChecker.validate_arena_escape(
           self.symbol_table,
@@ -171,6 +203,64 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
           checker=self,
       )
 
+  def _collect_expr_proto_ancestors(self, expr_node: Optional[ASTNode]) -> set:
+    """Collects prototype ancestor names propagated through an expression."""
+    if expr_node is None:
+      return set()
+    if isinstance(expr_node, CloneNode):
+      src_id = ArenaChecker.get_root_identifier(expr_node.expr)
+      if src_id:
+        src_sym = self.symbol_table.lookup(src_id.name)
+        if isinstance(src_sym, VariableSymbol):
+          return {src_sym.name} | set(src_sym.proto_ancestors)
+      return set()
+    if isinstance(expr_node, (IdentifierNode, MoveNode)):
+      src_sym = self.symbol_table.lookup(expr_node.name)
+      if isinstance(src_sym, VariableSymbol):
+        return set(src_sym.proto_ancestors)
+      return set()
+    if isinstance(expr_node, TernaryExprNode):
+      return (
+          self._collect_expr_proto_ancestors(expr_node.true_expr)
+          | self._collect_expr_proto_ancestors(expr_node.false_expr)
+      )
+    if isinstance(expr_node, BinaryOpNode) and expr_node.op == "??":
+      return (
+          self._collect_expr_proto_ancestors(expr_node.left)
+          | self._collect_expr_proto_ancestors(expr_node.right)
+      )
+    return set()
+
+  def _propagate_binding_metadata(
+      self,
+      target_sym: VariableSymbol,
+      expr_node: Optional[ASTNode],
+      replace: bool,
+  ) -> None:
+    """Propagates prototype ancestry and closure capture modes to *target_sym*."""
+    ancestors = self._collect_expr_proto_ancestors(expr_node)
+    if replace:
+      target_sym.proto_ancestors = ancestors
+    else:
+      target_sym.proto_ancestors.update(ancestors)
+
+    mut_caps = set()
+    read_caps = set()
+    if isinstance(expr_node, LambdaNode):
+      mut_caps = set(getattr(expr_node, "closure_mutated_captures", set()))
+      read_caps = set(getattr(expr_node, "closure_read_captures", set()))
+    elif isinstance(expr_node, (IdentifierNode, MoveNode)):
+      src_sym = self.symbol_table.lookup(expr_node.name)
+      if isinstance(src_sym, VariableSymbol):
+        mut_caps = set(getattr(src_sym, "closure_mutated_captures", set()))
+        read_caps = set(getattr(src_sym, "closure_read_captures", set()))
+    if replace:
+      target_sym.closure_mutated_captures = mut_caps
+      target_sym.closure_read_captures = read_caps
+    else:
+      target_sym.closure_mutated_captures.update(mut_caps)
+      target_sym.closure_read_captures.update(read_caps)
+
   def _update_assignment_target(
       self,
       target: ASTNode,
@@ -182,16 +272,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     if isinstance(target, IdentifierNode):
       target_sym = self._get_target_symbol(target)
       if target_sym:
-        if isinstance(expr_node, CloneNode):
-          src_id = ArenaChecker.get_root_identifier(expr_node.expr)
-          if src_id:
-            src_sym = self.symbol_table.lookup(src_id.name)
-            if isinstance(src_sym, VariableSymbol):
-              target_sym.proto_ancestors = {src_sym.name} | set(
-                  src_sym.proto_ancestors
-              )
-        else:
-          target_sym.proto_ancestors.clear()
+        self._propagate_binding_metadata(target_sym, expr_node, replace=True)
         ArenaChecker.validate_arena_escape(
             self.symbol_table,
             target_sym,
@@ -261,23 +342,37 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     if isinstance(target, IdentifierNode):
       target_sym = self.symbol_table.lookup(target.name)
       if isinstance(target_sym, VariableSymbol):
-        # Re-initializing a previously moved `var` makes it live again.
+        # Re-initializing a previously moved or uninitialized `var` makes it live.
         target_sym.is_moved = False
         self.moved_symbols.discard(target_sym)
+        self.uninitialized_symbols.discard(target_sym)
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
     """Type-checks single and multi-target assignments."""
-    target_types = [self._check_lvalue(t) for t in node.targets]
+    target_types = []
+    for t in node.targets:
+      t_type = self._check_lvalue(t)
+      t.inferred_type = t_type
+      target_types.append(t_type)
 
-    if len(node.exprs) == 1:
-      single_type = self.visit(node.exprs[0])
-      rhs_types = (
-          single_type.types
-          if isinstance(single_type, MultiReturnType)
-          else [single_type]
-      )
-    else:
-      rhs_types = [self.visit(e) for e in node.exprs]
+    old_expected = self.expected_type
+    pre_rhs_errors = len(self.errors)
+    try:
+      if len(node.exprs) == 1:
+        self.expected_type = target_types[0] if len(target_types) == 1 else None
+        single_type = self.visit(node.exprs[0])
+        rhs_types = (
+            single_type.types
+            if isinstance(single_type, MultiReturnType)
+            else [single_type]
+        )
+      else:
+        rhs_types = []
+        for idx, e in enumerate(node.exprs):
+          self.expected_type = target_types[idx] if idx < len(target_types) else None
+          rhs_types.append(self.visit(e))
+    finally:
+      self.expected_type = old_expected
 
     if len(rhs_types) != len(target_types):
       self.error(
@@ -286,15 +381,22 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       )
       return
 
+    rhs_had_errors = len(self.errors) > pre_rhs_errors
+
     for i, (target, target_type, expr_type) in enumerate(
         zip(node.targets, target_types, rhs_types)
     ):
-      if not expr_type.is_compatible(target_type):
+      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
+      if not rhs_had_errors and self._is_void_call_result(expr_node, expr_type):
+        self.error(
+            "Cannot assign void result of function call to target.",
+            node=node,
+        )
+      elif not expr_type.is_compatible(target_type):
         self.error(
             f"Cannot assign type '{expr_type}' to target of type '{target_type}'.",
             node=node,
         )
-      expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       self._update_assignment_target(target, target_type, expr_node, node)
 
@@ -308,6 +410,11 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       return PrimitiveType("none")
 
     receiver_type = self.visit(node.receiver)
+    if self.has_shared_ref_base(node.receiver):
+      self.error(
+          "Cannot mutate through deeply immutable 'SharedRef'.", node=node
+      )
+      return PrimitiveType("none")
     if node.is_optional and isinstance(receiver_type, OptionalType):
       receiver_type = receiver_type.base_type
     if isinstance(receiver_type, RefType):
@@ -353,78 +460,102 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         return field.field_type
 
     # Inside `__init__` or `clone` blocks, `self` fields are assignable even if `let`.
-    is_self = (
+    is_direct_self = (
         isinstance(node.receiver, IdentifierNode)
         and node.receiver.name == "self"
     )
     if not field.is_mutable:
-      if not ((self.is_in_init or self.is_in_clone_init) and is_self):
+      if not ((self.is_in_init or self.is_in_clone_init) and is_direct_self):
         self.error(
             f"Cannot assign to constant field '{node.member}' of '{receiver_type.name}'.",
             node=node,
         )
 
-    if is_self:
-      self_sym = self.symbol_table.lookup("self")
-      if self_sym and not self_sym.is_mutable:
-        self.error(
-            f"Cannot mutate field '{node.member}' within an immutable method. "
-            "Declare the method with 'var func' to allow mutation of 'self'.",
-            node=node,
-        )
+    immut = self._find_immutable_field_in_chain(node.receiver)
+    if immut is not None:
+      immut_field, immut_struct = immut
+      self.error(
+          f"Cannot assign to field '{node.member}' through constant field "
+          f"'{immut_field}' of '{immut_struct}'.",
+          node=node,
+      )
 
-    curr = node.receiver
-    while isinstance(curr, MemberAccessNode):
-      curr = curr.receiver
-    if isinstance(curr, IdentifierNode) and curr.name != "self":
-      root_sym = self.symbol_table.lookup(curr.name)
-      if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
-        kind = (
-            "Ref " if isinstance(root_sym.symbol_type, RefType) else "struct "
-        )
-        self.error(
-            f"Cannot mutate field '{node.member}' of constant {kind}"
-            f"variable '{curr.name}'.",
-            node=node,
-        )
+    root = ArenaChecker.get_root_identifier(node.receiver)
+    if root is not None:
+      if root.name == "self":
+        self_sym = self.symbol_table.lookup("self")
+        if self_sym and not self_sym.is_mutable:
+          self.error(
+              f"Cannot mutate field '{node.member}' within an immutable method. "
+              "Declare the method with 'var func' to allow mutation of 'self'.",
+              node=node,
+          )
+      else:
+        root_sym = self.symbol_table.lookup(root.name)
+        if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+          kind = (
+              "Ref " if isinstance(root_sym.symbol_type, RefType) else "struct "
+          )
+          self.error(
+              f"Cannot mutate field '{node.member}' of constant {kind}"
+              f"variable '{root.name}'.",
+              node=node,
+          )
 
     return field.field_type
 
   def _check_index_lvalue(self, node: IndexExprNode) -> Type:
     """Validates mutability and index types for an Array or Map subscript lvalue."""
     container_type = self.visit(node.array)
+    if self.has_shared_ref_base(node.array):
+      self.error(
+          "Cannot mutate through deeply immutable 'SharedRef'.", node=node
+      )
+      return PrimitiveType("none")
     if isinstance(container_type, RefType):
       container_type = container_type.inner_type
 
-    if isinstance(container_type, ArrayType):
-      if isinstance(node.array, IdentifierNode):
-        sym = self.symbol_table.lookup(node.array.name)
-        if sym and not sym.is_mutable:
-          kind = "Ref " if isinstance(sym.symbol_type, RefType) else "array "
-          self.error(
-              f"Cannot assign to index of constant {kind}'{sym.name}'.",
-              node=node,
-          )
-      index_type = self.visit(node.index)
-      if index_type != PrimitiveType("int"):
-        self.error("Array index must be of type 'int'.", node=node)
-      self._check_array_bounds(node, container_type)
-      return container_type.element_type
+    if isinstance(container_type, (ArrayType, MapType)):
+      is_array = isinstance(container_type, ArrayType)
+      immut = self._find_immutable_field_in_chain(node.array)
+      if immut is not None:
+        immut_field, immut_struct = immut
+        noun = "index" if is_array else "key"
+        self.error(
+            f"Cannot assign to {noun} through constant field "
+            f"'{immut_field}' of '{immut_struct}'.",
+            node=node,
+        )
+      root = ArenaChecker.get_root_identifier(node.array)
+      if root is not None:
+        root_sym = self.symbol_table.lookup(root.name)
+        if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
+          if root.name == "self":
+            self.error(
+                "Cannot mutate collection element within an immutable method. "
+                "Declare the method with 'var func' to allow mutation of 'self'.",
+                node=node,
+            )
+          else:
+            noun = "index" if is_array else "key"
+            default_kind = "array " if is_array else "map "
+            kind = (
+                "Ref "
+                if isinstance(root_sym.symbol_type, RefType)
+                else default_kind
+            )
+            self.error(
+                f"Cannot assign to {noun} of constant {kind}'{root_sym.name}'.",
+                node=node,
+            )
 
-    if isinstance(container_type, MapType):
-      if isinstance(node.array, IdentifierNode):
-        sym = self.symbol_table.lookup(node.array.name)
-        if sym and not sym.is_mutable:
-          kind = "Ref " if isinstance(sym.symbol_type, RefType) else "map "
-          self.error(
-              f"Cannot assign to key of constant {kind}'{sym.name}'.",
-              node=node,
-          )
       index_type = self.visit(node.index)
-      if (
-          not index_type.is_compatible(container_type.key_type)
-          and not container_type.key_type.is_compatible(index_type)
-      ):
+      if is_array:
+        if index_type != PrimitiveType("int"):
+          self.error("Array index must be of type 'int'.", node=node)
+        self._check_array_bounds(node, container_type)
+        return container_type.element_type
+      if not index_type.is_compatible(container_type.key_type):
         self.error(
             f"Map index type '{index_type}' is not compatible with key type "
             f"'{container_type.key_type}'.",
@@ -437,12 +568,6 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
   def _check_lvalue(self, node: ASTNode) -> Type:
     """Checks that an AST node is a mutable lvalue and returns its resolved type."""
-    if self.has_shared_ref_base(node):
-      self.error(
-          "Cannot mutate through deeply immutable 'SharedRef'.", node=node
-      )
-      return PrimitiveType("none")
-
     res = ArenaChecker.get_lvalue_path(self.symbol_table, node)
     if res:
       root_name, field_path = res
@@ -461,6 +586,13 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         )
 
     if isinstance(node, IdentifierNode):
+      if node.name == "self":
+        self.error(
+            "Cannot reassign 'self' directly; mutate fields on 'self' instead.",
+            node=node,
+        )
+        sym = self.symbol_table.lookup("self")
+        return sym.symbol_type if sym else PrimitiveType("none")
       sym = self.symbol_table.lookup(node.name)
       if not sym:
         self.error(f"Undefined identifier '{node.name}'.", node=node)
@@ -470,7 +602,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
             f"Identifier '{node.name}' is not a mutable variable.", node=node
         )
         return sym.symbol_type
-      if not sym.is_mutable and sym.name != "self":
+      if not sym.is_mutable:
         self.error(
             f"Cannot assign to constant variable '{node.name}'.", node=node
         )
@@ -487,6 +619,33 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     self.visit(node.expr)
+
+  def _mark_rvo_return_moved(
+      self, expr_node: Optional[ASTNode], expr_type: Type
+  ) -> None:
+    """Marks local move-only/SharedRef RVO bindings moved between multi-return siblings."""
+    if expr_node is None:
+      return
+    if not (
+        expr_type.is_move_only_type(self.symbol_table)
+        or expr_type.is_shared_ref_lvalue_type()
+    ):
+      return
+    if isinstance(expr_node, TernaryExprNode):
+      self._mark_rvo_return_moved(expr_node.true_expr, expr_type)
+      self._mark_rvo_return_moved(expr_node.false_expr, expr_type)
+      return
+    if isinstance(expr_node, BinaryOpNode) and expr_node.op == "??":
+      self._mark_rvo_return_moved(expr_node.left, expr_type)
+      self._mark_rvo_return_moved(expr_node.right, expr_type)
+      return
+    if isinstance(expr_node, IdentifierNode) and not isinstance(
+        expr_node, MoveNode
+    ):
+      sym = self.symbol_table.lookup(expr_node.name)
+      if isinstance(sym, VariableSymbol):
+        sym.is_moved = True
+        self.moved_symbols.add(sym)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     """Type-checks `return` statements, ownership transfers, and escape rules."""
@@ -507,14 +666,27 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     actual_ret_types: List[Type] = []
     if node.expressions:
-      if len(node.expressions) == 1:
-        single_type = self.visit(node.expressions[0])
-        if isinstance(single_type, MultiReturnType):
-          actual_ret_types = single_type.types
+      old_expected = self.expected_type
+      try:
+        if len(node.expressions) == 1:
+          self.expected_type = (
+              expected_ret_types[0] if len(expected_ret_types) == 1 else None
+          )
+          single_type = self.visit(node.expressions[0])
+          if isinstance(single_type, MultiReturnType):
+            actual_ret_types = single_type.types
+          else:
+            actual_ret_types = [single_type]
         else:
-          actual_ret_types = [single_type]
-      else:
-        actual_ret_types = [self.visit(e) for e in node.expressions]
+          for idx, e in enumerate(node.expressions):
+            self.expected_type = (
+                expected_ret_types[idx] if idx < len(expected_ret_types) else None
+            )
+            et = self.visit(e)
+            actual_ret_types.append(et)
+            self._mark_rvo_return_moved(e, et)
+      finally:
+        self.expected_type = old_expected
 
     if len(actual_ret_types) != len(expected_ret_types):
       if len(expected_ret_types) == 0:

@@ -7,7 +7,7 @@ func size(s: String): int? {
   return 0;
 }
 
-func offset(s: String, n: int, i: int = 1): int? {
+func offset(s: String, n: int, i: int? = none): int? {
   return none;
 }
 

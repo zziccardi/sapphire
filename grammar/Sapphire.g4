@@ -85,7 +85,7 @@ returnTypeList
     ;
 
 traitMember
-    : annotation* (STATIC | VAR)? FUNC typeParamList? IDENTIFIER LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
+    : annotation* (STATIC | VAR)? FUNC IDENTIFIER typeParamList? LPAREN parameterList? RPAREN (COLON returnTypeList)? SEMICOLON
     ;
 
 functionDeclaration
@@ -132,8 +132,16 @@ baseType
     | identifierPath typeArgumentList?
     ;
 
+functionParamTypes
+    : type (COMMA type)*
+    ;
+
+multiReturnTypeList
+    : type COMMA type (COMMA type)*
+    ;
+
 functionType
-    : LPAREN (type (COMMA type)*)? RPAREN ARROW (LPAREN returnTypeList? RPAREN | type)
+    : LPAREN functionParamTypes? RPAREN ARROW (LPAREN RPAREN | LPAREN multiReturnTypeList RPAREN | type)
     ;
 
 statement
@@ -178,7 +186,7 @@ matchCase
 
 matchPattern
     : ELLIPSIS
-    | expression (COMMA expression)*
+    | nonLambdaExpression (COMMA nonLambdaExpression)*
     ;
 
 block
@@ -240,22 +248,34 @@ forStatement
     ;
 
 expression
-    : expression LBRACKET expression RBRACKET                                    # IndexExpr
-    | expression typeArgumentList? LPAREN argumentList? RPAREN (IN expression)?  # CallExpr
-    | expression (DOT | OPT_DOT) memberAccess                                    # MemberAccessExpr
-    | (SUB | ADD | NOT) expression                                               # UnaryExpr
-    | CLONE expression (LBRACE statement* RBRACE)? (IN expression)?              # CloneExpr
-    | MOVE IDENTIFIER                                                            # MoveExpr
-    | expression AS type                                                         # CastExpr
-    | expression (MUL | DIV | MOD) expression                                    # MultiplicativeExpr
-    | expression (ADD | SUB) expression                                          # AdditiveExpr
-    | expression (EQ | NEQ | LT | LE | GT | GE) expression                       # CompareExpr
-    | expression COALESCE expression                                             # CoalesceExpr
-    | expression AND expression                                                  # LogicalAndExpr
-    | expression OR expression                                                   # LogicalOrExpr
-    | <assoc=right> expression QUESTION expression COLON expression              # TernaryExpr
-    | lambdaExpression                                                           # LambdaExpr
-    | primaryExpression                                                          # PrimaryExpr
+    : lambdaExpression                                                                # LambdaExpr
+    | nonLambdaExpression                                                             # NonLambdaExpr
+    ;
+
+nonLambdaExpression
+    : nonLambdaExpression LBRACKET expression RBRACKET                                          # IndexExpr
+    | nonLambdaExpression typeArgumentList? LPAREN argumentList? RPAREN (IN postfixExpression)? # CallExpr
+    | nonLambdaExpression (DOT | OPT_DOT) memberAccess                                          # MemberAccessExpr
+    | (SUB | ADD | NOT) nonLambdaExpression                                                     # UnaryExpr
+    | CLONE postfixExpression (LBRACE statement* RBRACE)? (IN postfixExpression)?               # CloneExpr
+    | MOVE IDENTIFIER                                                                           # MoveExpr
+    | nonLambdaExpression AS type                                                               # CastExpr
+    | nonLambdaExpression (MUL | DIV | MOD) nonLambdaExpression                                 # MultiplicativeExpr
+    | nonLambdaExpression (ADD | SUB) nonLambdaExpression                                       # AdditiveExpr
+    | nonLambdaExpression (LT | LE | GT | GE) nonLambdaExpression                               # RelationalExpr
+    | nonLambdaExpression (EQ | NEQ) nonLambdaExpression                                        # EqualityExpr
+    | nonLambdaExpression COALESCE nonLambdaExpression                                          # CoalesceExpr
+    | nonLambdaExpression AND nonLambdaExpression                                               # LogicalAndExpr
+    | nonLambdaExpression OR nonLambdaExpression                                                # LogicalOrExpr
+    | <assoc=right> nonLambdaExpression QUESTION expression COLON nonLambdaExpression           # TernaryExpr
+    | primaryExpression                                                                         # PrimaryExpr
+    ;
+
+postfixExpression
+    : postfixExpression LBRACKET expression RBRACKET                                            # PostfixIndexExpr
+    | postfixExpression typeArgumentList? LPAREN argumentList? RPAREN                           # PostfixCallExpr
+    | postfixExpression (DOT | OPT_DOT) memberAccess                                            # PostfixMemberAccessExpr
+    | primaryExpression                                                                         # PostfixPrimaryExpr
     ;
 
 lambdaExpression
@@ -307,7 +327,7 @@ mapEntry
     ;
 
 structInitializer
-    : identifierPath typeArgumentList? LBRACE structInitFieldList? RBRACE (IN expression)?
+    : identifierPath typeArgumentList? LBRACE structInitFieldList? RBRACE (IN postfixExpression)?
     ;
 
 structInitFieldList
@@ -427,7 +447,13 @@ IDENTIFIER : [a-zA-Z_][a-zA-Z0-9_]*;
 INT_LIT : [0-9]+;
 FLOAT_LIT : [0-9]+ '.' [0-9]+;
 STRING_LIT : '"' (~["\\] | '\\' .)* '"';
-INTERPOLATED_STRING_LIT : 'f"' ( '\\' . | '{' ( '\\' . | '"' (~["\\] | '\\' .)* '"' | ~["\\}] )* '}' | ~["\\{] )* '"';
+INTERPOLATED_STRING_LIT
+    : 'f"' ( '{{' | '}}' | '\\' . | FSTRING_INTERP | ~["\\{] )* '"'
+    ;
+
+fragment FSTRING_INTERP
+    : '{' ( 'f"' ( '{{' | '}}' | '\\' . | FSTRING_INTERP | ~["\\{] )* '"' | '"' (~["\\] | '\\' .)* '"' | '\\' . | FSTRING_INTERP | ~["\\{}] )* '}'
+    ;
 
 // Whitespace and Comments
 WS : [ \t\r\n]+ -> skip;

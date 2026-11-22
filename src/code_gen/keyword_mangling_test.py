@@ -107,6 +107,35 @@ class KeywordManglingTest(unittest.TestCase):
     self.assertIn('"hello\\nworld"', py_code)
     self.assertIn('"hello\\nworld"', lua_code)
 
+  def test_python_keyword_mangling_collision_free_and_types(self):
+    """Verifies `pass` and `pass_` do not collide, and enums/structs with reserved names work."""
+    source = """
+    enum class {
+      pass,
+      lambda,
+    }
+
+    struct from {
+      var global: int = 1;
+    }
+
+    func compute(pass: int, pass_: int): int {
+      let f = from { global = pass + pass_ };
+      return f.global + (class.lambda as int);
+    }
+
+    var out: int = 0;
+
+    func main() {
+      out = compute(10, 20);
+    }
+    """
+    py_code = self._compile_python(source)
+    compiled_py = compile(py_code, "<string>", "exec")
+    env = {"__name__": "__main__"}
+    exec(compiled_py, env)
+    self.assertEqual(env.get("out"), 31)
+
 
 if __name__ == "__main__":
   unittest.main()

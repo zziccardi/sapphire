@@ -258,15 +258,41 @@ class CollectionChecker:
 
   @staticmethod
   def _bind_args(
-      arguments: List[Any], param_names: List[str]
+      arguments: List[Any],
+      param_names: List[str],
+      checker: Optional[Any] = None,
+      method_name: Optional[str] = None,
   ) -> Dict[str, Any]:
-    """Maps positional and named call arguments to parameter names."""
+    """Maps positional and named call arguments to parameter names and validates arity/names."""
     bound: Dict[str, Any] = {}
+    label = f".{method_name}()" if method_name else "collection method"
+    reported_too_many = False
     for idx, arg in enumerate(arguments):
       if arg.name:
+        if arg.name not in param_names:
+          if checker is not None:
+            checker.error(f"Unknown named argument '{arg.name}' in {label}.")
+          continue
+        if arg.name in bound:
+          if checker is not None:
+            checker.error(f"Duplicate argument '{arg.name}' in {label}.")
+          continue
         bound[arg.name] = arg
       elif idx < len(param_names):
-        bound[param_names[idx]] = arg
+        pname = param_names[idx]
+        if pname in bound:
+          if checker is not None:
+            checker.error(f"Duplicate argument '{pname}' in {label}.")
+          continue
+        bound[pname] = arg
+      else:
+        if checker is not None and not reported_too_many:
+          noun = "argument" if len(param_names) == 1 else "arguments"
+          checker.error(
+              f"{label} takes at most {len(param_names)} {noun}, "
+              f"got {len(arguments)}."
+          )
+          reported_too_many = True
     return bound
 
   @staticmethod
@@ -292,6 +318,14 @@ class CollectionChecker:
             f"Cannot invoke {action_desc} '{method_label}' on constant "
             f"variable '{r}'."
         )
+      else:
+        immut = checker._find_immutable_field_in_chain(receiver)
+        if immut is not None:
+          field_name, struct_name = immut
+          checker.error(
+              f"Cannot invoke {action_desc} '{method_label}' through constant "
+              f"field '{field_name}' of '{struct_name}'."
+          )
       reason = checker.get_frozen_lvalue_reason(r, path)
       if reason:
         hint = ""
@@ -346,7 +380,7 @@ class CollectionChecker:
   def _check_in_place_arg(
       checker: Any, in_place_arg: Any, method_name: str
   ) -> bool:
-    """Validates an optional 'in_place' bool argument and returns if literal true."""
+    """Validates an optional 'in_place' bool argument; returns True if potentially mutating."""
     if not in_place_arg:
       return False
     in_p_type = checker.visit(in_place_arg.expr)
@@ -354,9 +388,11 @@ class CollectionChecker:
       checker.error(
           f"'in_place' parameter in .{method_name}() must be 'bool', got '{in_p_type}'."
       )
-    return (
+    # Any expression other than literal `false` may evaluate to `true` at
+    # runtime and must satisfy all in-place mutability/type constraints.
+    return not (
         isinstance(in_place_arg.expr, LiteralNode)
-        and in_place_arg.expr.value is True
+        and in_place_arg.expr.value is False
     )
 
   @staticmethod
@@ -391,7 +427,9 @@ class CollectionChecker:
       checker: Any, node: CallNode, receiver_type: ArrayType
   ) -> Type:
     elem_type = receiver_type.element_type
-    args = CollectionChecker._bind_args(node.arguments, ["fn", "in_place"])
+    args = CollectionChecker._bind_args(
+        node.arguments, ["fn", "in_place"], checker=checker, method_name="map"
+    )
     fn_arg = args.get("fn")
     in_place_arg = args.get("in_place")
 
@@ -408,11 +446,17 @@ class CollectionChecker:
     )
 
     ret_elem_type: Type = PrimitiveType("none")
-    if isinstance(fn_type, FunctionType):
+    if not isinstance(fn_type, FunctionType):
+      checker.error(
+          f".map() callback must be a function, got '{fn_type}'."
+      )
+    else:
       ret_elem_type = fn_type.return_type
-      if fn_type.param_types and not elem_type.is_compatible(
-          fn_type.param_types[0]
-      ):
+      if len(fn_type.param_types) != 1:
+        checker.error(
+            f".map() callback must take 1 parameter, got {len(fn_type.param_types)}."
+        )
+      elif not elem_type.is_compatible(fn_type.param_types[0]):
         checker.error(
             f"Closure parameter type mismatch in .map(). Expected '{elem_type}', got '{fn_type.param_types[0]}'."
         )
@@ -441,7 +485,9 @@ class CollectionChecker:
       checker: Any, node: CallNode, receiver_type: ArrayType
   ) -> Type:
     elem_type = receiver_type.element_type
-    args = CollectionChecker._bind_args(node.arguments, ["fn", "in_place"])
+    args = CollectionChecker._bind_args(
+        node.arguments, ["fn", "in_place"], checker=checker, method_name="filter"
+    )
     fn_arg = args.get("fn")
     in_place_arg = args.get("in_place")
 
@@ -457,10 +503,16 @@ class CollectionChecker:
         ".filter() callback",
     )
 
-    if isinstance(fn_type, FunctionType):
-      if fn_type.param_types and not elem_type.is_compatible(
-          fn_type.param_types[0]
-      ):
+    if not isinstance(fn_type, FunctionType):
+      checker.error(
+          f".filter() predicate must be a function, got '{fn_type}'."
+      )
+    else:
+      if len(fn_type.param_types) != 1:
+        checker.error(
+            f".filter() predicate must take 1 parameter, got {len(fn_type.param_types)}."
+        )
+      elif not elem_type.is_compatible(fn_type.param_types[0]):
         checker.error(
             f"Closure parameter type mismatch in .filter(). Expected '{elem_type}', got '{fn_type.param_types[0]}'."
         )
@@ -490,7 +542,10 @@ class CollectionChecker:
   ) -> Type:
     elem_type = receiver_type.element_type
     args = CollectionChecker._bind_args(
-        node.arguments, ["initial", "fn", "reverse"]
+        node.arguments,
+        ["initial", "fn", "reverse"],
+        checker=checker,
+        method_name="reduce",
     )
     initial_arg = args.get("initial")
     fn_arg = args.get("fn")
@@ -509,8 +564,16 @@ class CollectionChecker:
         ".reduce() callback",
     )
 
-    if isinstance(fn_type, FunctionType):
-      if len(fn_type.param_types) >= 2:
+    if not isinstance(fn_type, FunctionType):
+      checker.error(
+          f".reduce() callback must be a function, got '{fn_type}'."
+      )
+    else:
+      if len(fn_type.param_types) != 2:
+        checker.error(
+            f".reduce() callback must take 2 parameters, got {len(fn_type.param_types)}."
+        )
+      else:
         if not acc_type.is_compatible(fn_type.param_types[0]):
           checker.error(
               f"Closure accumulator parameter mismatch in .reduce(). Expected '{acc_type}', got '{fn_type.param_types[0]}'."
@@ -579,7 +642,12 @@ class CollectionChecker:
       return OptionalType(elem_type)
 
     if method == "insert":
-      args = CollectionChecker._bind_args(node.arguments, ["index", "element"])
+      args = CollectionChecker._bind_args(
+          node.arguments,
+          ["index", "element"],
+          checker=checker,
+          method_name="insert",
+      )
       index_arg = args.get("index")
       element_arg = args.get("element")
       if not index_arg or not element_arg:
@@ -632,7 +700,9 @@ class CollectionChecker:
       return PrimitiveType("none")
 
     # method == "swap"
-    args = CollectionChecker._bind_args(node.arguments, ["i", "j"])
+    args = CollectionChecker._bind_args(
+        node.arguments, ["i", "j"], checker=checker, method_name="swap"
+    )
     i_arg = args.get("i")
     j_arg = args.get("j")
     if not i_arg or not j_arg:
@@ -651,10 +721,10 @@ class CollectionChecker:
       checker: Any, node: CallNode, receiver_type: ArrayType
   ) -> Type:
     elem_type = receiver_type.element_type
-    args = CollectionChecker._bind_args(node.arguments, ["in_place"])
+    args = CollectionChecker._bind_args(
+        node.arguments, ["in_place"], checker=checker, method_name="reverse"
+    )
     in_place_arg = args.get("in_place")
-    if len(node.arguments) > 1:
-      checker.error(".reverse() takes at most 1 argument (in_place).")
 
     if CollectionChecker._check_in_place_arg(checker, in_place_arg, "reverse"):
       CollectionChecker._check_mutating_receiver(
@@ -668,7 +738,10 @@ class CollectionChecker:
   ) -> Type:
     elem_type = receiver_type.element_type
     args = CollectionChecker._bind_args(
-        node.arguments, ["by", "reverse", "in_place"]
+        node.arguments,
+        ["by", "reverse", "in_place"],
+        checker=checker,
+        method_name="sort",
     )
     by_arg = args.get("by")
     reverse_arg = args.get("reverse")
@@ -682,7 +755,24 @@ class CollectionChecker:
           FunctionType([elem_type, elem_type], PrimitiveType("int")),
           ".sort() callback",
       )
-      if isinstance(by_type, FunctionType):
+      if not isinstance(by_type, FunctionType):
+        checker.error(
+            f".sort() comparator must be a function, got '{by_type}'."
+        )
+      else:
+        if len(by_type.param_types) != 2:
+          checker.error(
+              f".sort() comparator must take 2 parameters, got {len(by_type.param_types)}."
+          )
+        else:
+          if not elem_type.is_compatible(by_type.param_types[0]):
+            checker.error(
+                f"Comparator parameter 1 mismatch in .sort(). Expected '{elem_type}', got '{by_type.param_types[0]}'."
+            )
+          if not elem_type.is_compatible(by_type.param_types[1]):
+            checker.error(
+                f"Comparator parameter 2 mismatch in .sort(). Expected '{elem_type}', got '{by_type.param_types[1]}'."
+            )
         if not by_type.return_type.is_compatible(PrimitiveType("int")):
           checker.error(
               f"Comparator closure in .sort() must return 'int', got '{by_type.return_type}'."
@@ -760,7 +850,9 @@ class CollectionChecker:
   ) -> Type:
     k_type = receiver_type.key_type
     v_type = receiver_type.value_type
-    args = CollectionChecker._bind_args(node.arguments, ["key", "value"])
+    args = CollectionChecker._bind_args(
+        node.arguments, ["key", "value"], checker=checker, method_name="insert"
+    )
     key_arg = args.get("key")
     val_arg = args.get("value")
 

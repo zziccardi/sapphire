@@ -37,6 +37,8 @@ class VariableSymbol(Symbol):
     self.is_moved: bool = False
     self.proto_ancestors: Set[str] = set()
     self.stack_borrow_symbols: Set[str] = set()
+    self.closure_mutated_captures: Set[str] = set()
+    self.closure_read_captures: Set[str] = set()
 
 
 class FunctionSymbol(Symbol):
@@ -139,13 +141,13 @@ class Scope:
         exp = mod_sym.lookup_export(parts[1])
         if isinstance(exp, Type):
           return exp
-        elif hasattr(exp, "symbol_type") and isinstance(exp.symbol_type, Type):
+        elif isinstance(exp, (StructSymbol, TraitSymbol, EnumSymbol)):
           return exp.symbol_type
     if name in self.types:
       return self.types[name]
     if name in self.symbols:
       sym = self.symbols[name]
-      if hasattr(sym, "symbol_type") and isinstance(sym.symbol_type, Type):
+      if isinstance(sym, (StructSymbol, TraitSymbol, EnumSymbol)):
         return sym.symbol_type
     if self.parent:
       return self.parent.lookup_type(name)

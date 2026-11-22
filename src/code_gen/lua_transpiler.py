@@ -36,63 +36,11 @@ local function _sp_load_runtime()
   error("Could not load _sapphire_runtime.lua")
 end
 local _SP_RT = _sp_load_runtime()
-local _Coroutine, Arena, _clone_helper, _create_cow_proxy, _create_proto_object = _SP_RT._Coroutine, _SP_RT.Arena, _SP_RT._clone_helper, _SP_RT._create_cow_proxy, _SP_RT._create_proto_object
-local _sapphire_string_strip, _sapphire_string_slice, _sapphire_string_split, _sapphire_string_find, _sapphire_string_to_int, _sapphire_string_to_float, _sapphire_string_to_bool, _sapphire_cast_int, _sapphire_enum_from = _SP_RT._sapphire_string_strip, _SP_RT._sapphire_string_slice, _SP_RT._sapphire_string_split, _SP_RT._sapphire_string_find, _SP_RT._sapphire_string_to_int, _SP_RT._sapphire_string_to_float, _SP_RT._sapphire_string_to_bool, _SP_RT._sapphire_cast_int, _SP_RT._sapphire_enum_from
-local _sapphire_array_map, _sapphire_array_filter, _sapphire_array_reduce, _sapphire_array_contains, _sapphire_array_reverse, _sapphire_array_sort, _sapphire_array_join, _sapphire_array_push, _sapphire_array_pop, _sapphire_array_insert, _sapphire_array_remove, _sapphire_array_clear, _sapphire_array_swap, _sapphire_array_get, _sapphire_array_idx = _SP_RT._sapphire_array_map, _SP_RT._sapphire_array_filter, _SP_RT._sapphire_array_reduce, _SP_RT._sapphire_array_contains, _SP_RT._sapphire_array_reverse, _SP_RT._sapphire_array_sort, _SP_RT._sapphire_array_join, _SP_RT._sapphire_array_push, _SP_RT._sapphire_array_pop, _SP_RT._sapphire_array_insert, _SP_RT._sapphire_array_remove, _SP_RT._sapphire_array_clear, _SP_RT._sapphire_array_swap, _SP_RT._sapphire_array_get, _SP_RT._sapphire_array_idx
-local _sapphire_map_size, _sapphire_map_empty, _sapphire_map_contains, _sapphire_map_get, _sapphire_map_keys, _sapphire_map_values, _sapphire_map_insert, _sapphire_map_remove, _sapphire_map_clear = _SP_RT._sapphire_map_size, _SP_RT._sapphire_map_empty, _SP_RT._sapphire_map_contains, _SP_RT._sapphire_map_get, _SP_RT._sapphire_map_keys, _SP_RT._sapphire_map_values, _SP_RT._sapphire_map_insert, _SP_RT._sapphire_map_remove, _SP_RT._sapphire_map_clear
-local _sapphire_iter_array, _sapphire_range, _sapphire_del, _Ref, Ref, _SharedRef, _WeakRef, SharedRef, WeakRef = _SP_RT._sapphire_iter_array, _SP_RT._sapphire_range, _SP_RT._sapphire_del, _SP_RT._Ref, _SP_RT.Ref, _SP_RT._SharedRef, _SP_RT._WeakRef, _SP_RT.SharedRef, _SP_RT.WeakRef
+local Arena, Ref, SharedRef, WeakRef = _SP_RT.Arena, _SP_RT.Ref, _SP_RT.SharedRef, _SP_RT.WeakRef
 """
 
 LUA_RUNTIME_MODULE_EXPORTS = """
-return {
-  _Coroutine = _Coroutine,
-  Arena = Arena,
-  _clone_helper = _clone_helper,
-  _create_cow_proxy = _create_cow_proxy,
-  _create_proto_object = _create_proto_object,
-  _sapphire_string_strip = _sapphire_string_strip,
-  _sapphire_string_slice = _sapphire_string_slice,
-  _sapphire_string_split = _sapphire_string_split,
-  _sapphire_string_find = _sapphire_string_find,
-  _sapphire_string_to_int = _sapphire_string_to_int,
-  _sapphire_string_to_float = _sapphire_string_to_float,
-  _sapphire_string_to_bool = _sapphire_string_to_bool,
-  _sapphire_cast_int = _sapphire_cast_int,
-  _sapphire_enum_from = _sapphire_enum_from,
-  _sapphire_array_map = _sapphire_array_map,
-  _sapphire_array_filter = _sapphire_array_filter,
-  _sapphire_array_reduce = _sapphire_array_reduce,
-  _sapphire_array_contains = _sapphire_array_contains,
-  _sapphire_array_reverse = _sapphire_array_reverse,
-  _sapphire_array_sort = _sapphire_array_sort,
-  _sapphire_array_join = _sapphire_array_join,
-  _sapphire_array_push = _sapphire_array_push,
-  _sapphire_array_pop = _sapphire_array_pop,
-  _sapphire_array_insert = _sapphire_array_insert,
-  _sapphire_array_remove = _sapphire_array_remove,
-  _sapphire_array_clear = _sapphire_array_clear,
-  _sapphire_array_swap = _sapphire_array_swap,
-  _sapphire_array_get = _sapphire_array_get,
-  _sapphire_array_idx = _sapphire_array_idx,
-  _sapphire_map_size = _sapphire_map_size,
-  _sapphire_map_empty = _sapphire_map_empty,
-  _sapphire_map_contains = _sapphire_map_contains,
-  _sapphire_map_get = _sapphire_map_get,
-  _sapphire_map_keys = _sapphire_map_keys,
-  _sapphire_map_values = _sapphire_map_values,
-  _sapphire_map_insert = _sapphire_map_insert,
-  _sapphire_map_remove = _sapphire_map_remove,
-  _sapphire_map_clear = _sapphire_map_clear,
-  _sapphire_iter_array = _sapphire_iter_array,
-  _sapphire_range = _sapphire_range,
-  _sapphire_del = _sapphire_del,
-  _Ref = _Ref,
-  Ref = Ref,
-  _SharedRef = _SharedRef,
-  _WeakRef = _WeakRef,
-  SharedRef = SharedRef,
-  WeakRef = WeakRef,
-}
+return _SP_RT
 """
 
 
@@ -104,7 +52,6 @@ LUA_RESERVED_WORDS = {
 
 
 @TranspilerRegistry.register(aliases=["lua", "lua5.1", "love2d", "love"], display_name="Lua 5.1", default_extension=".lua")
-@TranspilerRegistry.register(aliases=["lua", "lua5.1", "love2d", "love"], display_name="Lua 5.1", default_extension=".lua")
 class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
 
   """AST visitor to transpile Sapphire code to Lua 5.1."""
@@ -115,9 +62,15 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       return name
     if name in ("self", "__init__", "__del__", "_init_sapphire"):
       return name
-    if name in LUA_RESERVED_WORDS:
+    if name.rstrip("_") in LUA_RESERVED_WORDS:
       return f"{name}_"
     return name
+
+  def _mangle_dotted(self, name: str) -> str:
+    """Mangles each segment of a dotted identifier path."""
+    if not name:
+      return name
+    return ".".join(self._mangle_name(part) for part in name.split("."))
 
   def __init__(
       self,
@@ -144,7 +97,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.imported_modules: Set[str] = set()
     self.destructor_stack: List[List[str]] = []
     self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = {"Arena"}
+    self.structs_with_destructor: Set[str] = {"Arena", "Ref", "SharedRef"}
     self.proto_structs: Set[str] = set()
     self.struct_destructible_fields: Dict[str, List[str]] = {}
     self.struct_parent_names: Dict[str, List[str]] = {}
@@ -152,11 +105,19 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self._branch_depth: int = 0
     self._var_branch_depth: Dict[str, int] = {}
     self._pending_null_vars: List[str] = []
-    self.func_return_types: Dict[str, str] = {}
-    self.method_return_types: Dict[str, str] = {}
+    self._pending_unconditional_null_vars: List[str] = []
+    self.func_return_types: Dict[str, List[str]] = {}
+    self.method_return_types: Dict[Any, List[str]] = {}
     self.variable_types: Dict[str, str] = {}
     self._identifier_map: Dict[str, str] = {}
     self._loop_stack: List[bool] = []
+    self._lifted_matches: Dict[int, str] = {}
+    self._lifted_match_arity: Dict[int, int] = {}
+    self._lifted_short_circuits: Dict[int, str] = {}
+    self._temp_name_counters: Dict[str, int] = {}
+    self._current_match_target: Optional[str] = None
+    self._current_match_done_flag: Optional[str] = None
+    self._match_loop_depth: int = 0
 
   def _make_expr_transpiler(self) -> "LuaTranspiler":
     """Creates a sub-transpiler inheriting module, struct, and rename state."""
@@ -177,6 +138,15 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     temp.method_return_types = self.method_return_types
     temp.variable_types = self.variable_types
     temp.moved_vars = self.moved_vars
+    temp.destructor_stack = self.destructor_stack
+    temp._branch_depth = self._branch_depth
+    temp._var_branch_depth = self._var_branch_depth
+    temp._pending_null_vars = self._pending_null_vars
+    temp._pending_unconditional_null_vars = self._pending_unconditional_null_vars
+    temp._lifted_matches = self._lifted_matches
+    temp._lifted_match_arity = self._lifted_match_arity
+    temp._lifted_short_circuits = self._lifted_short_circuits
+    temp._temp_name_counters = self._temp_name_counters
     return temp
 
   def emit(self, text: str) -> None:
@@ -207,6 +177,13 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.source_file = source_file
     if source_map_builder:
       self.source_map_builder = source_map_builder
+
+    self._lifted_matches = {}
+    self._lifted_match_arity = {}
+    self._lifted_short_circuits = {}
+    self._temp_name_counters = {}
+    self._pending_null_vars = []
+    self._pending_unconditional_null_vars = []
 
     # 1. Output runtime preamble or shared runtime module import
     preamble = LUA_RUNTIME_MODULE_IMPORT if self.use_runtime_module else LUA_RUNTIME_PREAMBLE
@@ -245,10 +222,14 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     if not self.dev_mode:
       for decl in struct_decls:
         if isinstance(decl, StructDeclNode):
-          forward_names.append(decl.name)
+          forward_names.append(self._mangle_name(decl.name))
       for decl in func_decls:
-        if not any(a.name == "export" for a in getattr(decl, "annotations", [])):
-          forward_names.append(decl.name)
+        anns = getattr(decl, "annotations", [])
+        if any(a.name == "export" for a in anns):
+          continue
+        if not self.test_mode and any(a.name == "test" for a in anns):
+          continue
+        forward_names.append(self._mangle_name(decl.name))
 
     if forward_names:
       self.emit(f"local {', '.join(forward_names)}")
@@ -284,8 +265,12 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.newline()
       self.emit("local _M = {}")
       for sym in self.declared_symbols:
+        m_sym = self._mangle_name(sym)
         self.newline()
-        self.emit(f"_M.{sym} = {sym}")
+        self.emit(f"_M.{m_sym} = {m_sym}")
+        if sym in LUA_RESERVED_WORDS:
+          self.newline()
+          self.emit(f'_M["{sym}"] = {m_sym}')
       self.newline()
       self.emit("return _M")
 
@@ -322,20 +307,28 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
 
   def visit_EnumDeclNode(self, node: EnumDeclNode) -> None:
     self.newline()
-    self.emit(f"local {node.name} = {{")
+    enum_name = self._mangle_name(node.name)
+    self.emit(f"local {enum_name} = {{")
     self.indent()
     current_val: Union[int, str] = 0
     is_string_enum = any(isinstance(m.value, str) for m in node.members)
     for idx, member in enumerate(node.members):
       if member.value is not None:
         current_val = member.value
-      elif is_string_enum and isinstance(current_val, str):
+      elif is_string_enum:
         current_val = member.name
       self.newline()
+      m_name = self._mangle_name(member.name)
       if isinstance(current_val, str):
-        self.emit(f'{member.name} = "{current_val}"')
+        escaped = (
+            current_val.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
+        )
+        self.emit(f'{m_name} = "{escaped}"')
       else:
-        self.emit(f"{member.name} = {current_val}")
+        self.emit(f"{m_name} = {current_val}")
         current_val += 1
       if idx < len(node.members) - 1:
         self.emit(",")
@@ -355,6 +348,17 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.emit(f"if _SP_DEV_WATCHER and _SP_DEV_WATCHER.register_file then _SP_DEV_WATCHER.register_file(\"{file_path}\") end")
     self.newline()
 
+  def _emit_export_prop(
+      self, target_tbl: str, exp_name: str, value_expr: str
+  ) -> None:
+    """Emits an export property assignment using consistent Sapphire mangling."""
+    mangled_exp = self._mangle_name(exp_name)
+    self.emit(f"{target_tbl}.{mangled_exp} = {value_expr}")
+    self.newline()
+    if exp_name in LUA_RESERVED_WORDS:
+      self.emit(f'{target_tbl}["{exp_name}"] = {value_expr}')
+      self.newline()
+
   def visit_ExportStmtNode(self, node: ExportStmtNode) -> None:
     self.newline()
     default_spec = next(
@@ -363,6 +367,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
             for s in node.specifiers
             if (s.alias == "default" or s.exported_name == "default")
             and not s.module_prefix
+            and s.symbol in self.known_structs
         ),
         None,
     )
@@ -371,9 +376,9 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         default_spec = node.specifiers[0]
 
     if default_spec is not None:
-      primary_sym = default_spec.symbol
-      self.emit(f"{primary_sym}.{primary_sym} = {primary_sym}")
-      self.newline()
+      primary_raw = default_spec.symbol
+      primary_sym = self._mangle_name(primary_raw)
+      self._emit_export_prop(primary_sym, primary_raw, primary_sym)
       self.emit(f"{primary_sym}.default = {primary_sym}")
       self.newline()
       for spec in node.specifiers:
@@ -381,14 +386,14 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           continue
         exp_name = spec.exported_name
         sym = self._mangle_name(spec.symbol)
-        if exp_name == primary_sym and not spec.module_prefix:
+        if exp_name == primary_raw and not spec.module_prefix:
           continue
-        prop_access = f'["{exp_name}"]' if exp_name in LUA_RESERVED_WORDS else f".{exp_name}"
         if spec.module_prefix:
-          self.emit(f"{primary_sym}{prop_access} = {spec.module_prefix}.{sym}")
+          mod_prefix = self._mangle_dotted(spec.module_prefix)
+          val_expr = f"{mod_prefix}.{sym}"
         else:
-          self.emit(f"{primary_sym}{prop_access} = {sym}")
-        self.newline()
+          val_expr = sym
+        self._emit_export_prop(primary_sym, exp_name, val_expr)
       self.emit(f"return {primary_sym}")
       self.newline()
     else:
@@ -397,24 +402,25 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       for spec in node.specifiers:
         exp_name = spec.exported_name
         sym = self._mangle_name(spec.symbol)
-        prop_access = f'["{exp_name}"]' if exp_name in LUA_RESERVED_WORDS else f".{exp_name}"
         if spec.module_prefix:
-          self.emit(f"_M{prop_access} = {spec.module_prefix}.{sym}")
+          mod_prefix = self._mangle_dotted(spec.module_prefix)
+          val_expr = f"{mod_prefix}.{sym}"
         else:
-          self.emit(f"_M{prop_access} = {sym}")
-        self.newline()
+          val_expr = sym
+        self._emit_export_prop("_M", exp_name, val_expr)
       self.emit("return _M")
       self.newline()
 
   def _emit_struct_init_fields(self, node: StructDeclNode) -> None:
     """Emits `Struct._init_fields(self)` to apply parent and field defaults."""
-    struct_name = node.name
+    struct_name = self._mangle_name(node.name)
     self.emit(f"function {struct_name}._init_fields(self)")
     self.indent()
     if node.parent_names:
       for p in node.parent_names:
+        mp = self._mangle_dotted(p)
         self.newline()
-        self.emit(f"if {p}._init_fields then {p}._init_fields(self) end")
+        self.emit(f"if {mp}._init_fields then {mp}._init_fields(self) end")
     for f in node.fields:
       default_expr = f.default_expr or get_default_value_for_type_node(
           f.field_type
@@ -433,7 +439,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self, node: StructDeclNode, methods: List[Any]
   ) -> None:
     """Emits `Struct.init(...)` handling proto delegation, `__init__`, and kwargs."""
-    struct_name = node.name
+    struct_name = self._mangle_name(node.name)
     is_proto = node.is_prototype
     self.emit(f"function {struct_name}.init(...)")
     self.indent()
@@ -447,7 +453,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           'local proto = (_n_args == 2 and type(select(2, ...)) == "table") and select(2, ...) or nil'
       )
       self.newline()
-      self.emit(f"self = _create_proto_object(proto, {struct_name})")
+      self.emit(f"self = _SP_RT._create_proto_object(proto, {struct_name})")
       self.newline()
       self.emit("if proto == nil then")
       self.indent()
@@ -480,24 +486,37 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.newline()
       self.emit("local _arg1 = ...")
       self.newline()
-      init_params = init_member.func_decl.parameters
+      init_params = [
+          p for p in init_member.func_decl.parameters if p.name != "self"
+      ]
       if len(init_params) == 0:
         self.emit(f"{struct_name}._init_sapphire(self)")
       else:
-        init_args = [
-            (
-                f"(function() if _arg1['{self._mangle_name(p.name)}'] ~= nil then "
-                f"return _arg1['{self._mangle_name(p.name)}'] else return _arg1[{idx + 1}] end end)()"
-            )
-            for idx, p in enumerate(init_params)
-        ]
+        init_args = []
+        for idx, p in enumerate(init_params):
+          pname = self._mangle_name(p.name)
+          unset_val = (
+              "_SP_RT._SP_UNSET"
+              if isinstance(p.param_type, OptionalTypeNode)
+              else "nil"
+          )
+          init_args.append(
+              f"(function() if _arg1['{pname}'] ~= nil then "
+              f"return _SP_RT._unwrap_opt(_arg1['{pname}']) "
+              f"elseif _arg1[{idx + 1}] ~= nil then "
+              f"return _SP_RT._unwrap_opt(_arg1[{idx + 1}]) "
+              f"else return {unset_val} end end)()"
+          )
         call_args = ["self"] + init_args
         param_checks = " or ".join(
             f"_arg1['{self._mangle_name(p.name)}'] ~= nil" for p in init_params
         )
+        pos_checks = " or ".join(
+            f"_arg1[{idx + 1}] ~= nil" for idx in range(len(init_params))
+        )
         self.emit(
             f'if type(_arg1) == "table" and '
-            f"({param_checks} or _arg1[1] ~= nil or next(_arg1) == nil) then"
+            f"({param_checks} or {pos_checks} or next(_arg1) == nil) then"
         )
         self.indent()
         self.newline()
@@ -547,14 +566,15 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.emit("for k, v in pairs(_arg1) do")
       self.indent()
       self.newline()
-      self.emit('if type(k) == "string" then self[k] = v end')
+      self.emit('if type(k) == "string" then self[k] = _SP_RT._unwrap_opt(v) end')
       self.dedent()
       self.newline()
       self.emit("end")
       for idx, f in enumerate(node.fields):
+        fname = self._mangle_name(f.name)
         self.newline()
         self.emit(
-            f"if _arg1[{idx + 1}] ~= nil and self.{self._mangle_name(f.name)} == nil then self.{self._mangle_name(f.name)} = _arg1[{idx + 1}] end"
+            f"if _arg1[{idx + 1}] ~= nil and _arg1['{fname}'] == nil then self.{fname} = _SP_RT._unwrap_opt(_arg1[{idx + 1}]) end"
         )
       self.dedent()
       self.newline()
@@ -577,13 +597,25 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.emit("end")
     self.newline()
 
+  def _emit_diamond_del_guard(self, raw_struct_name: str) -> None:
+    """Emits per-class destruction tracking so diamond bases run `__del__` once."""
+    self.newline()
+    self.emit('local _sp_d = rawget(self, "_sapphire_destroyed_classes_")')
+    self.newline()
+    self.emit('if not _sp_d then _sp_d = {}; rawset(self, "_sapphire_destroyed_classes_", _sp_d) end')
+    self.newline()
+    self.emit(f'if _sp_d["{raw_struct_name}"] then return end')
+    self.newline()
+    self.emit(f'_sp_d["{raw_struct_name}"] = true')
+
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     """Emits Lua table, metatable inheritance, constructor, methods, and `__del__`."""
     self.known_structs.add(node.name)
     self.declared_symbols.append(node.name)
     is_proto = node.is_prototype
-    struct_name = node.name
-    methods = self.struct_methods.get(struct_name, [])
+    raw_name = node.name
+    struct_name = self._mangle_name(raw_name)
+    methods = self.struct_methods.get(raw_name, [])
 
     self.newline()
     if self.dev_mode:
@@ -595,12 +627,13 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.newline()
 
     if node.parent_names:
-      if len(node.parent_names) == 1:
+      mangled_parents = [self._mangle_dotted(p) for p in node.parent_names]
+      if len(mangled_parents) == 1:
         self.emit(
-            f"setmetatable({struct_name}, {{ __index = {node.parent_names[0]} }})"
+            f"setmetatable({struct_name}, {{ __index = {mangled_parents[0]} }})"
         )
       else:
-        chain = " or ".join(f"{p}[k]" for p in node.parent_names)
+        chain = " or ".join(f"{p}[k]" for p in mangled_parents)
         self.emit(
             f"setmetatable({struct_name}, {{ __index = function(t, k) return {chain} end }})"
         )
@@ -619,45 +652,47 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     needs_synth_del = (
         not is_proto
         and not has_explicit_del
-        and struct_name in self.structs_with_destructor
+        and raw_name in self.structs_with_destructor
         and bool(
-            self.struct_destructible_fields.get(struct_name)
+            self.struct_destructible_fields.get(raw_name)
             or len(destructible_parents) > 1
         )
     )
 
     for m in methods:
-      self._visit_ImplMemberNode_for_struct(m, struct_name)
+      self._visit_ImplMemberNode_for_struct(m, raw_name)
 
     if needs_synth_del:
       self.newline()
       self.emit(f"function {struct_name}:__del__()")
       self.indent()
-      self._emit_struct_auto_teardown(struct_name, call_parents=True)
+      self._emit_diamond_del_guard(raw_name)
+      self._emit_struct_auto_teardown(raw_name, call_parents=True)
       self.dedent()
       self.newline()
       self.emit("end")
       self.newline()
 
   def _emit_destructor_call(self, var_name: str) -> None:
-    """Emits Lua destructor teardown (`destroy()` for Arena, `_sapphire_del` otherwise)."""
+    """Emits Lua destructor teardown (`destroy()` for Arena, `_SP_RT._sapphire_del` otherwise)."""
     if self.variable_types.get(var_name) == "Arena":
       self.emit(f"if {var_name} ~= nil then {var_name}:destroy() end")
     else:
-      self.emit(f"_sapphire_del({var_name})")
+      self.emit(f"_SP_RT._sapphire_del({var_name})")
 
   def _emit_struct_auto_teardown(
       self, struct_name: str, call_parents: bool = True
   ) -> None:
-    """Emits LIFO `_sapphire_del` calls for destructible fields and parents in Lua."""
+    """Emits LIFO `_SP_RT._sapphire_del` calls for destructible fields and parents in Lua."""
     for f_name in reversed(self.struct_destructible_fields.get(struct_name, [])):
       self.newline()
-      self.emit(f"_sapphire_del(self.{self._mangle_name(f_name)})")
+      self.emit(f"_SP_RT._sapphire_del(self.{self._mangle_name(f_name)})")
     if call_parents:
       for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
         if p_name in self.structs_with_destructor:
+          mp = self._mangle_dotted(p_name)
           self.newline()
-          self.emit(f"if {p_name}.__del__ then {p_name}.__del__(self) end")
+          self.emit(f"if {mp}.__del__ then {mp}.__del__(self) end")
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
     pass
@@ -677,6 +712,54 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         "Lua backend, not directly on a standalone ImplMemberNode."
     )
 
+  def _has_optional_default_param(self, params: List[Any]) -> bool:
+    """Returns True if any parameter has both an optional type and a default value."""
+    return any(
+        p.default_expr is not None and isinstance(p.param_type, OptionalTypeNode)
+        for p in params
+    )
+
+  def _emit_default_params(
+      self, params: List[Any], has_opt_default: bool
+  ) -> None:
+    """Emits parameter unpacking (for optional defaults) and default assignments."""
+    if has_opt_default:
+      self.newline()
+      self.emit('local _n_args = select("#", ...)')
+      if params:
+        pnames = ", ".join(self._mangle_name(p.name) for p in params)
+        self.newline()
+        self.emit(f"local {pnames} = ...")
+
+    for idx, p in enumerate(params):
+      if p.default_expr is None:
+        continue
+      pname = self._mangle_name(p.name)
+      is_opt = isinstance(p.param_type, OptionalTypeNode)
+      if is_opt:
+        cond = f"_n_args < {idx + 1} or {pname} == _SP_RT._SP_UNSET"
+      elif has_opt_default:
+        cond = f"{pname} == nil or {pname} == _SP_RT._SP_UNSET"
+      else:
+        cond = f"{pname} == nil"
+
+      if self._contains_liftable_expr(p.default_expr, include_moves=True):
+        self.newline()
+        self.emit(f"if {cond} then")
+        self.indent()
+        self._lift_match_expressions(p.default_expr)
+        self.newline()
+        self.emit(f"{pname} = ")
+        self.visit(p.default_expr)
+        self.dedent()
+        self.newline()
+        self.emit("end")
+      else:
+        self.newline()
+        temp = self._make_expr_transpiler()
+        temp.visit(p.default_expr)
+        self.emit(f"if {cond} then {pname} = {temp.get_output()} end")
+
   def _visit_ImplMemberNode_for_struct(self, node: ImplMemberNode,
                                        struct_name: str) -> None:
     func = node.func_decl
@@ -687,31 +770,29 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     if is_test_func and not self.test_mode:
       return
 
+    m_struct = self._mangle_name(struct_name)
     func_name = "_init_sapphire" if func.name == "__init__" else self._mangle_name(func.name)
-    self.newline()
+    non_self_params = [p for p in func.parameters if p.name != "self"]
+    has_opt_default = self._has_optional_default_param(non_self_params)
+    params = [self._mangle_name(p.name) for p in non_self_params]
+    sig_params = "..." if has_opt_default else ", ".join(params)
 
+    self.newline()
     if node.modifier == "static":
-      params = [self._mangle_name(p.name) for p in func.parameters if p.name != "self"]
-      self.emit(f"function {struct_name}.{func_name}({', '.join(params)})")
+      self.emit(f"function {m_struct}.{func_name}({sig_params})")
     else:
-      other_params = [self._mangle_name(p.name) for p in func.parameters if p.name != "self"]
-      self.emit(f"function {struct_name}:{func_name}({', '.join(other_params)})")
+      self.emit(f"function {m_struct}:{func_name}({sig_params})")
 
     self.indent()
-    for p in func.parameters:
-      if p.default_expr:
-        self.newline()
-        temp = self._make_expr_transpiler()
-        temp.visit(p.default_expr)
-        pname = self._mangle_name(p.name)
-        self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")
+    self._emit_default_params(non_self_params, has_opt_default)
+
     if is_coroutine_func(func):
       self.newline()
-      all_params = (["self"] if node.modifier != "static" else []) + [p.name for p in func.parameters if p.name != "self"]
+      all_params = (["self"] if node.modifier != "static" else []) + params
       if all_params:
-        self.emit(f"return _Coroutine.create(function({', '.join(all_params)})")
+        self.emit(f"return _SP_RT._Coroutine.create(function({', '.join(all_params)})")
       else:
-        self.emit("return _Coroutine.create(function()")
+        self.emit("return _SP_RT._Coroutine.create(function()")
       self.indent()
       self.visit(func.body)
       self.dedent()
@@ -723,8 +804,24 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     else:
       if func.name == "__init__" and getattr(func, "base_initializers", None):
         for base_init in func.base_initializers:
-          parent_name = base_init.callee.name
+          raw_parent = base_init.callee.name
+          parent_name = self._mangle_dotted(raw_parent)
           resolved = getattr(base_init, "_resolved_arguments", None)
+          omitted_slots = getattr(base_init, "_omitted_arg_slots", set())
+          p_members = self.struct_methods.get(raw_parent, [])
+          p_init = next(
+              (
+                  m
+                  for m in p_members
+                  if getattr(m, "func_decl", None) and m.func_decl.name == "__init__"
+              ),
+              None,
+          )
+          p_init_params = (
+              [p for p in p_init.func_decl.parameters if p.name != "self"]
+              if p_init
+              else []
+          )
           if resolved is not None:
             if getattr(base_init, "_requires_eval_order_temps", False):
               temp_binds = []
@@ -738,9 +835,16 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
                       getattr(base_init, "_eval_order_slots", [])
                   )
               }
-              call_args = ["self"] + [
-                  slot_to_temp.get(i, "nil") for i in range(len(resolved))
-              ]
+              call_args = ["self"]
+              for i in range(len(resolved)):
+                if i in slot_to_temp:
+                  call_args.append(slot_to_temp[i])
+                elif i < len(p_init_params) and isinstance(
+                    p_init_params[i].param_type, OptionalTypeNode
+                ):
+                  call_args.append("_SP_RT._SP_UNSET")
+                else:
+                  call_args.append("nil")
               self.newline()
               self.emit(
                   f"do {'; '.join(temp_binds)}; "
@@ -748,17 +852,22 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
               )
             else:
               args_strs = ["self"]
-              for expr in resolved:
-                temp = self._make_expr_transpiler()
-                temp.visit(expr)
-                args_strs.append(temp.get_output())
+              for idx, expr in enumerate(resolved):
+                if (
+                    idx in omitted_slots
+                    and idx < len(p_init_params)
+                    and isinstance(p_init_params[idx].param_type, OptionalTypeNode)
+                ):
+                  args_strs.append("_SP_RT._SP_UNSET")
+                else:
+                  temp = self._make_expr_transpiler()
+                  temp.visit(expr)
+                  args_strs.append(temp.get_output())
               self.newline()
               self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
             continue
 
-          p_members = self.struct_methods.get(parent_name, [])
-          p_init = next((m for m in p_members if getattr(m, "func_decl", None) and m.func_decl.name == "__init__"), None)
-          param_names = [p.name for p in p_init.func_decl.parameters if p.name != "self"] if p_init else []
+          param_names = [p.name for p in p_init_params]
 
           args_strs = ["self"]
           if param_names:
@@ -771,7 +880,13 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
                 args_by_name[arg.name] = val
               elif idx < len(param_names):
                 args_by_name[param_names[idx]] = val
-            args_strs.extend(args_by_name.get(p_name, "nil") for p_name in param_names)
+            for idx, p_name in enumerate(param_names):
+              if p_name in args_by_name:
+                args_strs.append(args_by_name[p_name])
+              elif isinstance(p_init_params[idx].param_type, OptionalTypeNode):
+                args_strs.append("_SP_RT._SP_UNSET")
+              else:
+                args_strs.append("nil")
           else:
             for arg in base_init.arguments:
               temp = self._make_expr_transpiler()
@@ -780,6 +895,10 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
 
           self.newline()
           self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
+
+      if func.name == "__del__":
+        self._emit_diamond_del_guard(struct_name)
+
       has_auto_teardown = (
           func.name == "__del__"
           and struct_name not in self.proto_structs
@@ -813,7 +932,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       alias_name = self._mangle_name(export_ann.arg)
       if alias_name != func_name:
         self.newline()
-        self.emit(f"{struct_name}.{alias_name} = {struct_name}.{func_name}")
+        self.emit(f"{m_struct}.{alias_name} = {m_struct}.{func_name}")
     self.newline()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
@@ -827,39 +946,35 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     if is_test_func:
       self.declared_symbols.append(node.name)
 
+    fn_name = self._mangle_name(node.name)
     if any(getattr(a, "name", "") == "on_reload" for a in getattr(node, "annotations", [])):
-      self.on_reload_callbacks.append(node.name)
+      self.on_reload_callbacks.append(fn_name)
 
     export_ann = next((a for a in node.annotations if a.name == "export"), None)
-    fn_name = self._mangle_name(node.name)
+    has_opt_default = self._has_optional_default_param(node.parameters)
     params = [self._mangle_name(p.name) for p in node.parameters]
+    sig_params = "..." if has_opt_default else ", ".join(params)
 
     self.newline()
     if export_ann:
       target_path = export_ann.arg if export_ann.arg else fn_name
-      self.emit(f"function {target_path}({', '.join(params)})")
+      self.emit(f"function {target_path}({sig_params})")
     else:
-      self.emit(f"function {fn_name}({', '.join(params)})")
+      self.emit(f"function {fn_name}({sig_params})")
 
     self.indent()
     if self.dev_mode and export_ann and export_ann.arg == "love.update":
       self.newline()
       self.emit("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end")
 
-    # Check default parameters
-    for p in node.parameters:
-      if p.default_expr:
-        self.newline()
-        temp = self._make_expr_transpiler()
-        temp.visit(p.default_expr)
-        pname = self._mangle_name(p.name)
-        self.emit(f"if {pname} == nil then {pname} = {temp.get_output()} end")
+    self._emit_default_params(node.parameters, has_opt_default)
+
     if is_coroutine_func(node):
       self.newline()
       if params:
-        self.emit(f"return _Coroutine.create(function({', '.join(params)})")
+        self.emit(f"return _SP_RT._Coroutine.create(function({', '.join(params)})")
       else:
-        self.emit("return _Coroutine.create(function()")
+        self.emit("return _SP_RT._Coroutine.create(function()")
       self.indent()
       self.visit(node.body)
       self.dedent()

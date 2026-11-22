@@ -7,7 +7,7 @@ local active_context = nil
 testing.TestContext = {}
 testing.TestContext.__index = testing.TestContext
 
-function testing.TestContext.new(name)
+function testing.TestContext.init(name)
   local self = setmetatable({}, testing.TestContext)
   self.name = name or ""
   self.passed_assertions = 0
@@ -44,7 +44,7 @@ end
 
 function testing.get_active_context()
   if not active_context then
-    active_context = TestContext.new("standalone")
+    active_context = testing.TestContext.init("standalone")
   end
   return active_context
 end
@@ -70,7 +70,7 @@ end
 testing.TestCase = {}
 testing.TestCase.__index = testing.TestCase
 
-function testing.TestCase.new()
+function testing.TestCase.init()
   return setmetatable({}, testing.TestCase)
 end
 
@@ -95,14 +95,64 @@ function testing.TestCase:expect_not_none(opt, msg) testing.expect_not_none(opt,
 
 -- Free-function assertions
 local function unwrap(val)
-  if type(val) == "table" and val.__opt_val ~= nil then
-    return val.__opt_val
+  if type(val) == "table" and rawget(val, "__is_opt") == true then
+    return rawget(val, "__opt_val")
   end
   return val
 end
 
 local function is_none(val)
-  return val == nil or (type(val) == "table" and val.__opt_val == nil)
+  if val == nil then
+    return true
+  end
+  if type(val) == "table" and rawget(val, "__is_opt") == true then
+    return rawget(val, "__opt_val") == nil
+  end
+  return false
+end
+
+local function unwrap_active(v)
+  while type(v) == "table" do
+    local mt = getmetatable(v)
+    if mt and mt.__get_active then
+      v = mt.__get_active()
+    else
+      break
+    end
+  end
+  return v
+end
+
+local function deep_eq(a, b, seen)
+  a = unwrap_active(a)
+  b = unwrap_active(b)
+  if a == b then
+    return true
+  end
+  if type(a) ~= "table" or type(b) ~= "table" then
+    return false
+  end
+  if getmetatable(a) ~= getmetatable(b) then
+    return false
+  end
+  seen = seen or {}
+  if seen[a] == b then
+    return true
+  end
+  seen[a] = b
+  local count_a = 0
+  for k, va in pairs(a) do
+    count_a = count_a + 1
+    local vb = b[k]
+    if vb == nil or not deep_eq(va, vb, seen) then
+      return false
+    end
+  end
+  local count_b = 0
+  for _ in pairs(b) do
+    count_b = count_b + 1
+  end
+  return count_a == count_b
 end
 
 local function normalize_args(a, b, c)
@@ -139,7 +189,7 @@ function testing.assert_eq(actual, expected, msg, extra)
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
-  if actual ~= expected then
+  if not deep_eq(actual, expected) then
     ctx:record_failure(format_msg("Expected " .. repr(expected) .. ", got " .. repr(actual), msg), true, "eq", expected, actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
@@ -151,7 +201,7 @@ function testing.assert_ne(actual, expected, msg, extra)
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
-  if actual == expected then
+  if deep_eq(actual, expected) then
     ctx:record_failure(format_msg("Expected value to not equal " .. repr(expected), msg), true, "ne", "anything != " .. repr(expected), actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
@@ -164,7 +214,7 @@ function testing.assert_almost_eq(a, b, eps, msg, extra)
   a = unwrap(a)
   b = unwrap(b)
   local ctx = testing.get_active_context()
-  if math.abs(a - b) > eps then
+  if not (math.abs(a - b) <= eps) then
     ctx:record_failure(format_msg("Expected " .. tostring(a) .. " to almost equal " .. tostring(b), msg), true, "almost_eq", b, a)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
@@ -218,7 +268,7 @@ function testing.expect_eq(actual, expected, msg, extra)
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
-  if actual ~= expected then
+  if not deep_eq(actual, expected) then
     ctx:record_failure(format_msg("Expected " .. repr(expected) .. ", got " .. repr(actual), msg), false, "eq", expected, actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
@@ -230,7 +280,7 @@ function testing.expect_ne(actual, expected, msg, extra)
   local ctx = testing.get_active_context()
   actual = unwrap(actual)
   expected = unwrap(expected)
-  if actual == expected then
+  if deep_eq(actual, expected) then
     ctx:record_failure(format_msg("Expected value to not equal " .. repr(expected), msg), false, "ne", "anything != " .. repr(expected), actual)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1
@@ -243,7 +293,7 @@ function testing.expect_almost_eq(a, b, eps, msg, extra)
   a = unwrap(a)
   b = unwrap(b)
   local ctx = testing.get_active_context()
-  if math.abs(a - b) > eps then
+  if not (math.abs(a - b) <= eps) then
     ctx:record_failure(format_msg("Expected " .. tostring(a) .. " to almost equal " .. tostring(b), msg), false, "almost_eq", b, a)
   else
     ctx.passed_assertions = ctx.passed_assertions + 1

@@ -59,10 +59,13 @@ class ModuleResolverTest(unittest.TestCase):
     self.assertIsNone(resolved)
 
   def test_resolves_built_in_standard_library(self):
-    """Verifies standard library modules in lib/std are resolvable."""
-    resolved = resolve_module_path("testing", source_file_path=self.main_file)
+    """Verifies stdlib modules require qualified 'std.*' paths and bare names do not leak."""
+    resolved = resolve_module_path("std.testing", source_file_path=self.main_file)
     self.assertIsNotNone(resolved)
     self.assertTrue(resolved.endswith("testing.sp"))
+    self.assertIsNone(
+        resolve_module_path("testing", source_file_path=self.main_file)
+    )
 
   def test_resolves_package_qualified_import_from_subdirectory(self):
     """Verifies package-qualified imports resolve from subdirectories."""
@@ -170,13 +173,25 @@ class ModuleResolverTest(unittest.TestCase):
           self.assertIsNone(find_sapphire_lib_dir())
 
   def test_resolve_module_path_adds_lib_parent_from_different_cwd(self):
-    """Verifies lib_parent is added to search_dirs when cwd differs."""
+    """Verifies explicit lib.* imports resolve from a different cwd without leaking lib_parent."""
     with patch("os.getcwd", return_value=self.base_dir):
       resolved = resolve_module_path(
           "lib.std.math", source_file_path=self.main_file
       )
       self.assertIsNotNone(resolved)
       self.assertTrue(resolved.endswith(os.path.join("std", "math.sp")))
+
+      # Unrelated repo directories like samples/ must NOT leak via lib_parent
+      self.assertIsNone(
+          resolve_module_path("samples.overview", source_file_path=self.main_file)
+      )
+      # Bare std/love2d module names must NOT resolve without their package prefix
+      self.assertIsNone(
+          resolve_module_path("math", source_file_path=self.main_file)
+      )
+      self.assertIsNone(
+          resolve_module_path("enums", source_file_path=self.main_file)
+      )
 
 
 if __name__ == "__main__":

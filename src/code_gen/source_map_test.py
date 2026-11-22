@@ -79,6 +79,24 @@ class TestSourceMap(unittest.TestCase):
     self.assertEqual(builder.sources, ["main.sp", "helper.sp"])
     self.assertEqual(builder.sources_content["helper.sp"], "let y = 2;")
 
+  def test_non_positive_gen_line_ignored_and_missing_content_is_none(self):
+    """Verifies gen_line <= 0 does not corrupt VLQ lines and missing content emits None."""
+    builder = SourceMapBuilder("main.sp")
+    builder.add_mapping(
+        gen_line=0, gen_col=0, source_file="main.sp", orig_line=1, orig_col=0
+    )
+    builder.add_mapping(
+        gen_line=-3, gen_col=0, source_file="main.sp", orig_line=1, orig_col=0
+    )
+    builder.add_mapping(
+        gen_line=2, gen_col=0, source_file="main.sp", orig_line=1, orig_col=0
+    )
+    v3_dict = builder.to_v3_dict("main.lua")
+    self.assertEqual(v3_dict["sourcesContent"], [None])
+    # Line 1 has no mappings, line 2 has one mapping => starts with ';'
+    self.assertTrue(v3_dict["mappings"].startswith(";"))
+    self.assertEqual(v3_dict["mappings"].count(";"), 1)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -93,12 +93,31 @@ class ExprVisitorMixin:
         self.error(f"Undefined identifier '{node.name}'.", node=node)
       return PrimitiveType("none")
     if isinstance(sym, VariableSymbol):
+      if sym in self.uninitialized_symbols:
+        self.error(f"Use of uninitialized variable '{node.name}'.", node=node)
       if sym in self.moved_symbols:
         self.error(f"Use of moved variable '{node.name}'.", node=node)
       ArenaChecker.check_use_validity(
           self.symbol_table, sym, lambda msg: self.error(msg, node=node)
       )
     return sym.symbol_type
+
+  def _is_orderable_pair(self, left: Type, right: Type) -> bool:
+    """Returns True if *left* and *right* support ordering operators (<, <=, >, >=)."""
+    if isinstance(left, InferredType) or isinstance(right, InferredType):
+      return True
+    if (
+        isinstance(left, PrimitiveType)
+        and left.name in ("int", "float")
+        and isinstance(right, PrimitiveType)
+        and right.name in ("int", "float")
+    ):
+      return True
+    if isinstance(left, StringType) and isinstance(right, StringType):
+      return True
+    if isinstance(left, EnumType) and isinstance(right, EnumType) and left == right:
+      return True
+    return False
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
     left = self.visit(node.left)
@@ -110,9 +129,30 @@ class ExprVisitorMixin:
         self.error(f"Left operand of '??' must be an optional type, got '{left}'.")
         return left
       base_type = left.base_type
-      if not right.is_compatible(base_type) and not base_type.is_compatible(right):
-        self.error(f"Fallback type '{right}' is not compatible with the optional's base type '{base_type}'.")
-      return base_type
+      if isinstance(right, NoneType) or (
+          isinstance(right, PrimitiveType) and right.name == "none"
+      ):
+        return left
+      if isinstance(right, OptionalType):
+        widened = self._widen_types(base_type, right.base_type)
+        if widened is None:
+          self.error(
+              f"Fallback type '{right}' is not compatible with the optional's base type '{base_type}'."
+          )
+          return left
+        return OptionalType(widened)
+      if isinstance(base_type, PrimitiveType) and base_type.name == "int" and isinstance(right, PrimitiveType) and right.name == "float":
+        self.error(
+            f"Fallback type '{right}' is not compatible with the optional's base type '{base_type}'."
+        )
+        return base_type
+      widened = self._widen_types(base_type, right)
+      if widened is None:
+        self.error(
+            f"Fallback type '{right}' is not compatible with the optional's base type '{base_type}'."
+        )
+        return base_type
+      return widened
 
     # Boolean operators
     if node.op in ("&&", "||"):
@@ -121,9 +161,14 @@ class ExprVisitorMixin:
       return PrimitiveType("bool")
 
     # Comparison operators
-    if node.op in ("==", "!=", "<", "<=", ">", ">="):
+    if node.op in ("==", "!="):
       # Sapphire allows comparing compatible types
       if not left.is_compatible(right) and not right.is_compatible(left):
+        self.error(f"Cannot compare type '{left}' with type '{right}' using '{node.op}'.")
+      return PrimitiveType("bool")
+
+    if node.op in ("<", "<=", ">", ">="):
+      if not self._is_orderable_pair(left, right):
         self.error(f"Cannot compare type '{left}' with type '{right}' using '{node.op}'.")
       return PrimitiveType("bool")
 
@@ -155,29 +200,26 @@ class ExprVisitorMixin:
       if isinstance(branch_node, TernaryExprNode) and not getattr(branch_node, "is_parenthesized", False):
         self.error("Nested ternary expressions must be explicitly enclosed in parentheses.")
 
-    cond_type = self.visit(node.condition)
+    old_expected = self.expected_type
+    self.expected_type = None
+    try:
+      cond_type = self.visit(node.condition)
+    finally:
+      self.expected_type = old_expected
     if cond_type != PrimitiveType("bool"):
       self.error(f"Ternary condition must be of type 'bool', got '{cond_type}'.")
 
+    pre_branch_moved = set(self.moved_symbols)
     true_type = self.visit(node.true_expr)
+    true_moved = set(self.moved_symbols)
+    self._restore_moved_symbols(pre_branch_moved)
     false_type = self.visit(node.false_expr)
+    false_moved = set(self.moved_symbols)
+    self._restore_moved_symbols(true_moved | false_moved)
 
-    # Check type compatibility between true and false branches
-    if isinstance(true_type, NoneType) and isinstance(false_type, NoneType):
-      return NoneType()
-    if isinstance(true_type, NoneType):
-      return OptionalType(false_type) if not isinstance(false_type, OptionalType) else false_type
-    if isinstance(false_type, NoneType):
-      return OptionalType(true_type) if not isinstance(true_type, OptionalType) else true_type
-
-    if true_type.is_compatible(false_type):
-      if isinstance(true_type, PrimitiveType) and true_type.name == "int" and isinstance(false_type, PrimitiveType) and false_type.name == "float":
-        return PrimitiveType("float")
-      return false_type if not false_type.is_compatible(true_type) else true_type
-    elif false_type.is_compatible(true_type):
-      if isinstance(false_type, PrimitiveType) and false_type.name == "int" and isinstance(true_type, PrimitiveType) and true_type.name == "float":
-        return PrimitiveType("float")
-      return true_type
+    widened = self._widen_types(true_type, false_type)
+    if widened is not None:
+      return widened
 
     self.error(f"Incompatible types in ternary branches: '{true_type}' and '{false_type}'.")
     return true_type
@@ -285,10 +327,18 @@ class ExprVisitorMixin:
       self.is_in_clone_init = True
       # Define self inside block as mutable
       clone_self_sym = VariableSymbol("self", expr_type, is_mutable=True)
-      clone_self_deps = ArenaChecker.collect_arena_deps(
-          self.symbol_table, node.expr, self
+      clone_self_deps = list(
+          ArenaChecker.collect_arena_deps(self.symbol_table, node.expr, self)
       )
-      clone_self_sym.arena_dep_records = list(clone_self_deps)
+      if node.arena_expr:
+        resolved_arena = ArenaChecker._resolve_arena_target(
+            self.symbol_table, node.arena_expr
+        )
+        if resolved_arena:
+          dep_rec = (resolved_arena[0], resolved_arena[2])
+          if dep_rec not in clone_self_deps:
+            clone_self_deps.append(dep_rec)
+      clone_self_sym.arena_dep_records = clone_self_deps
       clone_self_sym.arena_dependency = (
           clone_self_deps[0][0] if clone_self_deps else None
       )
@@ -323,6 +373,22 @@ class ExprVisitorMixin:
       return sym.symbol_type
     if self.current_function is not None and sym.scope_defined is not None and sym.scope_defined.parent is None:
       self.error(f"Cannot move out of module-level global variable '{node.name}'.", node=node)
+      return sym.symbol_type
+    if (
+        isinstance(self.current_function, FunctionSymbol)
+        and self.current_function.name == "<lambda>"
+        and sym.scope_defined is not None
+        and not ArenaChecker.is_descendant_scope(
+            sym.scope_defined, self.current_function_scope
+        )
+    ):
+      self.error(
+          f"Cannot move captured outer variable '{node.name}' inside a closure.",
+          node=node,
+      )
+      return sym.symbol_type
+    if sym in self.uninitialized_symbols:
+      self.error(f"Use of uninitialized variable '{node.name}'.", node=node)
       return sym.symbol_type
     if sym in self.moved_symbols:
       self.error(f"Use of moved variable '{node.name}'.", node=node)
@@ -426,8 +492,8 @@ class ExprVisitorMixin:
     if self.is_in_del and self._ast_references_self(node.body):
       self.error("Cannot capture 'self' in a closure inside destructor '__del__'.", node=node)
     self.symbol_table.enter_scope()
-    old_moved_symbols = set(self.moved_symbols)
-    self.moved_symbols = set()
+    pre_lambda_moved = set(self.moved_symbols)
+    pre_lambda_uninit = set(self.uninitialized_symbols)
 
     expected_func = self.expected_type
     from src.semantics.symbol_table import OptionalType
@@ -435,8 +501,12 @@ class ExprVisitorMixin:
     if isinstance(expected_func, OptionalType):
       expected_func = expected_func.base_type
 
+    seen_param_names: Set[str] = set()
     param_types = []
     for idx, p in enumerate(node.parameters):
+      if p.name in seen_param_names:
+        self.error(f"Duplicate parameter name '{p.name}' in lambda.", node=node)
+      seen_param_names.add(p.name)
       if p.param_type:
         ptype = self._resolve_type_node(p.param_type)
       elif (
@@ -451,39 +521,68 @@ class ExprVisitorMixin:
         # is ambiguous so that no false errors are emitted.
         inferred = self._infer_lambda_param_type(p.name, node.body)
         ptype = inferred if inferred is not None else InferredType()
-      self.symbol_table.define(p.name, VariableSymbol(p.name, ptype, is_mutable=False))
+      self.symbol_table.define(
+          p.name, VariableSymbol(p.name, ptype, is_mutable=False, is_parameter=True)
+      )
       param_types.append(ptype)
 
     old_func = self.current_function
     old_func_scope = self.current_function_scope
+    old_expected = self.expected_type
     declared_ret = self._resolve_type_node(node.return_type) if node.return_type else None
+    expected_ret = declared_ret
+    if expected_ret is None and isinstance(expected_func, FunctionType):
+      cand_ret = expected_func.return_type
+      if not isinstance(cand_ret, (InferredType, NoneType)) and not (
+          isinstance(cand_ret, PrimitiveType) and cand_ret.name in ("none", "void")
+      ):
+        expected_ret = cand_ret
+
     lambda_sym = FunctionSymbol("<lambda>", None)
-    lambda_sym.return_types = [declared_ret] if declared_ret else []
+    lambda_sym.return_types = [expected_ret] if expected_ret else []
     self.current_function = lambda_sym
     self.current_function_scope = self.symbol_table.current_scope
+    self.expected_type = None if isinstance(node.body, BlockNode) else expected_ret
 
     try:
       body_type = self.visit(node.body)
     finally:
+      self.expected_type = old_expected
       self.current_function = old_func
       self.current_function_scope = old_func_scope
 
     # Resolve any InferredType placeholders: if the body produced a concrete
     # return type, use it to back-fill params that remained unconstrained.
-    resolved_param_types = [
-        body_type if isinstance(pt, InferredType) and not isinstance(body_type, (NoneType, InferredType))
-        else (PrimitiveType("none") if isinstance(pt, InferredType) else pt)
-        for pt in param_types
-    ]
+    resolved_param_types: List[Type] = []
+    for p, pt in zip(node.parameters, param_types):
+      if isinstance(pt, InferredType):
+        if (
+            not isinstance(body_type, (NoneType, InferredType))
+            and not (isinstance(body_type, PrimitiveType) and body_type.name == "none")
+        ):
+          resolved_param_types.append(body_type)
+        else:
+          self.error(
+              f"Cannot infer type for lambda parameter '{p.name}'; "
+              "add an explicit type annotation.",
+              node=node,
+          )
+          resolved_param_types.append(PrimitiveType("none"))
+      else:
+        resolved_param_types.append(pt)
 
     # Lambda expression implicit return
-    ret_type = body_type if not isinstance(node.body, BlockNode) else PrimitiveType("none")
+    ret_type = body_type if not isinstance(node.body, BlockNode) else (expected_ret or PrimitiveType("none"))
     if node.return_type:
       ret_type = self._resolve_type_node(node.return_type)
 
-    self.moved_symbols = old_moved_symbols
+    self._restore_moved_symbols(pre_lambda_moved)
+    self.uninitialized_symbols = pre_lambda_uninit
     self.symbol_table.exit_scope()
     node.stack_borrow_symbols = self._scan_lambda_stack_borrows(node)
+    mut_caps, read_caps = self._scan_lambda_capture_modes(node)
+    node.closure_mutated_captures = mut_caps
+    node.closure_read_captures = read_caps
     return FunctionType(
         resolved_param_types,
         ret_type,
@@ -524,12 +623,14 @@ class ExprVisitorMixin:
         return ArrayType(target_elem, size=len(node.elements), is_fixed_size=True)
       return ArrayType(target_elem, size=len(node.elements), is_fixed_size=False)
 
-    first_type = elem_types[0]
+    inferred_elem = elem_types[0]
     for etype in elem_types[1:]:
-      if not etype.is_compatible(first_type) and not first_type.is_compatible(etype):
+      widened = self._widen_types(inferred_elem, etype)
+      if widened is None:
         self.error("Inconsistent element types in array literal.")
         break
-    return ArrayType(first_type, size=len(node.elements), is_fixed_size=False)
+      inferred_elem = widened
+    return ArrayType(inferred_elem, size=len(node.elements), is_fixed_size=False)
 
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> Type:
     expected_map = (
@@ -573,16 +674,22 @@ class ExprVisitorMixin:
           self.error("Inconsistent value types in map literal.")
       return MapType(expected_map.key_type, expected_map.value_type)
 
-    first_key_type = key_types[0]
-    first_val_type = val_types[0]
+    inferred_key = key_types[0]
+    inferred_val = val_types[0]
     for ktype, vtype in zip(key_types[1:], val_types[1:]):
-      if not ktype.is_compatible(first_key_type) and not first_key_type.is_compatible(ktype):
+      widened_k = self._widen_types(inferred_key, ktype)
+      if widened_k is None:
         self.error("Inconsistent key types in map literal.")
+      else:
+        inferred_key = widened_k
 
-      if not vtype.is_compatible(first_val_type) and not first_val_type.is_compatible(vtype):
+      widened_v = self._widen_types(inferred_val, vtype)
+      if widened_v is None:
         self.error("Inconsistent value types in map literal.")
+      else:
+        inferred_val = widened_v
 
-    return MapType(first_key_type, first_val_type)
+    return MapType(inferred_key, inferred_val)
 
   def _get_const_int_value(self, expr: ASTNode) -> Optional[int]:
     if isinstance(expr, LiteralNode) and expr.lit_type == "int":
@@ -617,6 +724,8 @@ class ExprVisitorMixin:
       self.error(f"Cannot index into moved variable '{node.array.name}'.", node=node)
       return PrimitiveType("none")
     container_type = self.visit(node.array)
+    if isinstance(container_type, (RefType, SharedRefType)):
+      container_type = container_type.inner_type
     index_type = self.visit(node.index)
 
     if isinstance(container_type, ArrayType):
@@ -627,7 +736,7 @@ class ExprVisitorMixin:
         self._check_array_bounds(node, container_type)
       return container_type.element_type
     elif isinstance(container_type, MapType):
-      if not index_type.is_compatible(container_type.key_type) and not container_type.key_type.is_compatible(index_type):
+      if not index_type.is_compatible(container_type.key_type):
         self.error(f"Map index type '{index_type}' is not compatible with key type '{container_type.key_type}'.")
       if isinstance(node.array, MapLiteralNode):
         self._check_map_literal_key(node)

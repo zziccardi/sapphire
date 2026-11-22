@@ -9,59 +9,58 @@ import lib.love2d.graphics;
 import lib.love2d.love2d;
 
 let SPEED = 250.0;
-let love = love2d.love;
 
 var hero_x = 200.0;
 var hero_y = 200.0;
 
 @export("love.load")
 func load() {
-  love.graphics.setBackgroundColor(r = 0.1, g = 0.1, b = 0.15);
+  love2d.love.graphics.setBackgroundColor(r = 0.1, g = 0.1, b = 0.15);
 }
 
 @export("love.update")
 func update(dt: float) {
-  if love.keyboard.isDown(enums.KeyCode.Left) ||
-     love.keyboard.isDown(enums.KeyCode.A) {
+  if love2d.love.keyboard.isDown(enums.KeyCode.Left) ||
+     love2d.love.keyboard.isDown(enums.KeyCode.A) {
     hero_x -= SPEED * dt;
   }
-  if love.keyboard.isDown(enums.KeyCode.Right) ||
-     love.keyboard.isDown(enums.KeyCode.D) {
+  if love2d.love.keyboard.isDown(enums.KeyCode.Right) ||
+     love2d.love.keyboard.isDown(enums.KeyCode.D) {
     hero_x += SPEED * dt;
   }
-  if love.keyboard.isDown(enums.KeyCode.Up) ||
-     love.keyboard.isDown(enums.KeyCode.W) {
+  if love2d.love.keyboard.isDown(enums.KeyCode.Up) ||
+     love2d.love.keyboard.isDown(enums.KeyCode.W) {
     hero_y -= SPEED * dt;
   }
-  if love.keyboard.isDown(enums.KeyCode.Down) ||
-     love.keyboard.isDown(enums.KeyCode.S) {
+  if love2d.love.keyboard.isDown(enums.KeyCode.Down) ||
+     love2d.love.keyboard.isDown(enums.KeyCode.S) {
     hero_y += SPEED * dt;
   }
 }
 
 @export("love.draw")
 func draw() {
-  love.graphics.clear(r = 0.1, g = 0.15, b = 0.2);
+  love2d.love.graphics.clear(r = 0.1, g = 0.15, b = 0.2);
 
   // Draw background playing arena
-  love.graphics.setColorRgba(0.2, 0.7, 0.5);
-  love.graphics.rectangle(mode = enums.DrawMode.Fill, x = 50.0, y = 50.0,
-                          width = 700.0, height = 500.0);
+  love2d.love.graphics.setColorRgba(0.2, 0.7, 0.5);
+  love2d.love.graphics.rectangle(mode = enums.DrawMode.Fill, x = 50.0, y = 50.0,
+                                 width = 700.0, height = 500.0);
 
   // Draw mock hero character procedurally (in practice use image asset)
-  love.graphics.setColorRgba(0.9, 0.3, 0.4);
-  love.graphics.circle(mode = enums.DrawMode.Fill, x = hero_x, y = hero_y,
-                       radius = 24.0);
+  love2d.love.graphics.setColorRgba(0.9, 0.3, 0.4);
+  love2d.love.graphics.circle(mode = enums.DrawMode.Fill, x = hero_x,
+                              y = hero_y, radius = 24.0);
 
   // Draw hero outline
-  love.graphics.setColorRgba(1.0, 1.0, 1.0);
-  love.graphics.circle(mode = enums.DrawMode.Line, x = hero_x, y = hero_y,
-                       radius = 24.0);
+  love2d.love.graphics.setColorRgba(1.0, 1.0, 1.0);
+  love2d.love.graphics.circle(mode = enums.DrawMode.Line, x = hero_x,
+                              y = hero_y, radius = 24.0);
 
   // Draw HUD information & Controls
-  love.graphics.setColorRgba(1.0, 1.0, 1.0);
-  let fps_str = f"FPS: {love.timer.getFPS()}";
-  love.graphics.print(text = fps_str, x = 10.0, y = 10.0);
-  love.graphics.print(text = "Move with WASD or Arrow Keys",
-                      x = 10.0, y = 30.0);
+  love2d.love.graphics.setColorRgba(1.0, 1.0, 1.0);
+  let fps_str = f"FPS: {love2d.love.timer.getFPS()}";
+  love2d.love.graphics.print(text = fps_str, x = 10.0, y = 10.0);
+  love2d.love.graphics.print(text = "Move with WASD or Arrow Keys",
+                             x = 10.0, y = 30.0);
 }

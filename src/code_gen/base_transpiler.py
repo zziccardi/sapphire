@@ -163,10 +163,67 @@ class BaseTranspiler(ABC):
     """Return the accumulated output as a single string."""
     return "".join(self.code)
 
+  def _next_temp_name(self, prefix: str = "_sp_tmp") -> str:
+    """Generates a unique temporary identifier name for this transpiler instance."""
+    counts = getattr(self, "_temp_name_counters", None)
+    if counts is None:
+      counts = {}
+      self._temp_name_counters = counts
+    n = counts.get(prefix, 0) + 1
+    counts[prefix] = n
+    return f"{prefix}_{n}"
+
+  def _type_needs_destructor(
+      self, type_obj: Any, _seen: Optional[Set[str]] = None
+  ) -> Optional[str]:
+    """Returns the destructible type name if *type_obj* requires deterministic teardown."""
+    if type_obj is None:
+      return None
+    from src.semantics.types import (
+        ArenaType,
+        OptionalType,
+        RefType,
+        SharedRefType,
+        StructType,
+    )
+    if isinstance(type_obj, OptionalType):
+      return self._type_needs_destructor(type_obj.base_type, _seen)
+    if isinstance(type_obj, ArenaType):
+      return "Arena"
+    if isinstance(type_obj, RefType):
+      return "Ref"
+    if isinstance(type_obj, SharedRefType):
+      return "SharedRef"
+    if isinstance(type_obj, StructType):
+      if type_obj.is_prototype:
+        return None
+      if type_obj.name in self.structs_with_destructor:
+        return type_obj.name
+      if type_obj.has_any_destructor():
+        return type_obj.name
+      seen = set() if _seen is None else set(_seen)
+      if type_obj.name in seen:
+        return None
+      seen.add(type_obj.name)
+      for field in type_obj.fields.values():
+        if self._type_needs_destructor(field.field_type, seen):
+          return type_obj.name
+    return None
+
   def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
-    """Determines if *expr* evaluates to a struct type with a `__del__` destructor."""
+    """Determines if *expr* evaluates to a destructible type (RAII struct, Arena, Ref, SharedRef)."""
     if expr is None:
       return None
+    inferred = getattr(expr, "inferred_type", None)
+    if inferred is not None:
+      from src.semantics.types import MultiReturnType
+      if isinstance(inferred, MultiReturnType):
+        if return_index < len(inferred.types):
+          inferred = inferred.types[return_index]
+        else:
+          return None
+      return self._type_needs_destructor(inferred)
+
     if isinstance(expr, StructInitializerNode):
       if expr.struct_name in self.structs_with_destructor:
         return expr.struct_name
@@ -179,11 +236,28 @@ class BaseTranspiler(ABC):
           if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
             return rets[return_index]
       elif isinstance(expr.callee, MemberAccessNode):
+        if getattr(expr.callee, "is_shared_ref_share", False) or getattr(
+            expr.callee, "is_weak_ref_upgrade", False
+        ):
+          return "SharedRef"
         m_name = expr.callee.member
-        if m_name in self.method_return_types:
-          rets = self.method_return_types[m_name]
-          if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
-            return rets[return_index]
+        recv_struct = None
+        if isinstance(expr.callee.receiver, IdentifierNode):
+          rm = (
+              self._mangle_name(expr.callee.receiver.name)
+              if hasattr(self, "_mangle_name")
+              else expr.callee.receiver.name
+          )
+          recv_struct = self.variable_types.get(rm) or self.variable_types.get(
+              expr.callee.receiver.name
+          )
+        rets = (
+            self.method_return_types.get((recv_struct, m_name))
+            if recv_struct
+            else None
+        )
+        if rets and return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+          return rets[return_index]
     elif isinstance(expr, (IdentifierNode, MoveNode)):
       m_name = (
           self._mangle_name(expr.name)
@@ -217,11 +291,6 @@ class BaseTranspiler(ABC):
           st = self._expr_destructible_struct(case.body, return_index=return_index)
           if st:
             return st
-    inferred = getattr(expr, "inferred_type", None)
-    if hasattr(inferred, "base_type"):
-      inferred = inferred.base_type
-    if inferred and getattr(inferred, "name", None) in self.structs_with_destructor:
-      return inferred.name
     return None
 
   @staticmethod
@@ -230,6 +299,18 @@ class BaseTranspiler(ABC):
     if isinstance(expr, MoveNode):
       return True
     if isinstance(expr, (IdentifierNode, MemberAccessNode, IndexExprNode)):
+      return False
+    # Array.get(...) and Map.get(...) return borrowed views into the container,
+    # never owned values to be destroyed at the end of an `if let`/`if var` block.
+    if (
+        isinstance(expr, CallNode)
+        and isinstance(expr.callee, MemberAccessNode)
+        and expr.callee.member == "get"
+        and (
+            getattr(expr.callee, "is_array_method", False)
+            or getattr(expr.callee, "is_map_method", False)
+        )
+    ):
       return False
     return True
 
@@ -268,21 +349,31 @@ class BaseTranspiler(ABC):
         pending.append(m_name)
     else:
       self.moved_vars.add(m_name)
+      # Also emit nulling on unconditional moves of tracked destructible vars
+      # so a subsequent conditional reassignment cannot leave an aliased live handle.
+      pending_uncond = getattr(self, "_pending_unconditional_null_vars", None)
+      if (
+          pending_uncond is not None
+          and self._is_active_destructible_var(m_name)
+          and m_name not in pending_uncond
+      ):
+        pending_uncond.append(m_name)
 
   def _drain_pending_null_vars(
       self,
       null_literal: str,
       exclude: Optional[Set[str]] = None,
   ) -> None:
-    """Emits post-statement drop-flag clearing (`v = None` / `v = nil`) for conditional moves."""
-    pending = getattr(self, "_pending_null_vars", None)
-    if not pending:
-      return
-    for var_name in list(pending):
-      if not exclude or var_name not in exclude:
-        self.newline()
-        self.emit(f"{var_name} = {null_literal}")
-    pending.clear()
+    """Emits post-statement drop-flag clearing (`v = None` / `v = nil`) for moved vars."""
+    for attr in ("_pending_null_vars", "_pending_unconditional_null_vars"):
+      pending = getattr(self, attr, None)
+      if not pending:
+        continue
+      for var_name in list(pending):
+        if not exclude or var_name not in exclude:
+          self.newline()
+          self.emit(f"{var_name} = {null_literal}")
+      pending.clear()
 
   def _visit_in_branch(self, node: ASTNode) -> None:
     """Visits *node* inside a conditional branch depth for move drop-flag tracking."""
@@ -325,7 +416,7 @@ class BaseTranspiler(ABC):
           if getattr(m, "func_decl", None):
             ret_names = get_return_type_names(m.func_decl)
             if ret_names:
-              self.method_return_types[m.func_decl.name] = ret_names
+              self.method_return_types[(decl.struct_name, m.func_decl.name)] = ret_names
       elif isinstance(decl, FuncDeclNode):
         ret_names = get_return_type_names(decl)
         if ret_names:
@@ -334,7 +425,7 @@ class BaseTranspiler(ABC):
     self.proto_structs: Set[str] = set()
     self.struct_destructible_fields: Dict[str, List[str]] = {}
     self.struct_parent_names: Dict[str, List[str]] = {}
-    self.structs_with_destructor = {"Arena"}
+    self.structs_with_destructor = {"Arena", "Ref", "SharedRef"}
 
     for decl in program.declarations:
       if isinstance(decl, StructDeclNode):

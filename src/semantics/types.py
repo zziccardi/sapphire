@@ -4,7 +4,19 @@ This module defines the Type class hierarchy and built-in method
 signatures used by the semantic analyzer and LSP.
 """
 
+import os
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+
+def _modules_match(m1: Optional[str], m2: Optional[str]) -> bool:
+  """Returns True if two optional defining_module paths refer to the same module."""
+  if m1 is None or m2 is None:
+    return True
+  if m1 == m2:
+    return True
+  if m1 == "__main__" or m2 == "__main__":
+    return False
+  return os.path.abspath(m1) == os.path.abspath(m2)
 
 
 # ==========================================
@@ -183,8 +195,10 @@ class FunctionType(Type):
   def return_types(self) -> List[Type]:
     if isinstance(self.return_type, MultiReturnType):
       return self.return_type.types
-    elif (isinstance(self.return_type, PrimitiveType) and
-          self.return_type.name == "none"):
+    elif isinstance(self.return_type, NoneType) or (
+        isinstance(self.return_type, PrimitiveType)
+        and self.return_type.name in ("none", "void")
+    ):
       return []
     else:
       return [self.return_type]
@@ -199,6 +213,8 @@ class FunctionType(Type):
     for p1, p2 in zip(self.param_types, other.param_types):
       if not p2.is_compatible(p1):
         return False
+    if self.param_mutabilities != other.param_mutabilities:
+      return False
     ret1 = self.return_type
     ret2 = other.return_type
     is_void1 = isinstance(ret1, (NoneType, InferredType)) or (isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void"))
@@ -325,11 +341,14 @@ class StructType(Type):
     """Returns True if this struct or any ancestor struct defines '__del__'."""
     if "__del__" in self.methods:
       return True
+    seen = set() if _seen is None else set(_seen)
+    if self.name in seen:
+      return False
+    seen.add(self.name)
+    for parent in self.parent_types:
+      if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
+        return True
     if self.parent_names and symbol_table:
-      seen = set() if _seen is None else set(_seen)
-      if self.name in seen:
-        return False
-      seen.add(self.name)
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)
         if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
@@ -408,8 +427,10 @@ class StructType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, StructType):
       return False
-    # Struct types are compared by name (nominal typing)
-    return self.name == other.name
+    # Struct types are compared by name and defining module (nominal typing)
+    return self.name == other.name and _modules_match(
+        self.defining_module, other.defining_module
+    )
 
   def __repr__(self) -> str:
     if self.type_params:
@@ -422,17 +443,21 @@ class TraitType(Type):
 
   def __init__(self, name: str, comments: Optional[str] = None,
                type_params: Optional[List[str]] = None,
-               ast_decl: Optional[Any] = None):
+               ast_decl: Optional[Any] = None,
+               defining_module: Optional[str] = None):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
     self.comments = comments or ""
     self.type_params = type_params or []
     self.ast_decl = ast_decl
+    self.defining_module = defining_module
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, TraitType):
       return False
-    return self.name == other.name
+    return self.name == other.name and _modules_match(
+        self.defining_module, other.defining_module
+    )
 
   def __repr__(self) -> str:
     if self.type_params:
@@ -448,10 +473,12 @@ class EnumType(Type):
       name: str,
       variants: Optional[Dict[str, Union[int, str]]] = None,
       comments: Optional[str] = None,
+      defining_module: Optional[str] = None,
   ):
     self.name = name
     self.variants: Dict[str, Union[int, str]] = variants or {}
     self.comments = comments or ""
+    self.defining_module = defining_module
 
   @property
   def value_type(self) -> str:
@@ -463,7 +490,9 @@ class EnumType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, EnumType):
       return False
-    return self.name == other.name
+    return self.name == other.name and _modules_match(
+        self.defining_module, other.defining_module
+    )
 
   def __repr__(self) -> str:
     return self.name
@@ -539,12 +568,12 @@ class ArrayType(Type):
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, ArrayType):
-      if (isinstance(self.element_type, NoneType) or
-          isinstance(other.element_type, NoneType)):
-        return True
       if other.is_fixed_size:
         if not self.is_fixed_size or self.size != other.size:
           return False
+      if (isinstance(self.element_type, NoneType) or
+          isinstance(other.element_type, NoneType)):
+        return True
       return self.element_type.is_compatible(other.element_type)
     if isinstance(other, OptionalType):
       return self.is_compatible(other.base_type)
@@ -603,9 +632,14 @@ class CoroutineType(Type):
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, CoroutineType):
-      if (isinstance(self.yield_type, NoneType) or
-          isinstance(other.yield_type, NoneType)):
+      if isinstance(self.yield_type, NoneType) and isinstance(
+          other.yield_type, NoneType
+      ):
         return True
+      if isinstance(self.yield_type, NoneType) or isinstance(
+          other.yield_type, NoneType
+      ):
+        return False
       return self.yield_type.is_compatible(other.yield_type)
     if isinstance(other, OptionalType):
       return self.is_compatible(other.base_type)

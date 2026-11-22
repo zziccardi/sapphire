@@ -190,10 +190,10 @@ class TestLLVMTranspiler(unittest.TestCase):
     code_bool = "func f_bool(): bool {}"
     code_struct = "struct Point { var x: int; }\nfunc f_struct(): Point {}"
 
-    self.assertIn("ret i64 0", self._parse_and_transpile(code_int))
-    self.assertIn("ret double", self._parse_and_transpile(code_float))
-    self.assertIn("ret i1 0", self._parse_and_transpile(code_bool))
-    self.assertIn('ret %"struct.Point"* null', self._parse_and_transpile(code_struct))
+    self.assertIn("ret i64 0", self._parse_and_transpile(code_int, check_types=False))
+    self.assertIn("ret double", self._parse_and_transpile(code_float, check_types=False))
+    self.assertIn("ret i1 0", self._parse_and_transpile(code_bool, check_types=False))
+    self.assertIn('ret %"struct.Point"* null', self._parse_and_transpile(code_struct, check_types=False))
 
   def test_block_and_expr_stmt(self):
     code = """
@@ -306,7 +306,7 @@ class TestLLVMTranspiler(unittest.TestCase):
 
     bad_op = BinaryOpNode(
         left=LiteralNode(value=1, lit_type="int"),
-        op="%",
+        op="&&",
         right=LiteralNode(value=2, lit_type="int"),
     )
     with self.assertRaises(NotImplementedError):
@@ -329,6 +329,105 @@ class TestLLVMTranspiler(unittest.TestCase):
     node2 = VarDeclNode(is_mutable=True, names=["b"])
     node2.type_node = BasicTypeNode("float")
     transpiler.visit(node2)
+
+  def test_isolated_ir_context_across_transpilers(self):
+    """Verifies separate LLVMTranspiler instances use isolated ir.Context() objects."""
+    code = """
+    struct Point {
+      var x: int;
+      var y: float;
+    }
+    """
+    ir1 = self._parse_and_transpile(code)
+    ir2 = self._parse_and_transpile(code)
+    self.assertIn('%"struct.Point" = type {i64, double}', ir1)
+    self.assertIn('%"struct.Point" = type {i64, double}', ir2)
+
+  def test_inferred_local_types_and_zero_initialization(self):
+    """Verifies untyped locals infer LLVM type from init_expr and uninitialized locals zero-init."""
+    code = """
+    func test_vars(): float {
+      let f = 2.5;
+      var i: int;
+      var d: float;
+      return f + i + d;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn('%"f" = alloca double', ir_out)
+    self.assertIn("store i64 0", ir_out)
+    self.assertRegex(ir_out, r'store double\s+0x0, double\* %"d"')
+
+  def test_compound_assignments_and_block_scoping_mcjit(self):
+    """Verifies compound assignments (+=, -=, *=, /=, %=) and lexical block scoping via MCJIT."""
+    import ctypes
+    import llvmlite.binding as llvm_binding
+
+    code = """
+    func compound(x: int): int {
+      var acc = x;
+      acc += 10;
+      acc -= 2;
+      acc *= 3;
+      acc /= 2;
+      acc %= 7;
+      {
+        var acc: int = 999;
+        acc += 1;
+      }
+      return acc;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn("srem i64", ir_out)
+    mod = llvm_binding.parse_assembly(ir_out)
+    mod.verify()
+    tm = llvm_binding.Target.from_default_triple().create_target_machine()
+    engine = llvm_binding.create_mcjit_compiler(mod, tm)
+    engine.finalize_object()
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(engine.get_function_address("compound"))
+    # ((4 + 10 - 2) * 3 / 2) % 7 = (12 * 3 / 2) % 7 = 18 % 7 = 4
+    self.assertEqual(fn(4), 4)
+
+  def test_struct_inheritance_and_inferred_field_types(self):
+    """Verifies child structs inline parent fields and infer untyped default field types."""
+    code = """
+    struct Base {
+      var id = 1;
+    }
+    struct Child: Base {
+      var weight = 2.5;
+      var active = true;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn('%"struct.Base" = type {i64}', ir_out)
+    self.assertIn('%"struct.Child" = type {i64, double, i1}', ir_out)
+
+  def test_float_unordered_not_equal_and_extern_declare(self):
+    """Verifies float != uses fcmp une (IEEE 754 NaN) and @extern emits declare prototypes."""
+    code = """
+    @extern
+    func c_hypot(a: float, b: float): float;
+
+    func is_neq(a: float, b: float): bool {
+      return a != b;
+    }
+    """
+    ir_out = self._parse_and_transpile(code)
+    self.assertIn('declare double @"c_hypot"(double %"a", double %"b")', ir_out)
+    self.assertIn("fcmp une double", ir_out)
+
+  def test_unsupported_top_level_and_multi_raise_not_implemented(self):
+    """Verifies top-level vars and multi-var/assign/return raise NotImplementedError cleanly."""
+    for snippet in (
+        "var g: int = 1;",
+        "func f() { var a, b = 1, 2; }",
+        "func f() { var a = 1; var b = 2; a, b = 3, 4; }",
+        "func f(): int, int { return 1, 2; }",
+    ):
+      with self.assertRaises(NotImplementedError, msg=snippet):
+        self._parse_and_transpile(snippet, check_types=False)
 
   def test_mcjit_execution(self):
     """Verifies that generated LLVM IR can be JIT-compiled and executed natively."""

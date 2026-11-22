@@ -1730,12 +1730,12 @@ let field_ref = c_var.p.x;
     # 2. Top-level func ForNode in _find_local_decl (lines 522-524)
     res_top_k = definition(self.ls, DefinitionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=14, character=18)
+        position=Position(line=14, character=16)
     ))
     self.assertIsNotNone(res_top_k)
     res_top_v = definition(self.ls, DefinitionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
-        position=Position(line=15, character=18)
+        position=Position(line=15, character=16)
     ))
     self.assertIsNotNone(res_top_v)
 
@@ -2242,31 +2242,37 @@ func run() {
       mock_doc.source = demo_code
       self.ls.workspace.get_text_document.return_value = mock_doc
 
-      # Line 18 (0-based): '  love.graphics.setBackgroundColor(r = 0.1, g = 0.1, b = 0.15);'
-      # Position on 'setBackgroundColor' (col 18)
+      demo_lines = demo_code.splitlines()
+      bg_line = next(
+          i for i, ln in enumerate(demo_lines) if "setBackgroundColor" in ln
+      )
+      bg_col = demo_lines[bg_line].index("setBackgroundColor") + 2
       def_res = definition(self.ls, DefinitionParams(
           text_document=TextDocumentIdentifier(uri=demo_uri),
-          position=Position(line=18, character=18)
+          position=Position(line=bg_line, character=bg_col)
       ))
       self.assertIsNotNone(def_res)
       self.assertEqual(def_res.uri, graphics_uri)
-      self.assertEqual(def_res.range.start.line, 51)  # line 52 in 1-based indexing
+      self.assertEqual(def_res.range.start.line, 45)  # line 46 in 1-based indexing
 
       enums_file = os.path.join(repo_root, "lib", "love2d", "enums.sp")
       enums_uri = from_fs_path(enums_file)
 
-      # Character 33 is on 'enums'
+      rect_line = next(
+          i for i, ln in enumerate(demo_lines) if "enums.DrawMode.Fill" in ln
+      )
+      enums_col = demo_lines[rect_line].index("enums.DrawMode") + 1
       def_enums_mod = definition(self.ls, DefinitionParams(
           text_document=TextDocumentIdentifier(uri=demo_uri),
-          position=Position(line=47, character=33)
+          position=Position(line=rect_line, character=enums_col)
       ))
       self.assertIsNotNone(def_enums_mod)
       self.assertEqual(def_enums_mod.uri, enums_uri)
 
-      # Character 39 is on 'DrawMode'
+      draw_mode_col = demo_lines[rect_line].index("DrawMode") + 1
       def_enum_type = definition(self.ls, DefinitionParams(
           text_document=TextDocumentIdentifier(uri=demo_uri),
-          position=Position(line=47, character=39)
+          position=Position(line=rect_line, character=draw_mode_col)
       ))
       self.assertIsNotNone(def_enum_type)
       self.assertTrue(def_enum_type.uri.startswith("file:///"))

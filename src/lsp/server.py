@@ -8,9 +8,9 @@ import sys
 import os
 from typing import Any, List, Optional
 
-# Add parent directories to Python path to allow imports from parser and semantics
+# Add repository root to Python path to allow `from src...` imports when run directly
 sys.path.insert(0, os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..")))
+    os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from antlr4 import InputStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
@@ -54,11 +54,13 @@ from lsprotocol.types import (
 from pygls.lsp.server import LanguageServer
 
 # Imports from compiler codebase
+from src.common.errors import SapphireSyntaxError
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.parser.ast_builder import ASTBuilder
 from src.lsp.semantic_tokens import (
     SemanticTokensTypeChecker,
+    codepoint_span_to_utf16,
     encode_semantic_tokens,
     TOKEN_TYPES,
     TOKEN_MODIFIERS,
@@ -96,9 +98,10 @@ server = SapphireLanguageServer("sapphire-lsp", "v0.1.0")
 class ANTLRDiagnosticListener(ErrorListener):
   """Listener to translate ANTLR parser/lexer errors to LSP Diagnostics."""
 
-  def __init__(self):
+  def __init__(self, doc_text: Optional[str] = None):
     super().__init__()
     self.diagnostics = []
+    self._lines = doc_text.splitlines() if isinstance(doc_text, str) else None
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     length = 1
@@ -108,14 +111,21 @@ class ANTLRDiagnosticListener(ErrorListener):
 
     from src.code_gen.transpiler import format_syntax_error_message
 
-
     custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
+
+    start_char = column
+    end_char = column + length
+    if self._lines is not None and 0 <= line - 1 < len(self._lines):
+      start_char, u16_len = codepoint_span_to_utf16(
+          self._lines[line - 1], column, length
+      )
+      end_char = start_char + u16_len
 
     # LSP Diagnostic structure
     diag = Diagnostic(
         range=Range(
-            start=Position(line=line - 1, character=column),
-            end=Position(line=line - 1, character=column + length),
+            start=Position(line=line - 1, character=start_char),
+            end=Position(line=line - 1, character=end_char),
         ),
         message=f"Syntax Error: {custom_msg}",
         severity=DiagnosticSeverity.Error,
@@ -124,8 +134,47 @@ class ANTLRDiagnosticListener(ErrorListener):
     self.diagnostics.append(diag)
 
 
-def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: Any, ws_root: Optional[str] = None) -> None:
+def _mark_file_uri(node: Any, uri: str) -> None:
+  """Recursively tags every reachable ASTNode in *node* with *uri*."""
   from src.parser.ast import ASTNode
+
+  visited: set = set()
+
+  def _walk(cur: Any) -> None:
+    if not isinstance(cur, ASTNode):
+      return
+    obj_id = id(cur)
+    if obj_id in visited:
+      return
+    visited.add(obj_id)
+    cur.file_uri = uri
+    for val in cur.__dict__.values():
+      if isinstance(val, ASTNode):
+        _walk(val)
+      elif isinstance(val, (list, tuple)):
+        for item in val:
+          if isinstance(item, ASTNode):
+            _walk(item)
+      elif isinstance(val, dict):
+        for item in val.values():
+          if isinstance(item, ASTNode):
+            _walk(item)
+
+  _walk(node)
+
+
+def _is_uri_open_in_workspace(ls: SapphireLanguageServer, uri: str) -> bool:
+  """Returns True when *uri* is currently open in the editor workspace."""
+  workspace = getattr(ls, "workspace", None)
+  if workspace is None:
+    return False
+  open_docs = getattr(workspace, "text_documents", None)
+  if isinstance(open_docs, dict) and uri in open_docs:
+    return True
+  return False
+
+
+def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: Any, ws_root: Optional[str] = None) -> None:
   from pygls.uris import from_fs_path
   for s_decl in getattr(ast, "imports", []):
     if getattr(s_decl, "path", None):
@@ -134,6 +183,9 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
         abs_mod_path = os.path.abspath(mod_path_fs)
         mod_uri = from_fs_path(abs_mod_path)
         s_decl.target_file_uri = mod_uri
+        # Do not clobber unsaved in-memory editor buffers with stale on-disk files.
+        if _is_uri_open_in_workspace(ls, mod_uri) and mod_uri in ls.ast_cache:
+          continue
         try:
           stat_res = os.stat(abs_mod_path)
           mtime_key = (stat_res.st_mtime_ns, stat_res.st_size)
@@ -153,17 +205,7 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
             sub_tree = sub_parser.program()
             sub_ast = ASTBuilder().visit(sub_tree)
             if sub_ast:
-              def _mark_file_uri(node):
-                if isinstance(node, ASTNode):
-                  node.file_uri = mod_uri
-                  for v in node.__dict__.values():
-                    if isinstance(v, list):
-                      for item in v:
-                        if isinstance(item, ASTNode):
-                          _mark_file_uri(item)
-                    elif isinstance(v, ASTNode):
-                      _mark_file_uri(v)
-              _mark_file_uri(sub_ast)
+              _mark_file_uri(sub_ast, mod_uri)
               sub_checker = SemanticTokensTypeChecker(sub_code, source_file_path=mod_path_fs)
               try:
                 sub_checker.check(sub_ast)
@@ -183,7 +225,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
                     doc_text: str) -> None:
   """Run lexical, syntactic, and semantic validation on the source text."""
   input_stream = InputStream(doc_text)
-  listener = ANTLRDiagnosticListener()
+  listener = ANTLRDiagnosticListener(doc_text)
 
   # 1. Lexical validation
   lexer = SapphireLexer(input_stream)
@@ -206,16 +248,54 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
     builder = ASTBuilder()
     ast = builder.visit(tree)
     if ast:
-      ast.file_uri = doc_uri
-      for s_decl in getattr(ast, "declarations", []):
-        s_decl.file_uri = doc_uri
+      _mark_file_uri(ast, doc_uri)
       checker.check(ast)
+  except SapphireSyntaxError as syn_err:
+    err_line = max(1, syn_err.line or 1)
+    err_col = max(0, syn_err.column or 0)
+    err_len = max(1, getattr(syn_err, "length", 1) or 1)
+    lines = doc_text.splitlines()
+    start_char = err_col
+    end_char = err_col + err_len
+    if 0 <= err_line - 1 < len(lines):
+      start_char, u16_len = codepoint_span_to_utf16(
+          lines[err_line - 1], err_col, err_len
+      )
+      end_char = start_char + max(1, u16_len)
+    listener.diagnostics.append(
+        Diagnostic(
+            range=Range(
+                start=Position(line=err_line - 1, character=start_char),
+                end=Position(line=err_line - 1, character=end_char),
+            ),
+            message=f"Syntax Error: {syn_err.message}",
+            severity=DiagnosticSeverity.Error,
+            source="sapphire-parser",
+        )
+    )
   except Exception as e:  # pragma: no cover
     ast_error = str(e)
 
-  if ast:
-    encoded = encode_semantic_tokens(checker.raw_tokens)
+  has_syntax_errors = bool(listener.diagnostics)
+  has_usable_ast = bool(
+      ast
+      and (
+          getattr(ast, "declarations", None)
+          or getattr(ast, "imports", None)
+          or doc_uri not in ls.ast_cache
+      )
+  )
+  # Preserve existing semantic tokens when syntax errors occur during typing,
+  # while still keeping partial AST/symbol caches fresh when declarations exist.
+  if not has_syntax_errors and ast:
+    encoded = encode_semantic_tokens(checker.raw_tokens, doc_text=doc_text)
     ls.tokens_cache[doc_uri] = encoded
+  elif ast and doc_uri not in ls.tokens_cache:
+    ls.tokens_cache[doc_uri] = encode_semantic_tokens(
+        checker.raw_tokens, doc_text=doc_text
+    )
+
+  if has_usable_ast and (not has_syntax_errors or getattr(ast, "declarations", None) or doc_uri not in ls.ast_cache):
     ls.ast_cache[doc_uri] = ast
     ls.node_types_cache[doc_uri] = checker.node_types
     ls.symbol_table_cache[doc_uri] = checker.symbol_table
@@ -225,7 +305,7 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
     _preload_module_dependencies(ls, doc_uri, ast, ws_root)
 
   # If syntax errors are present, report them immediately
-  if listener.diagnostics:
+  if has_syntax_errors:
     ls.text_document_publish_diagnostics(
         PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
     )

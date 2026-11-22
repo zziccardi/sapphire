@@ -30,13 +30,30 @@ function math_mod.max(a, b)
   return b
 end
 
+function math_mod.safe_div__int(a, b)
+  if b == 0 then
+    return nil
+  end
+  local q = a / b
+  if q >= 0 then
+    return math.floor(q)
+  end
+  return math.ceil(q)
+end
+
+function math_mod.safe_div__float(a, b)
+  if b == 0 then
+    return nil
+  end
+  return a / b
+end
+
 function math_mod.safe_div(a, b)
   if b == 0 then
     return nil
   end
-  -- TODO: Validate against Lua 5.1 / LuaJIT.
   if math.type and math.type(a) == "integer" and math.type(b) == "integer" then
-    return math.floor(a / b)
+    return math_mod.safe_div__int(a, b)
   end
   return a / b
 end
@@ -75,8 +92,6 @@ math_mod.min__int = math_mod.min
 math_mod.min__float = math_mod.min
 math_mod.max__int = math_mod.max
 math_mod.max__float = math_mod.max
-math_mod.safe_div__int = math_mod.safe_div
-math_mod.safe_div__float = math_mod.safe_div
 math_mod.log__int = math_mod.log
 math_mod.log__float = math_mod.log
 math_mod.pow__int = math_mod.pow

@@ -16,6 +16,8 @@ describe('url helpers', () => {
   it('strips base path from pathname for active nav matching', () => {
     expect(stripBase('/sapphire/docs/spec', '/sapphire/')).toBe('/docs/spec');
     expect(stripBase('/sapphire/', '/sapphire/')).toBe('/');
+    expect(stripBase('/sapphire', '/sapphire/')).toBe('/');
+    expect(stripBase('/sapphire-extra', '/sapphire/')).toBe('/sapphire-extra');
     expect(stripBase('/docs', '/')).toBe('/docs');
   });
 });

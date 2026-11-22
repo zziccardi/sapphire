@@ -77,42 +77,95 @@ interface InlineToken {
   tokens?: InlineToken[];
 }
 
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function isUnsafeUri(href: string): boolean {
+  const normalized = href.replace(/[\u0000-\u001F\s]+/g, '').toLowerCase();
+  return (
+    normalized.startsWith('javascript:') ||
+    normalized.startsWith('vbscript:') ||
+    normalized.startsWith('data:')
+  );
+}
+
 function extractPlainTextFromTokens(tokens: InlineToken[]): string {
+  // Keep codespan contents (e.g. `Ref<T>`, `Coroutine<T>`) verbatim while
+  // stripping raw HTML tags across non-code text segments.
   let out = '';
-  for (const token of tokens) {
-    if (token.type === 'html') {
-      continue;
+  let textBuf = '';
+  const flushText = () => {
+    if (textBuf) {
+      out += stripHtmlTags(textBuf);
+      textBuf = '';
     }
-    if (token.tokens && token.tokens.length > 0) {
-      out += extractPlainTextFromTokens(token.tokens);
-    } else if (typeof token.text === 'string') {
-      out += token.text;
+  };
+  const walk = (items: InlineToken[]) => {
+    for (const token of items) {
+      if (token.type === 'html') {
+        continue;
+      }
+      if (token.type === 'codespan' && typeof token.text === 'string') {
+        flushText();
+        out += token.text;
+      } else if (token.tokens && token.tokens.length > 0) {
+        walk(token.tokens);
+      } else if (typeof token.text === 'string') {
+        textBuf += token.text;
+      }
     }
-  }
+  };
+  walk(tokens);
+  flushText();
   return out;
 }
 
-export function slugify(text: string): string {
-  return stripHtmlTags(text)
+function slugifyPlain(text: string): string {
+  return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[^a-z0-9_\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
 }
 
+export function slugify(text: string): string {
+  return slugifyPlain(stripHtmlTags(text));
+}
+
 export function rewriteMarkdownHref(href: string): string {
-  if (!href || href.startsWith('http://') || href.startsWith('https://') || href.startsWith('#')) {
+  if (!href) {
+    return '';
+  }
+  if (isUnsafeUri(href)) {
+    return '#';
+  }
+  if (
+    href.startsWith('http://') ||
+    href.startsWith('https://') ||
+    href.startsWith('mailto:') ||
+    href.startsWith('#')
+  ) {
     return href;
   }
-  const [rawPath, hash] = href.split('#');
+  const hashIdx = href.indexOf('#');
+  const rawPath = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+  const hash = hashIdx >= 0 ? href.slice(hashIdx + 1) : '';
   const baseName = path.basename(rawPath);
   const mapped = DOC_LINK_MAP[baseName];
   if (mapped) {
     return withBase(hash ? `${mapped}#${hash}` : mapped);
   }
-  if (rawPath.endsWith('.sp')) {
-    return `https://github.com/zziccardi/sapphire/blob/main/${rawPath.replace(/^\.\.\//, '')}`;
+  if (rawPath.endsWith('.sp') || rawPath.endsWith('.py')) {
+    const repoRel = rawPath.replace(/^(?:\.\.\/)+/, '').replace(/^\.\//, '');
+    const suffix = hash ? `#${hash}` : '';
+    return `https://github.com/zziccardi/sapphire/blob/main/${repoRel}${suffix}`;
   }
   return href;
 }
@@ -124,6 +177,7 @@ function normalizeLang(lang?: string): string {
   if (clean === 'sh' || clean === 'shell') return 'bash';
   if (clean === 'rs') return 'rust';
   if (clean === 'c++') return 'cpp';
+  if (clean === 'txt') return 'text';
   return SUPPORTED_LANGS.has(clean) ? clean : 'text';
 }
 
@@ -139,13 +193,11 @@ export async function renderMarkdownString(source: string): Promise<RenderedMark
     renderer: {
       heading({ tokens, depth }) {
         const text = this.parser.parseInline(tokens);
-        const plainText = stripHtmlTags(
-          extractPlainTextFromTokens(tokens as InlineToken[]),
-        ).trim();
+        const plainText = extractPlainTextFromTokens(tokens as InlineToken[]).trim();
         if (depth === 1 && !title) {
           title = plainText;
         }
-        let slug = slugify(plainText) || 'section';
+        let slug = slugifyPlain(plainText) || 'section';
         const count = usedSlugs.get(slug) ?? 0;
         usedSlugs.set(slug, count + 1);
         if (count > 0) {
@@ -154,7 +206,7 @@ export async function renderMarkdownString(source: string): Promise<RenderedMark
         if (depth === 2 || depth === 3) {
           headings.push({ depth, text: plainText, slug });
         }
-        return `<h${depth} id="${slug}">${text}</h${depth}>\n`;
+        return `<h${depth} id="${escapeHtmlAttr(slug)}">${text}</h${depth}>\n`;
       },
       code({ text, lang }) {
         const cleanLang = (lang ?? '').trim().toLowerCase();
@@ -168,10 +220,11 @@ export async function renderMarkdownString(source: string): Promise<RenderedMark
       link({ href, title: linkTitle, tokens }) {
         const text = this.parser.parseInline(tokens);
         const rewritten = rewriteMarkdownHref(href ?? '');
-        const titleAttr = linkTitle ? ` title="${linkTitle}"` : '';
+        const safeHref = escapeHtmlAttr(rewritten);
+        const titleAttr = linkTitle ? ` title="${escapeHtmlAttr(linkTitle)}"` : '';
         const external = rewritten.startsWith('http://') || rewritten.startsWith('https://');
         const relAttr = external ? ' target="_blank" rel="noopener noreferrer"' : '';
-        return `<a href="${rewritten}"${titleAttr}${relAttr}>${text}</a>`;
+        return `<a href="${safeHref}"${titleAttr}${relAttr}>${text}</a>`;
       },
     },
   });
@@ -180,7 +233,7 @@ export async function renderMarkdownString(source: string): Promise<RenderedMark
 
   for (const block of codeBlocks) {
     const highlighted = await highlightCode(block.code, block.lang);
-    html = html.replace(block.token, highlighted);
+    html = html.replace(block.token, () => highlighted);
   }
 
   return { html, headings, title };

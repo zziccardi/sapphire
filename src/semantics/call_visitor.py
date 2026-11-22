@@ -5,19 +5,24 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from src.parser.ast import (
     ASTNode,
     ArgumentNode,
+    ArrayLiteralNode,
+    ArrayTypeNode,
     BasicTypeNode,
     BinaryOpNode,
     CallNode,
     CastExprNode,
+    FunctionTypeNode,
     IdentifierNode,
     IndexExprNode,
     InterpolatedStringNode,
-    ArrayLiteralNode,
     LiteralNode,
     MapLiteralNode,
+    MapTypeNode,
     MemberAccessNode,
     MoveNode,
+    OptionalTypeNode,
     TernaryExprNode,
+    TypeNode,
     UnaryOpNode,
 )
 from src.semantics.arena_checker import ArenaChecker
@@ -31,14 +36,17 @@ from src.semantics.symbol_table import (
     FunctionSymbol,
     FunctionType,
     GenericTypeParameter,
+    MapType,
     ModuleSymbol,
     MultiReturnType,
+    NoneType,
     OptionalType,
     PrimitiveType,
     RangeType,
     RefType,
     SharedRefType,
     StringType,
+    StructSymbol,
     StructType,
     Type,
     VariableSymbol,
@@ -63,6 +71,112 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     """Verifies that non-primitive arguments do not conflict due to mutability aliasing."""
     ArenaChecker.check_aliasing(self, node, signature, is_constructor)
 
+  def _unify_generic_type(
+      self, param_t: Type, arg_t: Type, inferred_map: Dict[str, Type]
+  ) -> None:
+    """Recursively unifies generic type parameters in *param_t* against *arg_t*."""
+    if isinstance(param_t, GenericTypeParameter):
+      if param_t.name not in inferred_map:
+        inferred_map[param_t.name] = arg_t
+      else:
+        widened = self._widen_types(inferred_map[param_t.name], arg_t)
+        if widened is not None:
+          inferred_map[param_t.name] = widened
+      return
+    if isinstance(arg_t, (RefType, SharedRefType)) and not isinstance(
+        param_t, (RefType, SharedRefType)
+    ):
+      self._unify_generic_type(param_t, arg_t.inner_type, inferred_map)
+      return
+    if isinstance(param_t, OptionalType):
+      if isinstance(arg_t, OptionalType):
+        self._unify_generic_type(
+            param_t.base_type, arg_t.base_type, inferred_map
+        )
+      elif not isinstance(arg_t, NoneType):
+        self._unify_generic_type(param_t.base_type, arg_t, inferred_map)
+      return
+    if isinstance(param_t, ArrayType) and isinstance(arg_t, ArrayType):
+      if not isinstance(arg_t.element_type, NoneType):
+        self._unify_generic_type(
+            param_t.element_type, arg_t.element_type, inferred_map
+        )
+      return
+    if isinstance(param_t, MapType) and isinstance(arg_t, MapType):
+      if not isinstance(arg_t.key_type, NoneType):
+        self._unify_generic_type(param_t.key_type, arg_t.key_type, inferred_map)
+      if not isinstance(arg_t.value_type, NoneType):
+        self._unify_generic_type(
+            param_t.value_type, arg_t.value_type, inferred_map
+        )
+      return
+    if isinstance(param_t, RefType) and isinstance(arg_t, RefType):
+      self._unify_generic_type(
+          param_t.inner_type, arg_t.inner_type, inferred_map
+      )
+      return
+    if isinstance(param_t, SharedRefType) and isinstance(arg_t, SharedRefType):
+      self._unify_generic_type(
+          param_t.inner_type, arg_t.inner_type, inferred_map
+      )
+      return
+    if isinstance(param_t, WeakRefType) and isinstance(arg_t, WeakRefType):
+      self._unify_generic_type(
+          param_t.inner_type, arg_t.inner_type, inferred_map
+      )
+      return
+    if isinstance(param_t, CoroutineType) and isinstance(arg_t, CoroutineType):
+      if not isinstance(arg_t.yield_type, NoneType):
+        self._unify_generic_type(
+            param_t.yield_type, arg_t.yield_type, inferred_map
+        )
+      return
+    if isinstance(param_t, FunctionType) and isinstance(arg_t, FunctionType):
+      for p_sub, a_sub in zip(param_t.param_types, arg_t.param_types):
+        self._unify_generic_type(p_sub, a_sub, inferred_map)
+      self._unify_generic_type(
+          param_t.return_type, arg_t.return_type, inferred_map
+      )
+
+  def _type_to_type_node(self, t: Type) -> TypeNode:
+    """Converts a resolved semantic Type into a structured AST TypeNode."""
+    if isinstance(t, OptionalType):
+      return OptionalTypeNode(self._type_to_type_node(t.base_type))
+    if isinstance(t, ArrayType):
+      elem_node = self._type_to_type_node(t.element_type)
+      size = t.size if t.is_fixed_size else None
+      return ArrayTypeNode(elem_node, size=size)
+    if isinstance(t, MapType):
+      return MapTypeNode(
+          self._type_to_type_node(t.key_type),
+          self._type_to_type_node(t.value_type),
+      )
+    if isinstance(t, FunctionType):
+      return FunctionTypeNode(
+          [self._type_to_type_node(p) for p in t.param_types],
+          [self._type_to_type_node(r) for r in t.return_types],
+      )
+    if isinstance(t, RefType):
+      return BasicTypeNode("Ref", type_args=[self._type_to_type_node(t.inner_type)])
+    if isinstance(t, SharedRefType):
+      return BasicTypeNode(
+          "SharedRef", type_args=[self._type_to_type_node(t.inner_type)]
+      )
+    if isinstance(t, WeakRefType):
+      return BasicTypeNode(
+          "WeakRef", type_args=[self._type_to_type_node(t.inner_type)]
+      )
+    if isinstance(t, CoroutineType):
+      t_args = (
+          []
+          if isinstance(t.yield_type, NoneType)
+          else [self._type_to_type_node(t.yield_type)]
+      )
+      return BasicTypeNode("Coroutine", type_args=t_args)
+    if isinstance(t, NoneType):
+      return BasicTypeNode("void")
+    return BasicTypeNode(str(t))
+
   def _try_monomorphize_generic_call(self, node: CallNode) -> None:
     """Resolves and monomorphizes calls to generic functions when applicable."""
     sym = None
@@ -86,29 +200,44 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
       type_arg_nodes = node.type_args
     else:
       # Infer generic type parameters from call arguments when omitted.
+      # Snapshot move state so speculative inference does not double-move args.
       inferred_map: Dict[str, Type] = {}
       param_names = sym.symbol_type.param_names or []
-      for idx, arg in enumerate(node.arguments):
-        if arg.name:
-          param_idx = (
-              param_names.index(arg.name) if arg.name in param_names else None
-          )
-        else:
-          param_idx = idx
-        if param_idx is not None and param_idx < len(
-            sym.symbol_type.param_types
-        ):
-          param_t = sym.symbol_type.param_types[param_idx]
-          arg_t = self.visit(arg.expr)
-          if isinstance(param_t, GenericTypeParameter):
-            inferred_map[param_t.name] = arg_t
+      saved_moved = set(self.moved_symbols)
+      saved_errors_len = len(self.errors)
+      saved_diags_len = len(self.diagnostics)
+      try:
+        for idx, arg in enumerate(node.arguments):
+          if arg.name:
+            param_idx = (
+                param_names.index(arg.name) if arg.name in param_names else None
+            )
+          else:
+            param_idx = idx
+          if param_idx is not None and param_idx < len(
+              sym.symbol_type.param_types
+          ):
+            param_t = sym.symbol_type.param_types[param_idx]
+            arg_t = self.visit(arg.expr)
+            self._unify_generic_type(param_t, arg_t, inferred_map)
+      finally:
+        self._restore_moved_symbols(saved_moved)
+        del self.errors[saved_errors_len:]
+        del self.diagnostics[saved_diags_len:]
 
       type_arg_nodes = []
       resolved_type_args = []
       for p_name in sym.type_params:
-        inf_t = inferred_map.get(p_name, PrimitiveType("int"))
+        if p_name not in inferred_map:
+          self.error(
+              f"Cannot infer generic type parameter '{p_name}' for '{sym.name}'; "
+              "specify explicit type arguments.",
+              node=node,
+          )
+          return
+        inf_t = inferred_map[p_name]
         resolved_type_args.append(inf_t)
-        type_arg_nodes.append(BasicTypeNode(str(inf_t)))
+        type_arg_nodes.append(self._type_to_type_node(inf_t))
 
     mangled_name = self._monomorphize_function(
         sym, type_arg_nodes, resolved_type_args
@@ -261,6 +390,14 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
         )
         if isinstance(node.callee, IdentifierNode):
           node.callee.name = callee_type.name
+        elif isinstance(node.callee, MemberAccessNode):
+          node.callee.member = callee_type.name
+          if isinstance(node.callee.receiver, IdentifierNode):
+            mod_sym = self.symbol_table.lookup(node.callee.receiver.name)
+            if isinstance(mod_sym, ModuleSymbol):
+              mod_sym.exports[callee_type.name] = StructSymbol(
+                  callee_type.name, callee_type
+              )
       else:
         self.error(
             f"Generic struct '{callee_type.name}' requires explicit type arguments."
@@ -444,6 +581,9 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
 
     builtin_res = self._try_check_builtin_call(node)
     if builtin_res is not None:
+      if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+        if not isinstance(builtin_res, OptionalType):
+          builtin_res = OptionalType(builtin_res)
       return builtin_res
 
     signature: Optional[FunctionType] = None
@@ -582,12 +722,15 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     )
 
     effective_arg_type = arg_type
+    unwrapped_param = (
+        param_type.base_type if isinstance(param_type, OptionalType) else param_type
+    )
     # Auto-borrow Ref<T>/SharedRef<T> when passing to an unboxed parameter.
-    if isinstance(arg_type, RefType) and not isinstance(param_type, RefType):
+    if isinstance(arg_type, RefType) and not isinstance(unwrapped_param, RefType):
       effective_arg_type = arg_type.inner_type
       arg.is_auto_borrow = True
     elif isinstance(arg_type, SharedRefType) and not isinstance(
-        param_type, SharedRefType
+        unwrapped_param, SharedRefType
     ):
       if param_is_var:
         self.error(
@@ -598,19 +741,32 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
         effective_arg_type = arg_type.inner_type
         arg.is_auto_borrow = True
 
-    if isinstance(param_type, RefType):
-      if isinstance(arg.expr, IdentifierNode) and not isinstance(
-          arg.expr, MoveNode
-      ):
-        self.error(
-            f"Cannot pass move-only type '{arg_type}' by value; use "
-            f"explicit 'move {arg.expr.name}' to transfer ownership."
-        )
-      elif isinstance(arg.expr, (MemberAccessNode, IndexExprNode)):
-        self.error(
-            f"Cannot copy or partially move move-only type '{arg_type}' "
-            "out of a field or collection index."
-        )
+    if isinstance(unwrapped_param, RefType) and not getattr(
+        arg, "is_auto_borrow", False
+    ):
+      def _check_ref_arg_move(expr: ASTNode) -> None:
+        if isinstance(expr, TernaryExprNode):
+          _check_ref_arg_move(expr.true_expr)
+          _check_ref_arg_move(expr.false_expr)
+          return
+        if isinstance(expr, BinaryOpNode) and expr.op == "??":
+          _check_ref_arg_move(expr.left)
+          _check_ref_arg_move(expr.right)
+          return
+        if isinstance(expr, IdentifierNode) and not isinstance(expr, MoveNode):
+          self.error(
+              f"Cannot pass move-only type '{arg_type}' by value; use "
+              f"explicit 'move {expr.name}' to transfer ownership.",
+              node=arg,
+          )
+        elif isinstance(expr, (MemberAccessNode, IndexExprNode)):
+          self.error(
+              f"Cannot copy or partially move move-only type '{arg_type}' "
+              "out of a field or collection index.",
+              node=arg,
+          )
+
+      _check_ref_arg_move(arg.expr)
 
     if not effective_arg_type.is_compatible(param_type):
       self.error(
@@ -618,6 +774,40 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
           f"Expected '{param_type}', got '{arg_type}'.",
           node=arg,
       )
+    elif param_is_var:
+      if (
+          isinstance(effective_arg_type, ArrayType)
+          and isinstance(param_type, ArrayType)
+          and not isinstance(effective_arg_type.element_type, NoneType)
+          and not isinstance(param_type.element_type, NoneType)
+          and not param_type.element_type.is_compatible(
+              effective_arg_type.element_type
+          )
+      ):
+        self.error(
+            f"Argument type mismatch at position {idx+1}. "
+            f"Expected '{param_type}', got '{arg_type}' "
+            "(mutable 'var' array parameters are invariant in their element type).",
+            node=arg,
+        )
+      elif (
+          isinstance(effective_arg_type, MapType)
+          and isinstance(param_type, MapType)
+          and not isinstance(effective_arg_type.value_type, NoneType)
+          and not isinstance(param_type.value_type, NoneType)
+          and (
+              not param_type.key_type.is_compatible(effective_arg_type.key_type)
+              or not param_type.value_type.is_compatible(
+                  effective_arg_type.value_type
+              )
+          )
+      ):
+        self.error(
+            f"Argument type mismatch at position {idx+1}. "
+            f"Expected '{param_type}', got '{arg_type}' "
+            "(mutable 'var' map parameters are invariant in their key/value types).",
+            node=arg,
+        )
 
     if param_is_var and isinstance(arg.expr, IdentifierNode):
       sym = self.symbol_table.lookup(arg.expr.name)
@@ -718,6 +908,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     """Attaches canonicalized argument order and eval-temp flags for codegen."""
     if not bound_slots:
       call_node._resolved_arguments = []
+      call_node._omitted_arg_slots = set()
       call_node._requires_eval_order_temps = False
       call_node._eval_order_slots = []
       return
@@ -727,6 +918,9 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
         bound_slots[i].expr if i in bound_slots else LiteralNode(None, "none")
         for i in range(max_idx + 1)
     ]
+    call_node._omitted_arg_slots = {
+        i for i in range(max_idx + 1) if i not in bound_slots
+    }
     valid_slots = [p for p in arg_param_indices if p is not None]
     is_reordered = any(
         valid_slots[k] > valid_slots[k + 1]

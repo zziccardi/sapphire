@@ -35,7 +35,10 @@ func test_utf8_offset(): int {
   let o1 = utf8.offset(s, 1) ?? -1;
   let o2 = utf8.offset(s, 2) ?? -1;
   let o3 = utf8.offset(s, 3) ?? -1;
-  if o1 == 1 && o2 == 2 && o3 == 6 {
+  let o_last = utf8.offset(s, -1) ?? -1;
+  let o_snap = utf8.offset(s, 0, 4) ?? -1;
+  let o_cont = utf8.offset(s, 1, 4);
+  if o1 == 1 && o2 == 2 && o3 == 6 && o_last == 6 && o_snap == 2 && o_cont == none {
     return 1;
   }
   return 0;

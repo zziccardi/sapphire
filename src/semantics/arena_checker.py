@@ -8,6 +8,7 @@ checks from TypeChecker.
 from typing import Any, Callable, List, Optional, Set, Tuple
 from src.parser.ast import (
     ArrayLiteralNode,
+    AssignmentNode,
     ASTNode,
     BinaryOpNode,
     BlockNode,
@@ -15,7 +16,9 @@ from src.parser.ast import (
     CastExprNode,
     CloneNode,
     ExprStmtNode,
+    ForNode,
     IdentifierNode,
+    IfNode,
     IndexExprNode,
     LambdaNode,
     MapLiteralNode,
@@ -27,6 +30,7 @@ from src.parser.ast import (
     TernaryExprNode,
     UnaryOpNode,
     VarDeclNode,
+    YieldNode,
 )
 from src.semantics.symbol_table import (
     ArenaType,
@@ -184,6 +188,15 @@ class ArenaChecker:
     if isinstance(arena_expr, MoveNode):
       error_callback(f"Cannot allocate into moved Arena '{arena_expr.name}'.")
       return
+    if (
+        checker is not None
+        and hasattr(checker, "has_shared_ref_base")
+        and checker.has_shared_ref_base(arena_expr)
+    ):
+      error_callback(
+          "Cannot allocate into Arena through deeply immutable 'SharedRef'."
+      )
+      return
     if isinstance(arena_expr, IdentifierNode):
       sym = symbol_table.lookup(arena_expr.name)
       if isinstance(sym, VariableSymbol):
@@ -217,14 +230,27 @@ class ArenaChecker:
           )
           return
       if checker is not None:
-        recv_type = checker.node_types.get(arena_expr.receiver)
-        if isinstance(recv_type, StructType):
-          field = recv_type.fields.get(arena_expr.member)
-          if field and not field.is_mutable:
-            error_callback(
-                f"Cannot allocate into immutable Arena field "
-                f"'{arena_expr.member}'; declare it with 'var'."
-            )
+        curr: Any = arena_expr
+        while curr is not None:
+          if isinstance(curr, MemberAccessNode):
+            recv_type = checker.node_types.get(curr.receiver)
+            if isinstance(recv_type, OptionalType):
+              recv_type = recv_type.base_type
+            if isinstance(recv_type, RefType):
+              recv_type = recv_type.inner_type
+            if isinstance(recv_type, StructType):
+              field = recv_type.fields.get(curr.member)
+              if field and not field.is_mutable:
+                error_callback(
+                    f"Cannot allocate into immutable Arena field "
+                    f"'{curr.member}'; declare it with 'var'."
+                )
+                return
+            curr = curr.receiver
+          elif isinstance(curr, IndexExprNode):
+            curr = curr.array
+          else:
+            break
       return
     error_callback(
         "Arena allocation target must be a mutable 'var' Arena variable, "
@@ -246,8 +272,41 @@ class ArenaChecker:
         for item in node:
           walk(item)
         return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
+        return
       if isinstance(node, VarDeclNode):
-        walk(node.expr)
+        expr_list = getattr(node, "exprs", None) or (
+            [node.expr] if getattr(node, "expr", None) else []
+        )
+        for e in expr_list:
+          walk(e)
         for name in node.names:
           local_names.add(name)
         return
@@ -305,24 +364,79 @@ class ArenaChecker:
   ) -> List[Tuple[str, int]]:
     """Collects arena dependencies across all branches of a `match` expression."""
     deps: List[Tuple[str, int]] = []
+
+    def walk_stmt(stmt: Any) -> None:
+      if stmt is None:
+        return
+      if isinstance(stmt, BlockNode):
+        for s in stmt.statements:
+          walk_stmt(s)
+      elif isinstance(stmt, IfNode):
+        walk_stmt(stmt.then_block)
+        walk_stmt(stmt.else_block)
+      elif isinstance(stmt, YieldNode):
+        exprs = getattr(stmt, "expressions", None) or (
+            [stmt.expr] if getattr(stmt, "expr", None) else []
+        )
+        for yexpr in exprs:
+          deps.extend(
+              ArenaChecker.collect_arena_deps(symbol_table, yexpr, checker)
+          )
+      elif isinstance(stmt, ReturnNode):
+        for rexpr in stmt.expressions:
+          deps.extend(
+              ArenaChecker.collect_arena_deps(symbol_table, rexpr, checker)
+          )
+      elif isinstance(stmt, ExprStmtNode):
+        deps.extend(
+            ArenaChecker.collect_arena_deps(symbol_table, stmt.expr, checker)
+        )
+
     for case in node.cases:
       if isinstance(case.body, BlockNode):
-        for stmt in case.body.statements:
-          if isinstance(stmt, ReturnNode):
-            for rexpr in stmt.expressions:
-              deps.extend(
-                  ArenaChecker.collect_arena_deps(symbol_table, rexpr, checker)
-              )
-          elif isinstance(stmt, ExprStmtNode):
-            deps.extend(
-                ArenaChecker.collect_arena_deps(
-                    symbol_table, stmt.expr, checker
-                )
-            )
+        walk_stmt(case.body)
       else:
         deps.extend(
             ArenaChecker.collect_arena_deps(symbol_table, case.body, checker)
         )
+    return _dedup_deps(deps)
+
+  @staticmethod
+  def _collect_clone_init_deps(
+      symbol_table: SymbolTable, stmts: List[ASTNode], checker: Any
+  ) -> List[Tuple[str, int]]:
+    """Collects arena deps stored via statements inside a `clone { ... }` block."""
+    deps: List[Tuple[str, int]] = []
+
+    def walk(stmt: Any) -> None:
+      if stmt is None:
+        return
+      if isinstance(stmt, list):
+        for item in stmt:
+          walk(item)
+        return
+      if isinstance(stmt, BlockNode):
+        walk(stmt.statements)
+      elif isinstance(stmt, IfNode):
+        walk(stmt.then_block)
+        walk(stmt.else_block)
+      elif isinstance(stmt, ForNode):
+        walk(stmt.block)
+      elif isinstance(stmt, AssignmentNode):
+        for e in stmt.exprs:
+          if not (isinstance(e, IdentifierNode) and e.name == "self"):
+            deps.extend(
+                ArenaChecker.collect_arena_deps(symbol_table, e, checker)
+            )
+      elif isinstance(stmt, ExprStmtNode):
+        if isinstance(stmt.expr, CallNode):
+          for arg in stmt.expr.arguments:
+            if not (isinstance(arg.expr, IdentifierNode) and arg.expr.name == "self"):
+              deps.extend(
+                  ArenaChecker.collect_arena_deps(symbol_table, arg.expr, checker)
+              )
+
+    walk(stmts)
     return _dedup_deps(deps)
 
   @staticmethod
@@ -375,6 +489,12 @@ class ArenaChecker:
                 symbol_table, node.callee.receiver, checker
             )
         )
+      else:
+        deps.extend(
+            ArenaChecker.collect_arena_deps(
+                symbol_table, node.callee, checker
+            )
+        )
       for arg in node.arguments:
         deps.extend(
             ArenaChecker.collect_arena_deps(symbol_table, arg.expr, checker)
@@ -391,6 +511,12 @@ class ArenaChecker:
         )
         if resolved:
           deps.append((resolved[0], resolved[2]))
+      if node.initializer_block:
+        deps.extend(
+            ArenaChecker._collect_clone_init_deps(
+                symbol_table, node.initializer_block, checker
+            )
+        )
       return _dedup_deps(deps)
 
     if isinstance(node, (IdentifierNode, MoveNode)):
@@ -516,6 +642,27 @@ class ArenaChecker:
       if not is_partial_mutation and not in_branch:
         ArenaChecker._merge_symbol_deps(target_sym, [], replace=True)
       return
+
+    # Module-level globals outlive all local/caller stack arenas; reject storing
+    # any proto or arena-referencing value (including borrowed parameters).
+    is_module_global = (
+        target_sym.scope_defined is not None
+        and target_sym.scope_defined.parent is None
+    )
+    if (
+        is_module_global
+        and checker is not None
+        and getattr(checker, "current_function", None) is not None
+    ):
+      expr_type = checker.node_types.get(expr_node)
+      if expr_type is not None and ArenaChecker.type_can_hold_arena_ref(
+          expr_type, is_box_check=True
+      ):
+        error_callback(
+            f"Cannot store arena-referencing value of type '{expr_type}' "
+            f"into module-level global '{target_sym.name}'."
+        )
+        return
 
     deps = ArenaChecker.collect_arena_deps(symbol_table, expr_node, checker)
     for arena_name, dep_gen in deps:

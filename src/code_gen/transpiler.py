@@ -139,11 +139,20 @@ def _parse_and_check(
 
   if not quiet:
     print("Building AST...")
-  ast = ASTBuilder().visit(tree)
+  src_content = str(input_stream)
+  try:
+    ast = ASTBuilder().visit(tree)
+  except SapphireSyntaxError as e:
+    if not e.file_path:
+      e.file_path = input_file
+    if raise_on_error:
+      raise
+    if not quiet:
+      print(f"\nSyntax Error: {e}", file=sys.stderr)
+    sys.exit(1)
 
   if not quiet:
     print("Running Semantic Analysis & Type Checker...")
-  src_content = str(input_stream)
   checker = TypeChecker(source_file_path=input_file, source_content=src_content)
   try:
     checker.check(ast)
@@ -204,6 +213,43 @@ def _transpile_imports(
     )
 
 
+def _instantiate_transpiler(
+    target_info: Any,
+    src_filename: str,
+    sm_builder: Optional[SourceMapBuilder],
+    test_mode: bool,
+    dev_mode: bool,
+    use_runtime_module: bool,
+) -> Any:
+  """Constructs a target transpiler passing only kwargs accepted by its factory."""
+  import inspect
+
+  if target_info.name in ("lua", "love2d", "love"):
+    return target_info.factory(
+        source_file=src_filename,
+        source_map_builder=sm_builder,
+        test_mode=test_mode,
+        dev_mode=dev_mode,
+        use_runtime_module=use_runtime_module,
+    )
+  if target_info.name == "python":
+    return target_info.factory(
+        test_mode=test_mode, use_runtime_module=use_runtime_module
+    )
+
+  try:
+    sig = inspect.signature(target_info.factory)
+    params = sig.parameters
+    accepts_var_kw = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if accepts_var_kw or "test_mode" in params:
+      return target_info.factory(test_mode=test_mode)
+  except (TypeError, ValueError):
+    pass
+  return target_info.factory()
+
+
 def transpile_file(
     input_file: str,
     output_file: Optional[str] = None,
@@ -221,15 +267,11 @@ def transpile_file(
   if visited is None:
     visited = set()
 
-  abs_input_file = os.path.abspath(input_file)
-  if abs_input_file in visited:
-    return output_file or ""
-  visited.add(abs_input_file)
-
   target_info = TranspilerRegistry.get(target)
   ext = target_info.default_extension
 
   # Isolate build outputs when writing outside the input file's directory tree.
+  abs_input_file = os.path.abspath(input_file)
   isolated_root = _output_root
   if isolated_root is None and output_file is not None:
     input_dir = os.path.dirname(abs_input_file)
@@ -239,6 +281,10 @@ def transpile_file(
 
   if not output_file:
     output_file = os.path.splitext(input_file)[0] + ext
+
+  if abs_input_file in visited:
+    return output_file
+  visited.add(abs_input_file)
 
   ast, src_content = _parse_and_check(input_file, quiet, raise_on_error)
   _transpile_imports(
@@ -258,22 +304,16 @@ def transpile_file(
 
   sm_builder = None
   src_filename = os.path.basename(input_file)
-  if target_info.name in ("lua", "love2d", "love"):
-    if sourcemap:
-      sm_builder = SourceMapBuilder(src_filename, src_content)
-    transpiler = target_info.factory(
-        source_file=src_filename,
-        source_map_builder=sm_builder,
-        test_mode=test_mode,
-        dev_mode=dev_mode,
-        use_runtime_module=use_runtime_module,
-    )
-  elif target_info.name == "python":
-    transpiler = target_info.factory(
-        test_mode=test_mode, use_runtime_module=use_runtime_module
-    )
-  else:
-    transpiler = target_info.factory(test_mode=test_mode)
+  if target_info.name in ("lua", "love2d", "love") and sourcemap:
+    sm_builder = SourceMapBuilder(src_filename, src_content)
+  transpiler = _instantiate_transpiler(
+      target_info,
+      src_filename,
+      sm_builder,
+      test_mode,
+      dev_mode,
+      use_runtime_module,
+  )
 
   if not quiet:
     print(f"Transpiling to {target_info.display_name}...")

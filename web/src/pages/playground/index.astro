@@ -125,7 +125,14 @@ const bundleUrl = withBase('/sapphire-compiler.json');
     </div>
   </section>
 
-  <script type="application/json" id="playground-presets" set:html={JSON.stringify(presets)} />
+  <script
+    type="application/json"
+    id="playground-presets"
+    set:html={JSON.stringify(presets)
+      .replace(/</g, '\\u003c')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029')}
+  />
 </BaseLayout>
 
 <script is:inline>
@@ -200,9 +207,10 @@ const bundleUrl = withBase('/sapphire-compiler.json');
 
     const worker = workerUrl ? new Worker(workerUrl) : null;
     if (!worker) return;
+    let isWorkerReady = false;
 
     function runCode() {
-      if (!editor || !runBtn || !outOutput) return;
+      if (!isWorkerReady || !editor || !runBtn || !outOutput) return;
       runBtn.disabled = true;
       if (statusText) statusText.textContent = 'Compiling & running...';
       if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-sky-400 animate-pulse';
@@ -212,17 +220,27 @@ const bundleUrl = withBase('/sapphire-compiler.json');
 
     runBtn?.addEventListener('click', runCode);
 
+    worker.onerror = (event) => {
+      if (runBtn) runBtn.disabled = !isWorkerReady;
+      if (statusText) statusText.textContent = 'Worker crashed';
+      if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-rose-500';
+      if (outOutput) {
+        outOutput.textContent = event?.message || 'Playground worker crashed unexpectedly.';
+      }
+    };
+
     worker.onmessage = (event) => {
       const msg = event.data;
       if (msg.type === 'status') {
         if (statusText) statusText.textContent = msg.message;
       } else if (msg.type === 'ready') {
+        isWorkerReady = true;
         if (statusText) statusText.textContent = 'Ready (Pyodide Wasm)';
         if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-emerald-400';
         if (runBtn) runBtn.disabled = false;
         if (outOutput) outOutput.textContent = 'Ready!';
       } else if (msg.type === 'result') {
-        if (runBtn) runBtn.disabled = false;
+        if (runBtn) runBtn.disabled = !isWorkerReady;
         if (statusText) statusText.textContent = msg.ok ? 'Execution succeeded' : 'Compilation / runtime error';
         if (statusDot) {
           statusDot.className = msg.ok
@@ -236,8 +254,10 @@ const bundleUrl = withBase('/sapphire-compiler.json');
         if (outPython) outPython.textContent = msg.pythonCode || '// No Python output';
         if (outLua) outLua.textContent = msg.luaCode || '-- No Lua output';
       } else if (msg.type === 'error') {
-        if (runBtn) runBtn.disabled = false;
-        if (statusText) statusText.textContent = 'Worker error';
+        if (runBtn) runBtn.disabled = !isWorkerReady;
+        if (statusText) {
+          statusText.textContent = isWorkerReady ? 'Worker error' : 'Initialization failed';
+        }
         if (statusDot) statusDot.className = 'h-2 w-2 rounded-full bg-rose-500';
         if (outOutput) outOutput.textContent = msg.error;
       }

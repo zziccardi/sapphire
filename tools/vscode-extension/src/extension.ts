@@ -6,14 +6,14 @@ import {
   Executable
 } from 'vscode-languageclient/node';
 
-let client: LanguageClient;
+let client: LanguageClient | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration('sapphire');
   const lspPath = config.get<string>('lsp.path', 'sapphire');
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders) {
+  if (!workspaceFolders || workspaceFolders.length === 0) {
     vscode.window.showErrorMessage('Sapphire LSP requires an open workspace.');
     return;
   }
@@ -32,12 +32,17 @@ export function activate(context: vscode.ExtensionContext) {
     debug: executable
   };
 
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*.sp');
+  if (context && Array.isArray(context.subscriptions)) {
+    context.subscriptions.push(watcher);
+  }
+
   // Configure options for the language client
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: 'file', language: 'sapphire' }],
     synchronize: {
       // Synchronize the setting section 'sapphire' to the server
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.sp')
+      fileEvents: watcher
     }
   };
 
@@ -50,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   client.start().catch((error: any) => {
-    const msg = error.message || String(error);
+    const msg = error?.message || String(error);
     vscode.window.showErrorMessage(
       `Failed to start Sapphire Language Server ('${lspPath} lsp'): ${msg}. Please ensure '${lspPath}' is installed on your system PATH or configure 'sapphire.lsp.path' in VS Code settings.`
     );
@@ -63,5 +68,7 @@ export function deactivate(): Thenable<void> | undefined {
   if (!client) {
     return undefined;
   }
-  return client.stop();
+  const activeClient = client;
+  client = undefined;
+  return activeClient.stop();
 }

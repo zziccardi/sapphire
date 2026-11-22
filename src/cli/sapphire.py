@@ -21,10 +21,10 @@ if src_dir not in sys.path:  # pragma: no cover
   sys.path.insert(0, src_dir)
 
 from antlr4 import FileStream, CommonTokenStream
-from src.cli.diagnostics import Diagnostic
-from src.code_gen.transpiler import is_stdlib_stub, transpile_file
+from src.cli.diagnostics import Diagnostic, format_diagnostic
+from src.code_gen.transpiler import _instantiate_transpiler, is_stdlib_stub, transpile_file
 from src.code_gen.transpiler_registry import TranspilerRegistry
-from src.common.errors import SapphireError
+from src.common.errors import SapphireError, SapphireSyntaxError
 from src.parser.ast_builder import ASTBuilder
 from src.parser.error_listener import CustomErrorListener
 from src.parser.gen.SapphireLexer import SapphireLexer
@@ -61,8 +61,11 @@ def _prepare_exec_env() -> Dict[str, str]:
   lib_dir = discovered_lib or os.path.join(root_dir, "lib")
   lib_parent = os.path.dirname(lib_dir)
 
+  # Do NOT add `lib/std` directly to PYTHONPATH: `lib/std/math.py`,
+  # `lib/std/os.py`, and `lib/std/time.py` would shadow Python's stdlib
+  # modules whenever transpiled code or `@extern` bindings import them.
   py_paths = []
-  for p in (root_dir, lib_parent, lib_dir, os.path.join(lib_dir, "std")):
+  for p in (root_dir, lib_parent, lib_dir):
     if p and p not in py_paths:
       py_paths.append(p)
   if "PYTHONPATH" in env and env["PYTHONPATH"]:
@@ -329,7 +332,11 @@ def dump_ast_command(args):
   print("Parse Tree generated successfully.")
   print("Building AST...")
   builder = ASTBuilder()
-  ast = builder.visit(tree)
+  try:
+    ast = builder.visit(tree)
+  except SapphireError as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
 
   print("AST built successfully!")
   print("\nAST JSON Representation (Preview):")
@@ -351,16 +358,14 @@ def _validate_target_lowering(
   """Runs in-memory target lowering (e.g. `-t lua`) to catch backend errors."""
   target_info = TranspilerRegistry.get(target)
   src_filename = os.path.basename(file_path)
-  if target_info.name in ("lua", "love2d", "love"):
-    transpiler = target_info.factory(
-        source_file=src_filename,
-        source_map_builder=None,
-        test_mode=False,
-        dev_mode=False,
-        use_runtime_module=False,
-    )
-  else:
-    transpiler = target_info.factory(test_mode=False)
+  transpiler = _instantiate_transpiler(
+      target_info,
+      src_filename=src_filename,
+      sm_builder=None,
+      test_mode=False,
+      dev_mode=False,
+      use_runtime_module=False,
+  )
 
   try:
     transpiler.transpile(ast)
@@ -413,8 +418,10 @@ def _check_file_recursive(
     formatted_errors.append(msg)
     return
 
+  # Always collect syntax errors quietly; `check_command` prints `formatted_errors`
+  # once so root-file syntax errors are never duplicated on stderr.
   error_listener = CustomErrorListener(
-      file_path=file_path, source_content=input_stream, quiet=quiet
+      file_path=file_path, source_content=input_stream, quiet=True
   )
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
@@ -435,7 +442,29 @@ def _check_file_recursive(
 
   if is_root and not quiet:
     print("Building AST...")
-  ast = ASTBuilder().visit(tree)
+  try:
+    ast = ASTBuilder().visit(tree)
+  except SapphireSyntaxError as e:
+    diag = Diagnostic(
+        severity="error",
+        code="E_SYNTAX",
+        message=e.message,
+        file_path=file_path,
+        line=e.line,
+        column=e.column,
+    )
+    error_diags.append(diag)
+    formatted_errors.append(
+        format_diagnostic(
+            error_type="Syntax Error",
+            message=e.message,
+            file_path=file_path,
+            line=e.line,
+            column=e.column,
+            source_content=str(input_stream),
+        )
+    )
+    return
 
   if check_transitive:
     for imp in getattr(ast, "imports", []):
@@ -547,11 +576,13 @@ def check_command(args):
 
   if error_diags:
     if formatted_errors:
-      print(
-          "\nSemantic Analysis failed with errors:\n"
-          + "\n".join(formatted_errors),
-          file=sys.stderr,
+      all_syntax = all(d.code == "E_SYNTAX" for d in error_diags)
+      header = (
+          "\nSyntax Analysis failed with errors:\n"
+          if all_syntax
+          else "\nSemantic Analysis failed with errors:\n"
       )
+      print(header + "\n".join(formatted_errors), file=sys.stderr)
     sys.exit(1)
 
   print("\nSemantic Analysis completed successfully with 0 errors!")
@@ -674,14 +705,19 @@ def main():
       help="Emit machine-readable JSON diagnostic report")
   check_parser.set_defaults(func=check_command)
 
-  # Handle shortcut invocation: if first argument is a file (e.g.
-  # `sapphire samples/overview.sp`)
-  known_commands = ["build", "run", "test", "lsp", "parse", "dump-ast", "check"]
-  if (len(sys.argv) > 1 and not sys.argv[1].startswith("-") and
-      sys.argv[1] not in known_commands):
-    sys.argv.insert(1, "run")
+  # Handle shortcut invocation (e.g. `sapphire samples/overview.sp` or
+  # `sapphire -t lua samples/overview.sp`) without mutating sys.argv.
+  known_commands = {"build", "run", "test", "lsp", "parse", "dump-ast", "check"}
+  argv = list(sys.argv[1:])
+  if (
+      argv
+      and argv[0] not in known_commands
+      and "-h" not in argv
+      and "--help" not in argv
+  ):
+    argv = ["run"] + argv
 
-  args = parser.parse_args()
+  args = parser.parse_args(argv)
 
   if hasattr(args, "func"):
     args.func(args)

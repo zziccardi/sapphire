@@ -113,8 +113,49 @@ class TestMathModule(unittest.TestCase):
     self.assertIsNone(std_math.log(10.0, 1.0))
     self.assertIsNone(std_math.log(10.0, -2.0))
     self.assertAlmostEqual(std_math.log(100.0, 10.0), 2.0)
-    self.assertEqual(std_math.pow(2, 8), 256)
+    self.assertEqual(std_math.pow(2, 8), 256.0)
+    self.assertIsInstance(std_math.pow(2, 8), float)
     self.assertEqual(std_math.pow(2.0, -1.0), 0.5)
+    import math as _pymath
+    self.assertTrue(_pymath.isnan(std_math.pow(-2.0, 0.5)))
+    self.assertTrue(_pymath.isinf(std_math.pow(0.0, -1.0)))
+    self.assertEqual(std_math.safe_div__int(-7, 2), -3)
+    self.assertEqual(std_math.safe_div__int(7, -2), -3)
+    self.assertEqual(std_math.safe_div__int(-7, -2), 3)
+
+  def test_math_numeric_generic_constraints(self):
+    """Verifies pow, ceil, and floor reject non-numeric type instantiations."""
+    from src.common.errors import SapphireTypeError
+
+    for bad_call in (
+        'let x = math.pow("a", "b");',
+        'let x = math.ceil("a");',
+        'let x = math.floor("a");',
+    ):
+      code = f"""
+      import std.math as math;
+      func main() {{
+        {bad_call}
+      }}
+      """
+      with self.assertRaises(SapphireTypeError, msg=bad_call):
+        self._parse_and_check(code)
+
+  def test_math_safe_div_int_lua_parity(self):
+    """Verifies safe_div__int truncates toward zero in Lua 5.1/LuaJIT."""
+    import os
+    import shutil
+    import subprocess
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    self.assertIsNotNone(lua_bin)
+    lib_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "lib"))
+    script = (
+        f'package.path = "{lib_dir}/?.lua;" .. package.path\n'
+        'local m = require("std.math")\n'
+        'print(m.safe_div__int(-7, 2), m.safe_div__int(7, -2), m.safe_div__int(7, 2), tostring(m.safe_div__int(7, 0)))\n'
+    )
+    proc = subprocess.run([lua_bin, "-e", script], capture_output=True, text=True, check=True)
+    self.assertEqual(proc.stdout.strip().split(), ["-3", "-3", "3", "nil"])
 
 
 if __name__ == "__main__":

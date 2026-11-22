@@ -24,7 +24,26 @@ function fs_mod.write_file(path, content)
   return ok ~= nil
 end
 
+local function _is_directory(path)
+  local f, err, code = _io.open(path, "r")
+  if f ~= nil then
+    local ok, rerr, rcode = f:read(0)
+    f:close()
+    if ok == nil and (rcode == 21 or (rerr and string.find(rerr, "Is a directory"))) then
+      return true
+    end
+    return false
+  end
+  if code == 21 or (err and string.find(err, "Is a directory")) then
+    return true
+  end
+  return false
+end
+
 function fs_mod.remove_file(path)
+  if _is_directory(path) then
+    return false
+  end
   if _os and _os.remove then
     local ok = _os.remove(path)
     return ok ~= nil and ok ~= false

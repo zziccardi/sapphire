@@ -236,11 +236,6 @@ class MemberAccessVisitorMixin:
       self.error(f"Coroutine has no method '{node.member}'.")
       return PrimitiveType("none")
 
-    if node.member in _ASSERTION_NAMES:
-      fn_t = FunctionType([], PrimitiveType("none"))
-      fn_t.is_testing_assertion = True
-      return fn_t
-
     if isinstance(receiver_type, ModuleType):
       if isinstance(node.receiver, IdentifierNode):
         mod_sym = self.symbol_table.lookup(node.receiver.name)
@@ -251,6 +246,20 @@ class MemberAccessVisitorMixin:
                 exp_sym.symbol_type
                 if hasattr(exp_sym, "symbol_type")
                 else exp_sym
+            )
+          mod_path = mod_sym.module_path or ""
+          if node.member in _ASSERTION_NAMES and (
+              mod_path == "std.testing"
+              or mod_path == "testing"
+              or mod_path.endswith(".testing")
+          ):
+            fn_t = FunctionType([], PrimitiveType("none"))
+            fn_t.is_testing_assertion = True
+            return fn_t
+          if mod_sym.exports or getattr(mod_sym, "file_path", None):
+            self.error(
+                f"Module '{mod_sym.name}' has no exported member '{node.member}'.",
+                node=node,
             )
       return PrimitiveType("none")
 
@@ -273,8 +282,31 @@ class MemberAccessVisitorMixin:
         node.is_static_method = is_static
         node.is_instance_method = not is_static
         return method
+      if node.member in _ASSERTION_NAMES and (
+          receiver_type is self.symbol_table.testcase_trait
+          or receiver_type.name == "TestCase"
+      ):
+        node.is_instance_method = True
+        fn_t = FunctionType([], PrimitiveType("none"))
+        fn_t.is_testing_assertion = True
+        return fn_t
       self.error(f"Trait '{receiver_type.name}' has no member '{node.member}'.")
       return PrimitiveType("none")
+
+    if (
+        node.member in _ASSERTION_NAMES
+        and isinstance(receiver_type, StructType)
+        and (
+            receiver_type.name == "TestContext"
+            or receiver_type.implements_trait(
+                self.symbol_table.testcase_trait, self.symbol_table
+            )
+        )
+    ):
+      node.is_instance_method = True
+      fn_t = FunctionType([], PrimitiveType("none"))
+      fn_t.is_testing_assertion = True
+      return fn_t
 
     return None
 
@@ -352,13 +384,12 @@ class MemberAccessVisitorMixin:
       )
       return PrimitiveType("none")
 
-    # Re-check Array/Map after auto-deref from Ref<T>/SharedRef<T>.
-    if isinstance(receiver_type, ArrayType):
-      self._widen_array_size_on_mutation(node, receiver_type)
-      return CollectionChecker.resolve_array_member(self, node, receiver_type)
-
-    if isinstance(receiver_type, MapType):
-      return CollectionChecker.resolve_map_member(self, node, receiver_type)
+    # Re-check builtin receivers (String, Array, Map, Coroutine, Enum, Trait)
+    # after auto-deref from Ref<T>/SharedRef<T>.
+    if getattr(node, "is_auto_deref", False):
+      builtin_res = self._resolve_builtin_receiver_member(node, receiver_type)
+      if builtin_res is not None:
+        return builtin_res
 
     if not isinstance(receiver_type, StructType):
       self.error("Member access receiver is not a struct or trait.")
@@ -393,8 +424,15 @@ class MemberAccessVisitorMixin:
 
     method = receiver_type.get_method(node.member, self.symbol_table)
     if method:
-      node.is_static_method = method.modifier == "static"
-      node.is_instance_method = method.modifier != "static"
+      if method.modifier == "static":
+        self.error(
+            f"Cannot call static method '{node.member}' on an instance of "
+            f"'{receiver_type.name}'; call '{receiver_type.name}.{node.member}(...)' instead.",
+            node=node,
+        )
+        return method.method_type
+      node.is_static_method = False
+      node.is_instance_method = True
       return method.method_type
 
     self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")

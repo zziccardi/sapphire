@@ -1,6 +1,6 @@
 """Type resolution and pre-pass global/lambda analysis for TypeChecker."""
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import *
 from src.semantics.symbol_table import (
@@ -89,13 +89,41 @@ class TypeResolverMixin:
 
   def _get_impl_type_params(self, decl: ImplBlockNode) -> List[str]:
     type_params = list(decl.type_params) if decl.type_params else []
+    struct_type = self.symbol_table.lookup_type(decl.struct_name)
+    trait_type = (
+        self.symbol_table.lookup_type(decl.trait_name)
+        if getattr(decl, "trait_name", None)
+        else None
+    )
+    struct_is_generic = isinstance(struct_type, StructType) and bool(
+        struct_type.type_params
+    )
+    trait_tparams = (
+        set(trait_type.type_params)
+        if isinstance(trait_type, TraitType) and trait_type.type_params
+        else set()
+    )
     builtin_type_names = {
         "int", "float", "String", "bool", "none", "void",
         "Array", "Map", "Coroutine", "Ref", "SharedRef", "WeakRef", "Arena", "Range",
     }
-    for arg in getattr(decl, "trait_type_args", []) + getattr(decl, "struct_type_args", []):
-      if isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names:
-        if "." not in arg.name and self.symbol_table.lookup_type(arg.name) is None:
+    if struct_is_generic:
+      for arg in getattr(decl, "struct_type_args", []) + getattr(decl, "trait_type_args", []):
+        if isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names:
+          if "." not in arg.name and self.symbol_table.lookup_type(arg.name) is None:
+            if arg.name not in type_params:
+              type_params.append(arg.name)
+    elif trait_tparams:
+      # For concrete structs implementing a generic trait (`impl Trait<T> for S`),
+      # only treat unresolved type args that match the trait's declared type
+      # parameter names as generic; typos like `impl Trait<Typo> for S` remain
+      # undefined-type errors.
+      for arg in getattr(decl, "trait_type_args", []):
+        if (
+            isinstance(arg, BasicTypeNode)
+            and arg.name in trait_tparams
+            and self.symbol_table.lookup_type(arg.name) is None
+        ):
           if arg.name not in type_params:
             type_params.append(arg.name)
     decl.type_params = type_params
@@ -107,12 +135,24 @@ class TypeResolverMixin:
     if isinstance(t, OptionalType):
       return OptionalType(self._substitute_type_params(t.base_type, type_map))
     if isinstance(t, ArrayType):
-      return ArrayType(self._substitute_type_params(t.element_type, type_map), size=t.size)
+      return ArrayType(
+          self._substitute_type_params(t.element_type, type_map),
+          size=t.size,
+          is_fixed_size=t.is_fixed_size,
+      )
     if isinstance(t, MapType):
       return MapType(
           self._substitute_type_params(t.key_type, type_map),
           self._substitute_type_params(t.value_type, type_map),
       )
+    if isinstance(t, RefType):
+      return RefType(self._substitute_type_params(t.inner_type, type_map))
+    if isinstance(t, SharedRefType):
+      return SharedRefType(self._substitute_type_params(t.inner_type, type_map))
+    if isinstance(t, WeakRefType):
+      return WeakRefType(self._substitute_type_params(t.inner_type, type_map))
+    if isinstance(t, CoroutineType):
+      return CoroutineType(self._substitute_type_params(t.yield_type, type_map))
     if isinstance(t, MultiReturnType):
       return MultiReturnType([self._substitute_type_params(sub, type_map) for sub in t.types])
     if isinstance(t, FunctionType):
@@ -156,7 +196,10 @@ class TypeResolverMixin:
         for member in decl.members:
           if trait_type and member.func_decl.name in trait_type.methods:
             trait_method = trait_type.methods[member.func_decl.name]
-            if getattr(trait_method.ast_decl, "modifier", None) == "static":
+            if (
+                member.modifier is None
+                and getattr(trait_method.ast_decl, "modifier", None) == "static"
+            ):
               member.modifier = "static"
           func_decl = member.func_decl
           # Resolve parameters
@@ -184,15 +227,45 @@ class TypeResolverMixin:
 
           method = StructMethod(func_decl.name, signature, member.modifier)
 
-          # Validate __del__ destructor
+          # Validate __del__ destructor and __init__ constructor
           if func_decl.name == "__del__":
             if member.modifier == "static":
               self.error("Destructor '__del__' cannot be static.")
             if len(func_decl.parameters) > 0:
               self.error("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.")
-            is_void = (len(ret_type) == 1 and (ret_type[0].name in ("none", "void") or (isinstance(ret_type[0], PrimitiveType) and ret_type[0].name in ("none", "void"))))
+            is_void = (
+                len(ret_type) == 0
+                or (
+                    len(ret_type) == 1
+                    and (
+                        isinstance(ret_type[0], NoneType)
+                        or (
+                            isinstance(ret_type[0], PrimitiveType)
+                            and ret_type[0].name in ("none", "void")
+                        )
+                    )
+                )
+            )
             if not is_void:
               self.error("Destructor '__del__' must return void.")
+          elif func_decl.name == "__init__":
+            if member.modifier == "static":
+              self.error("Constructor '__init__' cannot be static.", node=func_decl)
+            is_void = (
+                len(ret_type) == 0
+                or (
+                    len(ret_type) == 1
+                    and (
+                        isinstance(ret_type[0], NoneType)
+                        or (
+                            isinstance(ret_type[0], PrimitiveType)
+                            and ret_type[0].name in ("none", "void")
+                        )
+                    )
+                )
+            )
+            if not is_void:
+              self.error("Constructor '__init__' must return void.", node=func_decl)
 
           # Check for duplicate definitions
           if func_decl.name in struct_type.methods:
@@ -267,7 +340,12 @@ class TypeResolverMixin:
         if isinstance(mod_sym, ModuleSymbol):
           exp_sym = mod_sym.lookup_export(parts[1])
           if exp_sym:
-            return exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+            resolved = exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
+            if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
+              resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
+              if not any(isinstance(t, GenericTypeParameter) for t in resolved_type_args):
+                return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
+            return resolved
           self.error(f"Module '{parts[0]}' does not export type '{parts[1]}'.", node=node)
           return PrimitiveType("none")
       resolved = self.symbol_table.lookup_type(node.name)
@@ -463,6 +541,35 @@ class TypeResolverMixin:
         for item in node:
           walk(item)
         return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
+        return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
             [node.expr] if getattr(node, "expr", None) else []
@@ -489,8 +596,16 @@ class TypeResolverMixin:
         return
       if isinstance(node, CallNode):
         if isinstance(node.callee, IdentifierNode):
-          direct_calls.add(node.callee.name)
+          callee_name = node.callee.name
+          if callee_name in local_names:
+            self.func_has_dynamic.add(func_id)
+          elif callee_name in self.module_var_globals:
+            direct_globals.add(callee_name)
+            self.func_has_dynamic.add(func_id)
+          else:
+            direct_calls.add(callee_name)
         elif isinstance(node.callee, MemberAccessNode):
+          walk(node.callee.receiver)
           if (
               isinstance(node.callee.receiver, IdentifierNode)
               and node.callee.receiver.name == "self"
@@ -503,6 +618,7 @@ class TypeResolverMixin:
           else:
             direct_calls.add(node.callee.member)
         else:
+          walk(node.callee)
           self.func_has_dynamic.add(func_id)
         for arg in node.arguments:
           walk(arg.expr)
@@ -527,6 +643,35 @@ class TypeResolverMixin:
       if isinstance(node, list):
         for item in node:
           walk(item)
+        return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
         return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
@@ -576,4 +721,150 @@ class TypeResolverMixin:
 
     walk(lambda_node.body)
     return borrows
+
+  def _scan_lambda_capture_modes(
+      self, lambda_node: LambdaNode
+  ) -> Tuple[Set[str], Set[str]]:
+    """Returns `(mutated_captures, read_captures)` for outer variables in *lambda_node*."""
+    local_names: Set[str] = {p.name for p in lambda_node.parameters}
+    mutated: Set[str] = set()
+    read: Set[str] = set()
+    collection_mutators = {
+        "push", "pop", "insert", "remove", "clear", "swap", "reverse", "sort",
+    }
+
+    def record_mutated(expr: ASTNode) -> None:
+      root = ArenaChecker.get_root_identifier(expr)
+      if root and root.name not in local_names:
+        sym = self.symbol_table.lookup(root.name)
+        if isinstance(sym, VariableSymbol):
+          mutated.add(sym.name)
+
+    def walk(node: Any) -> None:
+      if node is None:
+        return
+      if isinstance(node, list):
+        for item in node:
+          walk(item)
+        return
+      if isinstance(node, BlockNode):
+        saved = set(local_names)
+        walk(node.statements)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, IfNode):
+        saved = set(local_names)
+        for b in getattr(node, "bindings", None) or []:
+          walk(b.expr)
+          if b.is_mutable:
+            record_mutated(b.expr)
+          for n in getattr(b, "let_names", None) or [b.let_name]:
+            local_names.add(n)
+        walk(node.condition)
+        walk(node.then_block)
+        local_names.clear()
+        local_names.update(saved)
+        walk(node.else_block)
+        return
+      if isinstance(node, ForNode):
+        walk(node.iterable)
+        saved = set(local_names)
+        if node.key_var:
+          local_names.add(node.key_var)
+        if node.val_var:
+          local_names.add(node.val_var)
+        walk(node.block)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, VarDeclNode):
+        expr_list = getattr(node, "exprs", None) or (
+            [node.expr] if getattr(node, "expr", None) else []
+        )
+        for e in expr_list:
+          walk(e)
+        for n in node.names:
+          local_names.add(n)
+        return
+      if isinstance(node, AssignmentNode):
+        for target in node.targets:
+          record_mutated(target)
+          walk(target)
+        for e in node.exprs:
+          walk(e)
+        return
+      if isinstance(node, CallNode):
+        if isinstance(node.callee, MemberAccessNode):
+          recv = node.callee.receiver
+          recv_type = self.node_types.get(recv)
+          if isinstance(recv_type, OptionalType):
+            recv_type = recv_type.base_type
+          if isinstance(recv_type, RefType):
+            recv_type = recv_type.inner_type
+          is_mut_method = False
+          if isinstance(recv_type, StructType):
+            m = recv_type.get_method(node.callee.member, self.symbol_table)
+            is_mut_method = bool(m and m.modifier == "var")
+          elif isinstance(recv_type, TraitType):
+            fn = recv_type.methods.get(node.callee.member)
+            is_mut_method = bool(
+                fn and getattr(fn.ast_decl, "modifier", None) == "var"
+            )
+          elif isinstance(recv_type, (ArrayType, MapType)):
+            if node.callee.member in collection_mutators:
+              is_mut_method = True
+            elif node.callee.member in ("map", "filter") and any(
+                a.name == "in_place" for a in node.arguments
+            ):
+              is_mut_method = True
+          if is_mut_method:
+            record_mutated(recv)
+          walk(recv)
+        else:
+          walk(node.callee)
+        callee_type = self.node_types.get(node.callee)
+        if isinstance(callee_type, FunctionType):
+          param_muts = callee_type.param_mutabilities or []
+          param_names = callee_type.param_names or []
+          if (
+              getattr(callee_type, "has_self", False)
+              and isinstance(node.callee, MemberAccessNode)
+          ):
+            param_muts = param_muts[1:]
+            param_names = param_names[1:] if param_names else []
+          for idx, arg in enumerate(node.arguments):
+            p_idx = idx
+            if arg.name and param_names and arg.name in param_names:
+              p_idx = param_names.index(arg.name)
+            if p_idx < len(param_muts) and param_muts[p_idx]:
+              record_mutated(arg.expr)
+        for arg in node.arguments:
+          walk(arg.expr)
+        return
+      if isinstance(node, LambdaNode):
+        saved = set(local_names)
+        for p in node.parameters:
+          local_names.add(p.name)
+        walk(node.body)
+        local_names.clear()
+        local_names.update(saved)
+        return
+      if isinstance(node, (IdentifierNode, MoveNode)):
+        if node.name not in local_names:
+          sym = self.symbol_table.lookup(node.name)
+          if isinstance(sym, VariableSymbol):
+            if ArenaChecker.is_reference_type(sym.symbol_type):
+              read.add(sym.name)
+            mutated.update(getattr(sym, "closure_mutated_captures", set()))
+            read.update(getattr(sym, "closure_read_captures", set()))
+        return
+      if isinstance(node, ASTNode):
+        for v in node.__dict__.values():
+          if isinstance(v, (ASTNode, list)):
+            walk(v)
+
+    walk(lambda_node.body)
+    read -= mutated
+    return (mutated, read)
 

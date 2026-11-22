@@ -20,13 +20,24 @@ class TestGenerateGrammar(unittest.TestCase):
 
   def test_parse_antlr_grammar_real(self):
     """Verifies parsing of the actual grammar/Sapphire.g4 file."""
+    import json
+    from generate_grammar import OUTPUT_FILE
+
     data = parse_antlr_grammar()
     self.assertIn("let", data["modifiers"])
     self.assertIn("struct", data["modifiers"])
     self.assertIn("match", data["control"])
     self.assertIn("yield", data["control"])
     self.assertIn("int", data["types"])
+    self.assertIn("String", data["types"])
     self.assertIn("none", data["constants"])
+
+    with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+      tm = json.load(f)
+    str_patterns = tm["repository"]["strings"]["patterns"]
+    self.assertEqual(str_patterns[0]["name"], "string.interpolated.sapphire")
+    self.assertEqual(str_patterns[0]["begin"], 'f"')
+    self.assertIn("interpolation-braces", tm["repository"])
 
   def test_parse_antlr_grammar_missing_file(self):
     """Verifies FileNotFoundError is raised if grammar file is missing."""

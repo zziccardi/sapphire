@@ -16,6 +16,7 @@ export {
 struct LoveEngine {
   var event: event.Event;
   var graphics: graphics.Graphics;
+  var joystick: joystick.Joystick;
   var keyboard: keyboard.Keyboard;
   var mouse: mouse.Mouse;
   var timer: timer.Timer;

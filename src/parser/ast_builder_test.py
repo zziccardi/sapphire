@@ -438,8 +438,9 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(specs[2].symbol, "DrawMode")
 
   def test_multiple_export_blocks_error(self):
-    """Verifies that multiple export blocks raise a SyntaxError."""
-    with self.assertRaises(SyntaxError):
+    """Verifies that multiple export blocks raise a SapphireSyntaxError."""
+    from src.common.errors import SapphireSyntaxError
+    with self.assertRaises(SapphireSyntaxError):
       self._get_ast("""
       export { A }
       export { B }
@@ -627,13 +628,14 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(node_trailing.parts[0].value, "hello\\")
 
   def test_invalid_struct_initializer_syntax(self):
-    """Verifies that malformed struct initializer field syntax without expression raises a clean SyntaxError."""
+    """Verifies that malformed struct initializer field syntax without expression raises a clean SapphireSyntaxError."""
+    from src.common.errors import SapphireSyntaxError
     class MockToken:
       def getText(self): return "item"
     class MockCtx:
       def IDENTIFIER(self): return MockToken()
       def expression(self): return None
-    with self.assertRaises(SyntaxError) as ctx:
+    with self.assertRaises(SapphireSyntaxError) as ctx:
       ASTBuilder().visitStructInitField(MockCtx())
     self.assertIn("must be assigned an expression using '='", str(ctx.exception))
 
@@ -844,6 +846,282 @@ class TestASTBuilder(unittest.TestCase):
 
     with self.assertRaises(SyntaxError):
       self._get_ast("let x = move;")
+
+  def test_match_identifier_patterns_not_hijacked_by_lambda(self):
+    """Verifies match arms with bare identifiers and lambda bodies parse cleanly."""
+    from src.parser.ast import (
+        EllipsisPatternNode,
+        IdentifierNode,
+        LambdaNode,
+        LiteralNode,
+        MatchExprNode,
+    )
+
+    ast = self._get_ast("""
+    func f(x: int): int {
+      return match x {
+        A -> 10,
+        B -> 20,
+        C, D -> 30,
+        ... -> 0
+      };
+    }
+    """)
+    match_node = ast.declarations[0].body.statements[0].expr
+    self.assertIsInstance(match_node, MatchExprNode)
+    self.assertEqual(len(match_node.cases), 4)
+    self.assertIsInstance(match_node.cases[0].patterns[0], IdentifierNode)
+    self.assertEqual(match_node.cases[0].patterns[0].name, "A")
+    self.assertIsInstance(match_node.cases[0].body, LiteralNode)
+    self.assertEqual(match_node.cases[0].body.value, 10)
+    self.assertEqual(match_node.cases[1].patterns[0].name, "B")
+    self.assertEqual(match_node.cases[1].body.value, 20)
+    self.assertEqual([p.name for p in match_node.cases[2].patterns], ["C", "D"])
+    self.assertIsInstance(match_node.cases[3].patterns[0], EllipsisPatternNode)
+
+    # Match arm returning a lambda expression
+    ast_lambda = self._get_ast("""
+    func make_fn(k: int): (int) -> int {
+      return match k {
+        FOO -> y -> y + 1,
+        ... -> y -> y
+      };
+    }
+    """)
+    m2 = ast_lambda.declarations[0].body.statements[0].expr
+    self.assertEqual(len(m2.cases), 2)
+    self.assertEqual(m2.cases[0].patterns[0].name, "FOO")
+    self.assertIsInstance(m2.cases[0].body, LambdaNode)
+    self.assertEqual(m2.cases[0].body.parameters[0].name, "y")
+
+  def test_generic_trait_method_syntax(self):
+    """Verifies generic type parameters appear after method name in trait declarations."""
+    from src.parser.ast import TraitDeclNode
+
+    ast = self._get_ast("""
+    trait Mapper {
+      func map<T>(x: T): T;
+      static func pair<A, B>(a: A, b: B): (A);
+    }
+    """)
+    trait_decl = ast.declarations[0]
+    self.assertIsInstance(trait_decl, TraitDeclNode)
+    self.assertEqual(len(trait_decl.members), 2)
+    self.assertEqual(trait_decl.members[0].name, "map")
+    self.assertEqual(trait_decl.members[0].type_params, ["T"])
+    self.assertEqual(trait_decl.members[1].name, "pair")
+    self.assertEqual(trait_decl.members[1].type_params, ["A", "B"])
+    self.assertEqual(trait_decl.members[1].modifier, "static")
+
+  def test_interpolated_string_escaped_braces_and_nested_struct_init(self):
+    """Verifies standalone {{ / }} escapes, triple braces, and nested braces with quotes in f-strings."""
+    # Standalone {{ without a later }
+    ast_open = self._get_ast('let s = f"open: {{";')
+    parts_open = ast_open.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts_open), 1)
+    self.assertEqual(parts_open[0].value, "open: {")
+
+    # Standalone }}
+    ast_close = self._get_ast('let s = f"close: }}";')
+    parts_close = ast_close.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts_close), 1)
+    self.assertEqual(parts_close[0].value, "close: }")
+
+    # Triple braces {{{x}}}
+    ast_triple = self._get_ast('let s = f"{{{x}}}";')
+    parts_triple = ast_triple.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts_triple), 3)
+    self.assertEqual(parts_triple[0].value, "{")
+    self.assertIsInstance(parts_triple[1], IdentifierNode)
+    self.assertEqual(parts_triple[1].name, "x")
+    self.assertEqual(parts_triple[2].value, "}")
+
+    # Nested struct initializer braces and quoted string inside interpolation
+    ast_nested = self._get_ast('let s = f"{foo(Point { x = 1 }, "bar")}";')
+    parts_nested = ast_nested.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts_nested), 1)
+    call = parts_nested[0]
+    self.assertIsInstance(call, CallNode)
+    self.assertEqual(call.callee.name, "foo")
+    self.assertIsInstance(call.arguments[0].expr, StructInitializerNode)
+    self.assertEqual(call.arguments[0].expr.struct_name, "Point")
+    self.assertIsInstance(call.arguments[1].expr, LiteralNode)
+    self.assertEqual(call.arguments[1].expr.value, "bar")
+
+    # Nested f-string inside interpolation
+    ast_inner_f = self._get_ast('let s = f"{f"inner {x}"}";')
+    parts_inner_f = ast_inner_f.declarations[0].exprs[0].parts
+    self.assertEqual(len(parts_inner_f), 1)
+    self.assertIsInstance(parts_inner_f[0], InterpolatedStringNode)
+
+  def test_interpolated_string_syntax_errors_and_multiline_spans(self):
+    """Verifies invalid f-string interpolations raise SapphireSyntaxError with accurate spans."""
+    from src.common.errors import SapphireSyntaxError
+
+    # Empty interpolation
+    with self.assertRaises(SapphireSyntaxError) as ctx_empty:
+      self._get_ast('let s = f"{}";')
+    self.assertIn("Empty interpolation", str(ctx_empty.exception))
+    self.assertEqual(ctx_empty.exception.line, 1)
+    self.assertEqual(ctx_empty.exception.column, 11)
+
+    # Whitespace-only interpolation
+    with self.assertRaises(SapphireSyntaxError):
+      self._get_ast('let s = f"{   }";')
+
+    # Trailing unexpected tokens
+    with self.assertRaises(SapphireSyntaxError) as ctx_extra:
+      self._get_ast('let s = f"{1 2 3}";')
+    self.assertIn("Unexpected token '2'", str(ctx_extra.exception))
+    self.assertEqual(ctx_extra.exception.line, 1)
+    self.assertEqual(ctx_extra.exception.column, 13)
+
+    # Incomplete expression
+    with self.assertRaises(SapphireSyntaxError) as ctx_inc:
+      self._get_ast('let s = f"{1 + }";')
+    self.assertIn("Invalid expression in f-string interpolation", str(ctx_inc.exception))
+
+    # Unterminated brace via direct helper invocation
+    with self.assertRaises(SapphireSyntaxError) as ctx_unterm:
+      ASTBuilder()._parse_interpolated_string("abc {x")
+    self.assertIn("Unterminated '{'", str(ctx_unterm.exception))
+
+    # Multiline f-string accurate line/column offsets
+    code = 'let s = f"line1\n  {my_var}\n  {other + 1}";'
+    ast = self._get_ast(code)
+    parts = ast.declarations[0].exprs[0].parts
+    ident1 = parts[1]
+    self.assertIsInstance(ident1, IdentifierNode)
+    self.assertEqual(ident1.name, "my_var")
+    self.assertEqual(ident1.name_line, 2)
+    self.assertEqual(ident1.name_column, 3)
+
+    bin_expr = parts[3]
+    self.assertIsInstance(bin_expr, BinaryOpNode)
+    self.assertEqual(bin_expr.left.name, "other")
+    self.assertEqual(bin_expr.left.name_line, 3)
+    self.assertEqual(bin_expr.left.name_column, 3)
+
+  def test_arena_in_and_clone_precedence(self):
+    """Verifies tight precedence for 'in <arena>' suffixes and 'clone' operands."""
+    from src.parser.ast import CloneNode, IndexExprNode, MemberAccessNode
+
+    # CallExpr in arena == none
+    ast1 = self._get_ast("let b = Enemy() in arena == none;")
+    expr1 = ast1.declarations[0].exprs[0]
+    self.assertIsInstance(expr1, BinaryOpNode)
+    self.assertEqual(expr1.op, "==")
+    self.assertIsInstance(expr1.left, CallNode)
+    self.assertIsInstance(expr1.left.arena_expr, IdentifierNode)
+    self.assertEqual(expr1.left.arena_expr.name, "arena")
+
+    # CallExpr in self.arena + 1
+    ast2 = self._get_ast("let x = Enemy() in self.arena + 1;")
+    expr2 = ast2.declarations[0].exprs[0]
+    self.assertIsInstance(expr2, BinaryOpNode)
+    self.assertEqual(expr2.op, "+")
+    self.assertIsInstance(expr2.left, CallNode)
+    self.assertIsInstance(expr2.left.arena_expr, MemberAccessNode)
+    self.assertEqual(expr2.left.arena_expr.member, "arena")
+
+    # StructInitializer in arena == none
+    ast3 = self._get_ast("let b = Enemy { x = 1 } in arenas[0] == none;")
+    expr3 = ast3.declarations[0].exprs[0]
+    self.assertIsInstance(expr3, BinaryOpNode)
+    self.assertEqual(expr3.op, "==")
+    self.assertIsInstance(expr3.left, StructInitializerNode)
+    self.assertIsInstance(expr3.left.arena_expr, IndexExprNode)
+
+    # clone a + b -> (clone a) + b
+    ast4 = self._get_ast("let x = clone a + b;")
+    expr4 = ast4.declarations[0].exprs[0]
+    self.assertIsInstance(expr4, BinaryOpNode)
+    self.assertEqual(expr4.op, "+")
+    self.assertIsInstance(expr4.left, CloneNode)
+    self.assertEqual(expr4.left.expr.name, "a")
+
+    # clone self.base { hp = 50; } in self.get_arena() == none
+    ast5 = self._get_ast("let b = clone self.base { hp = 50; } in self.get_arena() == none;")
+    expr5 = ast5.declarations[0].exprs[0]
+    self.assertIsInstance(expr5, BinaryOpNode)
+    self.assertEqual(expr5.op, "==")
+    self.assertIsInstance(expr5.left, CloneNode)
+    self.assertIsInstance(expr5.left.expr, MemberAccessNode)
+    self.assertIsInstance(expr5.left.arena_expr, CallNode)
+
+  def test_relational_binds_tighter_than_equality(self):
+    """Verifies <, <=, >, >= have strictly higher precedence than == and !=."""
+    ast1 = self._get_ast("let b = a < b == c < d;")
+    expr1 = ast1.declarations[0].exprs[0]
+    self.assertIsInstance(expr1, BinaryOpNode)
+    self.assertEqual(expr1.op, "==")
+    self.assertIsInstance(expr1.left, BinaryOpNode)
+    self.assertEqual(expr1.left.op, "<")
+    self.assertIsInstance(expr1.right, BinaryOpNode)
+    self.assertEqual(expr1.right.op, "<")
+
+    ast2 = self._get_ast("let b = a == b >= c;")
+    expr2 = ast2.declarations[0].exprs[0]
+    self.assertIsInstance(expr2, BinaryOpNode)
+    self.assertEqual(expr2.op, "==")
+    self.assertIsInstance(expr2.left, IdentifierNode)
+    self.assertIsInstance(expr2.right, BinaryOpNode)
+    self.assertEqual(expr2.right.op, ">=")
+
+  def test_function_type_parenthesized_optional_returns(self):
+    """Verifies () -> ((int) -> int)? and () -> (int)? attach '?' to the return type."""
+    from src.parser.ast import FunctionTypeNode, OptionalTypeNode
+
+    ast1 = self._get_ast("let f: () -> ((int) -> int)?;")
+    t1 = ast1.declarations[0].val_types[0]
+    self.assertIsInstance(t1, FunctionTypeNode)
+    self.assertEqual(len(t1.param_types), 0)
+    self.assertEqual(len(t1.return_types), 1)
+    self.assertIsInstance(t1.return_types[0], OptionalTypeNode)
+    self.assertIsInstance(t1.return_types[0].base_type, FunctionTypeNode)
+
+    ast2 = self._get_ast("let f: () -> (int)?;")
+    t2 = ast2.declarations[0].val_types[0]
+    self.assertIsInstance(t2, FunctionTypeNode)
+    self.assertIsInstance(t2.return_types[0], OptionalTypeNode)
+    self.assertEqual(t2.return_types[0].base_type.name, "int")
+
+    ast3 = self._get_ast("let f: (() -> (int))?;")
+    t3 = ast3.declarations[0].val_types[0]
+    self.assertIsInstance(t3, OptionalTypeNode)
+    self.assertIsInstance(t3.base_type, FunctionTypeNode)
+    self.assertEqual(t3.base_type.return_types[0].name, "int")
+
+    ast4 = self._get_ast("let f: () -> ();")
+    t4 = ast4.declarations[0].val_types[0]
+    self.assertIsInstance(t4, FunctionTypeNode)
+    self.assertEqual(len(t4.return_types), 0)
+
+    ast5 = self._get_ast("let f: () -> (int, String);")
+    t5 = ast5.declarations[0].val_types[0]
+    self.assertIsInstance(t5, FunctionTypeNode)
+    self.assertEqual([rt.name for rt in t5.return_types], ["int", "String"])
+
+    ast6 = self._get_ast("let f: () -> ((int, int) -> int)?;")
+    t6 = ast6.declarations[0].val_types[0]
+    self.assertIsInstance(t6, FunctionTypeNode)
+    self.assertIsInstance(t6.return_types[0], OptionalTypeNode)
+    inner_fn = t6.return_types[0].base_type
+    self.assertIsInstance(inner_fn, FunctionTypeNode)
+    self.assertEqual(len(inner_fn.param_types), 2)
+
+  def test_qualified_base_type_name_length(self):
+    """Verifies BasicTypeNode.name_length covers full qualified identifier paths."""
+    ast = self._get_ast("let x: mod.MyStruct; let y: a.b.Box<int>;")
+    t1 = ast.declarations[0].val_types[0]
+    self.assertIsInstance(t1, BasicTypeNode)
+    self.assertEqual(t1.name, "mod.MyStruct")
+    self.assertEqual(t1.name_length, len("mod.MyStruct"))
+
+    t2 = ast.declarations[1].val_types[0]
+    self.assertIsInstance(t2, BasicTypeNode)
+    self.assertEqual(t2.name, "a.b.Box")
+    self.assertEqual(t2.name_length, len("a.b.Box"))
 
 
 if __name__ == "__main__":

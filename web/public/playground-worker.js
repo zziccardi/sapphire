@@ -5,32 +5,33 @@ let initPromise = null;
 async function initPyodide(bundleUrl) {
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    self.postMessage({ type: 'status', message: 'Loading Pyodide WebAssembly runtime...' });
-    importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js');
-    pyodide = await loadPyodide({
-      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/',
-    });
+    try {
+      self.postMessage({ type: 'status', message: 'Loading Pyodide WebAssembly runtime...' });
+      importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js');
+      pyodide = await loadPyodide({
+        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/',
+      });
 
-    self.postMessage({ type: 'status', message: 'Installing antlr4-python3-runtime...' });
-    await pyodide.loadPackage('micropip');
-    const micropip = pyodide.pyimport('micropip');
-    await micropip.install('antlr4-python3-runtime');
+      self.postMessage({ type: 'status', message: 'Installing antlr4-python3-runtime...' });
+      await pyodide.loadPackage('micropip');
+      const micropip = pyodide.pyimport('micropip');
+      await micropip.install('antlr4-python3-runtime');
 
-    self.postMessage({ type: 'status', message: 'Mounting Sapphire compiler...' });
-    const resp = await fetch(bundleUrl);
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch compiler bundle (${resp.status})`);
-    }
-    const bundle = await resp.json();
+      self.postMessage({ type: 'status', message: 'Mounting Sapphire compiler...' });
+      const resp = await fetch(bundleUrl);
+      if (!resp.ok) {
+        throw new Error(`Failed to fetch compiler bundle (${resp.status})`);
+      }
+      const bundle = await resp.json();
 
-    for (const [relPath, content] of Object.entries(bundle.files)) {
-      const fullPath = `/sapphire/${relPath}`;
-      const dir = fullPath.slice(0, fullPath.lastIndexOf('/'));
-      pyodide.FS.mkdirTree(dir);
-      pyodide.FS.writeFile(fullPath, content, { encoding: 'utf8' });
-    }
+      for (const [relPath, content] of Object.entries(bundle.files)) {
+        const fullPath = `/sapphire/${relPath}`;
+        const dir = fullPath.slice(0, fullPath.lastIndexOf('/'));
+        pyodide.FS.mkdirTree(dir);
+        pyodide.FS.writeFile(fullPath, content, { encoding: 'utf8' });
+      }
 
-    await pyodide.runPythonAsync(`
+      await pyodide.runPythonAsync(`
 import os, sys
 if '/sapphire' not in sys.path:
     sys.path.insert(0, '/sapphire')
@@ -38,7 +39,12 @@ os.chdir('/sapphire')
 from src.code_gen.transpiler import transpile_file
 `);
 
-    self.postMessage({ type: 'ready' });
+      self.postMessage({ type: 'ready' });
+    } catch (err) {
+      initPromise = null;
+      pyodide = null;
+      throw err;
+    }
   })();
   return initPromise;
 }
@@ -82,8 +88,14 @@ if ok and python_code:
     with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
         try:
             exec(compile(python_code, '/sapphire/out.py', 'exec'), exec_ns)
-        except SystemExit:
-            pass
+        except SystemExit as exc:
+            code = exc.code
+            if code not in (None, 0):
+                ok = False
+                if isinstance(code, str):
+                    stderr_buf.write(f"{code}\\n")
+                else:
+                    stderr_buf.write(f"Process exited with code {code}\\n")
         except Exception:
             ok = False
             traceback.print_exc(file=stderr_buf)

@@ -248,6 +248,75 @@ class TestConstEval(unittest.TestCase):
     )
     self.assertFalse(ok)
 
+  def test_phase4_div_by_zero_omitted_defaults_and_mutable_module_member(self):
+    from src.parser.ast import StructDeclNode, StructFieldNode
+
+    # 1. Literal division and modulo by zero (including -0 and 0.0)
+    for op in ("/", "%"):
+      ok, err = is_constant_expression(
+          BinaryOpNode(LiteralNode(1, "int"), op, LiteralNode(0, "int")),
+          self.table,
+      )
+      self.assertFalse(ok)
+      self.assertIn("Division or modulo by zero", err)
+    ok, err = is_constant_expression(
+        BinaryOpNode(
+            LiteralNode(1.0, "float"),
+            "/",
+            UnaryOpNode("-", LiteralNode(0.0, "float")),
+        ),
+        self.table,
+    )
+    self.assertFalse(ok)
+    self.assertIn("Division or modulo by zero", err)
+
+    # 2. Omitted struct field with non-constant default expression
+    bad_default = CallNode(IdentifierNode("runtime_fn"), [])
+    cfg_decl = StructDeclNode(
+        "Cfg",
+        fields=[
+            StructFieldNode(
+                is_mutable=False,
+                name="x",
+                field_type=None,
+                default_expr=bad_default,
+            ),
+        ],
+    )
+    cfg_st = StructType("Cfg", {}, ast_decl=cfg_decl)
+    self.table.define_type("Cfg", cfg_st)
+    ok, err = is_constant_expression(
+        StructInitializerNode("Cfg", []), self.table
+    )
+    self.assertFalse(ok)
+    self.assertIn("Default value of omitted field 'x'", err)
+    # Explicitly overriding the non-constant default with a constant succeeds
+    ok_override, _ = is_constant_expression(
+        StructInitializerNode("Cfg", [ArgumentNode("x", LiteralNode(5, "int"))]),
+        self.table,
+    )
+    self.assertTrue(ok_override)
+
+    # 3. Mutable imported @extern var is rejected while imported let const is accepted
+    mod = ModuleSymbol("ext_mod", "ext_mod")
+    mut_var = VariableSymbol("g", PrimitiveType("int"), is_mutable=True)
+    const_var = VariableSymbol("C", PrimitiveType("int"), is_mutable=False)
+    const_var.is_constant_expr = True
+    mod.exports["g"] = mut_var
+    mod.exports["C"] = const_var
+    self.table.define("ext_mod", mod)
+
+    ok_mut, err_mut = is_constant_expression(
+        MemberAccessNode(IdentifierNode("ext_mod"), "g", False), self.table
+    )
+    self.assertFalse(ok_mut)
+    self.assertIn("not a compile-time constant", err_mut)
+
+    ok_const, _ = is_constant_expression(
+        MemberAccessNode(IdentifierNode("ext_mod"), "C", False), self.table
+    )
+    self.assertTrue(ok_const)
+
 
 if __name__ == "__main__":
   unittest.main()

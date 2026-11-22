@@ -293,12 +293,12 @@ class TestGenerics(unittest.TestCase):
   def test_imported_module_generic_function_call(self):
     """Verifies monomorphization when calling a generic function exported by a module with explicit type args."""
     from src.semantics.symbol_table import ModuleSymbol, FunctionSymbol, FunctionType, GenericTypeParameter
-    from src.parser.ast import FuncDeclNode, ParameterNode, BasicTypeNode, BlockNode
+    from src.parser.ast import FuncDeclNode, ParameterNode, BasicTypeNode, BlockNode, ReturnNode, IdentifierNode
 
     tc = TypeChecker()
     mod_sym = ModuleSymbol("math_utils", "lib.math_utils")
     fn_type = FunctionType([GenericTypeParameter("T")], GenericTypeParameter("T"))
-    func_ast = FuncDeclNode("identity", parameters=[ParameterNode(False, "x", BasicTypeNode("T"))], return_type=BasicTypeNode("T"), type_params=["T"], body=BlockNode([]))
+    func_ast = FuncDeclNode("identity", parameters=[ParameterNode(False, "x", BasicTypeNode("T"))], return_type=BasicTypeNode("T"), type_params=["T"], body=BlockNode([ReturnNode([IdentifierNode("x")])]))
     fn_sym = FunctionSymbol("identity", fn_type, type_params=["T"], ast_decl=func_ast)
     mod_sym.exports["identity"] = fn_sym
     tc.symbol_table.define("math_utils", mod_sym)

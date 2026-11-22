@@ -34,8 +34,9 @@ func test_min_max(): int {
 @test
 func test_safe_div(): int {
   let valid = math.safe_div(10, 2);
+  let neg_trunc = math.safe_div(-7, 2);
   let invalid = math.safe_div(10, 0);
-  if valid == 5 && invalid == none {
+  if valid == 5 && neg_trunc == -3 && invalid == none {
     return 1;
   }
   return 0;

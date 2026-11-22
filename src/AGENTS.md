@@ -33,13 +33,19 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
   2. Update `src/parser/ast.py` and `src/parser/ast_builder.py`.
   3. Update `src/semantics/type_checker.py` and `src/semantics/symbol_table.py`.
   4. Update both `src/code_gen/python_transpiler.py` and `src/code_gen/lua_transpiler.py`.
-  5. Add or update unit tests in `src/` and end-to-end tests in `testing/e2e/`.
+  5. Regenerate the VS Code TextMate grammar via `python3 tools/vscode-extension/scripts/generate_grammar.py`.
+  6. Add or update unit tests in `src/` and end-to-end tests in `testing/e2e/`.
 
 ## 2. Semantic & Runtime Invariants
 * Preserve existing semantic and codegen helpers when adding orthogonal checks rather than rewriting unrelated passes.
 * Verify exact `ASTNode`/`Type` attribute names (`RefType.inner_type`, `OptionalType.base_type`) in `src/parser/ast.py` and `src/semantics/symbol_table.py`.
+* Follow Sapphire syntax conventions: generic trait impls use `impl Trait for Struct<T>` (never `impl<T>`); never use `new` for constructors or runtime helpers (use `__init__` / `.init`); the built-in string type is capitalized `String`.
 * In Python and Lua runtime preambles, `SapphireObject` clones delegate missing lookups to `__proto__`; per-instance lifecycle flags (e.g. `_sapphire_disposed_`) must inspect own storage (`__dict__` / `object.__setattr__` in Python; `rawget`/`rawset` in Lua), and implicit `clone` must inherit the source object's `__arena`.
+* In Lua 5.1 codegen and `lib/std/*.lua`, never store raw `nil` for Sapphire `none` in tables, `[T?]` arrays, proto overrides, optional struct field overrides, or default-param checks — use the `_SP_NONE` sentinel (`_SP_RT.NONE`) and explicit unpack counts. Never use `a and b or c` as a ternary when `b` can be `false`/`nil`, do not rely on Lua 5.3+ `math.type` or `//`, and keep runtime helpers inside `local _SP_RT = {}` to stay well below Lua 5.1's 200-local limit.
+* Never mutate AST nodes in place during transpilation, always use lexical scope stacks for nested blocks across all backends (Python, Lua, LLVM), evaluate non-trivial receivers/indices once into temporaries, and capture shadowed host builtins (e.g. `abs`) before defining stdlib functions.
 * In `TypeChecker`, `self.moved_symbols` stores `VariableSymbol` instances (not string names); check `sym not in self.moved_symbols and not sym.is_moved`.
+* In `src/lsp/`, convert UTF-16 ↔ Unicode code-point columns at LSP boundaries, treat `end_column` as exclusive, keep semantic tokens strictly non-overlapping, resolve local declarations before globals, never overwrite open workspace buffers from disk, and preserve valid token caches across transient syntax errors.
+* Keep `tools/vscode-extension/` compiled as CommonJS (`"module": "node16"` without `"type": "module"`) with `engines.vscode` compatible with `vscode-languageclient`.
 
 ## 3. Python Code Quality Standards
 * Follow the Google Python Style Guide rather than PEP 8, maintain 2-space or 4-space consistency with surrounding files, and include explicit type annotations where appropriate.
@@ -50,10 +56,12 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
 * **No test masking via `self.skipTest()`**: Only skip tests if optional prerequisite binaries (e.g. `lua`) are genuinely absent from `PATH`. Never catch runtime errors or non-zero exit codes to call `self.skipTest()`; failures must fail with `self.fail()`.
 * **Strict semantic checks**: Never wrap `TypeChecker().check(ast)` in blanket `try...except Exception: pass` in transpiler tests unless testing compile-time rejection.
 * **True backend verification**: Do not rely purely on substring matching. For LLVM IR, verify structural integrity via `llvmlite.binding.parse_assembly(ir).verify()` and assert execution output with MCJIT where feasible.
+* **Cross-backend parity**: For every new language feature or stdlib API, run both `pipenv run sapphire test` and `pipenv run sapphire test -t lua`, and add parity tests in `src/code_gen/transpiler_parity_test.py` covering edge values (`none`, `false`, `0`, `NaN`, negative indices, Unicode) plus negative compile-time tests for new semantic rules.
 * **Runnable sample execution**: Non-host-bound scripts in `samples/` must execute cleanly with exit code 0 in `samples_compilation_test.py`.
 * **Standard library & negative runtime coverage**: Additions to `lib/std/` require unit tests for happy paths and boundary values. Verify runtime safety guards (`.get()` bounds checks, nil coalescing, coroutine exhaustion) in `testing/e2e/negative_runtime_test.sp`.
 * **Cross-backend integration commands**:
   ```bash
   pipenv run python -m unittest src/code_gen/python_transpiler_test.py
   pipenv run python -m unittest src/code_gen/lua_transpiler_test.py
+  pipenv run sapphire test && pipenv run sapphire test -t lua
   ```

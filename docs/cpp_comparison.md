@@ -158,7 +158,7 @@ vulnerabilities at compile time:
   2. **Private by Default with Explicit Export Manifests**: All top-level
      declarations are module-private by default. Public interfaces are declared
      in a single, unambiguous `export { ... }` block per file
-     ([docs/SPEC.md (Export Manifest)](SPEC.md#explicit-export-manifest-export-)).
+     ([docs/SPEC.md (Export Manifest)](SPEC.md#explicit-export-manifest-export)).
   3. **No Preprocessor**: Constants use `let` or `SCREAMING_SNAKE_CASE`
      bindings; code generation is handled by compile-time generics and AST
      monomorphization rather than macro token substitution.

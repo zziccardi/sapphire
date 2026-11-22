@@ -747,6 +747,157 @@ func test_fail_case() {
     self.assertEqual(payload["failed"], 1)
     self.assertEqual(len(payload["tests"]), 2)
 
+  def test_prepare_python_test_paths_protects_stdlib_and_compiler_modules(self):
+    """Verifies running a test at repo root does not evict stdlib or src.* modules."""
+    import sys
+    from src.cli.test_runner import _prepare_python_test_paths
+
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../..")
+    )
+    dummy_root_sp = os.path.join(repo_root, "dummy_root_test.sp")
+    orig_path = list(sys.path)
+    try:
+      _prepare_python_test_paths(dummy_root_sp)
+      for mod_name in ("os", "math", "time", "src.parser.ast", "src.cli.test_runner"):
+        self.assertIn(mod_name, sys.modules)
+    finally:
+      sys.path[:] = orig_path
+
+  def test_keyword_mangled_tests_execute_instead_of_false_pass(self):
+    """Verifies Python-keyword-named @test methods and functions actually run."""
+    kw_sp = os.path.join(self.temp_dir, "kw_test.sp")
+    with open(kw_sp, "w", encoding="utf-8") as f:
+      f.write("""import std.testing;
+struct KwSuite {}
+impl testing.TestCase for KwSuite {
+  @test
+  func assert() {
+    self.assert_eq(1, 2);
+  }
+}
+@test
+func pass() {
+  testing.assert_eq(1, 2);
+}
+""")
+    ast = parse_ast(kw_sp)
+    standalone, suites = discover_tests(ast)
+    self.assertEqual(standalone, ["pass"])
+    self.assertEqual(suites, {"KwSuite": ["assert"]})
+    with suppress_output():
+      passed, failed, _ = run_tests_python(kw_sp, standalone, suites)
+    self.assertEqual(passed, 0)
+    self.assertEqual(failed, 2)
+
+  def test_discover_tests_merges_multiple_impl_blocks_and_matches_exact_testcase(self):
+    multi_sp = os.path.join(self.temp_dir, "multi_impl_test.sp")
+    with open(multi_sp, "w", encoding="utf-8") as f:
+      f.write("""import std.testing;
+trait NotATestCaseHelper { func helper(); }
+struct MySuite {}
+impl testing.TestCase for MySuite {
+  @test func test_one() {}
+}
+impl testing.TestCase for MySuite {
+  @test func test_two() {}
+}
+impl NotATestCaseHelper for MySuite {
+  @test func helper() {}
+}
+""")
+    ast = parse_ast(multi_sp)
+    _, suites = discover_tests(ast)
+    self.assertEqual(suites, {"MySuite": ["test_one", "test_two"]})
+
+  def test_run_tests_love2d_routes_to_lua_backend(self):
+    with patch("src.cli.test_runner.run_tests_lua", return_value=(1, 0, [])) as mock_lua:
+      with patch("src.cli.test_runner.run_tests_python") as mock_py:
+        with suppress_output():
+          rc = run_tests(self.sample_sp, target="love2d")
+        self.assertEqual(rc, 0)
+        mock_lua.assert_called_once()
+        mock_py.assert_not_called()
+
+  def test_lua_mid_run_crash_after_pass_fails_and_preserves_stderr_in_json(self):
+    import io
+    import json
+    from contextlib import redirect_stdout
+
+    mock_proc = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="[ PASS ] test_standalone_pass\n", stderr="lua fatal error\n"
+    )
+    buf = io.StringIO()
+    with patch("shutil.which", return_value="lua"), patch("subprocess.run", return_value=mock_proc):
+      with redirect_stdout(buf):
+        rc = run_tests(self.sample_sp, target="lua", json_output=True)
+    self.assertEqual(rc, 1)
+    payload = json.loads(buf.getvalue())
+    self.assertFalse(payload["ok"])
+    self.assertEqual(payload["passed"], 1)
+    self.assertEqual(payload["failed"], 1)
+    self.assertTrue(any("lua fatal error" in e["message"] for e in payload["errors"]))
+
+  def test_isolated_transpilation_preserves_existing_files_and_cleans_imports(self):
+    helper_sp = os.path.join(self.temp_dir, "iso_helper.sp")
+    with open(helper_sp, "w", encoding="utf-8") as f:
+      f.write("export { val }\nlet val = 7;\n")
+    test_sp = os.path.join(self.temp_dir, "iso_main_test.sp")
+    with open(test_sp, "w", encoding="utf-8") as f:
+      f.write(
+          "import iso_helper;\n"
+          "import std.testing;\n"
+          "@test\n"
+          "func test_val() {\n"
+          "  testing.assert_eq(iso_helper.val, 7);\n"
+          "}\n"
+      )
+    existing_py = os.path.join(self.temp_dir, "iso_main_test.py")
+    with open(existing_py, "w", encoding="utf-8") as f:
+      f.write("# pre-existing file\n")
+
+    with suppress_output():
+      passed, failed, _ = run_tests_python(test_sp, ["test_val"], {})
+    self.assertEqual((passed, failed), (1, 0))
+    # Pre-existing .py was untouched and helper.py was not leaked in source dir.
+    with open(existing_py, "r", encoding="utf-8") as f:
+      self.assertEqual(f.read(), "# pre-existing file\n")
+    self.assertFalse(os.path.exists(os.path.join(self.temp_dir, "iso_helper.py")))
+
+  def test_teardown_failure_and_none_message_reported(self):
+    import io
+    from contextlib import redirect_stdout
+
+    td_sp = os.path.join(self.temp_dir, "td_fail_test.sp")
+    with open(td_sp, "w", encoding="utf-8") as f:
+      f.write("""import std.testing as t;
+struct TdSuite {}
+impl t.TestCase for TdSuite {
+  var func tear_down() {
+    assert(false, "teardown boom");
+  }
+  @test
+  func test_passing_body_but_broken_teardown() {
+    self.assert_true(true);
+  }
+  @test
+  func test_none_message() {
+    let opt: int? = 5;
+    self.expect_none(opt, "must be none");
+  }
+}
+""")
+    ast = parse_ast(td_sp)
+    standalone, suites = discover_tests(ast)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+      passed, failed, _ = run_tests_python(td_sp, standalone, suites)
+    self.assertEqual(passed, 0)
+    self.assertEqual(failed, 2)
+    out = buf.getvalue()
+    self.assertIn("Message:  must be none", out)
+    self.assertIn("tear_down failed", out)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -46,13 +46,22 @@ func log<T>(x: T, base: float? = none): float? {
 }
 
 func pow<T>(base: T, exp: T): float {
+  if base < 0 && exp < 0 {
+    return 0.0;
+  }
   return 0.0;
 }
 
 func ceil<T>(x: T): int {
+  if x < 0 {
+    return 0;
+  }
   return 0;
 }
 
 func floor<T>(x: T): int {
+  if x < 0 {
+    return 0;
+  }
   return 0;
 }

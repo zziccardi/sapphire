@@ -53,17 +53,47 @@ jobs:
           pipenv run antlr
           git diff --exit-code src/parser/gen
 
+      - name: Verify TextMate grammar is up-to-date
+        run: |
+          python3 tools/vscode-extension/scripts/generate_grammar.py
+          git diff --exit-code tools/vscode-extension/syntaxes/sapphire.tmLanguage.json
+
       - name: Run Python unit tests
         run: pipenv run test
 
       - name: Run test coverage verification
         run: pipenv run coverage
 
-      - name: Run Sapphire native E2E test runner
+      - name: Run Sapphire native E2E test runner (Python)
         run: pipenv run sapphire test
+
+      - name: Run Sapphire native E2E test runner (Lua)
+        run: pipenv run sapphire test -t lua
 
       - name: Verify sample programs
         run: pipenv run check-samples
+
+  vscode-extension:
+    name: Test VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: tools/vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: tools/vscode-extension
+        run: npm ci
+
+      - name: Run VS Code extension build & tests
+        working-directory: tools/vscode-extension
+        run: npm test
 
   web:
     name: Test & Build Website

@@ -664,6 +664,70 @@ class TestSemanticTokens(unittest.TestCase):
       self.assertIn((7, 20, 4, "struct", 0), line_7_tokens)
       self.assertIn((7, 25, 4, "method", 0), line_7_tokens)
 
+  def test_multivar_tokens_parameter_scope_and_utf16_encoding(self):
+    """Verifies multi-var tokens, parameter isolation from globals, UTF-16 encoding, and non-overlap."""
+    from unittest.mock import MagicMock
+    from src.lsp.semantic_tokens import find_node_at_position
+    from src.lsp.server import SapphireLanguageServer, validate_source
+
+    code = (
+        'func foo(): int { return 1; }\n'
+        'func bar(foo: int) {\n'
+        '  let s = "🚀"; let a, b = 1, "hi";\n'
+        '}\n'
+    )
+    parser = SapphireParser(CommonTokenStream(SapphireLexer(InputStream(code))))
+    ast = ASTBuilder().visit(parser.program())
+    checker = SemanticTokensTypeChecker(doc_text=code)
+    checker.check(ast)
+    self.assertEqual(checker.lsp_errors, [])
+
+    # Parameter `foo` must NOT overwrite global `func foo`'s ast_decl.
+    global_foo = checker.symbol_table.lookup("foo")
+    self.assertEqual(type(global_foo.ast_decl).__name__, "FuncDeclNode")
+
+    # Both `a` and `b` in multi-var decl must get variable tokens.
+    lines = code.splitlines()
+    a_col = lines[2].index(" a,") + 1
+    b_col = lines[2].index(" b =") + 1
+    line3_toks = [t for t in checker.raw_tokens if t[0] == 3]
+    self.assertIn((3, a_col, 1, "variable", 5), line3_toks)
+    self.assertIn((3, b_col, 1, "variable", 5), line3_toks)
+
+    # UTF-16 encoding shifts columns after "🚀" by +1 code unit.
+    encoded = encode_semantic_tokens(
+        [(3, a_col, 1, "variable", 5), (3, a_col, 1, "variable", 5)],
+        doc_text=code,
+    )
+    expected_u16 = len(lines[2][:a_col].encode("utf-16-le")) // 2
+    self.assertEqual(len(encoded), 5)  # Duplicate/overlapping token dropped.
+    self.assertEqual(encoded[1], expected_u16)
+
+    # Exclusive end_column boundary check.
+    bar_decl = ast.declarations[1]
+    self.assertIsNone(
+        find_node_at_position(bar_decl, bar_decl.end_line, bar_decl.end_column)
+    )
+
+    # Invalid f-string interpolation must publish an LSP syntax diagnostic.
+    ls = SapphireLanguageServer("test", "0.1")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    bad_uri = "file:///bad_fstring.sp"
+    validate_source(ls, bad_uri, 'func main() { let x = f"bad {1 + }"; }\n')
+    diags = ls.text_document_publish_diagnostics.call_args[0][0].diagnostics
+    self.assertGreaterEqual(len(diags), 1)
+    self.assertIn("Syntax Error", diags[0].message)
+
+    # Subsequent syntax error preserves previously cached valid semantic tokens.
+    good_uri = "file:///preserve_toks.sp"
+    validate_source(ls, good_uri, "func ok(): int { return 1; }\n")
+    valid_tokens = list(ls.tokens_cache[good_uri])
+    self.assertTrue(len(valid_tokens) > 0)
+    validate_source(ls, good_uri, "func ok(): int { return ; }\n")
+    self.assertEqual(ls.tokens_cache[good_uri], valid_tokens)
+
+
 
 
 

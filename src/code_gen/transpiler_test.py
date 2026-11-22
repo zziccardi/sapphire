@@ -92,6 +92,29 @@ class TranspilerHygieneTest(unittest.TestCase):
             os.path.exists(os.path.join(out_dir, "lib", "love2d", "enums.lua"))
         )
 
+  def test_transpile_file_visited_returns_default_output_path(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      src = os.path.join(tmpdir, "dup.sp")
+      with open(src, "w", encoding="utf-8") as f:
+        f.write("let x = 1;\n")
+      visited = {os.path.abspath(src)}
+      out = transpile_file(src, output_file=None, target="python", visited=visited, quiet=True)
+      self.assertEqual(out, os.path.join(tmpdir, "dup.py"))
+
+  def test_transpile_file_llvm_target_instantiation(self):
+    import src.code_gen.llvm_transpiler  # noqa: F401 — registers LLVM target
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      src = os.path.join(tmpdir, "add.sp")
+      out_ll = os.path.join(tmpdir, "add.ll")
+      with open(src, "w", encoding="utf-8") as f:
+        f.write("func add(a: int, b: int): int { return a + b; }\n")
+      res = transpile_file(src, output_file=out_ll, target="llvm", quiet=True)
+      self.assertEqual(res, out_ll)
+      self.assertTrue(os.path.exists(out_ll))
+      with open(out_ll, "r", encoding="utf-8") as f:
+        self.assertIn('define i64 @"add"', f.read())
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -37,6 +37,53 @@ TOKEN_MODIFIERS = [
 ]
 
 
+def codepoint_to_utf16(line_text: str, cp_col: int) -> int:
+  """Converts a 0-based Unicode code-point column to an LSP UTF-16 offset."""
+  if not line_text or cp_col <= 0:
+    return max(0, cp_col)
+  prefix = line_text[:cp_col]
+  extra = max(0, cp_col - len(line_text))
+  return (len(prefix.encode("utf-16-le")) // 2) + extra
+
+
+def utf16_to_codepoint(line_text: str, utf16_col: int) -> int:
+  """Converts an LSP 0-based UTF-16 offset to a Unicode code-point column."""
+  if not line_text or utf16_col <= 0:
+    return max(0, utf16_col)
+  units = 0
+  for idx, ch in enumerate(line_text):
+    if units >= utf16_col:
+      return idx
+    units += 2 if ord(ch) > 0xFFFF else 1
+  return len(line_text) + max(0, utf16_col - units)
+
+
+def codepoint_span_to_utf16(
+    line_text: str, start_cp: int, length_cp: int
+) -> Tuple[int, int]:
+  """Converts a (start_col, length) code-point span to UTF-16 (start, length)."""
+  start_u16 = codepoint_to_utf16(line_text, start_cp)
+  end_u16 = codepoint_to_utf16(line_text, start_cp + max(0, length_cp))
+  return start_u16, max(0, end_u16 - start_u16)
+
+
+def get_doc_line(ls: Any, uri: str, line_1based: int) -> Optional[str]:
+  """Returns the 1-based line text for *uri* from the workspace if available."""
+  try:
+    workspace = getattr(ls, "workspace", None)
+    if workspace is None:
+      return None
+    doc = workspace.get_text_document(uri)
+    source = getattr(doc, "source", None)
+    if isinstance(source, str):
+      lines = source.splitlines()
+      if 0 <= line_1based - 1 < len(lines):
+        return lines[line_1based - 1]
+  except Exception:  # pragma: no cover
+    return None
+  return None
+
+
 def extract_comments_above(doc_text: str, start_line: Optional[int]) -> str:
   """Extracts comments directly above start_line (1-based)."""
   if start_line is None:
@@ -162,10 +209,18 @@ class SemanticTokensTypeChecker(TypeChecker):
       if getattr(target_node, "length", None) is not None:
         length = target_node.length
 
+    start_char = col
+    end_char = col + length
+    if isinstance(self.doc_text, str):
+      lines = self.doc_text.splitlines()
+      if 0 <= line - 1 < len(lines):
+        start_char, u16_len = codepoint_span_to_utf16(lines[line - 1], col, length)
+        end_char = start_char + u16_len
+
     return target_node, {
         "range": {
-            "start": {"line": line - 1, "character": col},
-            "end": {"line": line - 1, "character": col + length},
+            "start": {"line": line - 1, "character": start_char},
+            "end": {"line": line - 1, "character": end_char},
         },
         "message": message,
         "severity": severity,
@@ -332,6 +387,15 @@ class SemanticTokensTypeChecker(TypeChecker):
     if line is not None and col is not None and length is not None:
       self.add_token(line, col, length, "decorator")
 
+  def _on_parameters_defined(
+      self, parameters: list, resolved_params: list
+  ) -> None:
+    """Visits parameters inside the function/method scope once defined."""
+    for p, ptype in zip(parameters, resolved_params):
+      self.visit(p)
+      if ptype is not None:
+        self.node_types[p] = ptype
+
   def visit_FuncDeclNode(self, node) -> None:
     for ann in getattr(node, "annotations", []):
       self.visit(ann)
@@ -339,8 +403,13 @@ class SemanticTokensTypeChecker(TypeChecker):
     is_method = self.current_struct is not None
     if not is_method:
       self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "function", 1)
-    for p in node.parameters:
-      self.visit(p)
+    if getattr(node, "type_params", None):
+      # Generic function bodies are skipped until monomorphized; emit parameter tokens without mutating outer scopes.
+      for p in node.parameters:
+        mods = 1 if p.is_mutable else (1 | 4)
+        self.add_token(getattr(p, "name_line", None), getattr(p, "name_column", None), getattr(p, "name_length", None), "parameter", mods)
+        if getattr(p, "param_type", None) is not None:
+          self.visit(p.param_type)
     super().visit_FuncDeclNode(node)
     if not is_method:
       sym = self.symbol_table.lookup(node.name)
@@ -364,8 +433,6 @@ class SemanticTokensTypeChecker(TypeChecker):
       for ann in getattr(func_decl, "annotations", []):
         self.visit(ann)
       self.add_token(getattr(func_decl, "name_line", None), getattr(func_decl, "name_column", None), getattr(func_decl, "name_length", None), "method", mods)
-      for p in func_decl.parameters:
-        self.visit(p)
     super().visit_ImplMemberNode(node)
     if self.current_struct and func_decl and func_decl.name in self.current_struct.methods:
       method_obj = self.current_struct.methods[func_decl.name]
@@ -381,15 +448,18 @@ class SemanticTokensTypeChecker(TypeChecker):
       method_obj.ast_decl = func_decl
       method_type.ast_decl = func_decl
 
-  def visit_ParameterNode(self, node) -> None:
+  def visit_ParameterNode(self, node) -> Any:
     mods = 1
     if not node.is_mutable:
       mods |= 4
     self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "parameter", mods)
-    sym = self.symbol_table.lookup(node.name)
-    if sym:  # pragma: no cover
+    # Only attach ast_decl to the parameter's own local scope symbol, never an outer global.
+    cur_scope = getattr(self.symbol_table, "current_scope", None)
+    sym = cur_scope.symbols.get(node.name) if cur_scope is not None else None
+    if sym:
       sym.ast_decl = node
-    # No parent visitor exists for parameters
+      return sym.symbol_type
+    return None
 
   def visit_VarDeclNode(self, node) -> None:
     for ann in getattr(node, "annotations", []):
@@ -397,12 +467,45 @@ class SemanticTokensTypeChecker(TypeChecker):
     mods = 1
     if not node.is_mutable:
       mods |= 4
-    self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "variable", mods)
+    bindings_info = getattr(node, "bindings_info", None)
+    if isinstance(bindings_info, list) and bindings_info:
+      for info in bindings_info:
+        self.add_token(
+            info.get("line"),
+            info.get("column"),
+            info.get("length"),
+            "variable",
+            mods,
+        )
+    else:
+      self.add_token(getattr(node, "name_line", None), getattr(node, "name_column", None), getattr(node, "name_length", None), "variable", mods)
     super().visit_VarDeclNode(node)
+    binding_types = {}
+    names = getattr(node, "names", None) or ([node.name] if getattr(node, "name", None) else [])
+    for b_name in names:
+      sym = self.symbol_table.lookup(b_name)
+      if sym:
+        binding_types[b_name] = sym.symbol_type
+        sym.ast_decl = node
+    if binding_types:
+      node.binding_types = binding_types
+      first_name = getattr(node, "name", None)
+      if first_name in binding_types:
+        self.node_types[node] = binding_types[first_name]
+
+  def visit_MoveNode(self, node) -> Any:
     sym = self.symbol_table.lookup(node.name)
-    if sym:
-      self.node_types[node] = sym.symbol_type
-      sym.ast_decl = node
+    if isinstance(sym, VariableSymbol):
+      mods = 0 if sym.is_mutable else 4
+      token_type = "parameter" if sym.is_parameter else "variable"
+      self.add_token(
+          getattr(node, "name_line", None),
+          getattr(node, "name_column", None),
+          getattr(node, "name_length", None),
+          token_type,
+          mods,
+      )
+    return super().visit_MoveNode(node)
 
   def visit_AssignmentNode(self, node) -> None:
     super().visit_AssignmentNode(node)
@@ -560,25 +663,37 @@ class SemanticTokensTypeChecker(TypeChecker):
     return None
 
 
-def encode_semantic_tokens(raw_tokens: List[Tuple[int, int, int, str, int]]) -> List[int]:
+def encode_semantic_tokens(
+    raw_tokens: List[Tuple[int, int, int, str, int]],
+    doc_text: Optional[str] = None,
+) -> List[int]:
   """Converts absolute token coordinate tuples into delta-encoded LSP format."""
-  # 1. Map absolute ANTLR coordinates (1-based lines, 0-based columns) to LSP (0-based lines)
+  lines = doc_text.splitlines() if isinstance(doc_text, str) else None
+
+  # 1. Map absolute ANTLR coordinates (1-based lines, 0-based columns) to LSP (0-based lines, UTF-16 cols)
   valid_tokens = []
   for line, col, length, type_str, mods in raw_tokens:
-    if line is not None and col is not None and length is not None:
-      valid_tokens.append((line - 1, col, length, type_str, mods))
+    if line is not None and col is not None and length is not None and length > 0:
+      lsp_line = line - 1
+      lsp_col = col
+      lsp_len = length
+      if lines is not None and 0 <= lsp_line < len(lines):
+        lsp_col, lsp_len = codepoint_span_to_utf16(lines[lsp_line], col, length)
+      if lsp_len > 0:
+        valid_tokens.append((lsp_line, lsp_col, lsp_len, type_str, mods))
 
   # 2. Sort tokens: primary key = line, secondary key = column
   valid_tokens.sort(key=lambda t: (t[0], t[1]))
 
-  # 3. Deduplicate tokens sharing the same start position
+  # 3. Deduplicate and drop overlapping tokens (LSP requires strictly non-overlapping ranges)
   unique_tokens = []
-  last_pos = None
+  last_end: Optional[Tuple[int, int]] = None
   for t in valid_tokens:
-    pos = (t[0], t[1])
-    if pos != last_pos:
-      unique_tokens.append(t)
-      last_pos = pos
+    t_line, t_col, t_len = t[0], t[1], t[2]
+    if last_end is not None and t_line == last_end[0] and t_col < last_end[1]:
+      continue
+    unique_tokens.append(t)
+    last_end = (t_line, t_col + t_len)
 
   # 4. Generate delta-encoded array
   delta_tokens: List[int] = []
@@ -604,7 +719,7 @@ def encode_semantic_tokens(raw_tokens: List[Tuple[int, int, int, str, int]]) -> 
 def find_node_at_position(node: ASTNode, line: int, col: int) -> Optional[ASTNode]:
   """Recursively finds the most specific AST node containing (line, col).
 
-  Line is 1-based, col is 0-based.
+  Line is 1-based, col is 0-based (code-point offset; end_column is exclusive).
   """
   if getattr(node, "start_line", None) is None or getattr(node, "end_line", None) is None:
     return None
@@ -614,8 +729,8 @@ def find_node_at_position(node: ASTNode, line: int, col: int) -> Optional[ASTNod
     # Check column boundary on start line
     if line == node.start_line and col < node.start_column:
       return None
-    # Check column boundary on end line
-    if line == node.end_line and col > node.end_column:
+    # Check exclusive column boundary on end line
+    if line == node.end_line and col >= node.end_column:
       return None
 
     # Recursively check children for a tighter match

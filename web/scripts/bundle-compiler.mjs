@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const EXCLUDED_DIRS = new Set(['__pycache__', 'lsp', '.pytest_cache']);
 const EXCLUDED_FILES = new Set(['llvm_transpiler.py', 'llvm_transpiler_test.py']);
@@ -38,8 +39,9 @@ export function buildCompilerBundle(repoRoot) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const webDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const currentFilePath = fileURLToPath(import.meta.url);
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(currentFilePath)) {
+  const webDir = path.resolve(path.dirname(currentFilePath), '..');
   const repoRoot = path.resolve(webDir, '..');
   const outDir = path.join(webDir, 'public');
   fs.mkdirSync(outDir, { recursive: true });

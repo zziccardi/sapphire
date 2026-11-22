@@ -287,4 +287,106 @@ class TestArenaChecker(unittest.TestCase):
         ArenaChecker.collect_arena_deps(st, lam), [("a1", 0), ("a2", 0)]
     )
 
+  def test_phase3_arena_and_stack_borrow_edge_cases(self):
+    from src.parser.ast import YieldNode
+    from src.semantics.borrow_checker import BorrowChecker
+    from src.semantics.symbol_table import SharedRefType
+
+    st = SymbolTable()
+    proto_t = StructType("Goblin", is_prototype=True)
+    v1 = VariableSymbol("v1", proto_t, is_mutable=False)
+    v1.arena_dep_records = [("a1", 0)]
+    st.define("v1", v1)
+
+    # 1. MatchExprNode with YieldNode inside block arm
+    match_yield = MatchExprNode(
+        LiteralNode(1, "int"),
+        [
+            MatchCaseNode(
+                LiteralNode(1, "int"),
+                BlockNode([YieldNode([IdentifierNode("v1")])]),
+            )
+        ],
+    )
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, match_yield), [("a1", 0)]
+    )
+
+    # 2. MatchExprNode stack borrow collection
+    cb = VariableSymbol("cb", PrimitiveType("none"), is_mutable=False)
+    cb.stack_borrow_symbols = {"local_x"}
+    st.define("cb", cb)
+    match_sb = MatchExprNode(
+        LiteralNode(1, "int"),
+        [
+            MatchCaseNode(
+                LiteralNode(1, "int"),
+                BlockNode([YieldNode([IdentifierNode("cb")])]),
+            )
+        ],
+    )
+    self.assertEqual(
+        BorrowChecker.collect_stack_borrow_symbols(st, match_sb), {"local_x"}
+    )
+
+    # 3. Multi-var VarDeclNode in lambda captures second expr
+    lam_multi = LambdaNode(
+        [],
+        None,
+        BlockNode([
+            VarDeclNode(
+                False,
+                ["x", "y"],
+                exprs=[LiteralNode(1, "int"), IdentifierNode("v1")],
+            )
+        ]),
+    )
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, lam_multi), [("a1", 0)]
+    )
+
+    # 4. CallNode with callable variable callee carrying arena dep
+    fn_var = VariableSymbol("get_v1", PrimitiveType("none"), is_mutable=False)
+    fn_var.arena_dep_records = [("a1", 0)]
+    st.define("get_v1", fn_var)
+    self.assertEqual(
+        ArenaChecker.collect_arena_deps(st, CallNode(IdentifierNode("get_v1"), [])),
+        [("a1", 0)],
+    )
+
+    # 5. Intermediate immutable field in arena chain
+    inner_t = StructType("Inner")
+    inner_t.fields["arena"] = VariableSymbol("arena", ArenaType(), is_mutable=True)
+    outer_t = StructType("Outer")
+    outer_t.fields["const_inner"] = VariableSymbol("const_inner", inner_t, is_mutable=False)
+    outer_sym = VariableSymbol("o", outer_t, is_mutable=True)
+    st.define("o", outer_sym)
+    o_id = IdentifierNode("o")
+    o_inner = MemberAccessNode(o_id, "const_inner", False)
+    o_arena = MemberAccessNode(o_inner, "arena", False)
+    fake_checker = type(
+        "C", (), {"node_types": {o_id: outer_t, o_inner: inner_t}}
+    )()
+    errs = []
+    ArenaChecker.validate_arena_mutability(
+        st, o_arena, errs.append, checker=fake_checker
+    )
+    self.assertTrue(errs)
+    self.assertIn("immutable Arena field 'const_inner'", errs[0])
+
+    # 6. SharedRef-backed arena rejected
+    sr_sym = VariableSymbol("sr", SharedRefType(inner_t), is_mutable=True)
+    st.define("sr", sr_sym)
+    sr_arena = MemberAccessNode(IdentifierNode("sr"), "arena", False)
+    fake_sr_checker = type(
+        "C", (), {"node_types": {}, "has_shared_ref_base": lambda self, n: True}
+    )()
+    errs = []
+    ArenaChecker.validate_arena_mutability(
+        st, sr_arena, errs.append, checker=fake_sr_checker
+    )
+    self.assertTrue(errs)
+    self.assertIn("SharedRef", errs[0])
+
+
 

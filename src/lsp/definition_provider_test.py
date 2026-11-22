@@ -249,6 +249,203 @@ class TestDefinitionProvider(unittest.TestCase):
     self.assertIsNotNone(res)
     self.assertEqual(res.range.start.line, 4)
 
+  def test_definition_local_shadows_global_and_no_scope_leak(self):
+    """Verifies locals resolve before globals and do not leak across functions or blocks."""
+    code = "\n".join([
+        "func helper(): int { return 1; }",
+        "func first() {",
+        "  let helper = 42;",
+        "  let a = helper;",
+        "  if true {",
+        "    let inner_only = 7;",
+        "  }",
+        "  let b = 0;",
+        "}",
+        "func second() {",
+        "  let c = helper();",
+        "  let d = inner_only;",
+        "}",
+    ])
+    ls = SapphireLanguageServer("sapphire", "v0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///tmp/test_scope_def.sp"
+    doc = MagicMock()
+    doc.source = code
+    doc.uri = doc_uri
+    ls.workspace.get_text_document.return_value = doc
+    validate_source(ls, doc_uri, code)
+
+    lines = code.splitlines()
+    # Inside first(), `helper` on line 3 jumps to local `let helper = 42` on line 2.
+    res_shadow = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=3, character=lines[3].index("helper")),
+        ),
+    )
+    self.assertIsNotNone(res_shadow)
+    self.assertEqual(res_shadow.range.start.line, 2)
+
+    # Inside second(), `helper()` on line 10 jumps to global `func helper` on line 0 (no +10 leak!).
+    res_global = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=10, character=lines[10].index("helper")),
+        ),
+    )
+    self.assertIsNotNone(res_global)
+    self.assertEqual(res_global.range.start.line, 0)
+
+    # `inner_only` declared inside first()'s if-block must not leak to second().
+    res_leak = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=11, character=lines[11].index("inner_only")),
+        ),
+    )
+    self.assertIsNone(res_leak)
+
+  def test_definition_struct_init_move_multivar_and_same_field_name(self):
+    """Verifies go-to-def for StructInitializerNode, MoveNode, multi-var, and same-named fields."""
+    code = "\n".join([
+        "struct Foo {",
+        "  var x: int;",
+        "}",
+        "struct Bar {",
+        "  var x: int;",
+        "}",
+        "func take(f: Foo) {}",
+        "func main() {",
+        "  let f = Foo { x = 1 };",
+        "  let b = Bar { x = 2 };",
+        "  let bx = b.x;",
+        "  let a, second_val = 10, 20;",
+        "  let use_second = second_val;",
+        "  take(move f);",
+        "}",
+    ])
+    ls = SapphireLanguageServer("sapphire", "v0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///tmp/test_extra_def.sp"
+    doc = MagicMock()
+    doc.source = code
+    doc.uri = doc_uri
+    ls.workspace.get_text_document.return_value = doc
+    validate_source(ls, doc_uri, code)
+
+    lines = code.splitlines()
+    # StructInitializerNode: `Foo` in `Foo { x = 1 }` jumps to `struct Foo` (line 0).
+    res_init = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=8, character=lines[8].index("Foo")),
+        ),
+    )
+    self.assertIsNotNone(res_init)
+    self.assertEqual(res_init.range.start.line, 0)
+
+    # `b.x` jumps to `Bar.x` (line 4), NOT `Foo.x` (line 1).
+    res_bx = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=10, character=lines[10].index(".x") + 1),
+        ),
+    )
+    self.assertIsNotNone(res_bx)
+    self.assertEqual(res_bx.range.start.line, 4)
+
+    # Multi-var: `second_val` jumps to `second_val`'s column on line 11, not `a`.
+    res_mv = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=12, character=lines[12].index("second_val")),
+        ),
+    )
+    self.assertIsNotNone(res_mv)
+    self.assertEqual(res_mv.range.start.line, 11)
+    self.assertEqual(
+        res_mv.range.start.character, lines[11].index("second_val")
+    )
+
+    # MoveNode: `move f` jumps to `let f = ...` (line 8).
+    res_move = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=13, character=lines[13].index("f)")),
+        ),
+    )
+    self.assertIsNotNone(res_move)
+    self.assertEqual(res_move.range.start.line, 8)
+
+  def test_definition_utf16_columns_with_emoji(self):
+    """Verifies UTF-16 LSP columns map accurately across non-BMP characters."""
+    code = 'func main() {\n  let s = "🚀"; let target = 1;\n  let r = target;\n}\n'
+    ls = SapphireLanguageServer("sapphire", "v0")
+    ls.text_document_publish_diagnostics = MagicMock()
+    ls.protocol._workspace = MagicMock()
+    doc_uri = "file:///tmp/test_utf16_def.sp"
+    doc = MagicMock()
+    doc.source = code
+    doc.uri = doc_uri
+    ls.workspace.get_text_document.return_value = doc
+    validate_source(ls, doc_uri, code)
+
+    lines = code.splitlines()
+    # In UTF-16, "🚀" takes 2 code units instead of 1 Python code point.
+    expected_u16_col = (
+        len(lines[1][: lines[1].index("target")].encode("utf-16-le")) // 2
+    )
+    res = DefinitionProvider.provide_definition(
+        ls,
+        DefinitionParams(
+            text_document=TextDocumentIdentifier(uri=doc_uri),
+            position=Position(line=2, character=lines[2].index("target")),
+        ),
+    )
+    self.assertIsNotNone(res)
+    self.assertEqual(res.range.start.line, 1)
+    self.assertEqual(res.range.start.character, expected_u16_col)
+
+  def test_preload_does_not_overwrite_open_dirty_buffer(self):
+    """Verifies _preload_module_dependencies skips disk reload for open workspace buffers."""
+    import os
+    import tempfile
+    from pygls.uris import from_fs_path
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      dep_path = os.path.join(tmp_dir, "dep.sp")
+      main_path = os.path.join(tmp_dir, "main.sp")
+      with open(dep_path, "w", encoding="utf-8") as f:
+        f.write("func from_disk(): int { return 1; }\nexport { from_disk, }\n")
+      main_code = "import dep;\nfunc main() { let x = dep.from_disk(); }\n"
+      with open(main_path, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      dep_uri = from_fs_path(os.path.abspath(dep_path))
+      main_uri = from_fs_path(os.path.abspath(main_path))
+
+      ls = SapphireLanguageServer("sapphire", "v0")
+      ls.text_document_publish_diagnostics = MagicMock()
+      ls.protocol._workspace = MagicMock()
+
+      dirty_dep = "func unsaved_fn(): int { return 2; }\nexport { unsaved_fn, }\n"
+      ls.workspace.text_documents = {dep_uri: MagicMock(source=dirty_dep)}
+      validate_source(ls, dep_uri, dirty_dep)
+      cached_ast_before = ls.ast_cache[dep_uri]
+
+      validate_source(ls, main_uri, main_code)
+      # The open unsaved buffer's AST cache must NOT be replaced by disk content.
+      self.assertIs(ls.ast_cache[dep_uri], cached_ast_before)
+
 
 if __name__ == "__main__":
   unittest.main()

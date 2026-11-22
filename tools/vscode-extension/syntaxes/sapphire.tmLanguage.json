@@ -38,6 +38,62 @@
     "strings": {
       "patterns": [
         {
+          "name": "string.interpolated.sapphire",
+          "begin": "f\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.sapphire"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.sapphire"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.sapphire",
+              "match": "\\\\.|\\{\\{|\\}\\}"
+            },
+            {
+              "name": "meta.interpolation.sapphire",
+              "begin": "\\{",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.begin.sapphire"
+                }
+              },
+              "end": "\\}",
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.end.sapphire"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#interpolation-braces"
+                },
+                {
+                  "include": "#strings"
+                },
+                {
+                  "include": "#numbers"
+                },
+                {
+                  "include": "#keywords"
+                },
+                {
+                  "include": "#types"
+                },
+                {
+                  "include": "#identifiers"
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "string.quoted.double.sapphire",
           "begin": "\"",
           "end": "\"",
@@ -47,6 +103,30 @@
               "match": "\\\\."
             }
           ]
+        }
+      ]
+    },
+    "interpolation-braces": {
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#interpolation-braces"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#identifiers"
         }
       ]
     },
@@ -82,7 +162,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.sapphire",
-          "match": "\\b(bool|float|int|void)\\b"
+          "match": "\\b(String|bool|float|int|void)\\b"
         }
       ]
     },

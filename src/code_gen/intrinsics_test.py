@@ -38,7 +38,7 @@ class TestIntrinsicRegistry(unittest.TestCase):
     mock_transpiler.reset_mock()
     handled_lua = IntrinsicRegistry.try_emit("lua", mock_transpiler, call)
     self.assertTrue(handled_lua)
-    mock_transpiler.emit.assert_any_call("(#")
+    mock_transpiler.emit.assert_any_call("_SP_RT._sapphire_string_size(")
 
   def test_range_python_named_and_positional_variants(self):
     from src.parser.ast import ArgumentNode, LiteralNode
@@ -98,6 +98,77 @@ class TestIntrinsicRegistry(unittest.TestCase):
         ]),
         "range(0, 10, 2)",
     )
+
+  def test_optional_chaining_on_intrinsics_python_and_lua(self):
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.code_gen.lua_transpiler import LuaTranspiler
+
+    member = MemberAccessNode(IdentifierNode("opt_s"), "upper", True)
+    member.is_string_method = True
+    call = CallNode(callee=member, arguments=[])
+
+    py_t = PythonTranspiler()
+    self.assertTrue(IntrinsicRegistry.try_emit("python", py_t, call))
+    py_out = py_t.get_output()
+    self.assertIn("is not None else None", py_out)
+    self.assertIn(".upper()", py_out)
+    # AST receiver must remain unmodified
+    self.assertIsInstance(member.receiver, IdentifierNode)
+    self.assertEqual(member.receiver.name, "opt_s")
+
+    lua_t = LuaTranspiler()
+    self.assertTrue(IntrinsicRegistry.try_emit("lua", lua_t, call))
+    lua_out = lua_t.get_output()
+    self.assertIn("~= nil then return string.upper(", lua_out)
+    self.assertEqual(member.receiver.name, "opt_s")
+
+  def test_reordered_named_intrinsic_preserves_call_order(self):
+    from src.parser.ast import ArgumentNode
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.code_gen.lua_transpiler import LuaTranspiler
+
+    member = MemberAccessNode(IdentifierNode("arr"), "insert", False)
+    member.is_array_method = True
+    member.array_method = "insert"
+    call = CallNode(
+        callee=member,
+        arguments=[
+            ArgumentNode("element", CallNode(IdentifierNode("first"), [])),
+            ArgumentNode("index", CallNode(IdentifierNode("second"), [])),
+        ],
+    )
+
+    py_t = PythonTranspiler()
+    self.assertTrue(IntrinsicRegistry.try_emit("python", py_t, call))
+    py_out = py_t.get_output()
+    self.assertLess(py_out.index("first()"), py_out.index("second()"))
+
+    lua_t = LuaTranspiler()
+    self.assertTrue(IntrinsicRegistry.try_emit("lua", lua_t, call))
+    lua_out = lua_t.get_output()
+    self.assertLess(lua_out.index("first()"), lua_out.index("second()"))
+
+  def test_python_assert_and_string_contains_helpers(self):
+    from src.parser.ast import ArgumentNode, LiteralNode
+    from src.code_gen.python_transpiler import PythonTranspiler
+
+    py_t = PythonTranspiler()
+    assert_call = CallNode(
+        callee=IdentifierNode("assert"),
+        arguments=[ArgumentNode(None, LiteralNode(True, "bool"))],
+    )
+    self.assertTrue(IntrinsicRegistry.try_emit("python", py_t, assert_call))
+    self.assertEqual(py_t.get_output(), '_sapphire_assert(True, "assertion failed")')
+
+    py_t2 = PythonTranspiler()
+    member = MemberAccessNode(CallNode(IdentifierNode("get_s"), []), "contains", False)
+    member.is_string_method = True
+    contains_call = CallNode(
+        callee=member,
+        arguments=[ArgumentNode(None, CallNode(IdentifierNode("get_sub"), []))],
+    )
+    self.assertTrue(IntrinsicRegistry.try_emit("python", py_t2, contains_call))
+    self.assertEqual(py_t2.get_output(), "_sapphire_string_contains(get_s(), get_sub())")
 
 
 if __name__ == "__main__":
