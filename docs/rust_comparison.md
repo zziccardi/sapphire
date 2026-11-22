@@ -189,7 +189,7 @@ Sapphire targets a different balance:
      ```
      `guard` keeps the "happy path" un-indented and cleanly exits early on
      precondition failures
-     ([docs/SPEC.md (Guard Statements)](SPEC.md#guard-statements-guard-else-)).
+     ([docs/SPEC.md (Guard Statements)](SPEC.md#guard-statements-guard-else)).
   2. **Rich optional syntax**:
      - Optional modifier (`T?`) with `none`.
      - Semicolon-separated init headers:

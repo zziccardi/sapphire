@@ -12,4 +12,11 @@
 - **Theme & Diagrams**: Dark mode is controlled via `[data-theme="dark"]` on
   `<html>`. Dynamic client-side widgets (such as Mermaid diagrams) must observe
   `data-theme` changes and re-render accordingly.
+- **Markdown & Security**: Always pass a replacement callback (`() => html`) to
+  `String.prototype.replace` when inserting highlighted code blocks so `$`
+  patterns (`$$`, `$&`, `$'`) are never interpreted. Escape `<` as `\u003c` in
+  inline JSON `<script>` tags, sanitize `javascript:`/`data:` URIs and HTML
+  attributes, keep `src/lib/highlight.ts` registered languages aligned with
+  `docs/*.md` fences, and guard async UI queries (e.g. Pagefind search) with a
+  monotonic request ID to drop stale responses.
 - **Verification**: Run `npm test` and `npm run build` in `web/` after changes.

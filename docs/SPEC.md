@@ -800,7 +800,7 @@ func fibonacci(count: int): Coroutine<int> {
   * `.is_done()`: Returns boolean indicating whether routine has terminated.
   * `.reset()`: Restarts the coroutine from the beginning.
 
-  For further details, see [coroutines](builtins.md#coroutines) in
+  For further details, see [coroutines](builtins.md#coroutine) in
   `builtins.md`.
 
 ## Structs & implementation blocks
