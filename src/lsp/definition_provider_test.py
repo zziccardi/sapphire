@@ -446,6 +446,96 @@ class TestDefinitionProvider(unittest.TestCase):
       # The open unsaved buffer's AST cache must NOT be replaced by disk content.
       self.assertIs(ls.ast_cache[dep_uri], cached_ast_before)
 
+  def test_extract_node_range_fallbacks(self):
+    """Verifies HeaderBindingNode let_name_* and start_line/end_line fallback ranges."""
+    from types import SimpleNamespace
+    from src.parser.ast import HeaderBindingNode, IdentifierNode, LiteralNode
+
+    hb = HeaderBindingNode(False, "x", None, LiteralNode(1, "int"), True)
+    hb.let_name_line = 4
+    hb.let_name_column = 6
+    hb.let_name_length = 1
+    r1 = DefinitionProvider._extract_node_range(hb, IdentifierNode("x"))
+    self.assertIsNotNone(r1)
+    self.assertEqual(r1.start.line, 3)
+    self.assertEqual(r1.start.character, 6)
+    self.assertEqual(r1.end.character, 7)
+
+    # Fallback to start_line/start_column/end_line/end_column when name_* absent
+    plain = SimpleNamespace(
+        start_line=2, start_column=3, end_line=2, end_column=8
+    )
+    r2 = DefinitionProvider._extract_node_range(plain, IdentifierNode("y"))
+    self.assertIsNotNone(r2)
+    self.assertEqual(r2.start.line, 1)
+    self.assertEqual(r2.start.character, 3)
+    self.assertEqual(r2.end.character, 8)
+
+  def test_locate_in_ast_cache_identity_and_name_fallback(self):
+    """Verifies _locate_in_ast_cache across enum/struct/impl members and name fallback."""
+    from types import SimpleNamespace
+    from src.parser.ast import (
+        BasicTypeNode,
+        BlockNode,
+        EnumDeclNode,
+        EnumMemberNode,
+        FuncDeclNode,
+        ImplBlockNode,
+        ImplMemberNode,
+        ProgramNode,
+        StructDeclNode,
+        StructFieldNode,
+    )
+
+    enum_mem = EnumMemberNode("Active", None)
+    enum_mem.name_line = 2
+    enum_mem.name_column = 2
+    enum_mem.name_length = 6
+    enum_decl = EnumDeclNode("Status", [enum_mem])
+
+    field_decl = StructFieldNode(True, "hp", BasicTypeNode("int"), None)
+    field_decl.name_line = 5
+    field_decl.name_column = 4
+    field_decl.name_length = 2
+    struct_decl = StructDeclNode("Hero", fields=[field_decl])
+
+    method_fn = FuncDeclNode("heal", [], [], BlockNode([]))
+    method_fn.name_line = 9
+    method_fn.name_column = 7
+    method_fn.name_length = 4
+    impl_decl = ImplBlockNode("Hero", None, [ImplMemberNode(None, method_fn)])
+
+    prog = ProgramNode([enum_decl, struct_decl, impl_decl])
+    uri = "file:///cache_loc.sp"
+    prog.file_uri = uri
+    mock_ls = SimpleNamespace(ast_cache={uri: prog})
+
+    # Pass 1: exact identity on enum member and struct field
+    res_enum = DefinitionProvider._locate_in_ast_cache(mock_ls, enum_mem)
+    self.assertIsNotNone(res_enum)
+    self.assertEqual(res_enum[0], uri)
+    self.assertEqual(res_enum[1].start.line, 1)
+
+    res_field = DefinitionProvider._locate_in_ast_cache(mock_ls, field_decl)
+    self.assertIsNotNone(res_field)
+    self.assertEqual(res_field[1].start.line, 4)
+
+    # Pass 2: name fallback with a distinct EnumMemberNode / StructFieldNode instance
+    enum_copy = EnumMemberNode("Active", None)
+    res_copy = DefinitionProvider._locate_in_ast_cache(mock_ls, enum_copy)
+    self.assertIsNotNone(res_copy)
+    self.assertEqual(res_copy[1].start.line, 1)
+
+    field_copy = StructFieldNode(True, "hp", BasicTypeNode("int"), None)
+    res_fcopy = DefinitionProvider._locate_in_ast_cache(mock_ls, field_copy)
+    self.assertIsNotNone(res_fcopy)
+    self.assertEqual(res_fcopy[1].start.line, 4)
+
+    # Unnamed target returns None
+    self.assertIsNone(
+        DefinitionProvider._locate_in_ast_cache(mock_ls, SimpleNamespace())
+    )
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -275,3 +275,24 @@ class TestStdlibModules(unittest.TestCase):
     with self.assertRaises(SapphireTypeError):
       self._parse_and_check(bad_quad)
 
+  def test_utf8_python_edge_cases(self):
+    """Verifies boundary and error branches in lib/std/utf8.py."""
+    import lib.std.utf8 as py_utf8
+
+    # Unpaired surrogate cannot be UTF-8 encoded -> None
+    self.assertIsNone(py_utf8.size("\ud800"))
+    self.assertEqual(py_utf8.size("café"), 4)
+
+    # Negative start index and out-of-bounds index
+    self.assertEqual(py_utf8.offset("café", 0, -1), 4)
+    self.assertIsNone(py_utf8.offset("abc", 1, 99))
+    self.assertIsNone(py_utf8.offset("abc", 1, -99))
+
+    # Forward and backward step past string boundaries
+    self.assertIsNone(py_utf8.offset("ab", 5, 1))
+    self.assertIsNone(py_utf8.offset("ab", -5, 1))
+
+    # Empty string sub
+    self.assertEqual(py_utf8.sub("", 0, 1), "")
+    self.assertEqual(py_utf8.sub("café", 1, 4), "afé")
+

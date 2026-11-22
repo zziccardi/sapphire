@@ -97,6 +97,268 @@ class TestBaseTranspilerHelpers(unittest.TestCase):
     expr.inferred_type = StructType("Resource")
     self.assertEqual(transpiler._expr_destructible_struct(expr), "Resource")
 
+  def test_next_temp_name_initializes_counters(self):
+    """Verifies _next_temp_name lazily initializes counters and increments per prefix."""
+    from src.code_gen.python_transpiler import PythonTranspiler
+
+    transpiler = PythonTranspiler()
+    if hasattr(transpiler, "_temp_name_counters"):
+      delattr(transpiler, "_temp_name_counters")
+    self.assertEqual(transpiler._next_temp_name(), "_sp_tmp_1")
+    self.assertEqual(transpiler._next_temp_name(), "_sp_tmp_2")
+    self.assertEqual(transpiler._next_temp_name("_custom"), "_custom_1")
+
+  def test_type_needs_destructor_paths(self):
+    """Verifies _type_needs_destructor for None, methods, cycles, and nested fields."""
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.semantics.types import (
+        ArenaType,
+        FunctionType,
+        OptionalType,
+        PrimitiveType,
+        RefType,
+        SharedRefType,
+        StructField,
+        StructMethod,
+        StructType,
+    )
+
+    transpiler = PythonTranspiler()
+    self.assertIsNone(transpiler._type_needs_destructor(None))
+    self.assertEqual(transpiler._type_needs_destructor(ArenaType()), "Arena")
+    self.assertEqual(
+        transpiler._type_needs_destructor(RefType(PrimitiveType("int"))), "Ref"
+    )
+    self.assertEqual(
+        transpiler._type_needs_destructor(SharedRefType(PrimitiveType("int"))),
+        "SharedRef",
+    )
+    self.assertEqual(
+        transpiler._type_needs_destructor(OptionalType(ArenaType())), "Arena"
+    )
+
+    # Struct with __del__ method not yet in structs_with_destructor
+    direct_dtor = StructType("DirectDtor")
+    direct_dtor.methods["__del__"] = StructMethod(
+        "__del__", FunctionType([], PrimitiveType("void")), None
+    )
+    self.assertEqual(
+        transpiler._type_needs_destructor(direct_dtor), "DirectDtor"
+    )
+
+    # Prototype structs never need stack destructors
+    proto_st = StructType("ProtoThing", is_prototype=True)
+    proto_st.methods["__del__"] = StructMethod(
+        "__del__", FunctionType([], PrimitiveType("void")), None
+    )
+    self.assertIsNone(transpiler._type_needs_destructor(proto_st))
+
+    # Nested struct field requiring destructor
+    wrapper = StructType("Wrapper")
+    wrapper.fields["res"] = StructField(
+        name="res", field_type=direct_dtor, is_mutable=False
+    )
+    self.assertEqual(transpiler._type_needs_destructor(wrapper), "Wrapper")
+
+    # Cycle detection prevents infinite recursion
+    cyclic = StructType("Cyclic")
+    cyclic.fields["next"] = StructField(
+        name="next", field_type=cyclic, is_mutable=False
+    )
+    self.assertIsNone(transpiler._type_needs_destructor(cyclic))
+
+  def test_expr_destructible_struct_fallbacks(self):
+    """Verifies _expr_destructible_struct for MultiReturnType and untyped AST nodes."""
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.parser.ast import (
+        CallNode,
+        EllipsisPatternNode,
+        IdentifierNode,
+        LiteralNode,
+        MatchCaseNode,
+        MatchExprNode,
+        MemberAccessNode,
+        MoveNode,
+        StructInitializerNode,
+        TernaryExprNode,
+        YieldNode,
+    )
+    from src.semantics.types import MultiReturnType, PrimitiveType, StructType
+
+    transpiler = PythonTranspiler()
+    transpiler.structs_with_destructor.add("Res")
+    transpiler.func_return_types["make_res"] = ["int", "Res"]
+    transpiler.method_return_types[("Factory", "build")] = ["Res"]
+    transpiler.variable_types["factory"] = "Factory"
+    transpiler.variable_types["r_unmangled"] = "Res"
+    transpiler.variable_types[transpiler._mangle_name("from")] = "Res"
+
+    # MultiReturnType in-bounds and out-of-bounds
+    multi_expr = LiteralNode(0, "int")
+    multi_expr.inferred_type = MultiReturnType(
+        [PrimitiveType("int"), StructType("Res")]
+    )
+    self.assertIsNone(
+        transpiler._expr_destructible_struct(multi_expr, return_index=0)
+    )
+    self.assertEqual(
+        transpiler._expr_destructible_struct(multi_expr, return_index=1), "Res"
+    )
+    self.assertIsNone(
+        transpiler._expr_destructible_struct(multi_expr, return_index=5)
+    )
+
+    # StructInitializerNode
+    self.assertEqual(
+        transpiler._expr_destructible_struct(StructInitializerNode("Res", [])),
+        "Res",
+    )
+    self.assertIsNone(
+        transpiler._expr_destructible_struct(
+            StructInitializerNode("Plain", [])
+        )
+    )
+
+    # CallNode with IdentifierNode (constructor & function return)
+    self.assertEqual(
+        transpiler._expr_destructible_struct(
+            CallNode(IdentifierNode("Res"), [])
+        ),
+        "Res",
+    )
+    self.assertEqual(
+        transpiler._expr_destructible_struct(
+            CallNode(IdentifierNode("make_res"), []), return_index=1
+        ),
+        "Res",
+    )
+    self.assertIsNone(
+        transpiler._expr_destructible_struct(
+            CallNode(IdentifierNode("make_res"), []), return_index=0
+        )
+    )
+
+    # CallNode with MemberAccessNode (share / upgrade / method_return_types)
+    share_access = MemberAccessNode(IdentifierNode("sr"), "share", False)
+    share_access.is_shared_ref_share = True
+    self.assertEqual(
+        transpiler._expr_destructible_struct(CallNode(share_access, [])),
+        "SharedRef",
+    )
+
+    upgrade_access = MemberAccessNode(IdentifierNode("wr"), "upgrade", False)
+    upgrade_access.is_weak_ref_upgrade = True
+    self.assertEqual(
+        transpiler._expr_destructible_struct(CallNode(upgrade_access, [])),
+        "SharedRef",
+    )
+
+    method_access = MemberAccessNode(IdentifierNode("factory"), "build", False)
+    self.assertEqual(
+        transpiler._expr_destructible_struct(CallNode(method_access, [])),
+        "Res",
+    )
+
+    # IdentifierNode and MoveNode (mangled and unmangled)
+    self.assertEqual(
+        transpiler._expr_destructible_struct(IdentifierNode("from")), "Res"
+    )
+    self.assertEqual(
+        transpiler._expr_destructible_struct(MoveNode("r_unmangled")), "Res"
+    )
+    self.assertIsNone(
+        transpiler._expr_destructible_struct(IdentifierNode("unknown_var"))
+    )
+
+    # Fallback with unmangled name when mangled name differs
+    transpiler.variable_types.pop(transpiler._mangle_name("from"))
+    transpiler.variable_types["from"] = "Res"
+    self.assertEqual(
+        transpiler._expr_destructible_struct(IdentifierNode("from")), "Res"
+    )
+
+    # TernaryExprNode
+    ternary = TernaryExprNode(
+        LiteralNode(True, "bool"),
+        LiteralNode(0, "int"),
+        StructInitializerNode("Res", []),
+    )
+    self.assertEqual(transpiler._expr_destructible_struct(ternary), "Res")
+
+    # MatchExprNode with BlockNode + YieldNode
+    match_block = MatchExprNode(
+        IdentifierNode("x"),
+        [
+            MatchCaseNode(
+                EllipsisPatternNode(),
+                BlockNode([YieldNode([StructInitializerNode("Res", [])])]),
+            )
+        ],
+    )
+    self.assertEqual(transpiler._expr_destructible_struct(match_block), "Res")
+
+    # MatchExprNode with direct expression body
+    match_expr = MatchExprNode(
+        IdentifierNode("x"),
+        [MatchCaseNode(EllipsisPatternNode(), StructInitializerNode("Res", []))],
+    )
+    self.assertEqual(transpiler._expr_destructible_struct(match_expr), "Res")
+
+  def test_is_owned_unwrap_expr_and_register_binding_destructibles(self):
+    """Verifies _is_owned_unwrap_expr and _register_binding_destructibles."""
+    from src.code_gen.base_transpiler import BaseTranspiler
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.parser.ast import (
+        CallNode,
+        IdentifierNode,
+        LiteralNode,
+        MemberAccessNode,
+        MoveNode,
+        StructInitializerNode,
+    )
+
+    self.assertTrue(BaseTranspiler._is_owned_unwrap_expr(MoveNode("r")))
+    self.assertFalse(BaseTranspiler._is_owned_unwrap_expr(IdentifierNode("r")))
+
+    arr_get = MemberAccessNode(IdentifierNode("arr"), "get", False)
+    arr_get.is_array_method = True
+    self.assertFalse(BaseTranspiler._is_owned_unwrap_expr(CallNode(arr_get, [])))
+    self.assertTrue(
+        BaseTranspiler._is_owned_unwrap_expr(StructInitializerNode("Res", []))
+    )
+
+    transpiler = PythonTranspiler()
+    transpiler.structs_with_destructor.add("Res")
+    transpiler.variable_types["r"] = "Res"
+
+    # Non-destructible expression registers nothing
+    block1 = BlockNode([])
+    self.assertEqual(
+        transpiler._register_binding_destructibles(
+            LiteralNode(1, "int"), ["a"], block1, is_unwrap=False
+        ),
+        [],
+    )
+
+    # Borrowed unwrap registers nothing
+    block2 = BlockNode([])
+    self.assertEqual(
+        transpiler._register_binding_destructibles(
+            IdentifierNode("r"), ["a"], block2, is_unwrap=True
+        ),
+        [],
+    )
+
+    # Owned unwrap registers destructible bindings on then_block
+    block3 = BlockNode([])
+    registered = transpiler._register_binding_destructibles(
+        MoveNode("r"), ["a", "b"], block3, is_unwrap=True
+    )
+    self.assertEqual(registered, ["a", "b"])
+    self.assertEqual(block3._block_destructibles, ["a", "b"])
+    self.assertEqual(transpiler.variable_types["a"], "Res")
+    self.assertEqual(transpiler.variable_types["b"], "Res")
+
 
 if __name__ == "__main__":
   unittest.main()

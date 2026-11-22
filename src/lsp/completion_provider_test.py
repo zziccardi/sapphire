@@ -268,6 +268,88 @@ class TestSignatureProvider(unittest.TestCase):
       self.assertIn("scale(", s_mod.signatures[0].label)
       self.assertEqual(s_mod.active_parameter, 1)
 
+  def test_scope_completions_guard_else_while_and_for(self):
+    """Verifies scope completions inside guard/else/else-if/while and after for."""
+    code = "\n".join([
+        "func demo(opt: int?) {",
+        "  for item in [1, 2] {",
+        "    let in_for = item;",
+        "  }",
+        "  guard let g_val ?= opt else {",
+        "    let in_guard_else = 1;",
+        "    ",
+        "  }",
+        "  if false {",
+        "    let in_then = 1;",
+        "  } else if true {",
+        "    let in_elif = 2;",
+        "    ",
+        "  } else {",
+        "    let in_else = 3;",
+        "    ",
+        "  }",
+        "  while false {",
+        "    let in_while = 4;",
+        "    ",
+        "  }",
+        "  ",
+        "}",
+    ])
+    uri = "file:///scope_branches.sp"
+    ls = _make_ls(uri, code)
+
+    def _var_labels(line_idx: int) -> set:
+      res = CompletionProvider.provide_completion(
+          ls,
+          CompletionParams(
+              text_document=TextDocumentIdentifier(uri=uri),
+              position=Position(line=line_idx, character=4),
+          ),
+      )
+      return {item.label for item in res.items}
+
+    # Inside guard else (line 6): sees in_guard_else
+    self.assertIn("in_guard_else", _var_labels(6))
+    # Inside else-if (line 12): sees in_elif
+    self.assertIn("in_elif", _var_labels(12))
+    # Inside else (line 15): sees in_else
+    self.assertIn("in_else", _var_labels(15))
+    # Inside while (line 19): sees in_while
+    self.assertIn("in_while", _var_labels(19))
+    # After guard (line 21): sees g_val
+    self.assertIn("g_val", _var_labels(21))
+
+  def test_enclosing_impl_and_binding_types_dot_fallback(self):
+    """Verifies _find_enclosing_impl_struct None paths and binding_types fallback."""
+    from types import SimpleNamespace
+    from src.lsp.completion_provider import _find_enclosing_impl_struct
+    from src.semantics.symbol_table import PrimitiveType, StructType, SymbolTable
+    from src.semantics.types import StructField
+
+    self.assertIsNone(_find_enclosing_impl_struct(None, None, 1))
+    self.assertIsNone(
+        _find_enclosing_impl_struct(SimpleNamespace(declarations=[]), SymbolTable(), 1)
+    )
+
+    st = StructType("Vec2")
+    st.fields["x"] = StructField("x", PrimitiveType("int"), True)
+
+    class _BindingNode:
+      binding_types = {"v": st}
+      start_line = 2
+
+    node = _BindingNode()
+    uri = "file:///bt_dot.sp"
+    mock_ls = SimpleNamespace(
+        ast_cache={uri: SimpleNamespace(declarations=[])},
+        symbol_table_cache={uri: SymbolTable()},
+    )
+    res = CompletionProvider._get_dot_completions(
+        mock_ls, uri, "v", 3, {node: st}
+    )
+    self.assertIsNotNone(res)
+    self.assertIn("x", {item.label for item in res.items})
+
 
 if __name__ == "__main__":
   unittest.main()
