@@ -34,6 +34,7 @@ class VariableSymbol(Symbol):
     self.arena_dependency: Optional[str] = None
     self.arena_generation: int = 0
     self.arena_dep_records: List[Tuple[str, int]] = []
+    self.has_param_arena_ref: bool = False
     self.is_moved: bool = False
     self.proto_ancestors: Set[str] = set()
     self.stack_borrow_symbols: Set[str] = set()

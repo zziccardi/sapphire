@@ -2376,6 +2376,44 @@ class TestLuaTranspiler(unittest.TestCase):
     })
     self.assertEqual(out, "129,129,29,15")
 
+  def test_cross_module_optional_sentinels_lua(self):
+    """Verifies _SP_UNSET and _SP_NONE sentinels match across compiled Lua modules."""
+    out = self._run_lua_project({
+        "defs.sp": """
+        struct Config {
+          var label: String = "default";
+          var opt: String? = "fallback";
+        }
+
+        func make_label(a: int, mid: String? = none, tail: String? = none): String {
+          let m = mid ?? "none";
+          let t = tail ?? "none";
+          return f"{a}:{m}:{t}";
+        }
+
+        func read_opt(c: Config): String {
+          return c.opt ?? "was_none";
+        }
+
+        export {
+          Config,
+          make_label,
+          read_opt,
+        }
+        """,
+        "main.sp": """
+        import defs;
+
+        func main() {
+          let s1 = defs.make_label(a = 7, tail = "end");
+          let cfg = defs.Config { label = "x", opt = none };
+          let s2 = defs.read_opt(cfg);
+          print(f"{s1}|{s2}");
+        }
+        """,
+    })
+    self.assertEqual(out, "7:none:end|was_none")
+
   def test_reordered_named_args_preserve_left_to_right_eval_order_lua(self):
     """Verifies left-to-right side effects across expr, multi-return, and stmt calls."""
     out = self._run_lua_project({

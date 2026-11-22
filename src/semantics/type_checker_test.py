@@ -8559,6 +8559,36 @@ class TestTypeChecker(unittest.TestCase):
       }
       """)
 
+    # 6b. Storing borrowed trait parameter (directly or via local struct) into
+    # module-level global must still be rejected.
+    with self.assertRaises(SemanticError):
+      self._check("""
+      trait Service { func run(); }
+      struct Holder { var svc: Service; }
+      var G: Holder? = none;
+      func leak(s: Service) {
+        let h = Holder { svc = s };
+        G = h;
+      }
+      """)
+
+    # 6c. Storing concrete non-proto struct with trait fields into module-level
+    # global (e.g. Love2D Engine / mock globals) must be allowed.
+    self._check("""
+    trait Service { func run(); }
+    struct ConcreteSvc {}
+    impl Service for ConcreteSvc { func run() {} }
+    struct Engine { var svc: Service; }
+    func create_engine(): Engine {
+      return Engine { svc = ConcreteSvc {} };
+    }
+    var G: Engine? = none;
+    func init_global() {
+      var eng = create_engine();
+      G = eng;
+    }
+    """)
+
     # 7. Delegated var method & optional receiver var method escape
     with self.assertRaises(SemanticError):
       self._check("""
