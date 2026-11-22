@@ -898,6 +898,79 @@ impl t.TestCase for TdSuite {
     self.assertIn("Message:  must be none", out)
     self.assertIn("tear_down failed", out)
 
+  def test_mangle_names_and_protected_module_helpers(self):
+    """Verifies _mangle_python_name, _mangle_lua_name, _is_path_under, and _is_protected_module."""
+    from types import SimpleNamespace
+    from src.cli.test_runner import (
+        _is_path_under,
+        _is_protected_module,
+        _mangle_lua_name,
+        _mangle_python_name,
+    )
+
+    self.assertEqual(_mangle_python_name("main"), "main")
+    self.assertEqual(_mangle_python_name("from"), "from_")
+    self.assertEqual(_mangle_python_name("normal"), "normal")
+
+    self.assertEqual(_mangle_lua_name("__init__"), "__init__")
+    self.assertEqual(_mangle_lua_name("end"), "end_")
+    self.assertEqual(_mangle_lua_name("normal"), "normal")
+
+    sp_dir = os.path.join(self.temp_dir, "proj")
+    out_dir = os.path.join(self.temp_dir, "out")
+    lib_dir = os.path.join(self.temp_dir, "lib")
+    self.assertTrue(_is_path_under(os.path.join(sp_dir, "a.py"), sp_dir))
+    self.assertFalse(_is_path_under(os.path.join(out_dir, "a.py"), sp_dir))
+
+    # Stdlib / compiler packages are protected
+    self.assertTrue(_is_protected_module("os", None, sp_dir, out_dir, lib_dir))
+    self.assertTrue(_is_protected_module("src.cli", None, sp_dir, out_dir, lib_dir))
+    # Missing module object for non-stdlib is not protected
+    self.assertFalse(_is_protected_module("custom_mod", None, sp_dir, out_dir, lib_dir))
+    # Module without __file__ is protected
+    self.assertTrue(
+        _is_protected_module("custom_mod", SimpleNamespace(), sp_dir, out_dir, lib_dir)
+    )
+    # Module inside compiler_lib_dir is protected
+    self.assertTrue(
+        _is_protected_module(
+            "custom_mod",
+            SimpleNamespace(__file__=os.path.join(lib_dir, "m.py")),
+            sp_dir,
+            out_dir,
+            lib_dir,
+        )
+    )
+    # Module inside sp_dir or out_dir is NOT protected (should be reloaded)
+    self.assertFalse(
+        _is_protected_module(
+            "custom_mod",
+            SimpleNamespace(__file__=os.path.join(sp_dir, "m.py")),
+            sp_dir,
+            out_dir,
+            lib_dir,
+        )
+    )
+    self.assertFalse(
+        _is_protected_module(
+            "custom_mod",
+            SimpleNamespace(__file__=os.path.join(out_dir, "m.py")),
+            sp_dir,
+            out_dir,
+            lib_dir,
+        )
+    )
+    # External third-party module outside sp_dir and out_dir is protected
+    self.assertTrue(
+        _is_protected_module(
+            "third_party",
+            SimpleNamespace(__file__="/opt/site-packages/third_party.py"),
+            sp_dir,
+            out_dir,
+            lib_dir,
+        )
+    )
+
 
 if __name__ == "__main__":
   unittest.main()
