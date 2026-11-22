@@ -239,4 +239,9 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_fixed_array_assignment_to_dynamic": 3,
         "test_fixed_array_mutation_with_negative_index": 99,
     },
+    "soundness_interactions_test.sp": {
+        "test_loop_reinit_and_conditional_move_drop_flags": 123,
+        "test_shared_weak_ref_upgrade_in_closure": 142,
+        "test_proto_nested_struct_cow_isolation": 100350,
+    },
 }
