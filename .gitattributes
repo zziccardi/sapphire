@@ -1,3 +1,6 @@
-# Mark ANTLR-generated parser files as generated so GitHub collapses them in diffs.
+# Mark generated and lock files so GitHub collapses them in diffs.
 src/parser/gen/* linguist-generated=true
 src/parser/gen/__init__.py linguist-generated=false
+tools/vscode-extension/syntaxes/sapphire.tmLanguage.json linguist-generated=true
+Pipfile.lock linguist-generated=true
+**/package-lock.json linguist-generated=true
