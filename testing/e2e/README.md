@@ -13,15 +13,15 @@ Unlike compiler and parser unit tests (located in [`src/`](../../src)), which te
 ## Directory structure
 - **`*.sp`**: Sapphire source files containing `@test` annotated functions that return comparable values (scalars, strings, structures).
 - **`_expectations.py`**: Central ground-truth registry mapping `{"<fixture>.sp": {"test_func": expected_value}}`. Both Python and Lua test harnesses validate their execution against this dictionary.
-- **`*_test.py`**: Transpiled Python output corresponding to each test file.
 
 ## Running integration tests
 Integration tests are executed via `unittest`:
 ```bash
-python -m unittest src/code_gen/python_transpiler_test.py
-python -m unittest src/code_gen/lua_transpiler_test.py
+pipenv run python -m unittest src/code_gen/python_transpiler_test.py
+pipenv run python -m unittest src/code_gen/lua_transpiler_test.py
 ```
-Or using the Sapphire CLI:
+Or using the Sapphire CLI across both targets:
 ```bash
-sapphire test testing/e2e/
+pipenv run sapphire test testing/e2e/
+pipenv run sapphire test testing/e2e/ -t lua
 ```

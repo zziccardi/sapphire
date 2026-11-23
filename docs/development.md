@@ -118,16 +118,33 @@ pipenv run sapphire check samples/overview.sp --no-transitive
 
 ### Running unit and integration tests
 
-Run the following to execute all unit tests under `src/` (which automatically
-includes all samples compilation tests):
+Run the following to execute all Python compiler, LSP, and tooling unit tests
+(including differential parity, LSP fuzzing, stdio JSON-RPC, golden diagnostic,
+soundness matrix, and sample compilation tests):
 
 ```bash
+# Serial unittest discovery (used by CI)
 pipenv run test
+
+# Parallel per-module runner (faster local iteration)
+pipenv run test-fast
+
+# Static lint check (ruff)
+pipenv run lint
+```
+
+### Running native Sapphire E2E tests
+
+Execute the native `.sp` test suites across both Python and Lua 5.1 backends:
+
+```bash
+pipenv run sapphire test
+pipenv run sapphire test -t lua
 ```
 
 ### Verifying sample programs compilation
 
-To exclusively verify that all 25+ demo programs in `samples/` compile cleanly
+To exclusively verify that all demo programs in `samples/` compile cleanly
 across both Python and Lua 5.1 target backends without writing artifacts to
 disk:
 
@@ -137,15 +154,24 @@ pipenv run check-samples
 
 ## Test coverage
 
-Run the following to execute all unit tests under `src/` & track code coverage:
+Run the following to execute all Python unit tests with statement + branch
+coverage (enforcing the CI coverage floor and generating an HTML report in
+`htmlcov/`):
 
 ```bash
 pipenv run coverage
 ```
 
-Note that this requires each directory to include an `__init__.py` file.
+To measure Lua 5.1 line coverage across `lib/std/*.lua` while running the
+native Lua test suite (using Lua's built-in `debug.sethook`, no external tools
+required):
 
-This will also create an HTML version of the coverage report.
+```bash
+pipenv run coverage-lua
+```
+
+Note that Python coverage requires each source directory to include an
+`__init__.py` file.
 
 ## Packaging and distribution
 

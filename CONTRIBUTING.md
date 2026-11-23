@@ -48,7 +48,9 @@ Run these checks locally before opening a pull request:
 
 ```bash
 pipenv run lint
-pipenv run test
+pipenv run test          # or `pipenv run test-fast` for parallel local runs
+pipenv run coverage      # statement + branch coverage gate
+pipenv run coverage-lua  # Lua 5.1 stdlib coverage report
 pipenv run sapphire test
 pipenv run sapphire test -t lua
 pipenv run check-samples
