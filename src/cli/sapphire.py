@@ -613,10 +613,23 @@ def lsp_command(args):
   lsp_main()
 
 
+def _get_cli_version() -> str:
+  """Returns the installed sapphire-lang package version."""
+  from importlib.metadata import PackageNotFoundError, version
+
+  try:
+    return version("sapphire-lang")
+  except PackageNotFoundError:  # pragma: no cover
+    return "0.1.0"
+
+
 def main():
   parser = argparse.ArgumentParser(
       prog="sapphire",
       description="Sapphire compiler & runner CLI")
+  parser.add_argument(
+      "-V", "--version", action="version",
+      version=f"%(prog)s {_get_cli_version()}")
 
   subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -714,6 +727,8 @@ def main():
       and argv[0] not in known_commands
       and "-h" not in argv
       and "--help" not in argv
+      and "-V" not in argv
+      and "--version" not in argv
   ):
     argv = ["run"] + argv
 
