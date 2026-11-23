@@ -38,11 +38,18 @@ For full syntax, types, and Love2D bindings, consult the `sapphire-lang` skill (
 ## 4. Essential Commands
 
 ```bash
-# Run Python compiler/LSP unit tests
+# Run Python compiler/LSP unit tests (serial or parallel)
 pipenv run test
+pipenv run test-fast
 
-# Run native Sapphire tests
+# Lint & coverage (Python statement+branch gate and Lua stdlib report)
+pipenv run lint
+pipenv run coverage
+pipenv run coverage-lua
+
+# Run native Sapphire tests (Python & Lua 5.1)
 pipenv run sapphire test
+pipenv run sapphire test -t lua
 
 # Type-check a Sapphire file and transitive imports
 pipenv run sapphire check samples/overview.sp -t lua --json

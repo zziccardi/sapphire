@@ -31,14 +31,18 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 
 ## Requirements
 
-- Python 3.14+
+- Python 3.10+
 - `pygls` package (installed via Pipfile)
 
 ## Files
 
-- [server.py](src/lsp/server.py): The main LSP server entrypoint that runs the server on `stdio` and manages the event hooks.
-- [document_symbols.py](src/lsp/document_symbols.py): Translates AST declarations into hierarchical LSP `DocumentSymbol` trees.
-- [semantic_tokens.py](src/lsp/semantic_tokens.py): Implements position tracking and LSP relative delta-encoding for Sapphire symbols.
+- [server.py](server.py): Main LSP server entrypoint running over `stdio` and wiring LSP request/notification handlers.
+- [completion_provider.py](completion_provider.py): Dot-access (`obj.`, `self.`) and scope-level identifier completions.
+- [definition_provider.py](definition_provider.py): Go-to-definition resolution across local scopes, structs, traits, enums, and imported modules.
+- [hover_provider.py](hover_provider.py): Hover tooltip formatting with type signatures and doc comments.
+- [signature_provider.py](signature_provider.py): Call signature help, parameter hints, and active parameter tracking.
+- [document_symbols.py](document_symbols.py): Translates AST declarations into hierarchical LSP `DocumentSymbol` trees.
+- [semantic_tokens.py](semantic_tokens.py): Implements UTF-16 position tracking and LSP relative delta-encoding for Sapphire symbols.
 
 ## Diagnostics
 

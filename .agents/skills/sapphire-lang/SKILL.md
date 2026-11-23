@@ -17,8 +17,8 @@ exclusivity, compile-time null safety, exhaustive pattern matching, and
 stackless coroutines (`Coroutine<T>`).
 
 For full specifications and formatting rules, see
-[docs/SPEC.md](docs/SPEC.md) and
-[docs/style_guide.md](docs/style_guide.md).
+[docs/SPEC.md](../../../docs/SPEC.md) and
+[docs/style_guide.md](../../../docs/style_guide.md).
 
 ## 1. Formatting & Style Rules (`style_guide.md`)
 
@@ -313,11 +313,14 @@ func run_enemy_turn(path: [PathNode],
   `Parent` (`enemy as Character` or `[Entity]` storing `Enemy` is a compile
   error).
 - **Use Traits for Polymorphism**: Define behavioral contracts with `trait` and
-  `impl Trait for Struct`:
+  `impl Trait for Struct`. Trait methods may declare optional default bodies
+  (`{ ... }`), and child structs may partially override inherited trait methods
+  while inheriting the remaining methods from their parent:
   ```sapphire
   trait Combatant {
     func get_unit(): Unit;
     var func set_hp(hp: int);
+    func is_alive(): bool { return self.get_unit().hp > 0; }
   }
   ```
 
