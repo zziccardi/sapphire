@@ -45,7 +45,7 @@ virtual-method tables, reference-cycle overhead, or lifetime annotations.
 
 This repository contains the ANTLR4 grammar, abstract syntax tree (AST) builder,
 semantic analyzer, type checker, transpilation backends that compile Sapphire
-source code (`.sp`) into executable Python or Lua 5.1, a built-in testing
+source code (`.sp`) into executable Python or Lua, a built-in testing
 runner, a Language Server Protocol (LSP) server, a VS Code extension, and the
 documentation website.
 
@@ -131,85 +131,65 @@ func main() {
 ## Key features of Sapphire
 
 ### Dual-paradigm code reuse
-* **Traits**: Traits define interfaces/contracts (`trait Damageable`) that are
-  statically checked and dispatched. Heterogeneous collections (`[Damageable]`)
-  eliminate vtables and fat pointers via compiler-synthesized closed tagged
-  unions.
-* **Structural delegation**: Structs can "inherit" layouts statically
-  (`struct Position: Vector2`) without runtime overhead or traditional OOP
-  boilerplate. The compiler treats this as syntactic sugar for composition and
-  automatically generates forwarding methods. Struct up-casting is prohibited to
-  prevent object slicing.
-* **Prototypal delegation**: Prototypal delegation is opt-in and uses
-  the `proto` keyword (e.g. `proto Entity`). Runtime objects can be created
-  by cloning existing prototypes using the `clone` keyword.
-  * Nested reference fields on cloned objects support **copy-on-write (CoW)** to
-    isolate mutations from the shared prototype.
-  * All `proto` instances are explicitly managed in RAII-style arenas
-    (using `in <arena>`), with clones inheriting their prototype's arena by
-    default.
+* **Zero-vtable traits**: Traits define statically checked contracts
+  (`trait Damageable`) with **default method bodies**, **transitive
+  inheritance** across `struct Child: Parent`, and **partial overrides** in
+  `impl Trait for Child`. Heterogeneous collections (`[Damageable]`) eliminate
+  vtables and fat pointers via compiler-synthesized closed tagged unions.
+* **Structural delegation**: Structs compose and forward fields/methods
+  statically (`struct Position: Vector2`) without runtime overhead or OOP
+  boilerplate. Struct up-casting (`Child as Parent`) is prohibited to prevent
+  object slicing.
+* **Opt-in prototypal delegation**: Mark types with `proto` (e.g.
+  `proto Entity`) to clone objects at runtime (`clone base { ... }`) with live
+  property delegation, **copy-on-write (CoW)** isolation for nested references,
+  and explicit lexical `Arena` lifetime bounds (`in <arena>`).
 
-### Null safety & deterministic error handling
-* **Zero throwable exceptions**: Sapphire eliminates `try`/`catch`/`throw` and
-  invisible stack unwinding. Fallibility is handled explicitly and
-  deterministically via optionals (`T?`), multiple return destructuring, and
-  early-exit `guard` statements.
-* Null-pointer errors are prevented at compile time.
-* Optionals are denoted by a `?` suffix (e.g., `Character?`).
-* Optionals can be chained safely (`let speed = target?.speed`).
-* Optionals can be conditionally unwrapped (`let x ?= optional`) within
-  Go/C++17-style init statements in `if` and `while` headers.
-* Nil-coalescing fallback values are supported via the `??` operator.
-* **Swift-style `guard` statements**: Early-exit `guard` clauses unwrap and
-  promote validated variables into the enclosing scope, eliminating rightward
-  drift.
+### Memory safety, RAII, & ownership
+* **Const-ref by default without lifetime annotations**: Non-primitive values
+  pass by constant reference by default; mutable parameters require explicit
+  `var` (`func update(var target: Entity)`), and call-site aliasing checks
+  prevent overlapping mutable borrows without lifetime syntax.
+* **Deterministic RAII & `move` semantics**: Structs support LIFO destructors
+  (`__del__`), explicit ownership transfer (`move x`) with compile-time
+  use-after-move checks, and return-value optimization (RVO).
+* **Smart references & arenas**: Exclusive heap ownership (`Ref<T>`),
+  read-only reference-counted sharing (`SharedRef<T>`), cycle-safe weak handles
+  (`WeakRef<T>`), and lexically scoped `Arena` teardown.
 
-### Pass-by-reference, ownership, & move semantics
-* Non-primitive types are passed by **constant reference** by default, avoiding
-  reference-cycle overhead and a visual pointer syntax.
-* Mutable parameters must be explicitly marked with `var` in function signatures
-  (e.g., `func update(var target: Character)`).
-* Named parameters are supported at the call site using `=`
-  (e.g., `execute_strike(bonus = 10)`); functions can also specify default
-  parameter values in their signatures.
-* Compile-time aliasing rules enforce reference safety at call sites without
-  requiring lifetime annotations.
-* **Explicit ownership transfers (`move`)**: Ownership transfers use the `move`
-  keyword (e.g., `let next = move current;`), which statically invalidates the
-  source variable with compile-time use-after-move enforcement.
-* **Move-only types & RVO**: Move-only heap references (`Ref<T>`) enforce
-  exclusive ownership, while return values use return-value optimization (RVO)
-  to construct values directly in the caller's stack frame.
+### Null safety, pattern matching, & expressive ergonomics
+* **Zero throwable exceptions**: No `try`/`catch`/`throw` or hidden unwinding.
+  Fallibility is explicit via optionals (`T?`), safe chaining (`?.`),
+  nil-coalescing (`??`), conditional unwrapping (`if let x ?= opt`), Swift-style
+  `guard` clauses, and multiple return destructuring.
+* **Pattern matching & typed enums**: Value-producing `match` expressions with
+  multi-pattern arms and `yield` blocks, alongside integer- and string-backed
+  `enum` types.
+* **Readable call sites**: Named arguments (`attack(bonus = 10)`), default
+  parameter values, and f-string interpolation (`f"{name}: {hp}"`).
 
-### Zero-overhead generics
-* Type-parameterized structs, implementation blocks, traits, and functions
-  (`struct Stack<T>`, `func identity<T>`) are supported.
-* Generics are resolved at compile-time via **monomorphization** with automatic
-  call-site type inference and explicit type arguments (`Stack<int>`).
+### Modules, encapsulation, generics, & coroutines
+* **Explicit modules & construction-contract encapsulation**: Modules declare
+  public APIs via `export { ... }` manifests. Structs with `__init__` enforce
+  cross-module field encapsulation (mutated only via methods), while structs
+  without `__init__` serve as lightweight plain-data records.
+* **Zero-overhead generics**: Compile-time monomorphized generic structs,
+  traits, `impl` blocks, and functions (`struct Stack<T>`, `func id<T>`) with
+  call-site type inference.
+* **First-class coroutines**: Stackless `Coroutine<T>` generators
+  (`yield expr;`) and `Coroutine` sequencers (`yield;`).
 
-### First-class coroutines
-* Coroutines are natively supported via `Coroutine<T>` for value generators and
-  `Coroutine` for sequencing/flow control.
-* Bare `yield;` is used for sequencing; `yield <expr>;` is used for value
-  streams.
-
-### Host engine interoperability & live hot-reloading
-* Native interoperation with host runtimes (such as **Love2D**) is supported by
-  combining traits and structs to model external host APIs without runtime
-  performance penalties. Interoperability is defined via annotations:
-  * `@extern var love: LoveEngine;` binds host runtime global variables with
-    100% type safety.
-  * `@export("love.update") func update(dt: float)` exposes functions directly
-    as global engine callbacks (e.g. `function love.update(dt)` in Lua).
-* **Source maps & Love2D error demangling**: Automatically generates standard
-  [source map v3](https://tc39.es/ecma426/) files (`.lua.map`) and embeds
-  runtime stack-trace demanglers. When a runtime error occurs in Love2D, both
-  the terminal and Love2D error screen display original Sapphire `.sp`
-  filenames, line numbers, and source line snippets.
-* **Live hot-reloading & dev mode (`sapphire run --dev`)**: Automatically
-  watches `.sp` project files, performs fast incremental re-compilation, patches
-  existing living prototype/struct instances in-place without losing state, and
-  executes `@on_reload` lifecycle hooks.
+### Host interop, live hot-reloading, & batteries-included tooling
+* **Zero-cost host bindings**: Model external host environments (such as
+  **Love2D**) with `@extern` globals and `@export("love.update")` callbacks.
+* **Source maps & error demangling**: Emits
+  [source map v3](https://tc39.es/ecma426/) files (`.lua.map`) and runtime
+  stack-trace demanglers mapping Lua/Love2D errors back to `.sp` lines.
+* **Live hot-reloading (`sapphire run --dev`)**: Incremental recompilation that
+  patches live instances in-place and triggers `@on_reload` hooks.
+* **Standard library, testing, & IDE support**: Cross-backend stdlib
+  (`std.math`, `std.fs`, `std.os`, `std.time`, `std.utf8`), built-in `@test`
+  runner (`std.testing`), LSP server (`sapphire lsp`), and VS Code extension.
 
 ## Installation
 
@@ -256,7 +236,7 @@ sapphire samples/overview.sp
 # Run with live hot-reloading / dev mode (watches files and reloads in-place):
 sapphire run samples/overview.sp --dev
 
-# Transpile to Lua 5.1 (generating both main.lua and main.lua.map source maps by
+# Transpile to Lua (generating both main.lua and main.lua.map source maps by
 # default):
 sapphire build samples/love2d_demo.sp -t lua -o main.lua
 
@@ -273,11 +253,12 @@ sapphire run samples/love2d_demo.sp -t love2d -o main.lua --dev
 sapphire test
 sapphire test --json
 
-# Inspect parse tree, AST, or type-check without code generation:
+# Inspect parse tree, AST, type-check, or launch the LSP server:
 sapphire parse samples/overview.sp
 sapphire dump-ast samples/overview.sp
 sapphire check samples/overview.sp
 sapphire check samples/overview.sp -t lua --json
+sapphire lsp
 ```
 
 ## Repository structure
@@ -303,17 +284,19 @@ sapphire check samples/overview.sp -t lua --json
     (`test_runner.py`).
   * `common/`: Domain exception hierarchy (`errors.py`).
   * `parser/`: AST definitions (`ast.py`), visitor builder (`ast_builder.py`),
-     centralized error listener (`error_listener.py`), and ANTLR-generated
-     parser.
+    centralized error listener (`error_listener.py`), and ANTLR-generated
+    parser.
   * `semantics/`: Symbol tables (`symbol_table.py`), type checker
-    (`type_checker.py`), arena memory checks (`arena_checker.py`), and generic
-    substitution helpers (`generics_checker.py`).
+    (`type_checker.py`), borrow/aliasing checker (`borrow_checker.py`), arena
+    escape checks (`arena_checker.py`), layout & const evaluation
+    (`struct_layout_pass.py`, `const_eval.py`), generics
+    (`generics_checker.py`), and static lints (`lints.py`).
   * `code_gen/`: Transpiler driver (`transpiler.py`), target backend registry
     (`transpiler_registry.py`), Python generator (`python_transpiler.py`),
     Lua 5.1 generator (`lua_transpiler.py`), experimental LLVM IR generator
     (`llvm_transpiler.py`), and source-map generator (`source_map.py`).
   * `lsp/`: Language Server Protocol (LSP) server providing diagnostics,
-    autocompletion, hover info, and semantic tokens.
+    autocompletion, hover info, go-to-definition, and semantic tokens.
 * `testing/`: Test suite runner, cross-backend integration and end-to-end tests
   (`testing/e2e/`), and test utilities (`test_utils.py`).
 * `tools/`: Development tools including the
