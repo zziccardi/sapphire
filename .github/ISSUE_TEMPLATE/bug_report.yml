@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a compiler, transpiler, runtime, or LSP bug
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Target backend / component
+      options:
+        - Type checker / semantics
+        - Python transpiler
+        - Lua 5.1 / Love2D transpiler
+        - LLVM backend
+        - CLI / test runner
+        - LSP / VS Code extension
+        - Standard library / bindings
+        - Website / playground
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Paste a minimal `.sp` snippet and the command used to run it.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Paste compiler diagnostics or runtime tracebacks.
+      render: shell
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "e.g., commit abc1234, Python 3.12, Lua 5.1, Ubuntu 24.04"

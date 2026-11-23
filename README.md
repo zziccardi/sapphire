@@ -1,4 +1,32 @@
-# Sapphire programming language
+<p align="center">
+  <img src="web/public/favicon.svg" alt="Sapphire logo" width="72" />
+</p>
+
+<h1 align="center">Sapphire programming language</h1>
+
+<p align="center">
+  <a href="https://github.com/zziccardi/sapphire/actions/workflows/ci.yml">
+    <img src="https://github.com/zziccardi/sapphire/actions/workflows/ci.yml/badge.svg" alt="CI" />
+  </a>
+  <a href="https://github.com/zziccardi/sapphire/actions/workflows/deploy-website.yml">
+    <img src="https://github.com/zziccardi/sapphire/actions/workflows/deploy-website.yml/badge.svg" alt="Deploy Website" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0" />
+  </a>
+  <a href="pyproject.toml">
+    <img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://zziccardi.github.io/sapphire/">Website</a> ·
+  <a href="https://zziccardi.github.io/sapphire/playground/">Playground</a> ·
+  <a href="docs/quickstart.md">Quickstart</a> ·
+  <a href="docs/SPEC.md">Language spec</a> ·
+  <a href="samples/README.md">Examples</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 Sapphire is a statically typed general-purpose programming language that
 combines the **safety and performance** of modern systems languages with the
@@ -7,6 +35,10 @@ design, its deterministic memory model, lexical arenas, and live-reload
 capabilities make it especially well-suited for simulations, interactive
 applications, and game engines.
 
+Try Sapphire in your browser right now in the
+[interactive playground](https://zziccardi.github.io/sapphire/playground/), or
+browse the [documentation site](https://zziccardi.github.io/sapphire/docs/).
+
 By resolving polymorphism at compile time and restricting prototypal inheritance
 to be data-only, Sapphire enables runtime object modification without
 virtual-method tables, reference-cycle overhead, or lifetime annotations.
@@ -14,7 +46,8 @@ virtual-method tables, reference-cycle overhead, or lifetime annotations.
 This repository contains the ANTLR4 grammar, abstract syntax tree (AST) builder,
 semantic analyzer, type checker, transpilation backends that compile Sapphire
 source code (`.sp`) into executable Python or Lua 5.1, a built-in testing
-runner, a Language Server Protocol (LSP) server, and a VS Code extension.
+runner, a Language Server Protocol (LSP) server, a VS Code extension, and the
+documentation website.
 
 The project is a **work in progress**. The [language spec](docs/SPEC.md) may
 change significantly over time. For now the transpiler toolchain targets Python
@@ -61,7 +94,7 @@ func attack(attacker: Entity, var target: Entity, bonus: int = 0) {
 }
 
 // Swift-style guard: early exit with validated value promoted to outer scope
-func execute_turn(hero: Entity, target_opt: Entity?) {
+func execute_turn(hero: Entity, var target_opt: Entity?) {
   guard var target ?= target_opt; target.health > 0 else {
     print("No valid target available!");
     return;
@@ -69,28 +102,30 @@ func execute_turn(hero: Entity, target_opt: Entity?) {
   attack(attacker = hero, target = target, bonus = 10);
 }
 
-var arena = Arena();
+func main() {
+  var arena = Arena();
 
-// Scoped prototype allocated within an explicit lexical arena
-let base_goblin = Entity {
-  name = "Goblin",
-  health = 50,
-  pos = Position { x = 0.0, y = 0.0 }
-} in arena;
+  // Scoped prototype allocated within an explicit lexical arena
+  let base_goblin = Entity {
+    name = "Goblin",
+    health = 50,
+    pos = Position { x = 0.0, y = 0.0 }
+  } in arena;
 
-// Dynamic cloning with live delegation and local property shadowing
-var elite_goblin = clone base_goblin {
-  self.health = 120;
-};
-var target_ref: Entity? = elite_goblin;
+  // Dynamic cloning with live delegation and local property shadowing
+  var elite_goblin = clone base_goblin {
+    self.health = 120;
+  };
+  var target_ref: Entity? = elite_goblin;
 
-let hero = Entity {
-  name = "Hero",
-  health = 100,
-  pos = Position { x = 10.0, y = 5.0 }
-} in arena;
+  let hero = Entity {
+    name = "Hero",
+    health = 100,
+    pos = Position { x = 10.0, y = 5.0 }
+  } in arena;
 
-execute_turn(hero = hero, target_opt = target_ref);
+  execute_turn(hero = hero, target_opt = target_ref);
+}
 ```
 
 ## Key features of Sapphire
@@ -186,10 +221,11 @@ Install the Sapphire CLI package using `pip` (Python 3.10+):
 pip install sapphire-lang
 ```
 
-Or install the wheel from a local build or GitHub release:
+Or install the wheel from a local build or
+[GitHub releases](https://github.com/zziccardi/sapphire/releases):
 
 ```bash
-pip install sapphire_lang-0.1.0-py3-none-any.whl
+pip install sapphire_lang-<version>-py3-none-any.whl
 ```
 
 For an isolated system-wide command without managing environments, use `pipx`:
@@ -200,11 +236,12 @@ pipx install sapphire-lang
 
 ### VS Code extension
 
-Download the `sapphire-0.1.0.vsix` asset from GitHub releases and install it via
-the command line:
+Download the `.vsix` asset from
+[GitHub releases](https://github.com/zziccardi/sapphire/releases) and install it
+via the command line:
 
 ```bash
-code --install-extension sapphire-0.1.0.vsix
+code --install-extension sapphire-<version>.vsix
 ```
 
 Alternatively, open VS Code, navigate to the Extensions pane, click `...` (More
@@ -245,7 +282,8 @@ sapphire check samples/overview.sp -t lua --json
 
 ## Repository structure
 
-* `docs/`: Core documentation including the [quickstart guide](docs/quickstart.md),
+* `docs/`: Core documentation (see [docs/README.md](docs/README.md)) including
+  the [quickstart guide](docs/quickstart.md),
   [host interop & Love2D guide](docs/host_interop.md),
   [language spec](docs/SPEC.md), [style guide](docs/style_guide.md),
   [C++ comparison](docs/cpp_comparison.md),
@@ -258,7 +296,8 @@ sapphire check samples/overview.sp -t lua --json
 * `grammar/`: ANTLR4 grammar specification (`Sapphire.g4`).
 * `lib/`: Sapphire standard library (`lib/std/`) and host-engine bindings
   (`lib/love2d/`).
-* `samples/`: Example scripts demonstrating core language features.
+* `samples/`: Example scripts demonstrating core language features (see
+  [samples/README.md](samples/README.md)).
 * `src/`: Compiler pipeline and tooling:
   * `cli/`: Unified `sapphire` CLI entry point (`sapphire.py`) and test runner
     (`test_runner.py`).
@@ -279,3 +318,5 @@ sapphire check samples/overview.sp -t lua --json
   (`testing/e2e/`), and test utilities (`test_utils.py`).
 * `tools/`: Development tools including the
   [VS Code extension](tools/vscode-extension/).
+* `web/`: Astro documentation website and browser playground deployed at
+  [zziccardi.github.io/sapphire](https://zziccardi.github.io/sapphire/).
