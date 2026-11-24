@@ -12,15 +12,15 @@ import unittest
 # Insert workspace src directory into python path to allow direct imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from antlr4 import InputStream, CommonTokenStream
+from antlr4 import CommonTokenStream, InputStream
+
+from src.lsp.semantic_tokens import (
+  SemanticTokensTypeChecker,
+  encode_semantic_tokens,
+)
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.lsp.semantic_tokens import (
-    SemanticTokensTypeChecker,
-    encode_semantic_tokens,
-)
-
 
 
 class TestSemanticTokens(unittest.TestCase):
@@ -165,7 +165,7 @@ class TestSemanticTokens(unittest.TestCase):
       process_character(c);
       test_func(1);
       let handler: Damageable? = none;
-      
+
       // Intentionally trigger a semantic type mismatch to test error diagnostics with position
       let error_trigger: int = "trigger-string";
     }
@@ -236,7 +236,14 @@ class TestSemanticTokens(unittest.TestCase):
   def test_mock_symbol_lookups(self):
     """Verifies VariableSymbol, TraitSymbol, FunctionSymbol and other lookups in visit_IdentifierNode."""
     from src.parser.ast import IdentifierNode
-    from src.semantics.symbol_table import TraitSymbol, TraitType, FunctionSymbol, FunctionType, VariableSymbol, PrimitiveType
+    from src.semantics.symbol_table import (
+      FunctionSymbol,
+      FunctionType,
+      PrimitiveType,
+      TraitSymbol,
+      TraitType,
+      VariableSymbol,
+    )
 
 
     checker = SemanticTokensTypeChecker()
@@ -559,6 +566,7 @@ class TestSemanticTokens(unittest.TestCase):
     """Ensures imported-module diagnostics anchor to the import statement in LSP."""
     import os
     import tempfile
+
     from src.common.errors import SemanticError
     from src.semantics.declaration_pass import DeclarationPass
 
@@ -667,6 +675,7 @@ class TestSemanticTokens(unittest.TestCase):
   def test_multivar_tokens_parameter_scope_and_utf16_encoding(self):
     """Verifies multi-var tokens, parameter isolation from globals, UTF-16 encoding, and non-overlap."""
     from unittest.mock import MagicMock
+
     from src.lsp.semantic_tokens import find_node_at_position
     from src.lsp.server import SapphireLanguageServer, validate_source
 

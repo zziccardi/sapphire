@@ -1,14 +1,15 @@
 """Unit tests for Sapphire C-style ternary expression support."""
 
 import unittest
-from antlr4 import InputStream, CommonTokenStream
 
+from antlr4 import CommonTokenStream, InputStream
+
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
 from src.semantics.type_checker import TypeChecker
-from src.code_gen.python_transpiler import PythonTranspiler
-from src.code_gen.lua_transpiler import LuaTranspiler
 
 
 def parse_and_check(code: str):

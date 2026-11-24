@@ -1,10 +1,12 @@
 """Semantic analysis context and typing annotations for Sapphire.
 
 Provides a unified SemanticContext container for AST node types, symbol tables,
-call resolutions, and compiler diagnostics across semantic analysis passes and LSP tooling.
+call resolutions, and compiler diagnostics across semantic analysis passes and
+LSP tooling.
 """
 
 from typing import Any, Dict, List, Optional, Protocol, Tuple
+
 from src.parser.ast import ASTNode, CallNode
 from src.semantics.symbol_table import SymbolTable, Type
 
@@ -20,16 +22,22 @@ class TypeCheckerProtocol(Protocol):
   warnings: List[str]
   _temporary_frozen_lvalues: List[Tuple[str, List[str], str]]
 
-  def error(self, message: str, node: Optional[ASTNode] = None, **kwargs: Any) -> None: ...
+  def error(
+    self, message: str, node: Optional[ASTNode] = None, **kwargs: Any
+  ) -> None: ...
   def visit(self, node: ASTNode) -> Any: ...
   def has_shared_ref_base(self, node: ASTNode) -> bool: ...
-  def get_frozen_lvalue_reason(self, root: str, path: List[str]) -> Optional[str]: ...
+  def get_frozen_lvalue_reason(
+    self, root: str, path: List[str]
+  ) -> Optional[str]: ...
   def _check_value_ownership_transfer(
-      self, expr_node: ASTNode, expr_type: Type, node: Optional[ASTNode] = None
+    self, expr_node: ASTNode, expr_type: Type, node: Optional[ASTNode] = None
   ) -> None: ...
   def _resolve_type_node(self, type_node: Any) -> Type: ...
   def _resolve_return_types(self, decl: Any) -> Type: ...
-  def _get_lvalue_path(self, node: ASTNode) -> Optional[Tuple[str, List[str]]]: ...
+  def _get_lvalue_path(
+    self, node: ASTNode
+  ) -> Optional[Tuple[str, List[str]]]: ...
   def _is_reference_type(self, type_obj: Type) -> bool: ...
 
 

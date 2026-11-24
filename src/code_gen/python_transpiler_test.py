@@ -10,17 +10,23 @@ import sys
 import tempfile
 import unittest
 from typing import Any
-from antlr4 import InputStream, CommonTokenStream
 
-from src.parser.ast import BasicTypeNode, GuardClauseNode, HeaderBindingNode, LiteralNode, YieldNode
+from antlr4 import CommonTokenStream, InputStream
+
+from src.code_gen.base_transpiler import get_default_value_for_type_node
+from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
+from src.code_gen.transpiler import transpile_file
+from src.parser.ast import (
+  BasicTypeNode,
+  GuardClauseNode,
+  HeaderBindingNode,
+  LiteralNode,
+  YieldNode,
+)
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.code_gen.python_transpiler import PythonTranspiler, Transpiler
-from src.code_gen.base_transpiler import get_default_value_for_type_node
-from src.code_gen.transpiler import transpile_file
 from src.semantics.type_checker import TypeChecker
-
 
 
 class TestPythonTranspiler(unittest.TestCase):
@@ -429,7 +435,15 @@ class TestPythonTranspiler(unittest.TestCase):
 
   def test_direct_transpiler_visitors(self):
     """Directly tests transpiler visitors that are not invoked during standard program traversal."""
-    from src.parser.ast import StructFieldNode, TraitDeclNode, LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode, ASTNode
+    from src.parser.ast import (
+      ASTNode,
+      BasicTypeNode,
+      BlockNode,
+      LambdaNode,
+      LambdaParamNode,
+      StructFieldNode,
+      TraitDeclNode,
+    )
 
 
     transpiler = Transpiler()
@@ -758,7 +772,12 @@ class TestPythonTranspiler(unittest.TestCase):
 
   def test_transpile_file_raise_on_error_modes(self):
     """Verifies transpile_file raises domain exceptions when raise_on_error is True."""
-    from src.common.errors import SapphireError, SapphireSyntaxError, SapphireTypeError, SapphireTranspileError
+    from src.common.errors import (
+      SapphireError,
+      SapphireSyntaxError,
+      SapphireTranspileError,
+      SapphireTypeError,
+    )
     with tempfile.TemporaryDirectory() as temp_dir:
       # Missing file
       with self.assertRaises(SapphireError):
@@ -766,19 +785,22 @@ class TestPythonTranspiler(unittest.TestCase):
 
       # Syntax error
       bad_syntax = os.path.join(temp_dir, "syntax.sp")
-      with open(bad_syntax, "w") as f: f.write("let x: int = ;")
+      with open(bad_syntax, "w") as f:
+        f.write("let x: int = ;")
       with self.assertRaises(SapphireSyntaxError):
         transpile_file(bad_syntax, raise_on_error=True)
 
       # Semantic error
       bad_sem = os.path.join(temp_dir, "sem.sp")
-      with open(bad_sem, "w") as f: f.write("return 42;")
+      with open(bad_sem, "w") as f:
+        f.write("return 42;")
       with self.assertRaises(SapphireTypeError):
         transpile_file(bad_sem, raise_on_error=True)
 
       # Write error
       valid_sp = os.path.join(temp_dir, "valid.sp")
-      with open(valid_sp, "w") as f: f.write("let x = 10;")
+      with open(valid_sp, "w") as f:
+        f.write("let x = 10;")
       with self.assertRaises(SapphireTranspileError):
         transpile_file(valid_sp, output_file="/invalid_dir_xyz/out.py", raise_on_error=True)
 
@@ -1244,7 +1266,12 @@ class TestPythonTranspiler(unittest.TestCase):
     self.assertEqual(self._transpile_and_run(comp_code, "test_comp(1)"), 3)
 
     # Direct visitor calls
-    from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
+    from src.parser.ast import (
+      EllipsisPatternNode,
+      LiteralNode,
+      MatchCaseNode,
+      MatchExprNode,
+    )
 
 
     pt = PythonTranspiler()
@@ -1270,7 +1297,8 @@ class TestPythonTranspiler(unittest.TestCase):
 
   def test_missing_semicolon_after_match_error_message(self):
     """Verifies clear syntax error message when semicolon is omitted after match expression."""
-    import io, sys
+    import io
+    import sys
     bad_code = """
     func main() {
       let x = match 1 {
@@ -2496,9 +2524,9 @@ class TestSharedFixtures(unittest.TestCase):
   def _transpile_and_exec(self, source: str) -> dict:
     """Transpile *source* to Python, exec it, return {fn_name: result}."""
     input_stream = InputStream(source)
+    from src.parser.ast_builder import ASTBuilder as _Builder
     from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
     from src.parser.gen.SapphireParser import SapphireParser as _Parser
-    from src.parser.ast_builder import ASTBuilder as _Builder
     from src.semantics.type_checker import TypeChecker as _Checker
 
 
@@ -2531,6 +2559,7 @@ class TestSharedFixtures(unittest.TestCase):
     _testing_pkg = None
     if local_imports:
       import types as _types
+
       import testing as _testing_pkg
       e2e_pkg = sys.modules.get("testing.e2e")
       if e2e_pkg is None:
@@ -2540,8 +2569,8 @@ class TestSharedFixtures(unittest.TestCase):
         created_e2e_pkg = True
       had_testing_e2e_attr = hasattr(_testing_pkg, "e2e")
       if had_testing_e2e_attr:
-        prev_testing_e2e_attr = getattr(_testing_pkg, "e2e")
-      setattr(_testing_pkg, "e2e", e2e_pkg)
+        prev_testing_e2e_attr = _testing_pkg.e2e
+      _testing_pkg.e2e = e2e_pkg
       for mod_path in local_imports:
         parts = mod_path.split(".")
         sp_path = repo_root.joinpath(*parts).with_suffix(".sp")
@@ -2582,7 +2611,7 @@ class TestSharedFixtures(unittest.TestCase):
         sys.modules.pop("testing.e2e", None)
       if _testing_pkg is not None:
         if had_testing_e2e_attr:
-          setattr(_testing_pkg, "e2e", prev_testing_e2e_attr)
+          _testing_pkg.e2e = prev_testing_e2e_attr
         elif hasattr(_testing_pkg, "e2e"):
           delattr(_testing_pkg, "e2e")
 
@@ -3352,7 +3381,13 @@ class TestPhase5PythonFixes(unittest.TestCase):
     )
 
   def test_export_alias_and_reexport_bindings(self):
-    from src.parser.ast import ExportSpecifierNode, ExportStmtNode, FuncDeclNode, BlockNode, ProgramNode
+    from src.parser.ast import (
+      BlockNode,
+      ExportSpecifierNode,
+      ExportStmtNode,
+      FuncDeclNode,
+      ProgramNode,
+    )
 
     fn = FuncDeclNode("helper", [], None, BlockNode([]))
     exp = ExportStmtNode([
@@ -3372,6 +3407,7 @@ class TestPhase5PythonFixes(unittest.TestCase):
     import importlib.util
     import sys
     import tempfile
+
     from src.code_gen.transpiler import transpile_file
 
     with tempfile.TemporaryDirectory() as tmpdir:

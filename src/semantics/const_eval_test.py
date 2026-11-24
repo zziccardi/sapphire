@@ -1,35 +1,36 @@
 """Unit tests for compile-time constant expression evaluation."""
 
 import unittest
+
 from src.parser.ast import (
-    ASTNode,
-    ArgumentNode,
-    ArrayLiteralNode,
-    BinaryOpNode,
-    CallNode,
-    CastExprNode,
-    CloneNode,
-    IdentifierNode,
-    InterpolatedStringNode,
-    LambdaNode,
-    LiteralNode,
-    MapLiteralNode,
-    MemberAccessNode,
-    MoveNode,
-    StructInitializerNode,
-    TernaryExprNode,
-    UnaryOpNode,
+  ArgumentNode,
+  ArrayLiteralNode,
+  ASTNode,
+  BinaryOpNode,
+  CallNode,
+  CastExprNode,
+  CloneNode,
+  IdentifierNode,
+  InterpolatedStringNode,
+  LambdaNode,
+  LiteralNode,
+  MapLiteralNode,
+  MemberAccessNode,
+  MoveNode,
+  StructInitializerNode,
+  TernaryExprNode,
+  UnaryOpNode,
 )
 from src.semantics.const_eval import is_constant_expression
 from src.semantics.symbol_table import (
-    EnumSymbol,
-    EnumType,
-    FunctionSymbol,
-    ModuleSymbol,
-    PrimitiveType,
-    StructType,
-    SymbolTable,
-    VariableSymbol,
+  EnumSymbol,
+  EnumType,
+  FunctionSymbol,
+  ModuleSymbol,
+  PrimitiveType,
+  StructType,
+  SymbolTable,
+  VariableSymbol,
 )
 
 

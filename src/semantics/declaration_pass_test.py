@@ -3,6 +3,7 @@
 import os
 import tempfile
 import unittest
+
 from antlr4 import CommonTokenStream, InputStream
 
 from src.common.errors import SemanticError

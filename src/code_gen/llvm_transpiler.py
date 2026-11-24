@@ -59,21 +59,19 @@ from typing import Any, Dict, Optional
 
 from src.code_gen.base_transpiler import BaseTranspiler
 from src.parser.ast import (
-    ASTNode,
-    AssignmentNode,
-    BasicTypeNode,
-    BinaryOpNode,
-    BlockNode,
-    ExprStmtNode,
-    FuncDeclNode,
-    IdentifierNode,
-    LiteralNode,
-    ProgramNode,
-    ReturnNode,
-    StructDeclNode,
-    VarDeclNode,
+  AssignmentNode,
+  ASTNode,
+  BinaryOpNode,
+  BlockNode,
+  ExprStmtNode,
+  FuncDeclNode,
+  IdentifierNode,
+  LiteralNode,
+  ProgramNode,
+  ReturnNode,
+  StructDeclNode,
+  VarDeclNode,
 )
-
 
 try:
   from llvmlite import ir
@@ -82,6 +80,7 @@ except ImportError:  # pragma: no cover
 
 try:
   import llvmlite.binding as llvm
+
   llvm.initialize_native_target()
   llvm.initialize_native_asmprinter()
   DEFAULT_TRIPLE = llvm.get_default_triple()
@@ -92,16 +91,19 @@ except Exception:  # pragma: no cover
 from src.code_gen.transpiler_registry import TranspilerRegistry
 
 
-@TranspilerRegistry.register(aliases=["llvm", "llvmir", "ir"], display_name="LLVM IR", default_extension=".ll")
+@TranspilerRegistry.register(
+  aliases=["llvm", "llvmir", "ir"],
+  display_name="LLVM IR",
+  default_extension=".ll",
+)
 class LLVMTranspiler(BaseTranspiler):
-
   """Transpiles a type-checked Sapphire AST into LLVM IR."""
 
   def __init__(self, module_name="sapphire_module", target_triple=None):
     if ir is None:  # pragma: no cover
       raise ImportError(
-          "The experimental LLVM backend requires 'llvmlite'. "
-          "Install it with: pip install 'sapphire-lang[llvm]'"
+        "The experimental LLVM backend requires 'llvmlite'. "
+        "Install it with: pip install 'sapphire-lang[llvm]'"
       )
     # 1. Initialize an isolated LLVM context and module per transpiler instance
     self.context = ir.Context()
@@ -155,7 +157,8 @@ class LLVMTranspiler(BaseTranspiler):
 
   def generic_visit(self, node: ASTNode) -> Any:
     raise NotImplementedError(
-        f"AST node '{type(node).__name__}' is not supported by the experimental LLVM transpiler backend yet."
+      f"AST node '{type(node).__name__}' is not supported by the experimental "
+      "LLVM transpiler backend yet."
     )
 
   # -------------------------------------------------------------------------
@@ -163,7 +166,8 @@ class LLVMTranspiler(BaseTranspiler):
   # -------------------------------------------------------------------------
 
   def get_llvm_type(self, type_node: Any) -> ir.Type:
-    """Maps Sapphire AST type nodes or semantic Type objects to LLVM IR types."""
+    """Maps Sapphire AST type nodes or semantic Type objects to LLVM IR types.
+    """
     if type_node is None:
       return self.void_type
 
@@ -183,7 +187,9 @@ class LLVMTranspiler(BaseTranspiler):
     raise NotImplementedError(f"Unsupported type: {type_name}")
 
   def _infer_expr_llvm_type(self, expr: Any) -> Optional[ir.Type]:
-    """Infers an LLVM IR type from an expression's semantic type or literal kind."""
+    """Infers an LLVM IR type from an expression's semantic type or literal
+    kind.
+    """
     if expr is None:
       return None
     inferred = getattr(expr, "inferred_type", None)
@@ -211,7 +217,8 @@ class LLVMTranspiler(BaseTranspiler):
     return ir.Constant(llvm_type, None)
 
   def _match_type(self, val: ir.Value, target_type: ir.Type) -> ir.Value:
-    """Helper to convert values when types differ (e.g. sitofp for int->float)."""
+    """Helper to convert values when types differ (e.g. sitofp for int->float).
+    """
     if val.type == target_type:
       return val
     if val.type == self.int_type and target_type == self.float_type:
@@ -226,18 +233,38 @@ class LLVMTranspiler(BaseTranspiler):
     elif lhs.type == self.int_type and rhs.type == self.float_type:
       lhs = self.builder.sitofp(lhs, self.float_type, name="conv_lhs")
 
-    is_float = (lhs.type == self.float_type or rhs.type == self.float_type)
+    is_float = lhs.type == self.float_type or rhs.type == self.float_type
 
     if op == "+":
-      return self.builder.fadd(lhs, rhs, name="faddtmp") if is_float else self.builder.add(lhs, rhs, name="addtmp")
+      return (
+        self.builder.fadd(lhs, rhs, name="faddtmp")
+        if is_float
+        else self.builder.add(lhs, rhs, name="addtmp")
+      )
     elif op == "-":
-      return self.builder.fsub(lhs, rhs, name="fsubtmp") if is_float else self.builder.sub(lhs, rhs, name="subtmp")
+      return (
+        self.builder.fsub(lhs, rhs, name="fsubtmp")
+        if is_float
+        else self.builder.sub(lhs, rhs, name="subtmp")
+      )
     elif op == "*":
-      return self.builder.fmul(lhs, rhs, name="fmultmp") if is_float else self.builder.mul(lhs, rhs, name="multmp")
+      return (
+        self.builder.fmul(lhs, rhs, name="fmultmp")
+        if is_float
+        else self.builder.mul(lhs, rhs, name="multmp")
+      )
     elif op == "/":
-      return self.builder.fdiv(lhs, rhs, name="fdivtmp") if is_float else self.builder.sdiv(lhs, rhs, name="sdivtmp")
+      return (
+        self.builder.fdiv(lhs, rhs, name="fdivtmp")
+        if is_float
+        else self.builder.sdiv(lhs, rhs, name="sdivtmp")
+      )
     elif op == "%":
-      return self.builder.frem(lhs, rhs, name="fremtmp") if is_float else self.builder.srem(lhs, rhs, name="sremtmp")
+      return (
+        self.builder.frem(lhs, rhs, name="fremtmp")
+        if is_float
+        else self.builder.srem(lhs, rhs, name="sremtmp")
+      )
     elif op in ("==", "!=", "<", "<=", ">", ">="):
       if is_float:
         if op == "!=":
@@ -257,15 +284,20 @@ class LLVMTranspiler(BaseTranspiler):
     return str(self.module)
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> ir.Type:
-    """Lowers a Sapphire struct (including parent fields) into a flat LLVM aggregate type."""
+    """Lowers a Sapphire struct (including parent fields) into a flat LLVM
+    aggregate type.
+    """
     struct_name = node.name
-    llvm_struct = self.module.context.get_identified_type(f"struct.{struct_name}")
+    llvm_struct = self.module.context.get_identified_type(
+      f"struct.{struct_name}"
+    )
 
     field_types = []
-    for parent_name in (getattr(node, "parent_names", None) or []):
+    for parent_name in getattr(node, "parent_names", None) or []:
       if parent_name not in self.struct_field_types:
         raise NotImplementedError(
-            f"Parent struct '{parent_name}' must be declared before child struct '{struct_name}' in LLVM backend."
+          f"Parent struct '{parent_name}' must be declared before child "
+          f"struct '{struct_name}' in LLVM backend."
         )
       field_types.extend(self.struct_field_types[parent_name])
 
@@ -274,10 +306,13 @@ class LLVMTranspiler(BaseTranspiler):
       if f_type is not None:
         field_types.append(self.get_llvm_type(f_type))
       else:
-        inferred_llvm = self._infer_expr_llvm_type(getattr(field, "default_expr", None))
+        inferred_llvm = self._infer_expr_llvm_type(
+          getattr(field, "default_expr", None)
+        )
         if inferred_llvm is None:
           raise NotImplementedError(
-              f"Cannot infer LLVM type for struct field '{struct_name}.{field.name}'."
+            "Cannot infer LLVM type for struct field "
+            f"'{struct_name}.{field.name}'."
           )
         field_types.append(inferred_llvm)
 
@@ -287,23 +322,34 @@ class LLVMTranspiler(BaseTranspiler):
     return llvm_struct
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> ir.Function:
-    """Lowers a Sapphire function declaration or `@extern` prototype into LLVM IR."""
+    """Lowers a Sapphire function declaration or `@extern` prototype into LLVM
+    IR.
+    """
     return_types = getattr(node, "return_types", None) or []
     if len(return_types) > 1:
       raise NotImplementedError(
-          "Multiple return values are not supported by the experimental LLVM backend yet."
+        "Multiple return values are not supported by the experimental LLVM "
+        "backend yet."
       )
     ret_type_node = return_types[0] if return_types else node.return_type
     return_type = self.get_llvm_type(ret_type_node)
     params = getattr(node, "parameters", getattr(node, "params", []))
     param_types = [
-        self.get_llvm_type(getattr(p, "param_type", getattr(p, "type_node", None)))
-        for p in params
+      self.get_llvm_type(
+        getattr(p, "param_type", getattr(p, "type_node", None))
+      )
+      for p in params
     ]
 
     anns = getattr(node, "annotations", None) or []
-    extern_ann = next((a for a in anns if getattr(a, "name", "") == "extern"), None)
-    llvm_name = (extern_ann.arg if extern_ann and getattr(extern_ann, "arg", None) else node.name)
+    extern_ann = next(
+      (a for a in anns if getattr(a, "name", "") == "extern"), None
+    )
+    llvm_name = (
+      extern_ann.arg
+      if extern_ann and getattr(extern_ann, "arg", None)
+      else node.name
+    )
 
     func_type = ir.FunctionType(return_type, param_types)
     func = ir.Function(self.module, func_type, name=llvm_name)
@@ -372,15 +418,21 @@ class LLVMTranspiler(BaseTranspiler):
     return self.visit(node.expr)
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> ir.AllocaInstr:
-    """Allocates a stack slot for a local variable, inferring type and zero-initializing."""
+    """Allocates a stack slot for a local variable, inferring type and
+    zero-initializing.
+    """
     if self.builder is None:
       raise NotImplementedError(
-          "Top-level module variables are not supported by the experimental LLVM backend yet."
+        "Top-level module variables are not supported by the "
+        "experimental LLVM backend yet."
       )
-    names = getattr(node, "names", None) or ([node.name] if getattr(node, "name", None) else [])
+    names = getattr(node, "names", None) or (
+      [node.name] if getattr(node, "name", None) else []
+    )
     if len(names) > 1:
       raise NotImplementedError(
-          "Multi-variable declarations are not supported by the experimental LLVM backend yet."
+        "Multi-variable declarations are not supported by the experimental "
+        "LLVM backend yet."
       )
     name = names[0] if names else ""
 
@@ -412,11 +464,17 @@ class LLVMTranspiler(BaseTranspiler):
     return alloca
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> ir.Value:
-    """Updates the value stored in a variable's stack slot (`alloca`), supporting compound ops."""
-    targets = getattr(node, "targets", None) or ([node.target] if getattr(node, "target", None) else [])
+    """Updates the value stored in a variable's stack slot (`alloca`),
+    supporting
+    compound ops.
+    """
+    targets = getattr(node, "targets", None) or (
+      [node.target] if getattr(node, "target", None) else []
+    )
     if len(targets) > 1:
       raise NotImplementedError(
-          "Multi-target assignments are not supported by the experimental LLVM backend yet."
+        "Multi-target assignments are not supported by the experimental LLVM "
+        "backend yet."
       )
     target = targets[0] if targets else None
     val_expr = getattr(node, "expr", getattr(node, "value", None))
@@ -438,21 +496,31 @@ class LLVMTranspiler(BaseTranspiler):
       self.builder.store(val, ptr)
       return val
 
-    raise NotImplementedError(f"Assignment to {type(target).__name__} is not supported yet.")
+    raise NotImplementedError(
+      f"Assignment to {type(target).__name__} is not supported yet."
+    )
 
   def visit_ReturnNode(self, node: ReturnNode) -> ir.Instruction:
     exprs = getattr(node, "expressions", None)
     if exprs and len(exprs) > 1:
       raise NotImplementedError(
-          "Multiple return values are not supported by the experimental LLVM backend yet."
+        "Multiple return values are not supported by the experimental LLVM "
+        "backend yet."
       )
-    ret_expr = exprs[0] if exprs else getattr(node, "expr", getattr(node, "value", None))
+    ret_expr = (
+      exprs[0] if exprs else getattr(node, "expr", getattr(node, "value", None))
+    )
     if ret_expr is None:
       return self.builder.ret_void()
 
     ret_val = self.visit(ret_expr)
-    if self.current_function and self.current_function.type.pointee.return_type != self.void_type:
-      ret_val = self._match_type(ret_val, self.current_function.type.pointee.return_type)
+    if (
+      self.current_function
+      and self.current_function.type.pointee.return_type != self.void_type
+    ):
+      ret_val = self._match_type(
+        ret_val, self.current_function.type.pointee.return_type
+      )
     return self.builder.ret(ret_val)
 
   # -------------------------------------------------------------------------
@@ -473,14 +541,18 @@ class LLVMTranspiler(BaseTranspiler):
     """Loads and returns the value stored in an identifier's stack location."""
     if node.name in self.named_values:
       val_or_ptr = self.named_values[node.name]
-      if hasattr(val_or_ptr, "type") and isinstance(val_or_ptr.type, ir.PointerType):
+      if hasattr(val_or_ptr, "type") and isinstance(
+        val_or_ptr.type, ir.PointerType
+      ):
         return self.builder.load(val_or_ptr, name=f"{node.name}_val")
       return val_or_ptr
 
     raise NameError(f"Unknown symbol: {node.name}")
 
   def visit_BinaryOpNode(self, node: BinaryOpNode) -> ir.Value:
-    """Lowers binary arithmetic and comparison operations to LLVM IR instructions."""
+    """Lowers binary arithmetic and comparison operations to LLVM IR
+    instructions.
+    """
     lhs = self.visit(node.left)
     rhs = self.visit(node.right)
     return self._emit_binary_op(node.op, lhs, rhs)
@@ -489,32 +561,89 @@ class LLVMTranspiler(BaseTranspiler):
   # Remaining BaseTranspiler visitor stubs (route to generic_visit)
   # -------------------------------------------------------------------------
 
-  def visit_EnumDeclNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_ImportStmtNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_ExportStmtNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_StructFieldNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_ImplMemberNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_TraitDeclNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_YieldNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_MatchExprNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_EllipsisPatternNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_IfNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_WhileNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_ForNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_BreakNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_ContinueNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_InterpolatedStringNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_TernaryExprNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_UnaryOpNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_CastExprNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_CallNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_MemberAccessNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_CloneNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_MoveNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_LambdaNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_ArrayLiteralNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_MapLiteralNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_IndexExprNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_StructInitializerNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_GuardClauseNode(self, node: Any) -> Any: return self.generic_visit(node)
-  def visit_GuardStmtNode(self, node: Any) -> Any: return self.generic_visit(node)
+  def visit_EnumDeclNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_ImportStmtNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_ExportStmtNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_StructFieldNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_ImplMemberNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_TraitDeclNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_YieldNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_MatchExprNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_EllipsisPatternNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_IfNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_WhileNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_ForNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_BreakNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_ContinueNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_InterpolatedStringNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_TernaryExprNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_UnaryOpNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_CastExprNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_CallNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_MemberAccessNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_CloneNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_MoveNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_LambdaNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_ArrayLiteralNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_MapLiteralNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_IndexExprNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_StructInitializerNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_GuardClauseNode(self, node: Any) -> Any:
+    return self.generic_visit(node)
+
+  def visit_GuardStmtNode(self, node: Any) -> Any:
+    return self.generic_visit(node)

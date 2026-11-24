@@ -1,11 +1,14 @@
 """Unit tests for TranspilerRegistry in src/code_gen/transpiler_registry.py."""
 
 import unittest
-from src.code_gen.transpiler_registry import TranspilerRegistry, TranspilerTarget
-from src.common.errors import SapphireTranspileError
-from src.code_gen.python_transpiler import PythonTranspiler
-from src.code_gen.lua_transpiler import LuaTranspiler
+
 from src.code_gen.llvm_transpiler import LLVMTranspiler
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.code_gen.transpiler_registry import (
+  TranspilerRegistry,
+)
+from src.common.errors import SapphireTranspileError
 
 
 class TestTranspilerRegistry(unittest.TestCase):

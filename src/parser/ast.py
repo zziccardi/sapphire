@@ -22,7 +22,10 @@ class ASTNode:
   length: Optional[int] = None
 
   def to_dict(self) -> Dict[str, Any]:
-    """Returns a dictionary representation of the AST node for serialization/debugging."""
+    """Returns a dictionary representation of the AST node for
+    serialization/debugging.
+    """
+
     def _serialize(v: Any) -> Any:
       if isinstance(v, ASTNode):
         return v.to_dict()
@@ -36,8 +39,15 @@ class ASTNode:
 
     result = {"node_type": self.__class__.__name__}
     for key, value in self.__dict__.items():
-      # Skip language-server specific positioning keys during standard AST serialization
-      if key in ("start_line", "start_column", "end_line", "end_column", "length"):
+      # Skip language-server specific positioning keys during standard AST
+      # serialization
+      if key in (
+        "start_line",
+        "start_column",
+        "end_line",
+        "end_column",
+        "length",
+      ):
         continue
       result[key] = _serialize(value)
     return result
@@ -50,13 +60,17 @@ class ASTNode:
 # Type AST Nodes
 # ==========================================
 
+
 class TypeNode(ASTNode):
   """Base class for all type representations in the AST."""
+
   pass
 
 
 class BasicTypeNode(TypeNode):
-  """Represents a basic type (e.g. 'int', 'float', 'bool', or a struct name like 'Stack<int>')."""
+  """Represents a basic type (e.g. 'int', 'float', 'bool', or a struct name like
+  'Stack<int>').
+  """
 
   def __init__(self, name: str, type_args: Optional[List[TypeNode]] = None):
     self.name = name
@@ -87,9 +101,16 @@ class MapTypeNode(TypeNode):
 
 
 class FunctionTypeNode(TypeNode):
-  """Represents a function type signature (e.g. '(int, int) -> float' or '(int) -> (float, float)')."""
+  """Represents a function type signature (e.g. '(int, int) -> float' or '(int)
+  ->
+  (float, float)').
+  """
 
-  def __init__(self, param_types: List[TypeNode], return_types: Union[TypeNode, List[TypeNode]]):
+  def __init__(
+    self,
+    param_types: List[TypeNode],
+    return_types: Union[TypeNode, List[TypeNode]],
+  ):
     self.param_types = param_types
     if isinstance(return_types, list):
       self.return_types = return_types
@@ -105,13 +126,17 @@ class FunctionTypeNode(TypeNode):
 # Declaration AST Nodes
 # ==========================================
 
+
 class DeclNode(ASTNode):
   """Base class for all declaration nodes."""
+
   pass
 
 
 class ImportStmtNode(ASTNode):
-  """Represents a module import statement (e.g. 'import lib.love2d.graphics as gfx;')."""
+  """Represents a module import statement (e.g. 'import lib.love2d.graphics as
+  gfx;').
+  """
 
   def __init__(self, path: str, alias: Optional[str] = None):
     self.path = path
@@ -119,9 +144,16 @@ class ImportStmtNode(ASTNode):
 
 
 class ExportSpecifierNode(ASTNode):
-  """Represents a specifier in an export manifest block (e.g. 'Image', 'enums.DrawMode', or 'new_image as create_image')."""
+  """Represents a specifier in an export manifest block (e.g. 'Image',
+  'enums.DrawMode', or 'new_image as create_image').
+  """
 
-  def __init__(self, symbol: str, module_prefix: Optional[str] = None, alias: Optional[str] = None):
+  def __init__(
+    self,
+    symbol: str,
+    module_prefix: Optional[str] = None,
+    alias: Optional[str] = None,
+  ):
     self.symbol = symbol
     self.module_prefix = module_prefix
     self.alias = alias
@@ -132,20 +164,25 @@ class ExportSpecifierNode(ASTNode):
 
 
 class ExportStmtNode(ASTNode):
-  """Represents an explicit module export manifest block (e.g. 'export { Image, new_image };')."""
+  """Represents an explicit module export manifest block (e.g. 'export { Image,
+  new_image };').
+  """
 
   def __init__(self, specifiers: List[ExportSpecifierNode]):
     self.specifiers = specifiers
 
 
 class ProgramNode(ASTNode):
-  """Root node of a Sapphire program, containing top-level declarations, imports, and optional export manifest."""
+  """Root node of a Sapphire program, containing top-level declarations,
+  imports,
+  and optional export manifest.
+  """
 
   def __init__(
-      self,
-      declarations: List[ASTNode],
-      imports: Optional[List[ImportStmtNode]] = None,
-      export_block: Optional[ExportStmtNode] = None,
+    self,
+    declarations: List[ASTNode],
+    imports: Optional[List[ImportStmtNode]] = None,
+    export_block: Optional[ExportStmtNode] = None,
   ):
     self.declarations = declarations
     self.imports = imports or []
@@ -153,9 +190,17 @@ class ProgramNode(ASTNode):
 
 
 class StructFieldNode(ASTNode):
-  """Represents a single field in a struct declaration (e.g. 'var x: float;' or 'var x = 0;')."""
+  """Represents a single field in a struct declaration (e.g. 'var x: float;' or
+  'var x = 0;').
+  """
 
-  def __init__(self, is_mutable: bool, name: str, field_type: Optional[TypeNode] = None, default_expr: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    is_mutable: bool,
+    name: str,
+    field_type: Optional[TypeNode] = None,
+    default_expr: Optional[ASTNode] = None,
+  ):
     self.is_mutable = is_mutable
     self.name = name
     self.field_type = field_type
@@ -163,7 +208,9 @@ class StructFieldNode(ASTNode):
 
 
 class AnnotationNode(ASTNode):
-  """Represents an annotation decorator (e.g. '@extern' or '@export("love.update")')."""
+  """Represents an annotation decorator (e.g. '@extern' or
+  '@export("love.update")').
+  """
 
   def __init__(self, name: str, arg: Optional[str] = None):
     self.name = name
@@ -173,7 +220,15 @@ class AnnotationNode(ASTNode):
 class StructDeclNode(DeclNode):
   """Represents a struct declaration."""
 
-  def __init__(self, name: str, parent_names: Optional[Union[str, List[str]]] = None, fields: List[StructFieldNode] = None, is_prototype: bool = False, type_params: Optional[List[str]] = None, parent_name: Optional[str] = None):
+  def __init__(
+    self,
+    name: str,
+    parent_names: Optional[Union[str, List[str]]] = None,
+    fields: List[StructFieldNode] = None,
+    is_prototype: bool = False,
+    type_params: Optional[List[str]] = None,
+    parent_name: Optional[str] = None,
+  ):
     self.name = name
     if parent_names is None:
       self.parent_names = [parent_name] if parent_name else []
@@ -217,7 +272,13 @@ class EnumDeclNode(DeclNode):
 class ParameterNode(ASTNode):
   """Represents a parameter in a function signature."""
 
-  def __init__(self, is_mutable: bool, name: str, param_type: Optional[TypeNode] = None, default_expr: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    is_mutable: bool,
+    name: str,
+    param_type: Optional[TypeNode] = None,
+    default_expr: Optional[ASTNode] = None,
+  ):
     self.is_mutable = is_mutable
     self.name = name
     self.param_type = param_type
@@ -225,9 +286,21 @@ class ParameterNode(ASTNode):
 
 
 class FuncDeclNode(DeclNode):
-  """Represents a function declaration, supporting single or multiple return types."""
+  """Represents a function declaration, supporting single or multiple return
+  types.
+  """
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, body: Optional['BlockNode'] = None, annotations: Optional[List[AnnotationNode]] = None, return_type: Optional[TypeNode] = None, type_params: Optional[List[str]] = None, base_initializers: Optional[List['CallNode']] = None):
+  def __init__(
+    self,
+    name: str,
+    parameters: List[ParameterNode],
+    return_types: Optional[Union[TypeNode, List[TypeNode]]] = None,
+    body: Optional["BlockNode"] = None,
+    annotations: Optional[List[AnnotationNode]] = None,
+    return_type: Optional[TypeNode] = None,
+    type_params: Optional[List[str]] = None,
+    base_initializers: Optional[List["CallNode"]] = None,
+  ):
     self.name = name
     self.parameters = parameters
     if return_types is not None:
@@ -250,7 +323,9 @@ class FuncDeclNode(DeclNode):
 
 
 class ImplMemberNode(ASTNode):
-  """Represents a member inside an impl block (e.g. static/var/immutable methods)."""
+  """Represents a member inside an impl block (e.g. static/var/immutable
+  methods).
+  """
 
   def __init__(self, modifier: Optional[str], func_decl: FuncDeclNode):
     self.modifier = modifier  # 'static', 'var', or None
@@ -260,7 +335,15 @@ class ImplMemberNode(ASTNode):
 class ImplBlockNode(DeclNode):
   """Represents a Rust-style implementation block."""
 
-  def __init__(self, struct_name: str, trait_name: Optional[str], members: List[ImplMemberNode], type_params: Optional[List[str]] = None, trait_type_args: Optional[List[TypeNode]] = None, struct_type_args: Optional[List[TypeNode]] = None):
+  def __init__(
+    self,
+    struct_name: str,
+    trait_name: Optional[str],
+    members: List[ImplMemberNode],
+    type_params: Optional[List[str]] = None,
+    trait_type_args: Optional[List[TypeNode]] = None,
+    struct_type_args: Optional[List[TypeNode]] = None,
+  ):
     self.struct_name = struct_name
     self.trait_name = trait_name
     self.members = members
@@ -270,9 +353,21 @@ class ImplBlockNode(DeclNode):
 
 
 class TraitMemberNode(ASTNode):
-  """Represents a method signature (and optional default body) inside a trait declaration."""
+  """Represents a method signature (and optional default body) inside a trait
+  declaration.
+  """
 
-  def __init__(self, name: str, parameters: List[ParameterNode], return_types: Optional[Union[TypeNode, List[TypeNode]]] = None, modifier: Optional[str] = None, return_type: Optional[TypeNode] = None, annotations: Optional[List[AnnotationNode]] = None, type_params: Optional[List[str]] = None, body: Optional["BlockNode"] = None):
+  def __init__(
+    self,
+    name: str,
+    parameters: List[ParameterNode],
+    return_types: Optional[Union[TypeNode, List[TypeNode]]] = None,
+    modifier: Optional[str] = None,
+    return_type: Optional[TypeNode] = None,
+    annotations: Optional[List[AnnotationNode]] = None,
+    type_params: Optional[List[str]] = None,
+    body: Optional["BlockNode"] = None,
+  ):
     self.name = name
     self.parameters = parameters
     if return_types is not None:
@@ -297,7 +392,12 @@ class TraitMemberNode(ASTNode):
 class TraitDeclNode(DeclNode):
   """Represents a trait declaration."""
 
-  def __init__(self, name: str, members: List[TraitMemberNode], type_params: Optional[List[str]] = None):
+  def __init__(
+    self,
+    name: str,
+    members: List[TraitMemberNode],
+    type_params: Optional[List[str]] = None,
+  ):
     self.name = name
     self.members = members
     self.type_params = type_params or []
@@ -307,8 +407,10 @@ class TraitDeclNode(DeclNode):
 # Statement AST Nodes
 # ==========================================
 
+
 class StmtNode(ASTNode):
   """Base class for all statement nodes."""
+
   pass
 
 
@@ -320,18 +422,20 @@ class BlockNode(StmtNode):
 
 
 class VarDeclNode(StmtNode):
-  """Represents a variable declaration statement (let/var), supporting multi-variable bindings."""
+  """Represents a variable declaration statement (let/var), supporting
+  multi-variable bindings.
+  """
 
   def __init__(
-      self,
-      is_mutable: bool,
-      names: Optional[Union[str, List[str]]] = None,
-      val_types: Optional[Union[TypeNode, List[Optional[TypeNode]]]] = None,
-      exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
-      annotations: Optional[List[AnnotationNode]] = None,
-      val_type: Optional[TypeNode] = None,
-      expr: Optional[ASTNode] = None,
-      name: Optional[str] = None,
+    self,
+    is_mutable: bool,
+    names: Optional[Union[str, List[str]]] = None,
+    val_types: Optional[Union[TypeNode, List[Optional[TypeNode]]]] = None,
+    exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
+    annotations: Optional[List[AnnotationNode]] = None,
+    val_type: Optional[TypeNode] = None,
+    expr: Optional[ASTNode] = None,
+    name: Optional[str] = None,
   ):
     self.is_mutable = is_mutable
     if names is not None:
@@ -389,8 +493,17 @@ class VarDeclNode(StmtNode):
 class AssignmentNode(StmtNode):
   """Represents an assignment statement (e.g. 'x = 5;' or 'x, y = 10, 20;')."""
 
-  def __init__(self, targets: Union[ASTNode, List[ASTNode]], op: str, exprs: Union[ASTNode, List[ASTNode]], target: Optional[ASTNode] = None, expr: Optional[ASTNode] = None):
-    if targets is not None and not (isinstance(targets, list) and len(targets) == 0):
+  def __init__(
+    self,
+    targets: Union[ASTNode, List[ASTNode]],
+    op: str,
+    exprs: Union[ASTNode, List[ASTNode]],
+    target: Optional[ASTNode] = None,
+    expr: Optional[ASTNode] = None,
+  ):
+    if targets is not None and not (
+      isinstance(targets, list) and len(targets) == 0
+    ):
       if isinstance(targets, list):
         self.targets = targets
       else:
@@ -435,9 +548,15 @@ class ExprStmtNode(StmtNode):
 
 
 class ReturnNode(StmtNode):
-  """Represents a return statement, supporting single or multiple returned expressions."""
+  """Represents a return statement, supporting single or multiple returned
+  expressions.
+  """
 
-  def __init__(self, exprs: Optional[Union[ASTNode, List[ASTNode]]] = None, expr: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
+    expr: Optional[ASTNode] = None,
+  ):
     if exprs is not None:
       if isinstance(exprs, list):
         self.expressions = exprs
@@ -459,9 +578,15 @@ class ReturnNode(StmtNode):
 
 
 class YieldNode(StmtNode):
-  """Represents a yield statement, supporting single or multiple yielded expressions."""
+  """Represents a yield statement, supporting single or multiple yielded
+  expressions.
+  """
 
-  def __init__(self, exprs: Optional[Union[ASTNode, List[ASTNode]]] = None, expr: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
+    expr: Optional[ASTNode] = None,
+  ):
     if exprs is not None:
       if isinstance(exprs, list):
         self.expressions = exprs
@@ -485,18 +610,31 @@ class YieldNode(StmtNode):
 
 class BreakNode(StmtNode):
   """Represents a break statement (e.g. 'break;')."""
+
   pass
 
 
 class ContinueNode(StmtNode):
   """Represents a continue statement (e.g. 'continue;')."""
+
   pass
 
 
 class HeaderBindingNode(ASTNode):
-  """Represents a variable binding inside control-flow headers (e.g. let x ?= y or let x, y ?= pair)."""
+  """Represents a variable binding inside control-flow headers (e.g. let x ?= y
+  or
+  let x, y ?= pair).
+  """
 
-  def __init__(self, is_mutable: bool, let_name: str, type_node: Optional[ASTNode], expr: ASTNode, is_unwrap: bool, let_names: Optional[List[str]] = None):
+  def __init__(
+    self,
+    is_mutable: bool,
+    let_name: str,
+    type_node: Optional[ASTNode],
+    expr: ASTNode,
+    is_unwrap: bool,
+    let_names: Optional[List[str]] = None,
+  ):
     self.is_mutable = is_mutable
     self.let_name = let_name
     self.let_names = let_names if let_names is not None else [let_name]
@@ -506,22 +644,29 @@ class HeaderBindingNode(ASTNode):
 
 
 class GuardClauseNode(ASTNode):
-  """Represents a single clause within a guard statement (binding or boolean condition)."""
+  """Represents a single clause within a guard statement (binding or boolean
+  condition).
+  """
 
-  def __init__(self, binding: Optional[HeaderBindingNode] = None, condition: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    binding: Optional[HeaderBindingNode] = None,
+    condition: Optional[ASTNode] = None,
+  ):
     self.binding = binding
     self.condition = condition
 
 
 class GuardStmtNode(StmtNode):
-  """Represents a guard statement (e.g. 'guard let a ?= x; a > 0 else { ... }')."""
+  """Represents a guard statement (e.g. 'guard let a ?= x; a > 0 else { ... }').
+  """
 
   def __init__(
-      self,
-      clauses: Optional[List[GuardClauseNode]] = None,
-      else_block: Optional[BlockNode] = None,
-      bindings: Optional[List[HeaderBindingNode]] = None,
-      condition: Optional[ASTNode] = None,
+    self,
+    clauses: Optional[List[GuardClauseNode]] = None,
+    else_block: Optional[BlockNode] = None,
+    bindings: Optional[List[HeaderBindingNode]] = None,
+    condition: Optional[ASTNode] = None,
   ):
     if clauses is not None:
       self.clauses = clauses
@@ -538,15 +683,17 @@ class GuardStmtNode(StmtNode):
 
 
 class IfNode(StmtNode):
-  """Represents an if/else conditional statement, supporting multi-bindings and conditions."""
+  """Represents an if/else conditional statement, supporting multi-bindings and
+  conditions.
+  """
 
   def __init__(
-      self,
-      init_binding: Optional[HeaderBindingNode] = None,
-      condition: Optional[ASTNode] = None,
-      then_block: Optional[BlockNode] = None,
-      else_block: Optional[Union[BlockNode, 'IfNode']] = None,
-      bindings: Optional[List[HeaderBindingNode]] = None,
+    self,
+    init_binding: Optional[HeaderBindingNode] = None,
+    condition: Optional[ASTNode] = None,
+    then_block: Optional[BlockNode] = None,
+    else_block: Optional[Union[BlockNode, "IfNode"]] = None,
+    bindings: Optional[List[HeaderBindingNode]] = None,
   ):
     if bindings is not None:
       self.bindings = bindings
@@ -582,13 +729,13 @@ class ForNode(StmtNode):
   """Represents a for-in loop."""
 
   def __init__(
-      self,
-      is_mutable: bool,
-      loop_var: str,
-      iterable: ASTNode,
-      block: BlockNode,
-      key_var: Optional[str] = None,
-      val_var: Optional[str] = None,
+    self,
+    is_mutable: bool,
+    loop_var: str,
+    iterable: ASTNode,
+    block: BlockNode,
+    key_var: Optional[str] = None,
+    val_var: Optional[str] = None,
   ):
     self.is_mutable = is_mutable
     self.loop_var = loop_var
@@ -602,8 +749,10 @@ class ForNode(StmtNode):
 # Expression AST Nodes
 # ==========================================
 
+
 class ExprNode(ASTNode):
   """Base class for all expression nodes."""
+
   pass
 
 
@@ -639,9 +788,13 @@ class BinaryOpNode(ExprNode):
 
 
 class TernaryExprNode(ExprNode):
-  """Represents a ternary conditional expression (e.g. 'condition ? true_expr : false_expr')."""
+  """Represents a ternary conditional expression (e.g. 'condition ? true_expr :
+  false_expr').
+  """
 
-  def __init__(self, condition: ASTNode, true_expr: ASTNode, false_expr: ASTNode):
+  def __init__(
+    self, condition: ASTNode, true_expr: ASTNode, false_expr: ASTNode
+  ):
     self.condition = condition
     self.true_expr = true_expr
     self.false_expr = false_expr
@@ -664,7 +817,10 @@ class CastExprNode(ExprNode):
 
 
 class ArgumentNode(ASTNode):
-  """Represents an argument passed to a function call, potentially named (e.g. 'x = 5')."""
+  """Represents an argument passed to a function call, potentially named (e.g.
+  'x =
+  5').
+  """
 
   def __init__(self, name: Optional[str], expr: ASTNode):
     self.name = name
@@ -674,7 +830,13 @@ class ArgumentNode(ASTNode):
 class CallNode(ExprNode):
   """Represents a function or method call."""
 
-  def __init__(self, callee: ASTNode, arguments: List[ArgumentNode], type_args: Optional[List[TypeNode]] = None, arena_expr: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    callee: ASTNode,
+    arguments: List[ArgumentNode],
+    type_args: Optional[List[TypeNode]] = None,
+    arena_expr: Optional[ASTNode] = None,
+  ):
     self.callee = callee
     self.arguments = arguments
     self.type_args = type_args or []
@@ -682,7 +844,9 @@ class CallNode(ExprNode):
 
 
 class MemberAccessNode(ExprNode):
-  """Represents a member or property access (e.g. 'obj.field' or 'obj?.field' or 'obj.__proto__')."""
+  """Represents a member or property access (e.g. 'obj.field' or 'obj?.field' or
+  'obj.__proto__').
+  """
 
   def __init__(self, receiver: ASTNode, member: str, is_optional: bool):
     self.receiver = receiver
@@ -691,16 +855,26 @@ class MemberAccessNode(ExprNode):
 
 
 class CloneNode(ExprNode):
-  """Represents a clone expression (e.g. 'clone prototype_enemy { self.health = 25; }')."""
+  """Represents a clone expression (e.g. 'clone prototype_enemy { self.health =
+  25;
+  }').
+  """
 
-  def __init__(self, expr: ASTNode, initializer_block: Optional[List[StmtNode]] = None, arena_expr: Optional[ASTNode] = None):
+  def __init__(
+    self,
+    expr: ASTNode,
+    initializer_block: Optional[List[StmtNode]] = None,
+    arena_expr: Optional[ASTNode] = None,
+  ):
     self.expr = expr
     self.initializer_block = initializer_block
     self.arena_expr = arena_expr
 
 
 class MoveNode(ExprNode):
-  """Represents an explicit ownership transfer expression (e.g. 'move resource')."""
+  """Represents an explicit ownership transfer expression (e.g. 'move
+  resource').
+  """
 
   def __init__(self, name: str):
     self.name = name
@@ -715,9 +889,16 @@ class LambdaParamNode(ASTNode):
 
 
 class LambdaNode(ExprNode):
-  """Represents an anonymous lambda function (e.g. '(x: int) -> int { return x; }')."""
+  """Represents an anonymous lambda function (e.g. '(x: int) -> int { return x;
+  }').
+  """
 
-  def __init__(self, parameters: List[LambdaParamNode], return_type: Optional[TypeNode], body: Union[BlockNode, ASTNode]):
+  def __init__(
+    self,
+    parameters: List[LambdaParamNode],
+    return_type: Optional[TypeNode],
+    body: Union[BlockNode, ASTNode],
+  ):
     self.parameters = parameters
     self.return_type = return_type
     self.body = body  # Can be a BlockNode or a single expression (shorthand)
@@ -754,9 +935,18 @@ class IndexExprNode(ExprNode):
 
 
 class StructInitializerNode(ExprNode):
-  """Represents a curly-brace struct initializer expression (e.g. 'Weapon { damage = 10 }')."""
+  """Represents a curly-brace struct initializer expression (e.g. 'Weapon {
+  damage
+  = 10 }').
+  """
 
-  def __init__(self, struct_name: str, fields: List[ArgumentNode], arena_expr: Optional[ASTNode] = None, type_args: Optional[List[TypeNode]] = None):
+  def __init__(
+    self,
+    struct_name: str,
+    fields: List[ArgumentNode],
+    arena_expr: Optional[ASTNode] = None,
+    type_args: Optional[List[TypeNode]] = None,
+  ):
     self.struct_name = struct_name
     self.fields = fields
     self.arena_expr = arena_expr
@@ -765,6 +955,7 @@ class StructInitializerNode(ExprNode):
 
 class EllipsisPatternNode(ASTNode):
   """Represents the '...' wildcard pattern in a match case."""
+
   pass
 
 
@@ -772,12 +963,12 @@ class MatchCaseNode(ASTNode):
   """Represents a single case branch in a match expression."""
 
   def __init__(
-      self,
-      pattern: Union[ASTNode, List[ASTNode]],
-      body: Union[BlockNode, ASTNode],
+    self,
+    pattern: Union[ASTNode, List[ASTNode]],
+    body: Union[BlockNode, ASTNode],
   ):
     self.patterns: List[ASTNode] = (
-        pattern if isinstance(pattern, list) else [pattern]
+      pattern if isinstance(pattern, list) else [pattern]
     )
     self.body = body  # BlockNode or single ExprNode
 
@@ -788,10 +979,16 @@ class MatchCaseNode(ASTNode):
 
 
 class MatchExprNode(ExprNode):
-  """Represents a match expression (e.g. 'match status { HttpStatus.Ok -> "Success", ... -> "Error", }')."""
+  """Represents a match expression (e.g. 'match status { HttpStatus.Ok ->
+  "Success", ... -> "Error", }').
+  """
 
-  def __init__(self, subject: ASTNode, cases: List[MatchCaseNode],
-               is_statement: bool = False):
+  def __init__(
+    self,
+    subject: ASTNode,
+    cases: List[MatchCaseNode],
+    is_statement: bool = False,
+  ):
     self.subject = subject
     self.cases = cases
     self.is_statement = is_statement

@@ -7,13 +7,12 @@ serialization to dictionaries work correctly.
 import unittest
 
 from src.parser.ast import (
-    BasicTypeNode,
-    LiteralNode,
-    VarDeclNode,
-    BinaryOpNode,
-    IdentifierNode,
+  BasicTypeNode,
+  BinaryOpNode,
+  IdentifierNode,
+  LiteralNode,
+  VarDeclNode,
 )
-
 
 
 class TestASTNodes(unittest.TestCase):
@@ -23,7 +22,7 @@ class TestASTNodes(unittest.TestCase):
     """Verifies BasicTypeNode creation and conversion to dictionary."""
     node = BasicTypeNode("int")
     self.assertEqual(node.name, "int")
-    
+
     node_dict = node.to_dict()
     self.assertEqual(node_dict["node_type"], "BasicTypeNode")
     self.assertEqual(node_dict["name"], "int")
@@ -68,7 +67,7 @@ class TestASTNodes(unittest.TestCase):
     self.assertEqual(node_dict["node_type"], "VarDeclNode")
     self.assertFalse(node_dict["is_mutable"])
     self.assertEqual(node_dict["name"], "x")
-    
+
     # Check type node dict
     self.assertEqual(node_dict["val_type"]["node_type"], "BasicTypeNode")
     self.assertEqual(node_dict["val_type"]["name"], "int")
@@ -125,9 +124,17 @@ class TestASTNodes(unittest.TestCase):
   def test_node_properties_and_backward_compatibility_to_dict(self):
     """Verifies backward compatible properties and to_dict methods on AST nodes."""
     from src.parser.ast import (
-        ASTNode, FunctionTypeNode, FuncDeclNode, TraitMemberNode, VarDeclNode,
-        AssignmentNode, ReturnNode, IdentifierNode, LiteralNode, BasicTypeNode,
-        ExprStmtNode
+      AssignmentNode,
+      ASTNode,
+      BasicTypeNode,
+      ExprStmtNode,
+      FuncDeclNode,
+      FunctionTypeNode,
+      IdentifierNode,
+      LiteralNode,
+      ReturnNode,
+      TraitMemberNode,
+      VarDeclNode,
     )
 
 
@@ -215,11 +222,11 @@ class TestASTNodes(unittest.TestCase):
   def test_tuple_serialization_and_guard_if_init_bindings(self):
     """Verifies tuple serialization in to_dict and GuardStmtNode/IfNode init_binding helpers."""
     from src.parser.ast import (
-        GuardClauseNode,
-        GuardStmtNode,
-        HeaderBindingNode,
-        IfNode,
-        BlockNode,
+      BlockNode,
+      GuardClauseNode,
+      GuardStmtNode,
+      HeaderBindingNode,
+      IfNode,
     )
 
     node = BasicTypeNode("int")

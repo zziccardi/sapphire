@@ -2,7 +2,11 @@
 
 import unittest
 from unittest.mock import MagicMock
-from src.parser.error_listener import CustomErrorListener, format_syntax_error_message
+
+from src.parser.error_listener import (
+  CustomErrorListener,
+  format_syntax_error_message,
+)
 
 
 class TestErrorListener(unittest.TestCase):
@@ -27,6 +31,7 @@ class TestErrorListener(unittest.TestCase):
 
   def test_match_expression_missing_semicolon_real_parser(self):
     from antlr4 import CommonTokenStream, InputStream
+
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
 
@@ -56,6 +61,7 @@ class TestErrorListener(unittest.TestCase):
 
   def test_missing_comma_after_match_arm_block_not_misreported(self):
     from antlr4 import CommonTokenStream, InputStream
+
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
 
@@ -85,6 +91,7 @@ class TestErrorListener(unittest.TestCase):
 
   def test_struct_initializer_missing_semicolon_after_match_not_misreported(self):
     from antlr4 import CommonTokenStream, InputStream
+
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
 

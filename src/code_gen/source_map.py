@@ -5,10 +5,12 @@ Sapphire (.sp) code to target languages (e.g. Lua 5.1).
 """
 
 import json
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional
 
 # Base64 characters used in V3 Source Maps
-BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+BASE64_CHARS = (
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
 
 
 def encode_vlq(value: int) -> str:
@@ -36,16 +38,18 @@ def encode_vlq(value: int) -> str:
 
 
 class MappingEntry:
-  """Represents a single position mapping from generated code to original source code."""
+  """Represents a single position mapping from generated code to original source
+  code.
+  """
 
   def __init__(
-      self,
-      gen_line: int,  # 1-indexed
-      gen_col: int,   # 0-indexed
-      source_file: str,
-      orig_line: int, # 1-indexed
-      orig_col: int,  # 0-indexed
-      symbol_name: Optional[str] = None,
+    self,
+    gen_line: int,  # 1-indexed
+    gen_col: int,  # 0-indexed
+    source_file: str,
+    orig_line: int,  # 1-indexed
+    orig_col: int,  # 0-indexed
+    symbol_name: Optional[str] = None,
   ):
     self.gen_line = gen_line
     self.gen_col = gen_col
@@ -56,7 +60,9 @@ class MappingEntry:
 
 
 class SourceMapBuilder:
-  """Collects position mappings and generates V3 Source Map JSON and Lua runtime line maps."""
+  """Collects position mappings and generates V3 Source Map JSON and Lua runtime
+  line maps.
+  """
 
   def __init__(self, source_file: str, source_content: Optional[str] = None):
     self.sources: List[str] = [source_file]
@@ -66,8 +72,11 @@ class SourceMapBuilder:
     self.names: List[str] = []
     self.mappings: List[MappingEntry] = []
 
-  def add_source(self, source_file: str, source_content: Optional[str] = None) -> int:
-    """Ensures a source file is present in sources list and returns its index."""
+  def add_source(
+    self, source_file: str, source_content: Optional[str] = None
+  ) -> int:
+    """Ensures a source file is present in sources list and returns its index.
+    """
     if source_file not in self.sources:
       self.sources.append(source_file)
     if source_content is not None:
@@ -81,25 +90,26 @@ class SourceMapBuilder:
     return self.names.index(name)
 
   def add_mapping(
-      self,
-      gen_line: int,
-      gen_col: int,
-      source_file: str,
-      orig_line: int,
-      orig_col: int,
-      symbol_name: Optional[str] = None,
+    self,
+    gen_line: int,
+    gen_col: int,
+    source_file: str,
+    orig_line: int,
+    orig_col: int,
+    symbol_name: Optional[str] = None,
   ) -> None:
-    """Adds a mapping entry from generated position to original source position."""
+    """Adds a mapping entry from generated position to original source position.
+    """
     self.add_source(source_file)
     if symbol_name:
       self.add_name(symbol_name)
     entry = MappingEntry(
-        gen_line=gen_line,
-        gen_col=gen_col,
-        source_file=source_file,
-        orig_line=orig_line,
-        orig_col=orig_col,
-        symbol_name=symbol_name,
+      gen_line=gen_line,
+      gen_col=gen_col,
+      source_file=source_file,
+      orig_line=orig_line,
+      orig_col=orig_col,
+      symbol_name=symbol_name,
     )
     self.mappings.append(entry)
 
@@ -107,7 +117,7 @@ class SourceMapBuilder:
     """Generates the V3 'mappings' string using Base64 VLQ encoding."""
     # Sort mappings by generated line then generated column
     sorted_mappings = sorted(
-        self.mappings, key=lambda m: (m.gen_line, m.gen_col)
+      self.mappings, key=lambda m: (m.gen_line, m.gen_col)
     )
 
     lines_mappings: Dict[int, List[MappingEntry]] = {}
@@ -136,14 +146,16 @@ class SourceMapBuilder:
         # Relative field calculation (V3 delta encoding)
         gen_col_delta = entry.gen_col - last_gen_col
         source_idx_delta = source_idx - last_source_idx
-        orig_line_delta = (entry.orig_line - 1) - last_orig_line  # 0-indexed delta
+        orig_line_delta = (
+          entry.orig_line - 1
+        ) - last_orig_line  # 0-indexed delta
         orig_col_delta = entry.orig_col - last_orig_col
 
         fields = [
-            encode_vlq(gen_col_delta),
-            encode_vlq(source_idx_delta),
-            encode_vlq(orig_line_delta),
-            encode_vlq(orig_col_delta),
+          encode_vlq(gen_col_delta),
+          encode_vlq(source_idx_delta),
+          encode_vlq(orig_line_delta),
+          encode_vlq(orig_col_delta),
         ]
 
         if entry.symbol_name:
@@ -167,15 +179,15 @@ class SourceMapBuilder:
   def to_v3_dict(self, generated_filename: str) -> Dict[str, Any]:
     """Returns the V3 Source Map as a python dictionary."""
     sources_content_list = [
-        self.sources_content.get(src, None) for src in self.sources
+      self.sources_content.get(src, None) for src in self.sources
     ]
     return {
-        "version": 3,
-        "file": generated_filename,
-        "sources": self.sources,
-        "sourcesContent": sources_content_list,
-        "names": self.names,
-        "mappings": self.generate_vlq_mappings(),
+      "version": 3,
+      "file": generated_filename,
+      "sources": self.sources,
+      "sourcesContent": sources_content_list,
+      "names": self.names,
+      "mappings": self.generate_vlq_mappings(),
     }
 
   def to_v3_json(self, generated_filename: str, indent: int = 2) -> str:
@@ -195,7 +207,7 @@ class SourceMapBuilder:
     # Deduplicate: pick first mapping per generated line
     seen_lines = set()
     sorted_mappings = sorted(
-        self.mappings, key=lambda m: (m.gen_line, m.gen_col)
+      self.mappings, key=lambda m: (m.gen_line, m.gen_col)
     )
 
     for m in sorted_mappings:
@@ -214,8 +226,8 @@ class SourceMapBuilder:
       escaped_text = snippet.replace("\\", "\\\\").replace('"', '\\"')
 
       entries.append(
-          f'  [{m.gen_line}] = {{ file = "{escaped_file}", line = {m.orig_line},'
-          f' col = {m.orig_col}, text = "{escaped_text}" }}'
+        f'  [{m.gen_line}] = {{ file = "{escaped_file}", line = {m.orig_line},'
+        f' col = {m.orig_col}, text = "{escaped_text}" }}'
       )
 
     return "_SP_LINE_MAP = {\n" + ",\n".join(entries) + "\n}\n"

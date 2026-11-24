@@ -11,36 +11,36 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from antlr4 import InputStream, CommonTokenStream
 
+from antlr4 import CommonTokenStream, InputStream
+
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.source_map import SourceMapBuilder
+from src.code_gen.transpiler import transpile_file
 from src.parser.ast import (
-    ASTNode,
-    ArgumentNode,
-    BinaryOpNode,
-    BlockNode,
-    CallNode,
-    ExprStmtNode,
-    GuardClauseNode,
-    HeaderBindingNode,
-    IdentifierNode,
-    LambdaNode,
-    LambdaParamNode,
-    LiteralNode,
-    MemberAccessNode,
-    StructFieldNode,
-    StructInitializerNode,
-    TraitDeclNode,
-    UnaryOpNode,
-    YieldNode,
+  ArgumentNode,
+  ASTNode,
+  BinaryOpNode,
+  BlockNode,
+  CallNode,
+  ExprStmtNode,
+  GuardClauseNode,
+  HeaderBindingNode,
+  IdentifierNode,
+  LambdaNode,
+  LambdaParamNode,
+  LiteralNode,
+  MemberAccessNode,
+  StructFieldNode,
+  StructInitializerNode,
+  TraitDeclNode,
+  UnaryOpNode,
+  YieldNode,
 )
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.code_gen.lua_transpiler import LuaTranspiler
-from src.code_gen.transpiler import transpile_file
-from src.code_gen.source_map import SourceMapBuilder
 from src.semantics.type_checker import TypeChecker
-
 
 
 class DummyNode(ASTNode):
@@ -90,7 +90,9 @@ class TestLuaTranspiler(unittest.TestCase):
 
     # visit_ImplMemberNode raises when called directly (impl members are emitted
     # via visit_StructDeclNode in the Lua backend, not standalone)
-    from src.parser.ast import ImplMemberNode as _ImplMemberNode, FuncDeclNode as _FuncDeclNode, BlockNode as _BlockNode
+    from src.parser.ast import BlockNode as _BlockNode
+    from src.parser.ast import FuncDeclNode as _FuncDeclNode
+    from src.parser.ast import ImplMemberNode as _ImplMemberNode
 
     _dummy_func = _FuncDeclNode("do_thing", [], None, _BlockNode([]), [])
     with self.assertRaises(NotImplementedError):
@@ -1120,8 +1122,13 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("x = x + _match_res_", lua_out7)
 
     # Direct visitor calls
-    from src.parser.ast import MatchExprNode, EllipsisPatternNode, MatchCaseNode, LiteralNode
     from src.code_gen.lua_transpiler import LuaTranspiler
+    from src.parser.ast import (
+      EllipsisPatternNode,
+      LiteralNode,
+      MatchCaseNode,
+      MatchExprNode,
+    )
 
 
     lt = LuaTranspiler()
@@ -1228,7 +1235,7 @@ class TestLuaTranspiler(unittest.TestCase):
 
     transpiler = LuaTranspiler()
     sm_builder = SourceMapBuilder("direct.sp")
-    lua_out = transpiler.transpile(ast, source_file="direct.sp", source_map_builder=sm_builder)
+    transpiler.transpile(ast, source_file="direct.sp", source_map_builder=sm_builder)
     self.assertEqual(transpiler.source_file, "direct.sp")
     self.assertEqual(transpiler.source_map_builder, sm_builder)
 
@@ -1510,7 +1517,7 @@ class TestLuaTranspiler(unittest.TestCase):
 
   def test_has_continue_node_nested_and_private_attr(self):
     """Verifies _has_continue_node behavior for nested loops and private attributes."""
-    from src.code_gen.lua_transpiler import _has_continue_node
+    from src.code_gen.lua_stmt_emitter import _has_continue_node
     from src.parser.ast import BlockNode
 
 
@@ -2967,9 +2974,9 @@ class TestSharedFixtures(unittest.TestCase):
 
   def _transpile_fixture(self, source: str) -> str:
     """Parse *source* and return the generated Lua code string."""
+    from src.parser.ast_builder import ASTBuilder as _Builder
     from src.parser.gen.SapphireLexer import SapphireLexer as _Lexer
     from src.parser.gen.SapphireParser import SapphireParser as _Parser
-    from src.parser.ast_builder import ASTBuilder as _Builder
     from src.semantics.type_checker import TypeChecker as _Checker
 
 

@@ -1,16 +1,21 @@
 """Unit tests for Generics (Parametric Polymorphism) in Sapphire."""
 
 import unittest
-from antlr4 import InputStream, CommonTokenStream
 
+from antlr4 import CommonTokenStream, InputStream
+
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.semantics.type_checker import TypeChecker, SemanticError
-from src.semantics.symbol_table import GenericTypeParameter, StructType, TraitType, PrimitiveType
-from src.code_gen.python_transpiler import PythonTranspiler
-from src.code_gen.lua_transpiler import LuaTranspiler
-
+from src.semantics.symbol_table import (
+  GenericTypeParameter,
+  PrimitiveType,
+  StructType,
+  TraitType,
+)
+from src.semantics.type_checker import SemanticError, TypeChecker
 
 
 class TestGenerics(unittest.TestCase):
@@ -133,7 +138,7 @@ class TestGenerics(unittest.TestCase):
 
     func main() {}
     """
-    ast = self._check(code)
+    self._check(code)
 
     # Verify concrete struct type argument in impl is type-checked
     concrete_impl_code = """
@@ -197,7 +202,7 @@ class TestGenerics(unittest.TestCase):
       };
     }
     """
-    ast = self._check(code)
+    self._check(code)
 
   def test_generic_type_errors(self):
     """Verifies errors when invoking generic struct constructor or initializer without type arguments."""
@@ -280,7 +285,12 @@ class TestGenerics(unittest.TestCase):
     self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))
 
   def test_mangle_type_name_complex_types(self):
-    from src.semantics.symbol_table import ArrayType, MapType, FunctionType, PrimitiveType, StringType
+    from src.semantics.symbol_table import (
+      ArrayType,
+      FunctionType,
+      MapType,
+      StringType,
+    )
 
     tc = TypeChecker()
     arr_t = ArrayType(PrimitiveType("int"))
@@ -292,8 +302,20 @@ class TestGenerics(unittest.TestCase):
 
   def test_imported_module_generic_function_call(self):
     """Verifies monomorphization when calling a generic function exported by a module with explicit type args."""
-    from src.semantics.symbol_table import ModuleSymbol, FunctionSymbol, FunctionType, GenericTypeParameter
-    from src.parser.ast import FuncDeclNode, ParameterNode, BasicTypeNode, BlockNode, ReturnNode, IdentifierNode
+    from src.parser.ast import (
+      BasicTypeNode,
+      BlockNode,
+      FuncDeclNode,
+      IdentifierNode,
+      ParameterNode,
+      ReturnNode,
+    )
+    from src.semantics.symbol_table import (
+      FunctionSymbol,
+      FunctionType,
+      GenericTypeParameter,
+      ModuleSymbol,
+    )
 
     tc = TypeChecker()
     mod_sym = ModuleSymbol("math_utils", "lib.math_utils")

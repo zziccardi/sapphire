@@ -2,8 +2,9 @@
 
 import unittest
 from unittest.mock import MagicMock
-from src.parser.ast import CallNode, IdentifierNode, MemberAccessNode
+
 from src.code_gen.intrinsics import IntrinsicRegistry, is_builtin_module
+from src.parser.ast import CallNode, IdentifierNode, MemberAccessNode
 
 
 class TestIntrinsicRegistry(unittest.TestCase):
@@ -41,8 +42,8 @@ class TestIntrinsicRegistry(unittest.TestCase):
     mock_transpiler.emit.assert_any_call("_SP_RT._sapphire_string_size(")
 
   def test_range_python_named_and_positional_variants(self):
-    from src.parser.ast import ArgumentNode, LiteralNode
     from src.code_gen.python_transpiler import PythonTranspiler
+    from src.parser.ast import ArgumentNode, LiteralNode
 
     def emit_range(args):
       t = PythonTranspiler()
@@ -100,8 +101,8 @@ class TestIntrinsicRegistry(unittest.TestCase):
     )
 
   def test_optional_chaining_on_intrinsics_python_and_lua(self):
-    from src.code_gen.python_transpiler import PythonTranspiler
     from src.code_gen.lua_transpiler import LuaTranspiler
+    from src.code_gen.python_transpiler import PythonTranspiler
 
     member = MemberAccessNode(IdentifierNode("opt_s"), "upper", True)
     member.is_string_method = True
@@ -123,9 +124,9 @@ class TestIntrinsicRegistry(unittest.TestCase):
     self.assertEqual(member.receiver.name, "opt_s")
 
   def test_reordered_named_intrinsic_preserves_call_order(self):
-    from src.parser.ast import ArgumentNode
-    from src.code_gen.python_transpiler import PythonTranspiler
     from src.code_gen.lua_transpiler import LuaTranspiler
+    from src.code_gen.python_transpiler import PythonTranspiler
+    from src.parser.ast import ArgumentNode
 
     member = MemberAccessNode(IdentifierNode("arr"), "insert", False)
     member.is_array_method = True
@@ -149,8 +150,8 @@ class TestIntrinsicRegistry(unittest.TestCase):
     self.assertLess(lua_out.index("first()"), lua_out.index("second()"))
 
   def test_python_assert_and_string_contains_helpers(self):
-    from src.parser.ast import ArgumentNode, LiteralNode
     from src.code_gen.python_transpiler import PythonTranspiler
+    from src.parser.ast import ArgumentNode, LiteralNode
 
     py_t = PythonTranspiler()
     assert_call = CallNode(

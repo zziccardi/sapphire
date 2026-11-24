@@ -3,35 +3,33 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.parser.ast import (
-    ASTNode,
-    AssignmentNode,
-    BinaryOpNode,
-    BlockNode,
-    CallNode,
-    FuncDeclNode,
-    GuardStmtNode,
-    IdentifierNode,
-    IfNode,
-    IndexExprNode,
-    LambdaNode,
-    LiteralNode,
-    MemberAccessNode,
-    UnaryOpNode,
+  AssignmentNode,
+  ASTNode,
+  BinaryOpNode,
+  CallNode,
+  FuncDeclNode,
+  GuardStmtNode,
+  IdentifierNode,
+  IfNode,
+  IndexExprNode,
+  LambdaNode,
+  LiteralNode,
+  MemberAccessNode,
+  UnaryOpNode,
 )
 from src.semantics.arena_checker import ArenaChecker
 from src.semantics.symbol_table import (
-    MapType,
-    OptionalType,
-    RefType,
-    StructType,
-    TraitType,
-    VariableSymbol,
+  MapType,
+  OptionalType,
+  RefType,
+  StructType,
+  TraitType,
+  VariableSymbol,
 )
-
 
 _STRUCTURAL_MAP_MUTATIONS = frozenset({"remove", "clear", "insert", "set"})
 _BUILTIN_MUTATING_METHODS = frozenset(
-    {"push", "pop", "insert", "remove", "clear", "set", "sort"}
+  {"push", "pop", "insert", "remove", "clear", "set", "sort"}
 )
 
 
@@ -43,9 +41,9 @@ def _exprs_equal(a: Optional[ASTNode], b: Optional[ASTNode]) -> bool:
     return a.name == b.name
   if isinstance(a, MemberAccessNode):
     return (
-        a.member == b.member
-        and a.is_optional == b.is_optional
-        and _exprs_equal(a.receiver, b.receiver)
+      a.member == b.member
+      and a.is_optional == b.is_optional
+      and _exprs_equal(a.receiver, b.receiver)
     )
   if isinstance(a, LiteralNode):
     return a.value == b.value and a.lit_type == b.lit_type
@@ -55,23 +53,23 @@ def _exprs_equal(a: Optional[ASTNode], b: Optional[ASTNode]) -> bool:
     return a.op == b.op and _exprs_equal(a.expr, b.expr)
   if isinstance(a, BinaryOpNode):
     return (
-        a.op == b.op
-        and _exprs_equal(a.left, b.left)
-        and _exprs_equal(a.right, b.right)
+      a.op == b.op
+      and _exprs_equal(a.left, b.left)
+      and _exprs_equal(a.right, b.right)
     )
   return False
 
 
 def _extract_map_contains(
-    expr: Optional[ASTNode], node_types: Dict[ASTNode, Any]
+  expr: Optional[ASTNode], node_types: Dict[ASTNode, Any]
 ) -> Optional[Tuple[CallNode, ASTNode, ASTNode]]:
   """Extracts `(call, receiver, key_expr)` if `expr` is `map.contains(k)`."""
   if not (
-      isinstance(expr, CallNode)
-      and isinstance(expr.callee, MemberAccessNode)
-      and expr.callee.member == "contains"
-      and not expr.callee.is_optional
-      and len(expr.arguments) == 1
+    isinstance(expr, CallNode)
+    and isinstance(expr.callee, MemberAccessNode)
+    and expr.callee.member == "contains"
+    and not expr.callee.is_optional
+    and len(expr.arguments) == 1
   ):
     return None
   recv = expr.callee.receiver
@@ -83,9 +81,11 @@ def _extract_map_contains(
 
 
 def _collect_contains_in_and_chain(
-    cond: Optional[ASTNode], node_types: Dict[ASTNode, Any]
+  cond: Optional[ASTNode], node_types: Dict[ASTNode, Any]
 ) -> List[Tuple[CallNode, ASTNode, ASTNode, List[ASTNode]]]:
-  """Finds `map.contains(k)` checks in `cond` and the RHS subtrees guarded by them."""
+  """Finds `map.contains(k)` checks in `cond` and the RHS subtrees guarded by
+  them.
+  """
   results: List[Tuple[CallNode, ASTNode, ASTNode, List[ASTNode]]] = []
   if cond is None:
     return results
@@ -109,26 +109,27 @@ def _collect_contains_in_and_chain(
   return results
 
 
-def _is_matching_map_get(
-    node: ASTNode, recv: ASTNode, key: ASTNode
-) -> bool:
+def _is_matching_map_get(node: ASTNode, recv: ASTNode, key: ASTNode) -> bool:
   if not (
-      isinstance(node, CallNode)
-      and isinstance(node.callee, MemberAccessNode)
-      and node.callee.member == "get"
-      and not node.callee.is_optional
-      and len(node.arguments) == 1
+    isinstance(node, CallNode)
+    and isinstance(node.callee, MemberAccessNode)
+    and node.callee.member == "get"
+    and not node.callee.is_optional
+    and len(node.arguments) == 1
   ):
     return False
   arg = node.arguments[0]
   arg_expr = arg.expr if hasattr(arg, "expr") else arg
-  return _exprs_equal(node.callee.receiver, recv) and _exprs_equal(arg_expr, key)
+  return _exprs_equal(node.callee.receiver, recv) and _exprs_equal(
+    arg_expr, key
+  )
 
 
 def _is_rooted_at_matching_index(
-    node: Optional[ASTNode], recv: ASTNode, key: ASTNode
+  node: Optional[ASTNode], recv: ASTNode, key: ASTNode
 ) -> bool:
-  """Returns True if `node` is `recv[key]` or a member/index chain rooted at it."""
+  """Returns True if `node` is `recv[key]` or a member/index chain rooted at it.
+  """
   cur = node
   while cur is not None:
     if isinstance(cur, IndexExprNode):
@@ -143,17 +144,18 @@ def _is_rooted_at_matching_index(
 
 
 def _scan_subtrees_for_map_access(
-    checker: Any, roots: List[ASTNode], recv: ASTNode, key: ASTNode
+  checker: Any, roots: List[ASTNode], recv: ASTNode, key: ASTNode
 ) -> Tuple[bool, bool, bool, bool]:
   """Scans AST subtrees for matching map accesses and conflicting mutations.
 
-  Returns `(has_access, has_in_place_mutation, has_direct_overwrite, has_recv_mutation)`.
+  Returns `(has_access, has_in_place_mutation, has_direct_overwrite,
+  has_recv_mutation)`.
   """
   state = {
-      "has_access": False,
-      "has_in_place_mutation": False,
-      "has_direct_overwrite": False,
-      "has_recv_mutation": False,
+    "has_access": False,
+    "has_in_place_mutation": False,
+    "has_direct_overwrite": False,
+    "has_recv_mutation": False,
   }
 
   def _walk(node: Any, in_assign_target: bool = False) -> None:
@@ -170,10 +172,7 @@ def _scan_subtrees_for_map_access(
 
     if isinstance(node, AssignmentNode):
       for tgt in node.targets:
-        if (
-            isinstance(tgt, IndexExprNode)
-            and _exprs_equal(tgt.array, recv)
-        ):
+        if isinstance(tgt, IndexExprNode) and _exprs_equal(tgt.array, recv):
           if _exprs_equal(tgt.index, key):
             if node.op == "=":
               state["has_direct_overwrite"] = True
@@ -198,11 +197,13 @@ def _scan_subtrees_for_map_access(
     elif _is_matching_map_get(node, recv, key):
       state["has_access"] = True
       return
-    elif isinstance(node, CallNode) and isinstance(node.callee, MemberAccessNode):
+    elif isinstance(node, CallNode) and isinstance(
+      node.callee, MemberAccessNode
+    ):
       callee_recv = node.callee.receiver
       if (
-          _exprs_equal(callee_recv, recv)
-          and node.callee.member in _STRUCTURAL_MAP_MUTATIONS
+        _exprs_equal(callee_recv, recv)
+        and node.callee.member in _STRUCTURAL_MAP_MUTATIONS
       ):
         state["has_recv_mutation"] = True
       elif _is_rooted_at_matching_index(callee_recv, recv, key):
@@ -232,10 +233,10 @@ def _scan_subtrees_for_map_access(
 
   _walk(roots)
   return (
-      state["has_access"],
-      state["has_in_place_mutation"],
-      state["has_direct_overwrite"],
-      state["has_recv_mutation"],
+    state["has_access"],
+    state["has_in_place_mutation"],
+    state["has_direct_overwrite"],
+    state["has_recv_mutation"],
   )
 
 
@@ -250,15 +251,15 @@ def _is_mutable_lvalue(checker: Any, recv: ASTNode) -> bool:
 
 
 def _maybe_warn_contains_access(
-    checker: Any,
-    call_node: CallNode,
-    recv: ASTNode,
-    key_expr: ASTNode,
-    subtrees: List[ASTNode],
-    kind: str,
+  checker: Any,
+  call_node: CallNode,
+  recv: ASTNode,
+  key_expr: ASTNode,
+  subtrees: List[ASTNode],
+  kind: str,
 ) -> None:
   has_access, has_in_place_mutation, has_direct_overwrite, has_recv_mutation = (
-      _scan_subtrees_for_map_access(checker, subtrees, recv, key_expr)
+    _scan_subtrees_for_map_access(checker, subtrees, recv, key_expr)
   )
   if not has_access or has_direct_overwrite or has_recv_mutation:
     return
@@ -268,9 +269,10 @@ def _maybe_warn_contains_access(
   kw = f"{kind} var" if has_in_place_mutation else f"{kind} let"
   else_hint = " else { ... }" if kind == "guard" else ""
   checker.warning(
-      f"Double lookup on map via '.contains(...)' followed by indexing/'.get(...)'. "
-      f"Prefer '{kw} v ?= <map>.get(<key>){else_hint}' for a single lookup.",
-      node=call_node,
+    "Double lookup on map via '.contains(...)' followed by "
+    "indexing/'.get(...)'. "
+    f"Prefer '{kw} v ?= <map>.get(<key>){else_hint}' for a single lookup.",
+    node=call_node,
   )
 
 
@@ -279,30 +281,32 @@ def check_if_contains_access(checker: Any, node: IfNode) -> None:
   if not node.condition or not node.then_block:
     return
   for call_node, recv, key_expr, rhs_exprs in _collect_contains_in_and_chain(
-      node.condition, checker.node_types
+    node.condition, checker.node_types
   ):
     subtrees: List[ASTNode] = list(rhs_exprs)
     subtrees.append(node.then_block)
     _maybe_warn_contains_access(
-        checker, call_node, recv, key_expr, subtrees, "if"
+      checker, call_node, recv, key_expr, subtrees, "if"
     )
 
 
 def check_guard_contains_access(
-    checker: Any, guard_node: GuardStmtNode, remaining_stmts: List[ASTNode]
+  checker: Any, guard_node: GuardStmtNode, remaining_stmts: List[ASTNode]
 ) -> None:
   """Warns on `guard map.contains(k)` followed by `map[k]` / `map.get(k)`."""
   if not remaining_stmts:
     return
   clauses = getattr(guard_node, "clauses", None) or []
-  conds = [c.condition for c in clauses if getattr(c, "condition", None) is not None]
+  conds = [
+    c.condition for c in clauses if getattr(c, "condition", None) is not None
+  ]
   if not conds and getattr(guard_node, "condition", None) is not None:
     conds = [guard_node.condition]
   for cond in conds:
     for call_node, recv, key_expr, rhs_exprs in _collect_contains_in_and_chain(
-        cond, checker.node_types
+      cond, checker.node_types
     ):
       subtrees: List[ASTNode] = list(rhs_exprs) + list(remaining_stmts)
       _maybe_warn_contains_access(
-          checker, call_node, recv, key_expr, subtrees, "guard"
+        checker, call_node, recv, key_expr, subtrees, "guard"
       )

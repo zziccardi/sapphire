@@ -1,27 +1,37 @@
 """Intrinsic method and standard library dispatch table for code generators.
 
-Provides table-driven code emission for Sapphire built-in primitives and standard
-data structures (String, Array, Map, Range, and Enum) across Python and Lua backends.
+Provides table-driven code emission for Sapphire built-in primitives and
+standard data structures (String, Array, Map, Range, and Enum) across Python
+and Lua backends.
 """
 
 from typing import Any, Callable, Dict, List, Tuple
-from src.parser.ast import ASTNode, CallNode, IdentifierNode, LiteralNode, MemberAccessNode
+
+from src.parser.ast import (
+  ASTNode,
+  CallNode,
+  IdentifierNode,
+  LiteralNode,
+  MemberAccessNode,
+)
 
 BUILTIN_MODULES = (
-    "std.testing",
-    "std.math",
-    "std.os",
-    "std.fs",
-    "std.time",
-    "std.utf8",
+  "std.testing",
+  "std.math",
+  "std.os",
+  "std.fs",
+  "std.time",
+  "std.utf8",
 )
 
 
 def is_builtin_module(import_path: str) -> bool:
-  """Returns True if the given import path belongs to Sapphire's built-in modules."""
+  """Returns True if the given import path belongs to Sapphire's built-in
+  modules.
+  """
   return any(
-      import_path == mod or import_path.startswith(mod + ".")
-      for mod in BUILTIN_MODULES
+    import_path == mod or import_path.startswith(mod + ".")
+    for mod in BUILTIN_MODULES
   )
 
 
@@ -31,13 +41,14 @@ def _is_trivial_expr(expr: Any) -> bool:
 
 
 def emit_in_call_order(
-    target: str,
-    transpiler: Any,
-    node: CallNode,
-    canonical_exprs: List[Any],
-    emit_fn: Callable[[List[Any]], None],
+  target: str,
+  transpiler: Any,
+  node: CallNode,
+  canonical_exprs: List[Any],
+  emit_fn: Callable[[List[Any]], None],
 ) -> None:
-  """Emits an intrinsic call while preserving left-to-right source evaluation order.
+  """Emits an intrinsic call while preserving left-to-right source evaluation
+  order.
 
   When named arguments reorder non-trivial expressions relative to canonical
   parameter order, evaluates the receiver and arguments in source order inside
@@ -46,13 +57,13 @@ def emit_in_call_order(
   source_exprs = [arg.expr for arg in node.arguments]
   source_pos = {id(expr): idx for idx, expr in enumerate(source_exprs)}
   emitted_positions = [
-      source_pos[id(e)]
-      for e in canonical_exprs
-      if e is not None and id(e) in source_pos
+    source_pos[id(e)]
+    for e in canonical_exprs
+    if e is not None and id(e) in source_pos
   ]
   is_reordered = any(
-      emitted_positions[i] > emitted_positions[i + 1]
-      for i in range(len(emitted_positions) - 1)
+    emitted_positions[i] > emitted_positions[i + 1]
+    for i in range(len(emitted_positions) - 1)
   )
   if not is_reordered or not any(not _is_trivial_expr(e) for e in source_exprs):
     emit_fn(canonical_exprs)
@@ -77,8 +88,8 @@ def emit_in_call_order(
     expr_map[id(expr)] = IdentifierNode(arg_tmp)
 
   rewritten = [
-      expr_map[id(e)] if (e is not None and id(e) in expr_map) else e
-      for e in canonical_exprs
+    expr_map[id(e)] if (e is not None and id(e) in expr_map) else e
+    for e in canonical_exprs
   ]
 
   if has_recv:
@@ -110,13 +121,17 @@ def emit_in_call_order(
 
 
 class IntrinsicRegistry:
-  """Registry for target-specific code generation emitters for intrinsic operations."""
+  """Registry for target-specific code generation emitters for intrinsic
+  operations.
+  """
 
   _handlers: Dict[Tuple[str, str, str], Callable[[Any, CallNode], None]] = {}
 
   @classmethod
   def register(cls, category: str, method: str, target: str):
-    """Decorator to register a code generation handler for (category, method, target)."""
+    """Decorator to register a code generation handler for (category, method,
+    target).
+    """
 
     def decorator(fn: Callable[[Any, CallNode], None]):
       cls._handlers[(category, method, target)] = fn
@@ -133,7 +148,10 @@ class IntrinsicRegistry:
     category = None
     method = None
 
-    if isinstance(node.callee, IdentifierNode) and node.callee.name in ("range", "assert"):
+    if isinstance(node.callee, IdentifierNode) and node.callee.name in (
+      "range",
+      "assert",
+    ):
       category = "global"
       method = node.callee.name
     elif isinstance(node.callee, MemberAccessNode):
@@ -156,7 +174,9 @@ class IntrinsicRegistry:
     if category and method:
       handler = cls._handlers.get((category, method, target))
       if handler:
-        if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
+        if (
+          isinstance(node.callee, MemberAccessNode) and node.callee.is_optional
+        ):
           next_tmp = getattr(transpiler, "_next_temp_name", None)
           tmp_name = next_tmp("_opt") if next_tmp else "_opt_recv"
           orig_recv = node.callee.receiver
@@ -170,7 +190,7 @@ class IntrinsicRegistry:
               transpiler.emit("))")
             elif target == "lua":
               transpiler.emit(
-                  f"(function({tmp_name}) if {tmp_name} ~= nil then return "
+                f"(function({tmp_name}) if {tmp_name} ~= nil then return "
               )
               handler(transpiler, node)
               transpiler.emit(" end return nil end)(")
@@ -194,7 +214,8 @@ class IntrinsicRegistry:
 
 
 def _resolve_range_args(node: CallNode) -> List[ASTNode]:
-  """Resolves range() arguments into canonical (stop) / (start, stop[, step])."""
+  """Resolves range() arguments into canonical (stop) / (start, stop[, step]).
+  """
   pos_args = [arg for arg in node.arguments if not arg.name]
   named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
 
@@ -596,7 +617,6 @@ def _emit_str_to_bool_lua(transpiler: Any, node: CallNode) -> None:
   transpiler.emit("_SP_RT._sapphire_string_to_bool(")
   transpiler.visit(node.callee.receiver)
   transpiler.emit(")")
-
 
 
 # Register Array and Map intrinsic handlers on import.

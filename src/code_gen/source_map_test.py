@@ -3,8 +3,7 @@
 import json
 import unittest
 
-from src.code_gen.source_map import encode_vlq, SourceMapBuilder
-
+from src.code_gen.source_map import SourceMapBuilder, encode_vlq
 
 
 class TestSourceMap(unittest.TestCase):

@@ -6,15 +6,13 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from testing.test_utils import suppress_output
-
-
 from src.cli.sapphire import (
-    main,
-    _collect_sp_watch_files,
-    _prepare_exec_env,
-    _run_dev_watcher,
+  _collect_sp_watch_files,
+  _prepare_exec_env,
+  _run_dev_watcher,
+  main,
 )
+from testing.test_utils import suppress_output
 
 
 class SapphireCLITest(unittest.TestCase):
@@ -133,14 +131,15 @@ class SapphireCLITest(unittest.TestCase):
           main()
       self.assertEqual(cm.exception.code, 0)
 
-  def test_sys_path_auto_injection(self):
-    """Ensures src/cli/sapphire.py injects the src directory into sys.path when absent."""
+  def test_no_sys_path_mutation_on_import(self):
+    """Ensures importing src/cli/sapphire.py does not mutate sys.path."""
     src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    with patch.object(sys, "path", [p for p in sys.path if p != src_dir]):
+    original_path = [p for p in sys.path if p != src_dir]
+    with patch.object(sys, "path", list(original_path)):
       import src.cli.sapphire as sapphire_cli
 
       importlib.reload(sapphire_cli)
-      self.assertIn(src_dir, sys.path)
+      self.assertEqual(sys.path, original_path)
 
   def test_isolated_pythonpath_execution(self):
     """Verifies that running sapphire CLI without PYTHONPATH succeeds without ModuleNotFoundError."""
@@ -521,9 +520,9 @@ class SapphireCLITest(unittest.TestCase):
       self.assertIn(custom_lua, env["LUA_PATH"])
 
   def test_check_subcommand_json_success_and_error(self):
-    from contextlib import redirect_stderr, redirect_stdout
     import io
     import json
+    from contextlib import redirect_stderr, redirect_stdout
     test_args = ["sapphire", "check", self.sp_file, "--json"]
     stdout_buf = io.StringIO()
     with patch.object(sys, "argv", test_args):
@@ -551,9 +550,9 @@ class SapphireCLITest(unittest.TestCase):
     self.assertEqual(err_data["errors"][0]["file"], bad_sem)
 
   def test_check_subcommand_target_lua_no_disk_emit(self):
-    from contextlib import redirect_stderr, redirect_stdout
     import io
     import json
+    from contextlib import redirect_stderr, redirect_stdout
     lua_out = os.path.splitext(self.sp_file)[0] + ".lua"
     if os.path.exists(lua_out):
       os.remove(lua_out)

@@ -2,16 +2,17 @@
 
 import unittest
 from unittest.mock import MagicMock
+
 from lsprotocol.types import (
-    DefinitionParams,
-    Position,
-    TextDocumentIdentifier,
+  DefinitionParams,
+  Position,
+  TextDocumentIdentifier,
 )
 
 from src.lsp.definition_provider import (
-    DefinitionProvider,
-    find_local_decl,
-    resolve_module_path,
+  DefinitionProvider,
+  find_local_decl,
+  resolve_module_path,
 )
 from src.lsp.server import SapphireLanguageServer, validate_source
 
@@ -419,6 +420,7 @@ class TestDefinitionProvider(unittest.TestCase):
     """Verifies _preload_module_dependencies skips disk reload for open workspace buffers."""
     import os
     import tempfile
+
     from pygls.uris import from_fs_path
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -449,6 +451,7 @@ class TestDefinitionProvider(unittest.TestCase):
   def test_extract_node_range_fallbacks(self):
     """Verifies HeaderBindingNode let_name_* and start_line/end_line fallback ranges."""
     from types import SimpleNamespace
+
     from src.parser.ast import HeaderBindingNode, IdentifierNode, LiteralNode
 
     hb = HeaderBindingNode(False, "x", None, LiteralNode(1, "int"), True)
@@ -474,17 +477,18 @@ class TestDefinitionProvider(unittest.TestCase):
   def test_locate_in_ast_cache_identity_and_name_fallback(self):
     """Verifies _locate_in_ast_cache across enum/struct/impl members and name fallback."""
     from types import SimpleNamespace
+
     from src.parser.ast import (
-        BasicTypeNode,
-        BlockNode,
-        EnumDeclNode,
-        EnumMemberNode,
-        FuncDeclNode,
-        ImplBlockNode,
-        ImplMemberNode,
-        ProgramNode,
-        StructDeclNode,
-        StructFieldNode,
+      BasicTypeNode,
+      BlockNode,
+      EnumDeclNode,
+      EnumMemberNode,
+      FuncDeclNode,
+      ImplBlockNode,
+      ImplMemberNode,
+      ProgramNode,
+      StructDeclNode,
+      StructFieldNode,
     )
 
     enum_mem = EnumMemberNode("Active", None)

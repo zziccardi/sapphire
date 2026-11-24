@@ -1,15 +1,16 @@
 """Unit tests for GenericsChecker in src/semantics/generics_checker.py."""
 
 import unittest
+
 from src.parser.ast import BasicTypeNode
-from src.semantics.symbol_table import (
-    PrimitiveType,
-    OptionalType,
-    ArrayType,
-    MapType,
-    FunctionType,
-)
 from src.semantics.generics_checker import GenericsChecker
+from src.semantics.symbol_table import (
+  ArrayType,
+  FunctionType,
+  MapType,
+  OptionalType,
+  PrimitiveType,
+)
 
 
 class TestGenericsChecker(unittest.TestCase):
@@ -55,6 +56,7 @@ class TestGenericsChecker(unittest.TestCase):
 
   def _check_code(self, code: str):
     from antlr4 import CommonTokenStream, InputStream
+
     from src.parser.ast_builder import ASTBuilder
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser

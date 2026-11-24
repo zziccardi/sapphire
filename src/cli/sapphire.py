@@ -8,39 +8,45 @@ import argparse
 import json
 import os
 import shutil
-import sys
 import subprocess
+import sys
 import time
 from typing import Any, Dict, List, Optional, Set
 
-src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-root_dir = os.path.abspath(os.path.join(src_dir, ".."))
-if root_dir not in sys.path:  # pragma: no cover
-  sys.path.insert(0, root_dir)
-if src_dir not in sys.path:  # pragma: no cover
-  sys.path.insert(0, src_dir)
+from antlr4 import CommonTokenStream, FileStream
 
-from antlr4 import FileStream, CommonTokenStream
 from src.cli.diagnostics import Diagnostic, format_diagnostic
-from src.code_gen.transpiler import _instantiate_transpiler, is_stdlib_stub, transpile_file
+from src.code_gen.transpiler import (
+  _instantiate_transpiler,
+  is_stdlib_stub,
+  transpile_file,
+)
 from src.code_gen.transpiler_registry import TranspilerRegistry
 from src.common.errors import SapphireError, SapphireSyntaxError
 from src.parser.ast_builder import ASTBuilder
 from src.parser.error_listener import CustomErrorListener
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.semantics.module_resolver import find_sapphire_lib_dir, resolve_module_path
-from src.semantics.type_checker import TypeChecker, SemanticError
+from src.semantics.module_resolver import (
+  find_sapphire_lib_dir,
+  resolve_module_path,
+)
+from src.semantics.type_checker import SemanticError, TypeChecker
+
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+root_dir = os.path.abspath(os.path.join(src_dir, ".."))
 
 TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
 
 
 def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
-  """Collects modification times for all .sp files in the project and source directory."""
+  """Collects modification times for all .sp files in the project and source
+  directory.
+  """
   watch_files = {}
   paths_to_check = {
-      os.path.dirname(os.path.abspath(root_path)) or ".",
-      os.getcwd(),
+    os.path.dirname(os.path.abspath(root_path)) or ".",
+    os.getcwd(),
   }
   for dir_path in paths_to_check:
     for root, _, files in os.walk(dir_path):
@@ -73,10 +79,10 @@ def _prepare_exec_env() -> Dict[str, str]:
   env["PYTHONPATH"] = os.pathsep.join(py_paths)
 
   lua_paths = [
-      f"{lib_dir}/?.lua",
-      f"{lib_dir}/?/init.lua",
-      f"{lib_dir}/love2d/?.lua",
-      f"{lib_parent}/?.lua",
+    f"{lib_dir}/?.lua",
+    f"{lib_dir}/?/init.lua",
+    f"{lib_dir}/love2d/?.lua",
+    f"{lib_parent}/?.lua",
   ]
   if "LUA_PATH" in env and env["LUA_PATH"]:
     lua_paths.append(env["LUA_PATH"])
@@ -87,16 +93,21 @@ def _prepare_exec_env() -> Dict[str, str]:
 
 
 def _run_dev_watcher(
-    source_file: str,
-    output_file: str,
-    target: str,
-    sourcemap: bool,
-    cmd: List[str],
-    verbose: bool = False,
+  source_file: str,
+  output_file: str,
+  target: str,
+  sourcemap: bool,
+  cmd: List[str],
+  verbose: bool = False,
 ):
   """Spawns process and watches source files for live hot-reloading."""
-  print(f"\n[Sapphire Dev Mode] Starting process with live hot-reloading: {' '.join(cmd)}")
-  print("[Sapphire Dev Mode] Watching for file changes... (Press Ctrl+C to stop)")
+  print(
+    "\n[Sapphire Dev Mode] Starting process with live hot-reloading: "
+    f"{' '.join(cmd)}"
+  )
+  print(
+    "[Sapphire Dev Mode] Watching for file changes... (Press Ctrl+C to stop)"
+  )
 
   exec_env = _prepare_exec_env()
   proc = subprocess.Popen(cmd, env=exec_env)
@@ -121,13 +132,13 @@ def _run_dev_watcher(
         print("\n[Sapphire Dev Mode] File change detected, re-transpiling...")
         try:
           transpile_file(
-              source_file,
-              output_file,
-              target=target,
-              sourcemap=sourcemap,
-              dev_mode=True,
-              quiet=False,
-              verbose=verbose,
+            source_file,
+            output_file,
+            target=target,
+            sourcemap=sourcemap,
+            dev_mode=True,
+            quiet=False,
+            verbose=verbose,
           )
           if target in ("love2d", "love"):
             run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
@@ -146,7 +157,10 @@ def _run_dev_watcher(
             print("\n--- Re-executing Sapphire Program ---")
             proc = subprocess.Popen(cmd, env=exec_env)
         except Exception as err:
-          print(f"[Sapphire Dev Mode Error] Compilation failed: {err}", file=sys.stderr)
+          print(
+            f"[Sapphire Dev Mode Error] Compilation failed: {err}",
+            file=sys.stderr,
+          )
 
   except KeyboardInterrupt:
     print("\n[Sapphire Dev Mode] Shutting down...")
@@ -160,16 +174,17 @@ def _run_dev_watcher(
 
 
 def _find_love_binary() -> Optional[str]:
-  """Locates Love2D executable across PATH and standard OS installation paths."""
+  """Locates Love2D executable across PATH and standard OS installation paths.
+  """
   binary = shutil.which("love") or shutil.which("love2d")
   if binary:
     return binary
 
   mac_candidates = [
-      "/Applications/love.app/Contents/MacOS/love",
-      os.path.expanduser("~/Applications/love.app/Contents/MacOS/love"),
-      "/opt/homebrew/bin/love",
-      "/usr/local/bin/love",
+    "/Applications/love.app/Contents/MacOS/love",
+    os.path.expanduser("~/Applications/love.app/Contents/MacOS/love"),
+    "/opt/homebrew/bin/love",
+    "/usr/local/bin/love",
   ]
   for candidate in mac_candidates:
     if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
@@ -180,16 +195,18 @@ def _find_love_binary() -> Optional[str]:
 
 def _find_lua_binary() -> Optional[str]:
   """Locates Lua interpreter across PATH and standard OS installation paths."""
-  binary = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+  binary = (
+    shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+  )
   if binary:
     return binary
 
   candidates = [
-      "/opt/homebrew/bin/lua",
-      "/opt/homebrew/bin/luajit",
-      "/usr/local/bin/lua",
-      "/usr/local/bin/luajit",
-      "/usr/bin/lua",
+    "/opt/homebrew/bin/lua",
+    "/opt/homebrew/bin/luajit",
+    "/usr/local/bin/lua",
+    "/usr/local/bin/luajit",
+    "/usr/bin/lua",
   ]
   for candidate in candidates:
     if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
@@ -214,12 +231,12 @@ def run_command(args):
   sourcemap = not getattr(args, "no_sourcemap", False)
   try:
     out_path = transpile_file(
-        source_file,
-        output_file,
-        target=target,
-        sourcemap=sourcemap,
-        dev_mode=dev_mode,
-        verbose=verbose,
+      source_file,
+      output_file,
+      target=target,
+      sourcemap=sourcemap,
+      dev_mode=dev_mode,
+      verbose=verbose,
     )
   except SapphireError as e:
     print(f"Error: {e}", file=sys.stderr)
@@ -230,13 +247,17 @@ def run_command(args):
   if target in ("love2d", "love"):
     love_bin = _find_love_binary()
     if not love_bin:
-      print("Error: Love2D executable ('love') not found in PATH or standard installation directories (/Applications/love.app).", file=sys.stderr)
+      print(
+        "Error: Love2D executable ('love') not found in PATH or standard "
+        "installation directories (/Applications/love.app).",
+        file=sys.stderr,
+      )
       sys.exit(1)
     run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
     cmd = [love_bin, run_dir]
     if dev_mode:
       _run_dev_watcher(
-          source_file, output_file, target, sourcemap, cmd, verbose=verbose
+        source_file, output_file, target, sourcemap, cmd, verbose=verbose
       )
       return
     else:
@@ -250,8 +271,11 @@ def run_command(args):
   if target in ("lua", "lua5.1"):
     lua_bin = _find_lua_binary()
     if not lua_bin:
-      print("Error: Lua interpreter ('lua', 'luajit', or 'lua5.1')"
-            " not found in PATH.", file=sys.stderr)
+      print(
+        "Error: Lua interpreter ('lua', 'luajit', or 'lua5.1')"
+        " not found in PATH.",
+        file=sys.stderr,
+      )
       sys.exit(1)
     cmd = [lua_bin, out_path]
   else:
@@ -259,7 +283,7 @@ def run_command(args):
 
   if dev_mode:
     _run_dev_watcher(
-        source_file, output_file, target, sourcemap, cmd, verbose=verbose
+      source_file, output_file, target, sourcemap, cmd, verbose=verbose
     )
   else:
     result = subprocess.run(cmd, env=exec_env)
@@ -282,12 +306,12 @@ def build_command(args):
   sourcemap = not getattr(args, "no_sourcemap", False)
   try:
     out_path = transpile_file(
-        source_file,
-        output_file,
-        target=target,
-        sourcemap=sourcemap,
-        dev_mode=dev_mode,
-        verbose=verbose,
+      source_file,
+      output_file,
+      target=target,
+      sourcemap=sourcemap,
+      dev_mode=dev_mode,
+      verbose=verbose,
     )
   except SapphireError as e:
     print(f"Error: {e}", file=sys.stderr)
@@ -310,7 +334,9 @@ def parse_command(args):
     print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
 
-  error_listener = CustomErrorListener(file_path=source_file, source_content=input_stream)
+  error_listener = CustomErrorListener(
+    file_path=source_file, source_content=input_stream
+  )
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
   lexer.addErrorListener(error_listener)
@@ -324,7 +350,10 @@ def parse_command(args):
   tree = parser.program()
 
   if error_listener.errors > 0:
-    print(f"\nParsing completed with {error_listener.errors} error(s).", file=sys.stderr)
+    print(
+      f"\nParsing completed with {error_listener.errors} error(s).",
+      file=sys.stderr,
+    )
     sys.exit(1)
   else:
     print("\nParsing completed successfully with 0 errors!")
@@ -337,8 +366,11 @@ def parse_command(args):
 
 
 def dump_ast_command(args):
-  """Handles `dump-ast` subcommand: parses source and outputs formatted JSON AST."""
+  """Handles `dump-ast` subcommand: parses source and outputs formatted JSON
+  AST.
+  """
   import json
+
   source_file = args.source
   if not os.path.exists(source_file):
     print(f"Error: File '{source_file}' not found.", file=sys.stderr)
@@ -351,7 +383,9 @@ def dump_ast_command(args):
     print(f"Failed to read file: {e}", file=sys.stderr)
     sys.exit(1)
 
-  error_listener = CustomErrorListener(file_path=source_file, source_content=input_stream)
+  error_listener = CustomErrorListener(
+    file_path=source_file, source_content=input_stream
+  )
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
   lexer.addErrorListener(error_listener)
@@ -365,7 +399,11 @@ def dump_ast_command(args):
   tree = parser.program()
 
   if error_listener.errors > 0:
-    print(f"\nParsing completed with {error_listener.errors} error(s). AST build aborted.", file=sys.stderr)
+    print(
+      f"\nParsing completed with {error_listener.errors} error(s). AST build "
+      "aborted.",
+      file=sys.stderr,
+    )
     sys.exit(1)
 
   print("Parse Tree generated successfully.")
@@ -388,22 +426,22 @@ def dump_ast_command(args):
 
 
 def _validate_target_lowering(
-    ast: Any,
-    file_path: str,
-    target: str,
-    error_diags: List[Diagnostic],
-    formatted_errors: List[str],
+  ast: Any,
+  file_path: str,
+  target: str,
+  error_diags: List[Diagnostic],
+  formatted_errors: List[str],
 ) -> None:
   """Runs in-memory target lowering (e.g. `-t lua`) to catch backend errors."""
   target_info = TranspilerRegistry.get(target)
   src_filename = os.path.basename(file_path)
   transpiler = _instantiate_transpiler(
-      target_info,
-      src_filename=src_filename,
-      sm_builder=None,
-      test_mode=False,
-      dev_mode=False,
-      use_runtime_module=False,
+    target_info,
+    src_filename=src_filename,
+    sm_builder=None,
+    test_mode=False,
+    dev_mode=False,
+    use_runtime_module=False,
   )
 
   try:
@@ -411,28 +449,28 @@ def _validate_target_lowering(
   except Exception as e:
     msg = f"Target '{target}' lowering failed: {e}"
     error_diags.append(
-        Diagnostic(
-            severity="error",
-            code="E_TRANSPILE",
-            message=msg,
-            file_path=file_path,
-        )
+      Diagnostic(
+        severity="error",
+        code="E_TRANSPILE",
+        message=msg,
+        file_path=file_path,
+      )
     )
     formatted_errors.append(msg)
 
 
 def _check_file_recursive(
-    file_path: str,
-    visited: Set[str],
-    files_checked: List[str],
-    error_diags: List[Diagnostic],
-    warning_diags: List[Diagnostic],
-    formatted_errors: List[str],
-    formatted_warnings: List[str],
-    target: Optional[str],
-    quiet: bool,
-    check_transitive: bool,
-    is_root: bool = False,
+  file_path: str,
+  visited: Set[str],
+  files_checked: List[str],
+  error_diags: List[Diagnostic],
+  warning_diags: List[Diagnostic],
+  formatted_errors: List[str],
+  formatted_warnings: List[str],
+  target: Optional[str],
+  quiet: bool,
+  check_transitive: bool,
+  is_root: bool = False,
 ) -> None:
   """Checks a Sapphire file and optionally its transitive non-stdlib imports."""
   # Guard against cyclic imports using canonicalized absolute paths.
@@ -450,17 +488,18 @@ def _check_file_recursive(
   except Exception as e:  # pragma: no cover
     msg = f"Failed to read file: {e}"
     error_diags.append(
-        Diagnostic(
-            severity="error", code="E_IO", message=msg, file_path=file_path
-        )
+      Diagnostic(
+        severity="error", code="E_IO", message=msg, file_path=file_path
+      )
     )
     formatted_errors.append(msg)
     return
 
-  # Always collect syntax errors quietly; `check_command` prints `formatted_errors`
+  # Always collect syntax errors quietly; `check_command` prints
+  # `formatted_errors`
   # once so root-file syntax errors are never duplicated on stderr.
   error_listener = CustomErrorListener(
-      file_path=file_path, source_content=input_stream, quiet=True
+    file_path=file_path, source_content=input_stream, quiet=True
   )
   lexer = SapphireLexer(input_stream)
   lexer.removeErrorListeners()
@@ -485,23 +524,23 @@ def _check_file_recursive(
     ast = ASTBuilder().visit(tree)
   except SapphireSyntaxError as e:
     diag = Diagnostic(
-        severity="error",
-        code="E_SYNTAX",
+      severity="error",
+      code="E_SYNTAX",
+      message=e.message,
+      file_path=file_path,
+      line=e.line,
+      column=e.column,
+    )
+    error_diags.append(diag)
+    formatted_errors.append(
+      format_diagnostic(
+        error_type="Syntax Error",
         message=e.message,
         file_path=file_path,
         line=e.line,
         column=e.column,
-    )
-    error_diags.append(diag)
-    formatted_errors.append(
-        format_diagnostic(
-            error_type="Syntax Error",
-            message=e.message,
-            file_path=file_path,
-            line=e.line,
-            column=e.column,
-            source_content=str(input_stream),
-        )
+        source_content=str(input_stream),
+      )
     )
     return
 
@@ -511,23 +550,23 @@ def _check_file_recursive(
       if is_stdlib_stub(imp.path, sub_source) or not sub_source:
         continue
       _check_file_recursive(
-          sub_source,
-          visited,
-          files_checked,
-          error_diags,
-          warning_diags,
-          formatted_errors,
-          formatted_warnings,
-          target=target,
-          quiet=True,
-          check_transitive=True,
-          is_root=False,
+        sub_source,
+        visited,
+        files_checked,
+        error_diags,
+        warning_diags,
+        formatted_errors,
+        formatted_warnings,
+        target=target,
+        quiet=True,
+        check_transitive=True,
+        is_root=False,
       )
 
   if is_root and not quiet:
     print("Running Semantic Analysis & Type Checker...")
   checker = TypeChecker(
-      source_file_path=file_path, source_content=str(input_stream)
+    source_file_path=file_path, source_content=str(input_stream)
   )
   has_semantic_errors = False
   try:
@@ -545,7 +584,7 @@ def _check_file_recursive(
 
   if not has_semantic_errors and target:
     _validate_target_lowering(
-        ast, file_path, target, error_diags, formatted_errors
+      ast, file_path, target, error_diags, formatted_errors
     )
 
 
@@ -560,18 +599,21 @@ def check_command(args):
     msg = f"Error: File '{source_file}' not found."
     if json_output:
       diag = Diagnostic(
-          severity="error", code="E_FILE_NOT_FOUND", message=msg, file_path=source_file
+        severity="error",
+        code="E_FILE_NOT_FOUND",
+        message=msg,
+        file_path=source_file,
       )
       print(
-          json.dumps(
-              {
-                  "ok": False,
-                  "files_checked": [],
-                  "errors": [diag.to_dict()],
-                  "warnings": [],
-              },
-              indent=2,
-          )
+        json.dumps(
+          {
+            "ok": False,
+            "files_checked": [],
+            "errors": [diag.to_dict()],
+            "warnings": [],
+          },
+          indent=2,
+        )
       )
     else:
       print(msg, file=sys.stderr)
@@ -585,25 +627,25 @@ def check_command(args):
   formatted_warnings: List[str] = []
 
   _check_file_recursive(
-      source_file,
-      visited=visited,
-      files_checked=files_checked,
-      error_diags=error_diags,
-      warning_diags=warning_diags,
-      formatted_errors=formatted_errors,
-      formatted_warnings=formatted_warnings,
-      target=target,
-      quiet=json_output,
-      check_transitive=check_transitive,
-      is_root=True,
+    source_file,
+    visited=visited,
+    files_checked=files_checked,
+    error_diags=error_diags,
+    warning_diags=warning_diags,
+    formatted_errors=formatted_errors,
+    formatted_warnings=formatted_warnings,
+    target=target,
+    quiet=json_output,
+    check_transitive=check_transitive,
+    is_root=True,
   )
 
   if json_output:
     payload = {
-        "ok": len(error_diags) == 0,
-        "files_checked": files_checked,
-        "errors": [d.to_dict() for d in error_diags],
-        "warnings": [d.to_dict() for d in warning_diags],
+      "ok": len(error_diags) == 0,
+      "files_checked": files_checked,
+      "errors": [d.to_dict() for d in error_diags],
+      "warnings": [d.to_dict() for d in warning_diags],
     }
     print(json.dumps(payload, indent=2))
     if error_diags:
@@ -617,9 +659,9 @@ def check_command(args):
     if formatted_errors:
       all_syntax = all(d.code == "E_SYNTAX" for d in error_diags)
       header = (
-          "\nSyntax Analysis failed with errors:\n"
-          if all_syntax
-          else "\nSemantic Analysis failed with errors:\n"
+        "\nSyntax Analysis failed with errors:\n"
+        if all_syntax
+        else "\nSemantic Analysis failed with errors:\n"
       )
       print(header + "\n".join(formatted_errors), file=sys.stderr)
     sys.exit(1)
@@ -637,11 +679,11 @@ def test_command(args):
   sourcemap = not getattr(args, "no_sourcemap", False)
   json_output = getattr(args, "json", False)
   exit_code = run_tests(
-      source_paths,
-      target=target,
-      filter_pattern=filter_pattern,
-      sourcemap=sourcemap,
-      json_output=json_output,
+    source_paths,
+    target=target,
+    filter_pattern=filter_pattern,
+    sourcemap=sourcemap,
+    json_output=json_output,
   )
   sys.exit(exit_code)
 
@@ -649,6 +691,7 @@ def test_command(args):
 def lsp_command(args):
   """Handles `lsp` subcommand: starts the Sapphire LSP server over stdio."""
   from src.lsp.server import main as lsp_main
+
   lsp_main()
 
 
@@ -664,103 +707,160 @@ def _get_cli_version() -> str:
 
 def main():
   parser = argparse.ArgumentParser(
-      prog="sapphire",
-      description="Sapphire compiler & runner CLI")
+    prog="sapphire", description="Sapphire compiler & runner CLI"
+  )
   parser.add_argument(
-      "-V", "--version", action="version",
-      version=f"%(prog)s {_get_cli_version()}")
+    "-V",
+    "--version",
+    action="version",
+    version=f"%(prog)s {_get_cli_version()}",
+  )
 
   subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
   # `build` subcommand
   build_parser = subparsers.add_parser(
-      "build", help="Transpile Sapphire source (.sp) to Python or Lua")
+    "build", help="Transpile Sapphire source (.sp) to Python or Lua"
+  )
   build_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   build_parser.add_argument(
-      "-o", "--output", help="Optional output path for generated target file")
+    "-o", "--output", help="Optional output path for generated target file"
+  )
   build_parser.add_argument(
-      "-t", "--target", choices=TARGET_CHOICES, default="python",
-      help="Code generation target (default: python)")
+    "-t",
+    "--target",
+    choices=TARGET_CHOICES,
+    default="python",
+    help="Code generation target (default: python)",
+  )
   build_parser.add_argument(
-      "--dev", action="store_true",
-      help="Enable development mode with in-place hot-reloading")
+    "--dev",
+    action="store_true",
+    help="Enable development mode with in-place hot-reloading",
+  )
   build_parser.add_argument(
-      "--no_sourcemap", action="store_true",
-      help="Disable source map generation (.lua.map) for Lua targets")
+    "--no_sourcemap",
+    action="store_true",
+    help="Disable source map generation (.lua.map) for Lua targets",
+  )
   build_parser.add_argument(
-      "-v", "--verbose", action="store_true",
-      help="Print detailed compilation progress for each file")
+    "-v",
+    "--verbose",
+    action="store_true",
+    help="Print detailed compilation progress for each file",
+  )
   build_parser.set_defaults(func=build_command)
 
   # `run` subcommand
   run_parser = subparsers.add_parser(
-      "run", help="Transpile and immediately execute Sapphire source (.sp)")
+    "run", help="Transpile and immediately execute Sapphire source (.sp)"
+  )
   run_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   run_parser.add_argument(
-      "-o", "--output", help="Optional output path for generated target file")
+    "-o", "--output", help="Optional output path for generated target file"
+  )
   run_parser.add_argument(
-      "-t", "--target", choices=TARGET_CHOICES, default="python",
-      help="Code generation target (default: python)")
+    "-t",
+    "--target",
+    choices=TARGET_CHOICES,
+    default="python",
+    help="Code generation target (default: python)",
+  )
   run_parser.add_argument(
-      "--dev", action="store_true",
-      help="Enable development mode with file watching and live hot-reloading")
+    "--dev",
+    action="store_true",
+    help="Enable development mode with file watching and live hot-reloading",
+  )
   run_parser.add_argument(
-      "--no_sourcemap", action="store_true",
-      help="Disable source map generation (.lua.map) for Lua targets")
+    "--no_sourcemap",
+    action="store_true",
+    help="Disable source map generation (.lua.map) for Lua targets",
+  )
   run_parser.add_argument(
-      "-v", "--verbose", action="store_true",
-      help="Print detailed compilation progress and execution banner")
+    "-v",
+    "--verbose",
+    action="store_true",
+    help="Print detailed compilation progress and execution banner",
+  )
   run_parser.set_defaults(func=run_command)
 
   # `test` subcommand
   test_parser = subparsers.add_parser(
-      "test", help="Discover and execute Sapphire tests")
+    "test", help="Discover and execute Sapphire tests"
+  )
   test_parser.add_argument(
-      "source", nargs="*", default=["."],
-      help="Path(s) to Sapphire source file(s) (.sp) or directories (default: .)")
+    "source",
+    nargs="*",
+    default=["."],
+    help="Path(s) to Sapphire source file(s) (.sp) or directories (default: .)",
+  )
   test_parser.add_argument(
-      "-t", "--target", choices=TARGET_CHOICES, default="python",
-      help="Code generation target (default: python)")
+    "-t",
+    "--target",
+    choices=TARGET_CHOICES,
+    default="python",
+    help="Code generation target (default: python)",
+  )
   test_parser.add_argument(
-      "--filter", help="Filter tests by substring matching test name")
+    "--filter", help="Filter tests by substring matching test name"
+  )
   test_parser.add_argument(
-      "--no_sourcemap", action="store_true",
-      help="Disable source map generation (.lua.map) for Lua targets")
+    "--no_sourcemap",
+    action="store_true",
+    help="Disable source map generation (.lua.map) for Lua targets",
+  )
   test_parser.add_argument(
-      "--json", action="store_true",
-      help="Emit machine-readable JSON test summary")
+    "--json",
+    action="store_true",
+    help="Emit machine-readable JSON test summary",
+  )
   test_parser.set_defaults(func=test_command)
 
   # `lsp` subcommand
   lsp_parser = subparsers.add_parser(
-      "lsp", help="Start the Sapphire Language Server over stdio")
+    "lsp", help="Start the Sapphire Language Server over stdio"
+  )
   lsp_parser.set_defaults(func=lsp_command)
 
   # `parse` subcommand
   parse_parser = subparsers.add_parser(
-      "parse", help="Parse Sapphire source (.sp) and print concrete parse tree")
+    "parse", help="Parse Sapphire source (.sp) and print concrete parse tree"
+  )
   parse_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   parse_parser.set_defaults(func=parse_command)
 
   # `dump-ast` subcommand
   dump_ast_parser = subparsers.add_parser(
-      "dump-ast", help="Parse Sapphire source (.sp) and dump AST in JSON format")
-  dump_ast_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
+    "dump-ast", help="Parse Sapphire source (.sp) and dump AST in JSON format"
+  )
+  dump_ast_parser.add_argument(
+    "source", help="Path to Sapphire source file (.sp)"
+  )
   dump_ast_parser.set_defaults(func=dump_ast_command)
 
   # `check` subcommand
   check_parser = subparsers.add_parser(
-      "check", help="Run semantic analysis and type checking without generating code")
+    "check",
+    help="Run semantic analysis and type checking without generating code",
+  )
   check_parser.add_argument("source", help="Path to Sapphire source file (.sp)")
   check_parser.add_argument(
-      "-t", "--target", choices=TARGET_CHOICES, default=None,
-      help="Optional target backend to validate in-memory lowering")
+    "-t",
+    "--target",
+    choices=TARGET_CHOICES,
+    default=None,
+    help="Optional target backend to validate in-memory lowering",
+  )
   check_parser.add_argument(
-      "--no-transitive", action="store_true",
-      help="Skip checking transitive non-stdlib imported modules")
+    "--no-transitive",
+    action="store_true",
+    help="Skip checking transitive non-stdlib imported modules",
+  )
   check_parser.add_argument(
-      "--json", action="store_true",
-      help="Emit machine-readable JSON diagnostic report")
+    "--json",
+    action="store_true",
+    help="Emit machine-readable JSON diagnostic report",
+  )
   check_parser.set_defaults(func=check_command)
 
   # Handle shortcut invocation (e.g. `sapphire samples/overview.sp` or
@@ -768,12 +868,12 @@ def main():
   known_commands = {"build", "run", "test", "lsp", "parse", "dump-ast", "check"}
   argv = list(sys.argv[1:])
   if (
-      argv
-      and argv[0] not in known_commands
-      and "-h" not in argv
-      and "--help" not in argv
-      and "-V" not in argv
-      and "--version" not in argv
+    argv
+    and argv[0] not in known_commands
+    and "-h" not in argv
+    and "--help" not in argv
+    and "-V" not in argv
+    and "--version" not in argv
   ):
     argv = ["run"] + argv
 

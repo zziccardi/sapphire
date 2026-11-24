@@ -1,6 +1,7 @@
 """Focused execution tests for Python statement emitter edge cases."""
 
 import unittest
+
 from antlr4 import CommonTokenStream, InputStream
 
 from src.code_gen.python_transpiler import PythonTranspiler

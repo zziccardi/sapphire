@@ -7,64 +7,62 @@ Sapphire language.
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from src.parser.ast import *
-from src.semantics.symbol_table import (
-    SymbolTable,
-    Type,
-    PrimitiveType,
-    StringType,
-    OptionalType,
-    FunctionType,
-    MultiReturnType,
-    StructMethod,
-    StructType,
-    TraitType,
-    EnumType,
-    NoneType,
-    InferredType,
-    ArrayType,
-    MapType,
-    ArenaType,
-    RangeType,
-    ModuleType,
-    GenericTypeParameter,
-    VariableSymbol,
-    FunctionSymbol,
-    EnumSymbol,
-    ModuleSymbol,
-    CoroutineType,
-    RefType,
-    SharedRefType,
-    WeakRefType,
-    COROUTINE_METHODS,
-    STRING_METHODS,
-)
-from src.cli.diagnostics import Diagnostic, format_diagnostic
+from src.common.diagnostics import Diagnostic, format_diagnostic
 from src.common.errors import SemanticError
-from src.semantics.arena_checker import ArenaChecker
-from src.semantics.collection_checker import CollectionChecker
+from src.parser.ast import (
+  ASTNode,
+  BinaryOpNode,
+  ExprNode,
+  IdentifierNode,
+  IndexExprNode,
+  MemberAccessNode,
+  MoveNode,
+  ParameterNode,
+  ProgramNode,
+  TernaryExprNode,
+  TypeNode,
+)
+from src.semantics.call_visitor import CallVisitorMixin
+from src.semantics.decl_visitor import DeclVisitorMixin
 from src.semantics.declaration_pass import DeclarationPass
+from src.semantics.expr_visitor import ExprVisitorMixin
 from src.semantics.generics_checker import GenericsChecker
 from src.semantics.semantic_context import SemanticContext
-from src.semantics.struct_layout_pass import StructLayoutPass
-
-from src.semantics.type_resolver import TypeResolverMixin
-from src.semantics.decl_visitor import DeclVisitorMixin
 from src.semantics.stmt_visitor import StmtVisitorMixin
-from src.semantics.call_visitor import CallVisitorMixin
-from src.semantics.expr_visitor import ExprVisitorMixin
+from src.semantics.struct_layout_pass import StructLayoutPass
+from src.semantics.symbol_table import (
+  ArrayType,
+  FunctionSymbol,
+  FunctionType,
+  InferredType,
+  MapType,
+  NoneType,
+  OptionalType,
+  PrimitiveType,
+  RefType,
+  SharedRefType,
+  StructType,
+  SymbolTable,
+  Type,
+  VariableSymbol,
+)
+from src.semantics.type_resolver import TypeResolverMixin
 
 
 class TypeChecker(
-    DeclVisitorMixin,
-    StmtVisitorMixin,
-    CallVisitorMixin,
-    ExprVisitorMixin,
-    TypeResolverMixin,
+  DeclVisitorMixin,
+  StmtVisitorMixin,
+  CallVisitorMixin,
+  ExprVisitorMixin,
+  TypeResolverMixin,
 ):
   """Walks the AST to perform type-checking and semantic validation."""
 
-  def __init__(self, source_file_path: Optional[str] = None, source_content: Optional[Any] = None):
+  def __init__(
+    self,
+    source_file_path: Optional[str] = None,
+    source_content: Optional[Any] = None,
+  ):
     self.symbol_table = SymbolTable()
     self.context = SemanticContext(symbol_table=self.symbol_table)
     self.node_types: Dict[ASTNode, Type] = self.context.node_types
@@ -92,17 +90,17 @@ class TypeChecker(
     self._temporary_frozen_lvalues: List[Tuple[str, List[str], str]] = []
     self._loop_context_stack: List[Tuple[Set[VariableSymbol], Any]] = []
     self._checked_import_results: Dict[
-        str, Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]
+      str, Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]
     ] = {}
     self._active_import_stack: Set[str] = set()
     self._reported_import_errors: Set[str] = set()
     self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
     self._current_node: Optional[ASTNode] = None
 
-  def _restore_moved_symbols(
-      self, target_moved: Set[VariableSymbol]
-  ) -> None:
-    """Restores `moved_symbols` to *target_moved* and keeps `sym.is_moved` synced."""
+  def _restore_moved_symbols(self, target_moved: Set[VariableSymbol]) -> None:
+    """Restores `moved_symbols` to *target_moved* and keeps `sym.is_moved`
+    synced.
+    """
     for sym in self.moved_symbols - target_moved:
       sym.is_moved = False
     for sym in target_moved - self.moved_symbols:
@@ -110,7 +108,9 @@ class TypeChecker(
     self.moved_symbols = set(target_moved)
 
   def _widen_types(self, t1: Type, t2: Type) -> Optional[Type]:
-    """Returns the common widened type for *t1* and *t2*, or None if incompatible."""
+    """Returns the common widened type for *t1* and *t2*, or None if
+    incompatible.
+    """
     if isinstance(t1, InferredType):
       return t2
     if isinstance(t2, InferredType):
@@ -118,10 +118,10 @@ class TypeChecker(
     if t1 == t2:
       return t1
     is_t1_none = isinstance(t1, NoneType) or (
-        isinstance(t1, PrimitiveType) and t1.name == "none"
+      isinstance(t1, PrimitiveType) and t1.name == "none"
     )
     is_t2_none = isinstance(t2, NoneType) or (
-        isinstance(t2, PrimitiveType) and t2.name == "none"
+      isinstance(t2, PrimitiveType) and t2.name == "none"
     )
     if is_t1_none and is_t2_none:
       return NoneType()
@@ -150,9 +150,13 @@ class TypeChecker(
       if elem is not None:
         return ArrayType(elem, is_fixed_size=False)
     if isinstance(t1, MapType) and isinstance(t2, MapType):
-      if isinstance(t1.key_type, NoneType) and isinstance(t1.value_type, NoneType):
+      if isinstance(t1.key_type, NoneType) and isinstance(
+        t1.value_type, NoneType
+      ):
         return t2
-      if isinstance(t2.key_type, NoneType) and isinstance(t2.value_type, NoneType):
+      if isinstance(t2.key_type, NoneType) and isinstance(
+        t2.value_type, NoneType
+      ):
         return t1
       k = self._widen_types(t1.key_type, t2.key_type)
       v = self._widen_types(t1.value_type, t2.value_type)
@@ -167,11 +171,14 @@ class TypeChecker(
     return None
 
   def _find_immutable_field_in_chain(
-      self,
-      node: ASTNode,
-      skip_outermost: bool = False,
+    self,
+    node: ASTNode,
+    skip_outermost: bool = False,
   ) -> Optional[Tuple[str, str]]:
-    """Walks an lvalue chain and returns `(field_name, struct_name)` for any `let` field."""
+    """Walks an lvalue chain and returns `(field_name, struct_name)` for any
+    `let`
+    field.
+    """
     curr: Any = node
     first = True
     while curr is not None:
@@ -195,7 +202,7 @@ class TypeChecker(
     return None
 
   def get_frozen_lvalue_reason(
-      self, root: str, path: List[str]
+    self, root: str, path: List[str]
   ) -> Optional[str]:
     """Returns freeze reason if lvalue path overlaps with a frozen lvalue."""
     scope = self.symbol_table.current_scope
@@ -205,7 +212,7 @@ class TypeChecker(
       scope = scope.parent
     for f_root, f_path, reason in all_frozen:
       if f_root == root:
-        if f_path[:len(path)] == path or path[:len(f_path)] == f_path:
+        if f_path[: len(path)] == path or path[: len(f_path)] == f_path:
           return reason
     return None
 
@@ -220,9 +227,8 @@ class TypeChecker(
           node_t = sym.symbol_type
       if isinstance(node_t, SharedRefType):
         return True
-      if (
-          isinstance(node_t, OptionalType)
-          and isinstance(node_t.base_type, SharedRefType)
+      if isinstance(node_t, OptionalType) and isinstance(
+        node_t.base_type, SharedRefType
       ):
         return True
       if isinstance(curr, MemberAccessNode):
@@ -253,7 +259,7 @@ class TypeChecker(
     if isinstance(ast_node, ASTNode):
       for val in ast_node.__dict__.values():
         if isinstance(val, (ASTNode, list)) and self._ast_references_ident(
-            val, name
+          val, name
         ):
           return True
     return False
@@ -263,206 +269,245 @@ class TypeChecker(
     return self._ast_references_ident(ast_node, "self")
 
   def _check_value_ownership_transfer(
-      self,
-      expr_node: Optional[ASTNode],
-      expr_type: Type,
-      node: Optional[ASTNode] = None,
+    self,
+    expr_node: Optional[ASTNode],
+    expr_type: Type,
+    node: Optional[ASTNode] = None,
   ) -> None:
-    """Enforces explicit 'move' on move-only lvalues and '.share()'/'move' on SharedRef lvalues."""
+    """Enforces explicit 'move' on move-only lvalues and '.share()'/'move' on
+    SharedRef lvalues.
+    """
     if expr_node is None:
       return
     diag_node = node or expr_node
 
-    if self.is_in_del and isinstance(expr_node, IdentifierNode) and expr_node.name == "self":
-      self.error("Cannot allow 'self' to escape from destructor '__del__'.", node=diag_node)
+    if (
+      self.is_in_del
+      and isinstance(expr_node, IdentifierNode)
+      and expr_node.name == "self"
+    ):
+      self.error(
+        "Cannot allow 'self' to escape from destructor '__del__'.",
+        node=diag_node,
+      )
       return
 
     if isinstance(expr_node, TernaryExprNode):
-      self._check_value_ownership_transfer(expr_node.true_expr, expr_type, node=diag_node)
-      self._check_value_ownership_transfer(expr_node.false_expr, expr_type, node=diag_node)
+      self._check_value_ownership_transfer(
+        expr_node.true_expr, expr_type, node=diag_node
+      )
+      self._check_value_ownership_transfer(
+        expr_node.false_expr, expr_type, node=diag_node
+      )
       return
 
     if isinstance(expr_node, BinaryOpNode) and expr_node.op == "??":
-      self._check_value_ownership_transfer(expr_node.left, expr_type, node=diag_node)
-      self._check_value_ownership_transfer(expr_node.right, expr_type, node=diag_node)
+      self._check_value_ownership_transfer(
+        expr_node.left, expr_type, node=diag_node
+      )
+      self._check_value_ownership_transfer(
+        expr_node.right, expr_type, node=diag_node
+      )
       return
 
     if expr_type.is_move_only_type(self.symbol_table):
-      if isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
+      if isinstance(expr_node, IdentifierNode) and not isinstance(
+        expr_node, MoveNode
+      ):
         self.error(
-            f"Cannot copy move-only type '{expr_type}'; use explicit 'move {expr_node.name}' to transfer ownership.",
-            node=diag_node,
+          f"Cannot copy move-only type '{expr_type}'; use explicit 'move "
+          f"{expr_node.name}' to transfer ownership.",
+          node=diag_node,
         )
       elif isinstance(expr_node, (MemberAccessNode, IndexExprNode)):
         self.error(
-            f"Cannot copy or partially move move-only type '{expr_type}' out of a field or collection index.",
-            node=diag_node,
+          f"Cannot copy or partially move move-only type '{expr_type}' out of "
+          "a field or collection index.",
+          node=diag_node,
         )
     elif expr_type.is_shared_ref_lvalue_type():
-      if isinstance(expr_node, IdentifierNode) and not isinstance(expr_node, MoveNode):
+      if isinstance(expr_node, IdentifierNode) and not isinstance(
+        expr_node, MoveNode
+      ):
         self.error(
-            f"Cannot implicitly copy 'SharedRef' variable '{expr_node.name}'; "
-            f"call '{expr_node.name}.share()' or use 'move {expr_node.name}'.",
-            node=diag_node,
+          f"Cannot implicitly copy 'SharedRef' variable '{expr_node.name}'; "
+          f"call '{expr_node.name}.share()' or use 'move {expr_node.name}'.",
+          node=diag_node,
         )
       elif isinstance(expr_node, (MemberAccessNode, IndexExprNode)):
         self.error(
-            "Cannot implicitly copy 'SharedRef' from a field or collection index; call '.share()' explicitly.",
-            node=diag_node,
+          "Cannot implicitly copy 'SharedRef' from a field or collection "
+          "index; call '.share()' explicitly.",
+          node=diag_node,
         )
 
   def _check_return_ownership_transfer(
-      self,
-      ret_expr: Optional[ASTNode],
-      ret_type: Type,
-      node: Optional[ASTNode] = None,
+    self,
+    ret_expr: Optional[ASTNode],
+    ret_type: Type,
+    node: Optional[ASTNode] = None,
   ) -> None:
-    """Validates ownership transfer on return expressions (allowing local RVO)."""
+    """Validates ownership transfer on return expressions (allowing local RVO).
+    """
     if ret_expr is None:
       return
     diag_node = node or ret_expr
     if isinstance(ret_expr, TernaryExprNode):
-      self._check_return_ownership_transfer(ret_expr.true_expr, ret_type, node=diag_node)
-      self._check_return_ownership_transfer(ret_expr.false_expr, ret_type, node=diag_node)
+      self._check_return_ownership_transfer(
+        ret_expr.true_expr, ret_type, node=diag_node
+      )
+      self._check_return_ownership_transfer(
+        ret_expr.false_expr, ret_type, node=diag_node
+      )
       return
     if isinstance(ret_expr, BinaryOpNode) and ret_expr.op == "??":
-      self._check_return_ownership_transfer(ret_expr.left, ret_type, node=diag_node)
-      self._check_return_ownership_transfer(ret_expr.right, ret_type, node=diag_node)
+      self._check_return_ownership_transfer(
+        ret_expr.left, ret_type, node=diag_node
+      )
+      self._check_return_ownership_transfer(
+        ret_expr.right, ret_type, node=diag_node
+      )
       return
-    if isinstance(ret_expr, IdentifierNode) and not isinstance(ret_expr, MoveNode):
+    if isinstance(ret_expr, IdentifierNode) and not isinstance(
+      ret_expr, MoveNode
+    ):
       sym = self.symbol_table.lookup(ret_expr.name)
       is_non_owned = (
-          ret_expr.name == "self"
-          or getattr(sym, "is_parameter", False)
-          or getattr(sym, "is_borrowed_unwrap", False)
-          or (
-              isinstance(sym, VariableSymbol)
-              and sym.scope_defined is not None
-              and sym.scope_defined.parent is None
-          )
+        ret_expr.name == "self"
+        or getattr(sym, "is_parameter", False)
+        or getattr(sym, "is_borrowed_unwrap", False)
+        or (
+          isinstance(sym, VariableSymbol)
+          and sym.scope_defined is not None
+          and sym.scope_defined.parent is None
+        )
       )
       if not is_non_owned:
         return
       if ret_type.is_move_only_type(self.symbol_table):
         self.error(
-            f"Cannot return borrowed or global move-only value '{ret_expr.name}' of type '{ret_type}'.",
-            node=diag_node,
+          f"Cannot return borrowed or global move-only value "
+          f"'{ret_expr.name}' of type '{ret_type}'.",
+          node=diag_node,
         )
       elif ret_type.is_shared_ref_lvalue_type():
         self.error(
-            f"Cannot implicitly copy 'SharedRef' variable '{ret_expr.name}' on return; "
-            f"call '{ret_expr.name}.share()'.",
-            node=diag_node,
+          f"Cannot implicitly copy 'SharedRef' variable '{ret_expr.name}' on "
+          "return; "
+          f"call '{ret_expr.name}.share()'.",
+          node=diag_node,
         )
       return
     self._check_value_ownership_transfer(ret_expr, ret_type, node=diag_node)
 
   def _infer_diagnostic_metadata(
-      self, message: str
+    self, message: str
   ) -> Tuple[Optional[str], Optional[str]]:
     """Infers default error code and fix-it hint for known error patterns."""
     if (
-        "cannot escape to" in message
-        or "Cannot return closure" in message
-        or "Cannot return coroutine" in message
-        or "capturing local stack borrow" in message
+      "cannot escape to" in message
+      or "Cannot return closure" in message
+      or "Cannot return coroutine" in message
+      or "capturing local stack borrow" in message
     ):
       return (
-          "E_BORROW_ESCAPE",
-          "Escaping closures and stored coroutines cannot borrow local "
-          "non-primitives or 'var' bindings. Pass a behavioral 'trait' "
-          "adapter or yield data instead of borrowing 'var' state.",
+        "E_BORROW_ESCAPE",
+        "Escaping closures and stored coroutines cannot borrow local "
+        "non-primitives or 'var' bindings. Pass a behavioral 'trait' "
+        "adapter or yield data instead of borrowing 'var' state.",
       )
     return None, None
 
   def _make_diagnostic(
-      self,
-      severity: str,
-      message: str,
-      node: Optional[ASTNode] = None,
-      hint: Optional[str] = None,
-      code: Optional[str] = None,
+    self,
+    severity: str,
+    message: str,
+    node: Optional[ASTNode] = None,
+    hint: Optional[str] = None,
+    code: Optional[str] = None,
   ) -> Diagnostic:
     """Constructs a structured Diagnostic for an error or warning."""
-    diag_node = node if node is not None else getattr(self, "_current_node", None)
+    diag_node = (
+      node if node is not None else getattr(self, "_current_node", None)
+    )
     line = getattr(diag_node, "start_line", None) if diag_node else None
     column = getattr(diag_node, "start_column", None) if diag_node else None
     length = getattr(diag_node, "length", None) if diag_node else None
     if hint is None and code is None and severity == "error":
       code, hint = self._infer_diagnostic_metadata(message)
     return Diagnostic(
-        severity=severity,
-        message=message,
-        file_path=self.source_file_path,
-        line=line,
-        column=column,
-        length=length,
-        hint=hint,
-        code=code,
+      severity=severity,
+      message=message,
+      file_path=self.source_file_path,
+      line=line,
+      column=column,
+      length=length,
+      hint=hint,
+      code=code,
     )
 
   def _format_diagnostic_entry(
-      self,
-      error_type: str,
-      message: str,
-      node: Optional[ASTNode] = None,
-      hint: Optional[str] = None,
+    self,
+    error_type: str,
+    message: str,
+    node: Optional[ASTNode] = None,
+    hint: Optional[str] = None,
   ) -> str:
     """Formats a diagnostic string for an error or warning."""
-    diag_node = node if node is not None else getattr(self, "_current_node", None)
+    diag_node = (
+      node if node is not None else getattr(self, "_current_node", None)
+    )
     line = getattr(diag_node, "start_line", None) if diag_node else None
     column = getattr(diag_node, "start_column", None) if diag_node else None
     length = getattr(diag_node, "length", None) if diag_node else None
 
     if line or self.source_file_path or self.source_content:
       return format_diagnostic(
-          error_type=error_type,
-          message=message,
-          file_path=self.source_file_path,
-          line=line,
-          column=column,
-          length=length,
-          source_content=self.source_content,
-          hint=hint,
+        error_type=error_type,
+        message=message,
+        file_path=self.source_file_path,
+        line=line,
+        column=column,
+        length=length,
+        source_content=self.source_content,
+        hint=hint,
       )
     if hint:
       return f"{message}\n  Hint: {hint}"
     return message
 
   def error(
-      self,
-      message: str,
-      node: Optional[ASTNode] = None,
-      hint: Optional[str] = None,
-      code: Optional[str] = None,
+    self,
+    message: str,
+    node: Optional[ASTNode] = None,
+    hint: Optional[str] = None,
+    code: Optional[str] = None,
   ) -> None:
     """Logs a semantic error."""
     diag = self._make_diagnostic(
-        "error", message, node=node, hint=hint, code=code
+      "error", message, node=node, hint=hint, code=code
     )
     self.diagnostics.append(diag)
     self.errors.append(
-        self._format_diagnostic_entry(
-            "Semantic Error", message, node, hint=diag.hint
-        )
+      self._format_diagnostic_entry(
+        "Semantic Error", message, node, hint=diag.hint
+      )
     )
 
   def warning(
-      self,
-      message: str,
-      node: Optional[ASTNode] = None,
-      hint: Optional[str] = None,
-      code: Optional[str] = None,
+    self,
+    message: str,
+    node: Optional[ASTNode] = None,
+    hint: Optional[str] = None,
+    code: Optional[str] = None,
   ) -> None:
     """Logs a non-fatal semantic warning."""
     diag = self._make_diagnostic(
-        "warning", message, node=node, hint=hint, code=code
+      "warning", message, node=node, hint=hint, code=code
     )
     self.diagnostics.append(diag)
     self.warnings.append(
-        self._format_diagnostic_entry(
-            "Warning", message, node, hint=diag.hint
-        )
+      self._format_diagnostic_entry("Warning", message, node, hint=diag.hint)
     )
 
   def check(self, program: ProgramNode) -> None:
@@ -477,7 +522,8 @@ class TypeChecker(
     # Pass 2: Register impl block method signatures
     self._register_impl_signatures(program)
 
-    # Pass 3: Resolve struct layouts and module-level let constants in source order
+    # Pass 3: Resolve struct layouts and module-level let constants in source
+    # order
     self._resolve_struct_layouts(program)
 
     # Pass 3.5: Pre-analyze module-level var globals and call graph accesses
@@ -497,31 +543,53 @@ class TypeChecker(
     return GenericsChecker.mangle_type_name(type_obj)
 
   def _monomorphize_struct(
-      self, generic_struct_type: StructType, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
+    self,
+    generic_struct_type: StructType,
+    type_arg_nodes: List[TypeNode],
+    resolved_type_args: List[Type],
   ) -> StructType:
-    """Monomorphizes a generic struct template for a specific set of concrete type arguments."""
-    return GenericsChecker.monomorphize_struct(self, generic_struct_type, type_arg_nodes, resolved_type_args)
+    """Monomorphizes a generic struct template for a specific set of concrete
+    type
+    arguments.
+    """
+    return GenericsChecker.monomorphize_struct(
+      self, generic_struct_type, type_arg_nodes, resolved_type_args
+    )
 
   def _monomorphize_function(
-      self, func_sym: FunctionSymbol, type_arg_nodes: List[TypeNode], resolved_type_args: List[Type]
+    self,
+    func_sym: FunctionSymbol,
+    type_arg_nodes: List[TypeNode],
+    resolved_type_args: List[Type],
   ) -> str:
-    """Monomorphizes a generic function template for a specific set of concrete type arguments."""
-    return GenericsChecker.monomorphize_function(self, func_sym, type_arg_nodes, resolved_type_args)
+    """Monomorphizes a generic function template for a specific set of concrete
+    type arguments.
+    """
+    return GenericsChecker.monomorphize_function(
+      self, func_sym, type_arg_nodes, resolved_type_args
+    )
 
   def _declare_imports(self, program: ProgramNode) -> None:
     """Pre-pass to register imported module symbols."""
     DeclarationPass.declare_imports(self, program)
 
-  def _validate_parameter_defaults(self, parameters: List[ParameterNode]) -> None:
-    """Validates that parameters without default values do not follow parameters with default values."""
+  def _validate_parameter_defaults(
+    self, parameters: List[ParameterNode]
+  ) -> None:
+    """Validates that parameters without default values do not follow parameters
+    with default values.
+    """
     DeclarationPass.validate_parameter_defaults(self, parameters)
 
   def _declare_globals(self, program: ProgramNode) -> None:
-    """Pass 1: Collect struct, enum, and function declarations into global scope."""
+    """Pass 1: Collect struct, enum, and function declarations into global
+    scope.
+    """
     DeclarationPass.declare_globals(self, program)
 
   def _resolve_struct_layouts(self, program: ProgramNode) -> None:
-    """Pre-pass to resolve static inheritance field copying and layout sizing."""
+    """Pre-pass to resolve static inheritance field copying and layout sizing.
+    """
     StructLayoutPass.resolve_struct_layouts(self, program)
 
   def visit(self, node: ASTNode) -> Any:
@@ -542,9 +610,10 @@ class TypeChecker(
 
   def generic_visit(self, node: ASTNode) -> Any:
     """Default fallback when no specific visitor method is defined."""
-    raise NotImplementedError(f"No visit_{node.__class__.__name__} method defined.")
+    raise NotImplementedError(
+      f"No visit_{node.__class__.__name__} method defined."
+    )
 
   # ==========================================
   # Visitor Methods
   # ==========================================
-

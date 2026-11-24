@@ -4,26 +4,30 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import List
 import unittest
+from typing import List
 from unittest.mock import patch
 
 from src.cli.test_runner import (
-    find_sp_files,
-    parse_ast,
-    discover_tests,
-    get_source_line,
-    find_lua_binary,
-    run_tests_python,
-    run_tests_lua,
-    run_tests,
+  discover_tests,
+  find_lua_binary,
+  find_sp_files,
+  get_source_line,
+  parse_ast,
+  run_tests,
+  run_tests_lua,
+  run_tests_python,
 )
-from src.code_gen.transpiler import transpile_file
-from src.code_gen.python_transpiler import PythonTranspiler
 from src.code_gen.lua_transpiler import LuaTranspiler
-from src.parser.ast import FuncDeclNode, StructDeclNode, AnnotationNode, BlockNode
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.code_gen.transpiler import transpile_file
+from src.parser.ast import (
+  AnnotationNode,
+  BlockNode,
+  FuncDeclNode,
+  StructDeclNode,
+)
 from src.semantics.type_checker import SemanticError
-
 from testing.test_utils import suppress_output
 
 
@@ -325,8 +329,8 @@ impl TestCase for UnimportedSuite {
     stripped source snippet.
     """
     import io
-    import sys
     import os as _os
+    import sys
     from contextlib import redirect_stdout
 
     workspace_root = _os.path.abspath(
@@ -388,10 +392,10 @@ impl TestCase for UnimportedSuite {
   def test_failure_format_none_and_not_none_kinds(self):
     """Covers none/not_none failure kinds and generic kind via format_failure branches."""
     import io
-    import sys
     import os as _os
-    from unittest.mock import patch
+    import sys
     from contextlib import redirect_stdout
+    from unittest.mock import patch
 
     workspace_root = _os.path.abspath(
         _os.path.join(_os.path.dirname(__file__), "..", "..")
@@ -400,7 +404,6 @@ impl TestCase for UnimportedSuite {
     if lib_dir not in sys.path:
       sys.path.insert(0, lib_dir)
 
-    import std.testing as testing
     from src.code_gen.transpiler import transpile_file
 
     none_sp = _os.path.join(self.temp_dir, "test_none_kinds.sp")
@@ -418,7 +421,7 @@ impl t.TestCase for NoneKindTest {
 """)
     ast = parse_ast(none_sp)
     standalone, suites = discover_tests(ast)
-    out_py = transpile_file(none_sp, target="python", test_mode=True, quiet=True)
+    transpile_file(none_sp, target="python", test_mode=True, quiet=True)
 
     # Use a helper to test the formatting logic directly
     patched_py2 = _os.path.join(self.temp_dir, "none_direct.py")
@@ -449,10 +452,10 @@ _SP_LINE_MAP = {}
   def test_failure_header_without_source_line(self):
     """Covers first_sp_line returning 0 (fallback walk fails) -> header without :LINE."""
     import io
-    import sys
     import os as _os
-    from unittest.mock import patch
+    import sys
     from contextlib import redirect_stdout
+    from unittest.mock import patch
 
     workspace_root = _os.path.abspath(
         _os.path.join(_os.path.dirname(__file__), "..", "..")
@@ -521,8 +524,10 @@ func test_bare_fail() {
     try:
       f1 = os.path.join(empty_dir, "a.sp")
       f2 = os.path.join(empty_dir, "b.sp")
-      with open(f1, "w") as f: f.write("let a = 1;")
-      with open(f2, "w") as f: f.write("let b = 2;")
+      with open(f1, "w") as f:
+        f.write("let a = 1;")
+      with open(f2, "w") as f:
+        f.write("let b = 2;")
       with suppress_output():
         res = run_tests(empty_dir, target="python")
       self.assertEqual(res, 0)
@@ -593,7 +598,7 @@ func test_bare_fail() {
   def test_std_testing_module_comprehensive(self):
     """Verifies std.testing TestCase methods, assertions, and soft/hard failures."""
     import lib.std.testing as std_t
-    from lib.std.testing import TestFailure, TestContext
+    from lib.std.testing import TestContext, TestFailure
 
     ctx = TestContext("suite")
     std_t.set_active_context(ctx)
@@ -722,6 +727,7 @@ func test_env() {
     import io
     import json
     from contextlib import redirect_stdout
+
     from src.cli.test_runner import run_tests
 
     sp_path = os.path.join(self.temp_dir, "json_sample_test.sp")
@@ -750,6 +756,7 @@ func test_fail_case() {
   def test_prepare_python_test_paths_protects_stdlib_and_compiler_modules(self):
     """Verifies running a test at repo root does not evict stdlib or src.* modules."""
     import sys
+
     from src.cli.test_runner import _prepare_python_test_paths
 
     repo_root = os.path.abspath(
@@ -901,11 +908,12 @@ impl t.TestCase for TdSuite {
   def test_mangle_names_and_protected_module_helpers(self):
     """Verifies _mangle_python_name, _mangle_lua_name, _is_path_under, and _is_protected_module."""
     from types import SimpleNamespace
+
     from src.cli.test_runner import (
-        _is_path_under,
-        _is_protected_module,
-        _mangle_lua_name,
-        _mangle_python_name,
+      _is_path_under,
+      _is_protected_module,
+      _mangle_lua_name,
+      _mangle_python_name,
     )
 
     self.assertEqual(_mangle_python_name("main"), "main")

@@ -1,41 +1,41 @@
 """Unit tests for ArenaChecker in src/semantics/arena_checker.py."""
 
 import unittest
+
 from src.parser.ast import (
-    ArrayLiteralNode,
-    BinaryOpNode,
-    BlockNode,
-    CallNode,
-    CastExprNode,
-    CloneNode,
-    ExprStmtNode,
-    IdentifierNode,
-    LambdaNode,
-    LambdaParamNode,
-    LiteralNode,
-    MapEntryNode,
-    MapLiteralNode,
-    MatchCaseNode,
-    MatchExprNode,
-    MemberAccessNode,
-    MoveNode,
-    ReturnNode,
-    StructInitializerNode,
-    TernaryExprNode,
-    UnaryOpNode,
-    VarDeclNode,
-)
-from src.semantics.symbol_table import (
-    ArenaType,
-    OptionalType,
-    PrimitiveType,
-    StructField,
-    StructType,
-    SymbolTable,
-    TraitType,
-    VariableSymbol,
+  BinaryOpNode,
+  BlockNode,
+  CallNode,
+  CastExprNode,
+  CloneNode,
+  ExprStmtNode,
+  IdentifierNode,
+  LambdaNode,
+  LambdaParamNode,
+  LiteralNode,
+  MapEntryNode,
+  MapLiteralNode,
+  MatchCaseNode,
+  MatchExprNode,
+  MemberAccessNode,
+  MoveNode,
+  ReturnNode,
+  StructInitializerNode,
+  TernaryExprNode,
+  UnaryOpNode,
+  VarDeclNode,
 )
 from src.semantics.arena_checker import ArenaChecker
+from src.semantics.symbol_table import (
+  ArenaType,
+  OptionalType,
+  PrimitiveType,
+  StructField,
+  StructType,
+  SymbolTable,
+  TraitType,
+  VariableSymbol,
+)
 
 
 class TestArenaChecker(unittest.TestCase):
@@ -93,7 +93,6 @@ class TestArenaChecker(unittest.TestCase):
     parent_scope = st.current_scope
     arena_sym = VariableSymbol("arena_sub", ArenaType(), is_mutable=True)
     st.enter_scope()
-    child_scope = st.current_scope
     st.define("arena_sub", arena_sym)
 
     proto_t = StructType("Goblin", is_prototype=True)

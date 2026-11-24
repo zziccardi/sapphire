@@ -2,23 +2,24 @@
 
 import unittest
 from unittest.mock import MagicMock
+
 from lsprotocol.types import (
-    HoverParams,
-    Position,
-    TextDocumentIdentifier,
+  HoverParams,
+  Position,
+  TextDocumentIdentifier,
 )
 
-from src.parser.ast import (
-    BasicTypeNode,
-    BinaryOpNode,
-    CallNode,
-    IdentifierNode,
-    LiteralNode,
-    MemberAccessNode,
-    UnaryOpNode,
-)
 from src.lsp.hover_provider import HoverProvider, format_ast_expr
 from src.lsp.server import SapphireLanguageServer, validate_source
+from src.parser.ast import (
+  BasicTypeNode,
+  BinaryOpNode,
+  CallNode,
+  IdentifierNode,
+  LiteralNode,
+  MemberAccessNode,
+  UnaryOpNode,
+)
 
 
 class TestHoverProvider(unittest.TestCase):

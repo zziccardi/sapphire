@@ -12,12 +12,12 @@ import unittest
 from unittest.mock import MagicMock
 
 from lsprotocol.types import (
-    CompletionParams,
-    DefinitionParams,
-    HoverParams,
-    Position,
-    SignatureHelpParams,
-    TextDocumentIdentifier,
+  CompletionParams,
+  DefinitionParams,
+  HoverParams,
+  Position,
+  SignatureHelpParams,
+  TextDocumentIdentifier,
 )
 
 from src.lsp.completion_provider import CompletionProvider
@@ -27,7 +27,6 @@ from src.lsp.hover_provider import HoverProvider
 from src.lsp.semantic_tokens import find_node_at_position
 from src.lsp.server import SapphireLanguageServer, validate_source
 from src.lsp.signature_provider import SignatureProvider
-
 
 _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")

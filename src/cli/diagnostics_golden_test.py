@@ -19,7 +19,6 @@ import tempfile
 import unittest
 from typing import List, Tuple
 
-
 _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
 )
