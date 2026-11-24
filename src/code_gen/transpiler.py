@@ -80,14 +80,20 @@ def is_stdlib_stub(
 
 
 def _is_prebuilt_lib_module(resolved_path: str, ext: str) -> bool:
-  """Returns True if resolved_path is under Sapphire lib/ with a prebuilt output."""
+  """Returns True if resolved_path is under Sapphire lib/ with a fresh prebuilt output."""
   from src.semantics.module_resolver import find_sapphire_lib_dir
 
   lib_dir = find_sapphire_lib_dir()
   if not lib_dir or not _is_path_under(resolved_path, lib_dir):
     return False
-  stem = os.path.splitext(os.path.abspath(resolved_path))[0]
-  return os.path.exists(stem + ext)
+  abs_src = os.path.abspath(resolved_path)
+  prebuilt_path = os.path.splitext(abs_src)[0] + ext
+  if not os.path.exists(prebuilt_path):
+    return False
+  try:
+    return os.path.getmtime(prebuilt_path) >= os.path.getmtime(abs_src)
+  except OSError:
+    return False
 
 
 def _parse_and_check(
