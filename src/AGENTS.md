@@ -69,3 +69,17 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
   pipenv run coverage && pipenv run coverage-lua
   pipenv run sapphire test && pipenv run sapphire test -t lua
   ```
+
+## 5. LuaJIT codegen & profiling guidelines
+
+### Profiling LuaJIT & Love2D
+* Use `luajit -jp=vlF` (`jit.p`) to inspect VM states (`Compiled`, `Interpreted`, `C code`, `GC`) alongside per-line hotspot percentages.
+* Use `luajit -jv` (`jit.v`) to identify trace compilation aborts (such as `NYI: bytecode FNEW`, `NYI: bytecode UCLO`, or `inner loop in root trace`) and `luajit -jdump` when inspecting IR/mcode for a specific hot trace.
+* Time hot paths with `love.timer.getTime()` in Love2D or LuaJIT FFI `clock_gettime(CLOCK_MONOTONIC)` in headless `luajit` benchmarks.
+* Never use `debug.sethook` when profiling JIT-compiled code: Lua debug hooks disable or abort LuaJIT trace compilation, skewing measurements toward interpreter overhead.
+
+### Transpiler invariants for LuaJIT
+* **No statement-level IIFE closures**: Never emit `(function(...) ... end)()` in statement-level expression paths. Both `FNEW` (closure creation) and `UCLO` (upvalue close) are NYI in LuaJIT 2.1, aborting trace compilation and creating per-iteration GC pressure. Lift `??`, `?:`, optional `?.` member/call/intrinsics, and optional primitive `as T?` casts into straight-line `local` + `if` blocks via `_lift_match_expressions` (keeping IIFE emitters only as fallbacks for non-statement contexts).
+* **Loop-free runtime fast-paths**: Keep hot runtime helpers (`_unwrap_read`, `_unwrap_write`) loop-free on the common fast-path (`type(obj) ~= "table" or getmetatable(obj) == nil`) and isolate `while` loops in `*_slow` helpers so plain tables/arrays/maps never trigger `inner loop in root trace` aborts.
+* **Native numeric `for` loops (`FORL`)**: Lower direct `for v in range(...)` loops to native Lua numeric `for` statements rather than allocating closure/table iterators (reserving `_SP_RT._sapphire_range` for first-class `Range` values).
+
