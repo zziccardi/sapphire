@@ -7,8 +7,11 @@ divergence impossible to miss.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Set
 
+from src.code_gen.emitter_state import EmitterState, OutputBuffer
 from src.parser.ast import (
   ArrayLiteralNode,
   AssignmentNode,
@@ -159,6 +162,293 @@ class BaseTranspiler(ABC):
         f"without implementing abstract methods: {missing}"
       )
 
+  def __init__(
+    self,
+    *,
+    test_mode: bool = False,
+    use_runtime_module: bool = False,
+  ) -> None:
+    """Initializes shared transpiler state and the root output buffer."""
+    self.state = EmitterState(
+      test_mode=test_mode,
+      use_runtime_module=use_runtime_module,
+    )
+    self._buffers: list[OutputBuffer] = [OutputBuffer()]
+
+  # ------------------------------------------------------------------
+  # Scoped output buffer management
+  # ------------------------------------------------------------------
+
+  @property
+  def is_root_buffer(self) -> bool:
+    """Returns True when emitting into the primary (non-captured) buffer."""
+    return len(self._buffers) == 1
+
+  def push_buffer(self) -> OutputBuffer:
+    """Pushes a fresh isolated OutputBuffer onto the buffer stack."""
+    buf = OutputBuffer()
+    self._buffers.append(buf)
+    return buf
+
+  def pop_buffer(self) -> str:
+    """Pops the top OutputBuffer and returns its accumulated text."""
+    if len(self._buffers) <= 1:
+      raise RuntimeError("Cannot pop the root output buffer.")
+    return self._buffers.pop().get_output()
+
+  @contextmanager
+  def scoped_buffer(self) -> Iterator[OutputBuffer]:
+    """Context manager that isolates emitted output into a temporary buffer."""
+    buf = self.push_buffer()
+    try:
+      yield buf
+    finally:
+      self._buffers.pop()
+
+  def capture_expr(self, node: ASTNode) -> str:
+    """Visits *node* in a fresh scoped buffer and returns its emitted text."""
+    with self.scoped_buffer() as buf:
+      self.visit(node)
+      return buf.get_output()
+
+  @property
+  def code(self) -> list[str]:
+    """Active output buffer chunk list."""
+    return self._buffers[-1].chunks
+
+  @code.setter
+  def code(self, value: list[str]) -> None:
+    self._buffers[-1].chunks = value
+
+  @property
+  def indent_level(self) -> int:
+    """Indentation level of the active output buffer."""
+    return self._buffers[-1].indent_level
+
+  @indent_level.setter
+  def indent_level(self, value: int) -> None:
+    self._buffers[-1].indent_level = value
+
+  # ------------------------------------------------------------------
+  # Shared EmitterState property delegates
+  # ------------------------------------------------------------------
+
+  @property
+  def test_mode(self) -> bool:
+    return self.state.test_mode
+
+  @test_mode.setter
+  def test_mode(self, value: bool) -> None:
+    self.state.test_mode = value
+
+  @property
+  def use_runtime_module(self) -> bool:
+    return self.state.use_runtime_module
+
+  @use_runtime_module.setter
+  def use_runtime_module(self, value: bool) -> None:
+    self.state.use_runtime_module = value
+
+  @property
+  def struct_methods(self) -> dict[str, list[Any]]:
+    return self.state.struct_methods
+
+  @struct_methods.setter
+  def struct_methods(self, value: dict[str, list[Any]]) -> None:
+    self.state.struct_methods = value
+
+  @property
+  def structs_with_destructor(self) -> set[str]:
+    return self.state.structs_with_destructor
+
+  @structs_with_destructor.setter
+  def structs_with_destructor(self, value: set[str]) -> None:
+    self.state.structs_with_destructor = value
+
+  @property
+  def proto_structs(self) -> set[str]:
+    return self.state.proto_structs
+
+  @proto_structs.setter
+  def proto_structs(self, value: set[str]) -> None:
+    self.state.proto_structs = value
+
+  @property
+  def struct_destructible_fields(self) -> dict[str, list[str]]:
+    return self.state.struct_destructible_fields
+
+  @struct_destructible_fields.setter
+  def struct_destructible_fields(self, value: dict[str, list[str]]) -> None:
+    self.state.struct_destructible_fields = value
+
+  @property
+  def struct_parent_names(self) -> dict[str, list[str]]:
+    return self.state.struct_parent_names
+
+  @struct_parent_names.setter
+  def struct_parent_names(self, value: dict[str, list[str]]) -> None:
+    self.state.struct_parent_names = value
+
+  @property
+  def destructor_stack(self) -> list[list[str]]:
+    return self.state.destructor_stack
+
+  @destructor_stack.setter
+  def destructor_stack(self, value: list[list[str]]) -> None:
+    self.state.destructor_stack = value
+
+  @property
+  def loop_destructor_depth(self) -> list[int]:
+    return self.state.loop_destructor_depth
+
+  @loop_destructor_depth.setter
+  def loop_destructor_depth(self, value: list[int]) -> None:
+    self.state.loop_destructor_depth = value
+
+  @property
+  def moved_vars(self) -> set[str]:
+    return self.state.moved_vars
+
+  @moved_vars.setter
+  def moved_vars(self, value: set[str]) -> None:
+    self.state.moved_vars = value
+
+  @property
+  def _branch_depth(self) -> int:
+    return self.state.branch_depth
+
+  @_branch_depth.setter
+  def _branch_depth(self, value: int) -> None:
+    self.state.branch_depth = value
+
+  @property
+  def _var_branch_depth(self) -> dict[str, int]:
+    return self.state.var_branch_depth
+
+  @_var_branch_depth.setter
+  def _var_branch_depth(self, value: dict[str, int]) -> None:
+    self.state.var_branch_depth = value
+
+  @property
+  def _pending_null_vars(self) -> list[str]:
+    return self.state.pending_null_vars
+
+  @_pending_null_vars.setter
+  def _pending_null_vars(self, value: list[str]) -> None:
+    self.state.pending_null_vars = value
+
+  @property
+  def _pending_unconditional_null_vars(self) -> list[str]:
+    return self.state.pending_unconditional_null_vars
+
+  @_pending_unconditional_null_vars.setter
+  def _pending_unconditional_null_vars(self, value: list[str]) -> None:
+    self.state.pending_unconditional_null_vars = value
+
+  @property
+  def _pending_destroy_moved_vars(self) -> list[str]:
+    return self.state.pending_destroy_moved_vars
+
+  @_pending_destroy_moved_vars.setter
+  def _pending_destroy_moved_vars(self, value: list[str]) -> None:
+    self.state.pending_destroy_moved_vars = value
+
+  @property
+  def func_return_types(self) -> dict[str, Any]:
+    return self.state.func_return_types
+
+  @func_return_types.setter
+  def func_return_types(self, value: dict[str, Any]) -> None:
+    self.state.func_return_types = value
+
+  @property
+  def method_return_types(self) -> dict[Any, Any]:
+    return self.state.method_return_types
+
+  @method_return_types.setter
+  def method_return_types(self, value: dict[Any, Any]) -> None:
+    self.state.method_return_types = value
+
+  @property
+  def variable_types(self) -> dict[str, str]:
+    return self.state.variable_types
+
+  @variable_types.setter
+  def variable_types(self, value: dict[str, str]) -> None:
+    self.state.variable_types = value
+
+  @property
+  def _identifier_map(self) -> dict[str, str]:
+    return self.state.identifier_map
+
+  @_identifier_map.setter
+  def _identifier_map(self, value: dict[str, str]) -> None:
+    self.state.identifier_map = value
+
+  @property
+  def _lifted_matches(self) -> dict[int, str]:
+    return self.state.lifted_matches
+
+  @_lifted_matches.setter
+  def _lifted_matches(self, value: dict[int, str]) -> None:
+    self.state.lifted_matches = value
+
+  @property
+  def _lifted_short_circuits(self) -> dict[int, str]:
+    return self.state.lifted_short_circuits
+
+  @_lifted_short_circuits.setter
+  def _lifted_short_circuits(self, value: dict[int, str]) -> None:
+    self.state.lifted_short_circuits = value
+
+  @property
+  def _temp_name_counters(self) -> dict[str, int]:
+    return self.state.temp_name_counters
+
+  @_temp_name_counters.setter
+  def _temp_name_counters(self, value: dict[str, int]) -> None:
+    self.state.temp_name_counters = value
+
+  @property
+  def _current_match_target(self) -> str | None:
+    return self.state.current_match_target
+
+  @_current_match_target.setter
+  def _current_match_target(self, value: str | None) -> None:
+    self.state.current_match_target = value
+
+  @property
+  def _current_match_node(self) -> Any:
+    return self.state.current_match_node
+
+  @_current_match_node.setter
+  def _current_match_node(self, value: Any) -> None:
+    self.state.current_match_node = value
+
+  @property
+  def _current_match_done_flag(self) -> str | None:
+    return self.state.current_match_done_flag
+
+  @_current_match_done_flag.setter
+  def _current_match_done_flag(self, value: str | None) -> None:
+    self.state.current_match_done_flag = value
+
+  @property
+  def _match_loop_depth(self) -> int:
+    return self.state.match_loop_depth
+
+  @_match_loop_depth.setter
+  def _match_loop_depth(self, value: int) -> None:
+    self.state.match_loop_depth = value
+
+  @property
+  def _unwrap_writebacks(self) -> dict[str, Any]:
+    return self.state.unwrap_writebacks
+
+  @_unwrap_writebacks.setter
+  def _unwrap_writebacks(self, value: dict[str, Any]) -> None:
+    self.state.unwrap_writebacks = value
+
   # ------------------------------------------------------------------
   # Core interface & shared helpers
   # ------------------------------------------------------------------
@@ -180,34 +470,30 @@ class BaseTranspiler(ABC):
     """
 
   def emit(self, text: str) -> None:
-    """Append *text* to the output buffer."""
-    self.code.append(text)
+    """Append *text* to the active output buffer."""
+    self._buffers[-1].emit(text)
 
   @abstractmethod
   def newline(self) -> None:
     """Emit a newline followed by the current indentation."""
 
   def indent(self) -> None:
-    """Increase the indentation level by one."""
-    self.indent_level += 1
+    """Increase the indentation level of the active buffer by one."""
+    self._buffers[-1].indent()
 
   def dedent(self) -> None:
-    """Decrease the indentation level by one."""
-    if self.indent_level > 0:
-      self.indent_level -= 1
+    """Decrease the indentation level of the active buffer by one."""
+    self._buffers[-1].dedent()
 
   def get_output(self) -> str:
-    """Return the accumulated output as a single string."""
-    return "".join(self.code)
+    """Return the accumulated output of the active buffer as a single string."""
+    return self._buffers[-1].get_output()
 
   def _next_temp_name(self, prefix: str = "_sp_tmp") -> str:
     """Generates a unique temporary identifier name for this transpiler
     instance.
     """
-    counts = getattr(self, "_temp_name_counters", None)
-    if counts is None:
-      counts = {}
-      self._temp_name_counters = counts
+    counts = self.state.temp_name_counters
     n = counts.get(prefix, 0) + 1
     counts[prefix] = n
     return f"{prefix}_{n}"

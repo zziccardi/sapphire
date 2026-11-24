@@ -1,6 +1,6 @@
 """Statement and control-flow code generation mixin for PythonTranspiler."""
 
-from typing import Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from src.code_gen.base_transpiler import (
   extract_type_name,
@@ -42,8 +42,15 @@ from src.parser.ast import (
   YieldNode,
 )
 
+if TYPE_CHECKING:
+  from src.code_gen.python_transpiler import (
+    PythonTranspiler as _PythonTranspilerBase,
+  )
+else:
+  _PythonTranspilerBase = object
 
-class PythonStmtMixin:
+
+class PythonStmtMixin(_PythonTranspilerBase):
   """Provides statement and control-flow AST emission for Python."""
 
   def _needs_value_copy(self, expr: Any) -> bool:
@@ -356,7 +363,7 @@ class PythonStmtMixin:
   ) -> None:
     """Visits a BlockNode with lexical scope isolation and LIFO RAII teardown.
     """
-    prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+    prev_wb = self._unwrap_writebacks.copy()
     self._unwrap_writebacks = dict(prev_wb)
     prev_id_map = self._identifier_map.copy()
     pushed_scope = bool(self._lexical_scopes)
@@ -433,7 +440,7 @@ class PythonStmtMixin:
       self._current_match_target,
       self._current_match_done_flag,
       self._match_loop_depth,
-      getattr(self, "_unwrap_writebacks", {}),
+      self._unwrap_writebacks,
       self._current_func_globals,
       self._loop_vars_stack,
     )
@@ -538,7 +545,7 @@ class PythonStmtMixin:
       self._current_match_target,
       self._current_match_done_flag,
       self._match_loop_depth,
-      getattr(self, "_unwrap_writebacks", {}),
+      self._unwrap_writebacks,
       self._current_func_globals,
       self._loop_vars_stack,
     )
@@ -757,7 +764,7 @@ class PythonStmtMixin:
     bindings
     in *targets*.
     """
-    wb_map = getattr(self, "_unwrap_writebacks", {})
+    wb_map = self._unwrap_writebacks
     if not wb_map:
       return
     for target in targets:
@@ -904,9 +911,7 @@ class PythonStmtMixin:
         val_type = node.val_types[idx] if idx < len(node.val_types) else None
         default_expr = get_default_value_for_type_node(val_type)
         if default_expr:
-          temp = self._make_expr_transpiler()
-          temp.visit(default_expr)
-          defaults.append(temp.get_output())
+          defaults.append(self.capture_expr(default_expr))
         else:
           defaults.append("None")
       self.emit(" = " + ", ".join(defaults))
@@ -1211,9 +1216,9 @@ class PythonStmtMixin:
       self.newline()
       self.emit(f"{done_flag} = False")
 
-    prev_target = getattr(self, "_current_match_target", None)
-    prev_done = getattr(self, "_current_match_done_flag", None)
-    prev_loop_depth = getattr(self, "_match_loop_depth", 0)
+    prev_target = self._current_match_target
+    prev_done = self._current_match_done_flag
+    prev_loop_depth = self._match_loop_depth
     self._current_match_target = target_var
     self._current_match_done_flag = done_flag
     self._match_loop_depth = 0
@@ -1278,8 +1283,8 @@ class PythonStmtMixin:
       [node.expr] if node.expr else []
     )
     self._lift_match_expressions(exprs)
-    target = getattr(self, "_current_match_target", None)
-    done_flag = getattr(self, "_current_match_done_flag", None)
+    target = self._current_match_target
+    done_flag = self._current_match_done_flag
     self.newline()
     if target:
       self.emit(f"{target} = ")
@@ -1383,9 +1388,7 @@ class PythonStmtMixin:
       pushed_scope = bool(self._lexical_scopes)
       if pushed_scope:
         self._lexical_scopes.append(set())
-      prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
-      if not hasattr(self, "_unwrap_writebacks"):
-        self._unwrap_writebacks = {}
+      prev_wb = self._unwrap_writebacks.copy()
       extra_destructibles: List[str] = []
       try:
         py_let_names: List[str] = []
@@ -1558,7 +1561,7 @@ class PythonStmtMixin:
               self._lexical_scopes.pop()
             self._identifier_map = prev_id_map
       else:
-        prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+        prev_wb = self._unwrap_writebacks.copy()
         self._unwrap_writebacks = dict(prev_wb)
         self._unwrap_writebacks.update(wb_entries)
         try:
@@ -1645,7 +1648,7 @@ class PythonStmtMixin:
         self.emit("break")
         self.dedent()
         self.visit(node.block)
-        done_flag = getattr(self, "_current_match_done_flag", None)
+        done_flag = self._current_match_done_flag
         if done_flag and self._stmt_contains_match_yield(node.block):
           self.newline()
           self.emit(f"if {done_flag}:")
@@ -1663,7 +1666,7 @@ class PythonStmtMixin:
         self.emit(":")
         self.indent()
         self.visit(node.block)
-        done_flag = getattr(self, "_current_match_done_flag", None)
+        done_flag = self._current_match_done_flag
         if done_flag and self._stmt_contains_match_yield(node.block):
           self.newline()
           self.emit(f"if {done_flag}:")
@@ -1681,7 +1684,7 @@ class PythonStmtMixin:
     self.loop_destructor_depth.append(len(self.destructor_stack))
     self._match_loop_depth += 1
     prev_id_map = self._identifier_map.copy()
-    prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+    prev_wb = self._unwrap_writebacks.copy()
     pushed_scope = bool(self._lexical_scopes)
     if pushed_scope:
       self._lexical_scopes.append(set())
@@ -1707,18 +1710,14 @@ class PythonStmtMixin:
           self.emit(
             f"for {k_py}, {v_py} in _sapphire_unwrap_read({iter_tmp}).items():"
           )
-          if not hasattr(self, "_unwrap_writebacks"):
-            self._unwrap_writebacks = {}
           self._unwrap_writebacks[v_py] = ("index", iter_tmp, k_py)
         else:
-          iter_code = self._make_expr_transpiler()
-          iter_code.visit(node.iterable)
+          iter_code = self.capture_expr(node.iterable)
           k_py = self._declare_local_var(node.key_var)
           v_py = self._declare_local_var(node.val_var)
           self.newline()
           self.emit(
-            f"for {k_py}, {v_py} in "
-            f"_sapphire_unwrap_read({iter_code.get_output()}).items():"
+            f"for {k_py}, {v_py} in _sapphire_unwrap_read({iter_code}).items():"
           )
       else:
         if is_mut and not is_range_call:
@@ -1730,19 +1729,16 @@ class PythonStmtMixin:
           v_py = self._declare_local_var(node.val_var)
           self.newline()
           self.emit(f"for {idx_tmp}, {v_py} in enumerate({iter_tmp}):")
-          if not hasattr(self, "_unwrap_writebacks"):
-            self._unwrap_writebacks = {}
           self._unwrap_writebacks[v_py] = ("index", iter_tmp, idx_tmp)
         else:
-          iter_code = self._make_expr_transpiler()
-          iter_code.visit(node.iterable)
+          iter_code = self.capture_expr(node.iterable)
           v_py = self._declare_local_var(node.val_var)
           self.newline()
-          self.emit(f"for {v_py} in {iter_code.get_output()}:")
+          self.emit(f"for {v_py} in {iter_code}:")
 
       self.indent()
       self.visit(node.block)
-      done_flag = getattr(self, "_current_match_done_flag", None)
+      done_flag = self._current_match_done_flag
       if done_flag and self._stmt_contains_match_yield(node.block):
         self.newline()
         self.emit(f"if {done_flag}:")
@@ -1819,8 +1815,6 @@ class PythonStmtMixin:
               self._var_branch_depth[py_n] = self._branch_depth
 
         if wb_entry and len(py_let_names) == 1:
-          if not hasattr(self, "_unwrap_writebacks"):
-            self._unwrap_writebacks = {}
           self._unwrap_writebacks[py_let_names[0]] = wb_entry
       elif clause.condition:
         self._lift_match_expressions(clause.condition)

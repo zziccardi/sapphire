@@ -1,6 +1,6 @@
 """Statement and control-flow code generation mixin for LuaTranspiler."""
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.code_gen.base_transpiler import (
   extract_type_name,
@@ -91,7 +91,13 @@ def _has_continue_node(node: ASTNode) -> bool:
   return False
 
 
-class LuaStmtMixin:
+if TYPE_CHECKING:
+  from src.code_gen.lua_transpiler import LuaTranspiler as _LuaTranspilerBase
+else:
+  _LuaTranspilerBase = object
+
+
+class LuaStmtMixin(_LuaTranspilerBase):
   """Provides statement and control-flow AST emission for Lua 5.1."""
 
   def _needs_value_copy(self, expr: Any) -> bool:
@@ -277,7 +283,7 @@ class LuaStmtMixin:
   ) -> None:
     """Visits a BlockNode with LIFO RAII teardown and Lua 5.1 terminator safety.
     """
-    prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+    prev_wb = self._unwrap_writebacks.copy()
     self._unwrap_writebacks = dict(prev_wb)
     self.destructor_stack.append([])
     for d_var in extra_destructibles or []:
@@ -290,7 +296,7 @@ class LuaStmtMixin:
           self._var_branch_depth[d_var] = self._branch_depth
 
     terminated = False
-    done_flag = getattr(self, "_current_match_done_flag", None)
+    done_flag = self._current_match_done_flag
     guarded_indent = 0
     if not node.statements:
       self.newline()
@@ -529,7 +535,7 @@ class LuaStmtMixin:
     bindings
     in *targets*.
     """
-    wb_map = getattr(self, "_unwrap_writebacks", {})
+    wb_map = self._unwrap_writebacks
     if not wb_map:
       return
     for target in targets:
@@ -656,9 +662,7 @@ class LuaStmtMixin:
           val_type = node.val_types[idx] if idx < len(node.val_types) else None
           default_expr = get_default_value_for_type_node(val_type)
           if default_expr:
-            temp = self._make_expr_transpiler()
-            temp.visit(default_expr)
-            defaults.append(temp.get_output())
+            defaults.append(self.capture_expr(default_expr))
             if default_expr.lit_type != "none":
               has_non_nil = True
           else:
@@ -873,9 +877,7 @@ class LuaStmtMixin:
       )
       self.emit(")")
     else:
-      temp = self._make_expr_transpiler()
-      temp.visit(node.target)
-      lhs_code = temp.get_output()
+      lhs_code = self.capture_expr(node.target)
       self.emit(f"{lhs_code} = ")
       self._emit_compound_rhs(lhs_code, node, is_int_div, is_str_concat)
     self._emit_writebacks([node.target])
@@ -890,9 +892,7 @@ class LuaStmtMixin:
       isinstance(node.expr, CallNode)
       and id(node.expr) not in self._lifted_short_circuits
     ):
-      temp = self._make_expr_transpiler()
-      temp.visit(node.expr)
-      expr_out = temp.get_output()
+      expr_out = self.capture_expr(node.expr)
       if expr_out.startswith("(") or not expr_out.endswith(")"):
         self.emit(f"local _ = {expr_out}")
       else:
@@ -1031,10 +1031,10 @@ class LuaStmtMixin:
       self.newline()
       self.emit(f"local {done_flag} = false")
 
-    prev_target = getattr(self, "_current_match_target", None)
-    prev_match_node = getattr(self, "_current_match_node", None)
-    prev_done = getattr(self, "_current_match_done_flag", None)
-    prev_loop_depth = getattr(self, "_match_loop_depth", 0)
+    prev_target = self._current_match_target
+    prev_match_node = self._current_match_node
+    prev_done = self._current_match_done_flag
+    prev_loop_depth = self._match_loop_depth
     self._current_match_target = target_var
     self._current_match_node = node
     self._current_match_done_flag = done_flag
@@ -1099,9 +1099,9 @@ class LuaStmtMixin:
       [node.expr] if node.expr else []
     )
     self._lift_match_expressions(exprs)
-    target = getattr(self, "_current_match_target", None)
-    match_node = getattr(self, "_current_match_node", None)
-    done_flag = getattr(self, "_current_match_done_flag", None)
+    target = self._current_match_target
+    match_node = self._current_match_node
+    done_flag = self._current_match_done_flag
     self.newline()
     if target:
       self.emit(f"{target} = ")
@@ -1121,7 +1121,7 @@ class LuaStmtMixin:
       if done_flag:
         self.newline()
         self.emit(f"{done_flag} = true")
-        if getattr(self, "_match_loop_depth", 0) > 0:
+        if self._match_loop_depth > 0:
           self._emit_loop_destructors()
           self.newline()
           if self._loop_stack and self._loop_stack[-1]:
@@ -1238,10 +1238,8 @@ class LuaStmtMixin:
           self.variable_types[m_n] = st_name
           extra_destructibles.append(m_n)
 
-      prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+      prev_wb = self._unwrap_writebacks.copy()
       if wb_entry and len(mangled_names) == 1:
-        if not hasattr(self, "_unwrap_writebacks"):
-          self._unwrap_writebacks = {}
         self._unwrap_writebacks[mangled_names[0]] = wb_entry
       self._branch_depth += 1
       try:
@@ -1362,7 +1360,7 @@ class LuaStmtMixin:
             current_destructibles.append(m_n)
           emit_binding_level(idx + 1, current_destructibles, wb_entries)
       else:
-        prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+        prev_wb = self._unwrap_writebacks.copy()
         self._unwrap_writebacks = dict(prev_wb)
         self._unwrap_writebacks.update(wb_entries)
         try:
@@ -1431,7 +1429,7 @@ class LuaStmtMixin:
       self._emit_multi_binding_if(node, bindings)
 
   def _visit_loop_body(self, block: BlockNode, has_continue: bool) -> None:
-    done_flag = getattr(self, "_current_match_done_flag", None)
+    done_flag = self._current_match_done_flag
     if has_continue:
       self.newline()
       self.emit("local _break_outer = false")
@@ -1454,7 +1452,7 @@ class LuaStmtMixin:
     has_continue = _has_continue_node(node.block)
     self._loop_stack.append(has_continue)
     self.loop_destructor_depth.append(len(self.destructor_stack))
-    self._match_loop_depth = getattr(self, "_match_loop_depth", 0) + 1
+    self._match_loop_depth = self._match_loop_depth + 1
     try:
       cond_liftable = bool(
         node.condition
@@ -1492,8 +1490,8 @@ class LuaStmtMixin:
     has_continue = _has_continue_node(node.block)
     self._loop_stack.append(has_continue)
     self.loop_destructor_depth.append(len(self.destructor_stack))
-    self._match_loop_depth = getattr(self, "_match_loop_depth", 0) + 1
-    prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
+    self._match_loop_depth = self._match_loop_depth + 1
+    prev_wb = self._unwrap_writebacks.copy()
     try:
       self._lift_match_expressions(node.iterable)
       val_var = self._mangle_name(node.val_var)
@@ -1522,8 +1520,6 @@ class LuaStmtMixin:
             f"for {key_var}, {val_var} in "
             f"_SP_RT._sapphire_iter_map({iter_tmp}) do"
           )
-          if not hasattr(self, "_unwrap_writebacks"):
-            self._unwrap_writebacks = {}
           self._unwrap_writebacks[val_var] = ("map_index", iter_tmp, key_var)
         else:
           self.newline()
@@ -1610,8 +1606,6 @@ class LuaStmtMixin:
         self.indent()
         self.newline()
         self.emit(f"for {idx_tmp} = 1, #{arr_tmp} do")
-        if not hasattr(self, "_unwrap_writebacks"):
-          self._unwrap_writebacks = {}
         self._unwrap_writebacks[val_var] = (
           "arr_index",
           iter_tmp,
@@ -1717,8 +1711,6 @@ class LuaStmtMixin:
               self._var_branch_depth[m_n] = self._branch_depth
 
         if wb_entry and len(mangled_names) == 1:
-          if not hasattr(self, "_unwrap_writebacks"):
-            self._unwrap_writebacks = {}
           self._unwrap_writebacks[mangled_names[0]] = wb_entry
       elif clause.condition:
         self._lift_match_expressions(clause.condition)

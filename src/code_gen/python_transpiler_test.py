@@ -2360,18 +2360,21 @@ class TestPythonTranspiler(unittest.TestCase):
     res = self._transpile_and_run(code, "run_test()")
     self.assertEqual(res, (3 + 1 + 5 + 5) + 11)
 
-  def test_make_expr_transpiler_preserves_state_python(self):
-    """Verifies PythonTranspiler._make_expr_transpiler inherits _identifier_map, extern_vars, and global_vars."""
+  def test_scoped_buffer_preserves_state_python(self):
+    """Verifies PythonTranspiler.capture_expr preserves state while isolating output."""
+    from src.parser.ast import IdentifierNode
+
     pt = PythonTranspiler(test_mode=True)
     pt._identifier_map["local_var"] = "_val_local_var"
     pt.extern_vars["love"] = "love"
     pt.global_vars.add("G_CONST")
-    sub = pt._make_expr_transpiler()
-    self.assertIsInstance(sub, PythonTranspiler)
-    self.assertTrue(sub.test_mode)
-    self.assertEqual(sub._identifier_map["local_var"], "_val_local_var")
-    self.assertEqual(sub.extern_vars["love"], "love")
-    self.assertIn("G_CONST", sub.global_vars)
+    pt.emit("root_prefix")
+    captured = pt.capture_expr(IdentifierNode("local_var"))
+    self.assertEqual(captured, "_val_local_var")
+    self.assertEqual(pt.get_output(), "root_prefix")
+    self.assertTrue(pt.test_mode)
+    self.assertEqual(pt.extern_vars["love"], "love")
+    self.assertIn("G_CONST", pt.global_vars)
 
   def test_named_args_skipped_defaults_eval_order_and_false_bool_python(self):
     """Verifies skipped defaults, reordered side-effect eval, base init, ?., and false bool."""

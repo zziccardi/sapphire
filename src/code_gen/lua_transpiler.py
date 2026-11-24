@@ -117,107 +117,53 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     dev_mode: bool = False,
     use_runtime_module: bool = False,
   ):
-    self.code: List[str] = []
-    self.indent_level = 0
+    super().__init__(
+      test_mode=test_mode,
+      use_runtime_module=use_runtime_module,
+    )
+    # Lua-specific source-map and module metadata
     self.current_line = 1
     self.current_column = 0
     self.source_file = source_file
     self.source_map_builder = source_map_builder
     self._pending_source_mapping: Optional[Tuple[str, int, int]] = None
-    self.test_mode = test_mode
     self.dev_mode = dev_mode
-    self.use_runtime_module = use_runtime_module
     self.on_reload_callbacks: List[str] = []
     self.declared_symbols: List[str] = []
-    # Map struct names to their collected method AST nodes from impl blocks
-    self.struct_methods: Dict[str, List[Any]] = {}
     self.known_structs: Set[str] = set()
     self.imported_modules: Set[str] = set()
-    self.destructor_stack: List[List[str]] = []
-    self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = {"Arena", "Ref", "SharedRef"}
-    self.proto_structs: Set[str] = set()
-    self.struct_destructible_fields: Dict[str, List[str]] = {}
-    self.struct_parent_names: Dict[str, List[str]] = {}
-    self.moved_vars: Set[str] = set()
-    self._branch_depth: int = 0
-    self._var_branch_depth: Dict[str, int] = {}
-    self._pending_null_vars: List[str] = []
-    self._pending_unconditional_null_vars: List[str] = []
-    self._pending_destroy_moved_vars: List[str] = []
-    self.func_return_types: Dict[str, List[str]] = {}
-    self.method_return_types: Dict[Any, List[str]] = {}
-    self.variable_types: Dict[str, str] = {}
-    self._identifier_map: Dict[str, str] = {}
     self._loop_stack: List[bool] = []
-    self._lifted_matches: Dict[int, str] = {}
     self._lifted_match_arity: Dict[int, int] = {}
-    self._lifted_short_circuits: Dict[int, str] = {}
-    self._temp_name_counters: Dict[str, int] = {}
-    self._current_match_target: Optional[str] = None
-    self._current_match_done_flag: Optional[str] = None
-    self._match_loop_depth: int = 0
-
-  def _make_expr_transpiler(self) -> "LuaTranspiler":
-    """Creates a sub-transpiler inheriting module, struct, and rename state."""
-    temp = type(self)(
-      test_mode=self.test_mode,
-      dev_mode=self.dev_mode,
-      use_runtime_module=self.use_runtime_module,
-    )
-    temp.known_structs = self.known_structs
-    temp.imported_modules = self.imported_modules
-    temp._identifier_map = self._identifier_map
-    temp.proto_structs = self.proto_structs
-    temp.structs_with_destructor = self.structs_with_destructor
-    temp.struct_methods = self.struct_methods
-    temp.struct_parent_names = self.struct_parent_names
-    temp.struct_destructible_fields = self.struct_destructible_fields
-    temp.func_return_types = self.func_return_types
-    temp.method_return_types = self.method_return_types
-    temp.variable_types = self.variable_types
-    temp.moved_vars = self.moved_vars
-    temp.destructor_stack = self.destructor_stack
-    temp._branch_depth = self._branch_depth
-    temp._var_branch_depth = self._var_branch_depth
-    temp._pending_null_vars = self._pending_null_vars
-    temp._pending_unconditional_null_vars = (
-      self._pending_unconditional_null_vars
-    )
-    temp._pending_destroy_moved_vars = self._pending_destroy_moved_vars
-    temp._lifted_matches = self._lifted_matches
-    temp._lifted_match_arity = self._lifted_match_arity
-    temp._lifted_short_circuits = self._lifted_short_circuits
-    temp._temp_name_counters = self._temp_name_counters
-    return temp
 
   def emit(self, text: str) -> None:
     """Emits text on the current line and updates line/column numbers."""
-    if self._pending_source_mapping is not None and text.strip():
-      src, orig_line, orig_col = self._pending_source_mapping
-      self._pending_source_mapping = None
-      if self.source_map_builder:
-        self.source_map_builder.add_mapping(
-          gen_line=self.current_line,
-          gen_col=self.current_column,
-          source_file=src,
-          orig_line=orig_line,
-          orig_col=orig_col,
-        )
-    lines = text.split("\n")
-    if len(lines) == 1:
-      self.current_column += len(text)
-    else:
-      self.current_line += len(lines) - 1
-      self.current_column = len(lines[-1])
-    self.code.append(text)
+    if self.is_root_buffer:
+      if self._pending_source_mapping is not None and text.strip():
+        src, orig_line, orig_col = self._pending_source_mapping
+        self._pending_source_mapping = None
+        if self.source_map_builder:
+          self.source_map_builder.add_mapping(
+            gen_line=self.current_line,
+            gen_col=self.current_column,
+            source_file=src,
+            orig_line=orig_line,
+            orig_col=orig_col,
+          )
+      lines = text.split("\n")
+      if len(lines) == 1:
+        self.current_column += len(text)
+      else:
+        self.current_line += len(lines) - 1
+        self.current_column = len(lines[-1])
+    super().emit(text)
 
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
     indent_str = "  " * self.indent_level
-    self.code.append("\n" + indent_str)
-    self.current_line += 1
-    self.current_column = len(indent_str)
+    super().emit("\n" + indent_str)
+    if self.is_root_buffer:
+      self.current_line += 1
+      self.current_column = len(indent_str)
 
   def transpile(
     self,
@@ -520,9 +466,8 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       )
       if default_expr:
         self.newline()
-        temp = self._make_expr_transpiler()
-        temp.visit(default_expr)
-        self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
+        default_code = self.capture_expr(default_expr)
+        self.emit(f"self.{self._mangle_name(f.name)} = {default_code}")
     self.dedent()
     self.newline()
     self.emit("end")
@@ -876,9 +821,8 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         self.emit("end")
       else:
         self.newline()
-        temp = self._make_expr_transpiler()
-        temp.visit(p.default_expr)
-        self.emit(f"if {cond} then {pname} = {temp.get_output()} end")
+        default_code = self.capture_expr(p.default_expr)
+        self.emit(f"if {cond} then {pname} = {default_code} end")
 
   def _visit_ImplMemberNode_for_struct(
     self, node: ImplMemberNode, struct_name: str
@@ -953,9 +897,8 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
             if getattr(base_init, "_requires_eval_order_temps", False):
               temp_binds = []
               for arg_idx, arg in enumerate(base_init.arguments):
-                temp = self._make_expr_transpiler()
-                temp.visit(arg.expr)
-                temp_binds.append(f"local _a{arg_idx} = {temp.get_output()}")
+                val = self.capture_expr(arg.expr)
+                temp_binds.append(f"local _a{arg_idx} = {val}")
               slot_to_temp = {
                 slot: f"_a{arg_idx}"
                 for arg_idx, slot in enumerate(
@@ -989,9 +932,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
                 ):
                   args_strs.append("_SP_RT._SP_UNSET")
                 else:
-                  temp = self._make_expr_transpiler()
-                  temp.visit(expr)
-                  args_strs.append(temp.get_output())
+                  args_strs.append(self.capture_expr(expr))
               self.newline()
               self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")
             continue
@@ -1002,9 +943,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           if param_names:
             args_by_name = {}
             for idx, arg in enumerate(base_init.arguments):
-              temp = self._make_expr_transpiler()
-              temp.visit(arg.expr)
-              val = temp.get_output()
+              val = self.capture_expr(arg.expr)
               if arg.name:
                 args_by_name[arg.name] = val
               elif idx < len(param_names):
@@ -1018,9 +957,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
                 args_strs.append("nil")
           else:
             for arg in base_init.arguments:
-              temp = self._make_expr_transpiler()
-              temp.visit(arg.expr)
-              args_strs.append(temp.get_output())
+              args_strs.append(self.capture_expr(arg.expr))
 
           self.newline()
           self.emit(f"{parent_name}._init_sapphire({', '.join(args_strs)})")

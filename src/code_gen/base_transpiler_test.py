@@ -110,15 +110,17 @@ class TestBaseTranspilerHelpers(unittest.TestCase):
     self.assertEqual(transpiler._expr_destructible_struct(expr), "Resource")
 
   def test_next_temp_name_initializes_counters(self):
-    """Verifies _next_temp_name lazily initializes counters and increments per prefix."""
+    """Verifies _next_temp_name increments counters per prefix in EmitterState."""
     from src.code_gen.python_transpiler import PythonTranspiler
 
     transpiler = PythonTranspiler()
-    if hasattr(transpiler, "_temp_name_counters"):
-      delattr(transpiler, "_temp_name_counters")
     self.assertEqual(transpiler._next_temp_name(), "_sp_tmp_1")
     self.assertEqual(transpiler._next_temp_name(), "_sp_tmp_2")
     self.assertEqual(transpiler._next_temp_name("_custom"), "_custom_1")
+    self.assertEqual(
+        transpiler.state.temp_name_counters,
+        {"_sp_tmp": 2, "_custom": 1},
+    )
 
   def test_type_needs_destructor_paths(self):
     """Verifies _type_needs_destructor for None, methods, cycles, and nested fields."""
