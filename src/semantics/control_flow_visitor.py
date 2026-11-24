@@ -1,7 +1,7 @@
 """Control-flow AST visitor methods for TypeChecker (if, guard, match, loops).
 """
 
-from typing import TYPE_CHECKING, Any, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 from src.parser.ast import (
   ASTNode,
@@ -60,7 +60,7 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
     owner_node: ASTNode,
     freeze_label: str,
     non_optional_msg: str,
-  ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
+  ) -> tuple[str, tuple[str, list[str], str]] | None:
     """Resolves and defines a `let`/`var` or `?=` header binding for
     `if`/`guard`.
     """
@@ -174,9 +174,9 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
     self,
     pattern: Any,
     subject_type: Type,
-    seen_enum_variants: Set[str],
-    bool_flags: List[bool],
-    opt_flags: List[bool],
+    seen_enum_variants: set[str],
+    bool_flags: list[bool],
+    opt_flags: list[bool],
   ) -> None:
     """Validates a single match pattern against the subject type and updates
     coverage.
@@ -297,161 +297,112 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
       )
     opt_flags[1] = True
 
-  def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
-    """Type-checks `match` statements and value-producing expressions."""
-    old_expected = self.expected_type
-    self.expected_type = None
-    try:
-      subject_type = self.visit(node.subject)
-    finally:
-      self.expected_type = old_expected
-    is_stmt = getattr(node, "is_statement", False)
+  def _check_match_arm_body(
+    self, case: Any, is_stmt: bool, case_types: list[Type]
+  ) -> tuple[bool, bool]:
+    """Type-checks a single match case body.
 
-    seen_enum_variants: Set[str] = set()
-    # [seen_true, seen_false] and [seen_none, seen_some, has_ellipsis]
-    bool_flags = [False, False]
-    opt_flags = [False, False, False]
-    has_unyielded_block = False
-
-    case_types: List[Type] = []
-    pre_match_moved = set(self.moved_symbols)
-    union_moved: Set[VariableSymbol] = set(pre_match_moved)
-    pre_match_uninit = set(self.uninitialized_symbols)
-    pre_match_init_fields = set(self.initialized_fields)
-    fallthrough_uninit: List[Set[VariableSymbol]] = []
-    fallthrough_init_fields: List[Set[str]] = []
-
-    for case in node.cases:
-      # Each arm starts from the pre-match state.
-      self._restore_moved_symbols(pre_match_moved)
-      self.uninitialized_symbols = set(pre_match_uninit)
-      self.initialized_fields = set(pre_match_init_fields)
-
-      pat_old_expected = self.expected_type
-      self.expected_type = None
-      try:
-        for pattern in case.patterns:
-          self._check_match_pattern(
-            pattern, subject_type, seen_enum_variants, bool_flags, opt_flags
-          )
-      finally:
-        self.expected_type = pat_old_expected
-
-      arm_diverges = False
-      if is_stmt:
-        self.visit(case.body)
-        if isinstance(case.body, BlockNode):
-          arm_diverges = self._block_terminates(case.body)
-        else:
-          arm_diverges = self._statement_terminates(case.body)
-        case_types.append(NoneType())
-      else:
-        self._match_stack.append([])
-        if isinstance(case.body, BlockNode):
-          self.visit(case.body)
-          yields = self._match_stack.pop()
-          all_yield_or_diverge = self._block_always_yields(case.body)
-          arm_diverges = self._block_terminates(case.body)
-          if yields:
-            widened_yield = yields[0]
-            for y in yields[1:]:
-              merged = self._widen_types(widened_yield, y)
-              if merged is None:
-                self.error(
-                  f"Incompatible yield types in match case: '{widened_yield}' "
-                  f"and '{y}'."
-                )
-              else:
-                widened_yield = merged
-            case_types.append(widened_yield)
-            if not all_yield_or_diverge:
-              has_unyielded_block = True
-          elif arm_diverges:
-            # Block unconditionally exits via return/break/continue; no yield
-            # needed.
-            pass
-          else:
-            case_types.append(NoneType())
-            has_unyielded_block = True
-        else:
-          self._match_stack.pop()
-          expr_type = self.visit(case.body)
-          self._check_value_ownership_transfer(
-            case.body, expr_type, node=case.body
-          )
-          case_types.append(expr_type)
-      union_moved |= self.moved_symbols
-      if not arm_diverges:
-        fallthrough_uninit.append(set(self.uninitialized_symbols))
-        fallthrough_init_fields.append(set(self.initialized_fields))
-
-    if node.cases:
-      self._restore_moved_symbols(union_moved)
-
-    has_ellipsis = opt_flags[2]
-    is_exhaustive = True
-    if not has_ellipsis:
-      if isinstance(subject_type, EnumType):
-        missing = set(subject_type.variants.keys()) - seen_enum_variants
-        if missing:
-          is_exhaustive = False
-          self.error(
-            f"Match expression for enum '{subject_type.name}' is not "
-            f"exhaustive. Missing case: '{next(iter(missing))}'."
-          )
-      elif (
-        isinstance(subject_type, PrimitiveType) and subject_type.name == "bool"
-      ):
-        if not (bool_flags[0] and bool_flags[1]):
-          is_exhaustive = False
-          self.error("Match expression for bool is not exhaustive.")
-      elif isinstance(subject_type, OptionalType):
-        base = subject_type.base_type
-        if isinstance(base, EnumType):
-          missing = set(base.variants.keys()) - seen_enum_variants
-          if not opt_flags[0] or missing:
-            is_exhaustive = False
-            self.error(
-              f"Match expression for optional '{subject_type}' is not "
-              "exhaustive."
-            )
-        elif isinstance(base, PrimitiveType) and base.name == "bool":
-          if not (opt_flags[0] and bool_flags[0] and bool_flags[1]):
-            is_exhaustive = False
-            self.error(
-              f"Match expression for optional '{subject_type}' is not "
-              "exhaustive."
-            )
-        else:
-          is_exhaustive = False
-          self.error(
-            f"Match expression for optional '{subject_type}' is not "
-            "exhaustive. Add a wildcard '...' arm."
-          )
-      elif not isinstance(subject_type, NoneType):
-        is_exhaustive = False
-        self.error(
-          f"Match expression for type '{subject_type}' is not exhaustive. Add "
-          "a wildcard '...' arm."
-        )
-
-    node._is_exhaustive = is_exhaustive
-    if is_exhaustive and fallthrough_uninit:
-      merged_uninit: Set[VariableSymbol] = set()
-      for u_set in fallthrough_uninit:
-        merged_uninit |= u_set
-      self.uninitialized_symbols = merged_uninit
-      merged_fields = set(fallthrough_init_fields[0])
-      for f_set in fallthrough_init_fields[1:]:
-        merged_fields &= f_set
-      self.initialized_fields = merged_fields
-    elif not is_exhaustive:
-      self.uninitialized_symbols = set(pre_match_uninit)
-      self.initialized_fields = set(pre_match_init_fields)
-
+    Returns `(arm_diverges, has_unyielded_block)`.
+    """
     if is_stmt:
-      return PrimitiveType("none")
+      self.visit(case.body)
+      arm_diverges = (
+        self._block_terminates(case.body)
+        if isinstance(case.body, BlockNode)
+        else self._statement_terminates(case.body)
+      )
+      case_types.append(NoneType())
+      return arm_diverges, False
 
+    self._match_stack.append([])
+    if isinstance(case.body, BlockNode):
+      self.visit(case.body)
+      yields = self._match_stack.pop()
+      all_yield_or_diverge = self._block_always_yields(case.body)
+      arm_diverges = self._block_terminates(case.body)
+      if yields:
+        widened_yield = yields[0]
+        for y in yields[1:]:
+          merged = self._widen_types(widened_yield, y)
+          if merged is None:
+            self.error(
+              f"Incompatible yield types in match case: '{widened_yield}' "
+              f"and '{y}'."
+            )
+          else:
+            widened_yield = merged
+        case_types.append(widened_yield)
+        return arm_diverges, not all_yield_or_diverge
+      if arm_diverges:
+        return True, False
+      case_types.append(NoneType())
+      return False, True
+
+    self._match_stack.pop()
+    expr_type = self.visit(case.body)
+    self._check_value_ownership_transfer(case.body, expr_type, node=case.body)
+    case_types.append(expr_type)
+    return False, False
+
+  def _verify_match_exhaustiveness(
+    self,
+    subject_type: Type,
+    seen_enum_variants: set[str],
+    bool_flags: list[bool],
+    opt_flags: list[bool],
+  ) -> bool:
+    """Checks whether match arms exhaustively cover *subject_type*."""
+    if opt_flags[2]:
+      return True
+    if isinstance(subject_type, EnumType):
+      missing = set(subject_type.variants.keys()) - seen_enum_variants
+      if missing:
+        self.error(
+          f"Match expression for enum '{subject_type.name}' is not "
+          f"exhaustive. Missing case: '{next(iter(missing))}'."
+        )
+        return False
+      return True
+    if isinstance(subject_type, PrimitiveType) and subject_type.name == "bool":
+      if not (bool_flags[0] and bool_flags[1]):
+        self.error("Match expression for bool is not exhaustive.")
+        return False
+      return True
+    if isinstance(subject_type, OptionalType):
+      base = subject_type.base_type
+      if isinstance(base, EnumType):
+        missing = set(base.variants.keys()) - seen_enum_variants
+        if not opt_flags[0] or missing:
+          self.error(
+            f"Match expression for optional '{subject_type}' is not exhaustive."
+          )
+          return False
+        return True
+      if isinstance(base, PrimitiveType) and base.name == "bool":
+        if not (opt_flags[0] and bool_flags[0] and bool_flags[1]):
+          self.error(
+            f"Match expression for optional '{subject_type}' is not exhaustive."
+          )
+          return False
+        return True
+      self.error(
+        f"Match expression for optional '{subject_type}' is not "
+        "exhaustive. Add a wildcard '...' arm."
+      )
+      return False
+    if not isinstance(subject_type, NoneType):
+      self.error(
+        f"Match expression for type '{subject_type}' is not exhaustive. Add "
+        "a wildcard '...' arm."
+      )
+      return False
+    return True
+
+  def _resolve_match_result_type(
+    self, case_types: list[Type], has_unyielded_block: bool
+  ) -> Type:
+    """Widens all value-producing match arm types and wraps optional if needed.
+    """
     non_none_types = [
       t
       for t in case_types
@@ -460,19 +411,13 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
         or (isinstance(t, PrimitiveType) and t.name == "none")
       )
     ]
-    if not non_none_types:
-      if has_unyielded_block:
-        self.error(
-          "Match case block in value-producing match expression must "
-          "explicitly yield a value."
-        )
-      return PrimitiveType("none")
-
     if has_unyielded_block:
       self.error(
         "Match case block in value-producing match expression must explicitly "
         "yield a value."
       )
+    if not non_none_types:
+      return PrimitiveType("none")
 
     result_type = non_none_types[0]
     for t in non_none_types[1:]:
@@ -498,15 +443,91 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
       )
     return result_type
 
+  def visit_MatchExprNode(self, node: MatchExprNode) -> Type:
+    """Type-checks `match` statements and value-producing expressions."""
+    old_expected = self.expected_type
+    self.expected_type = None
+    try:
+      subject_type = self.visit(node.subject)
+    finally:
+      self.expected_type = old_expected
+    is_stmt = getattr(node, "is_statement", False)
+
+    seen_enum_variants: set[str] = set()
+    # [seen_true, seen_false] and [seen_none, seen_some, has_ellipsis]
+    bool_flags = [False, False]
+    opt_flags = [False, False, False]
+    has_unyielded_block = False
+
+    case_types: list[Type] = []
+    pre_match_moved = set(self.moved_symbols)
+    union_moved: set[VariableSymbol] = set(pre_match_moved)
+    pre_match_uninit = set(self.uninitialized_symbols)
+    pre_match_init_fields = set(self.initialized_fields)
+    fallthrough_uninit: list[set[VariableSymbol]] = []
+    fallthrough_init_fields: list[set[str]] = []
+
+    for case in node.cases:
+      self._restore_moved_symbols(pre_match_moved)
+      self.uninitialized_symbols = set(pre_match_uninit)
+      self.initialized_fields = set(pre_match_init_fields)
+
+      pat_old_expected = self.expected_type
+      self.expected_type = None
+      try:
+        for pattern in case.patterns:
+          self._check_match_pattern(
+            pattern, subject_type, seen_enum_variants, bool_flags, opt_flags
+          )
+      finally:
+        self.expected_type = pat_old_expected
+
+      arm_diverges, arm_unyielded = self._check_match_arm_body(
+        case, is_stmt, case_types
+      )
+      if arm_unyielded:
+        has_unyielded_block = True
+      union_moved |= self.moved_symbols
+      if not arm_diverges:
+        fallthrough_uninit.append(set(self.uninitialized_symbols))
+        fallthrough_init_fields.append(set(self.initialized_fields))
+
+    if node.cases:
+      self._restore_moved_symbols(union_moved)
+
+    is_exhaustive = self._verify_match_exhaustiveness(
+      subject_type, seen_enum_variants, bool_flags, opt_flags
+    )
+    node._is_exhaustive = is_exhaustive
+    if is_exhaustive:
+      self.context.mark_exhaustive_match(node)
+
+    if is_exhaustive and fallthrough_uninit:
+      merged_uninit: set[VariableSymbol] = set()
+      for u_set in fallthrough_uninit:
+        merged_uninit |= u_set
+      self.uninitialized_symbols = merged_uninit
+      merged_fields = set(fallthrough_init_fields[0])
+      for f_set in fallthrough_init_fields[1:]:
+        merged_fields &= f_set
+      self.initialized_fields = merged_fields
+    elif not is_exhaustive:
+      self.uninitialized_symbols = set(pre_match_uninit)
+      self.initialized_fields = set(pre_match_init_fields)
+
+    if is_stmt:
+      return PrimitiveType("none")
+    return self._resolve_match_result_type(case_types, has_unyielded_block)
+
   def _visit_if_else_branch(
     self,
     node: IfNode,
-    pre_branch_moved: Set[VariableSymbol],
-    pre_uninit: Set[VariableSymbol],
-    pre_init_fields: Set[str],
-    then_moved: Optional[Set[VariableSymbol]] = None,
-    then_uninit: Optional[Set[VariableSymbol]] = None,
-    then_init_fields: Optional[Set[str]] = None,
+    pre_branch_moved: set[VariableSymbol],
+    pre_uninit: set[VariableSymbol],
+    pre_init_fields: set[str],
+    then_moved: set[VariableSymbol] | None = None,
+    then_uninit: set[VariableSymbol] | None = None,
+    then_init_fields: set[str] | None = None,
   ) -> None:
     """Visits an `else` branch with `if var` freezes cleared and merges branch
     states.
@@ -567,7 +588,7 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
       self.symbol_table.enter_scope()
       if_header_scope = self.symbol_table.current_scope
       has_unwrap = False
-      unwrap_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
+      unwrap_freezes: list[tuple[str, tuple[str, list[str], str]]] = []
       for binding in node.bindings:
         if binding.is_unwrap:
           has_unwrap = True
@@ -983,7 +1004,7 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
 
   def _resolve_container_get_unwrap(
     self, expr: ASTNode
-  ) -> Optional[Tuple[Tuple[str, List[str]], ASTNode, ASTNode, bool]]:
+  ) -> tuple[tuple[str, list[str]], ASTNode, ASTNode, bool] | None:
     """Resolves `container.get(key)` on a Map or Array lvalue."""
     if not (
       isinstance(expr, CallNode)
@@ -1006,7 +1027,7 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
 
   def _register_unwrap_binding_freeze(
     self, binding: HeaderBindingNode, freeze_label: str
-  ) -> Optional[Tuple[str, Tuple[str, List[str], str]]]:
+  ) -> tuple[str, tuple[str, list[str], str]] | None:
     """Validates and registers a mutable optional-unwrap freeze on an lvalue."""
     if not (binding.is_unwrap and binding.is_mutable):
       return None
@@ -1059,10 +1080,8 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
 
   def _visit_stmts_with_unwrap_nll(
     self,
-    stmts: List[ASTNode],
-    initial_freezes: Optional[
-      List[Tuple[str, Tuple[str, List[str], str]]]
-    ] = None,
+    stmts: list[ASTNode],
+    initial_freezes: list[tuple[str, tuple[str, list[str], str]]] | None = None,
     freeze_scope: Any = None,
   ) -> None:
     """Visits statements with non-lexical lifetime unfreezing for `if var` and
@@ -1072,10 +1091,10 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
     if not hasattr(self, "_active_unwrap_freezes"):
       self._active_unwrap_freezes = []
     pushed_count = 0
-    tracked: List[Tuple[str, Tuple[str, List[str], str], int]] = []
+    tracked: list[tuple[str, tuple[str, list[str], str], int]] = []
 
     def register_freezes(
-      freezes: List[Tuple[str, Tuple[str, List[str], str]]], start_idx: int
+      freezes: list[tuple[str, tuple[str, list[str], str]]], start_idx: int
     ) -> None:
       nonlocal pushed_count
       for var_name, freeze_entry in freezes:
@@ -1135,7 +1154,7 @@ class ControlFlowVisitorMixin(_TypeCheckerBase):
     """
     outer_scope = self.symbol_table.current_scope
     pre_clause_symbols = dict(outer_scope.symbols)
-    guard_freezes: List[Tuple[str, Tuple[str, List[str], str]]] = []
+    guard_freezes: list[tuple[str, tuple[str, list[str], str]]] = []
     for clause in node.clauses:
       if clause.binding:
         unwrap_entry = self._bind_header_binding(

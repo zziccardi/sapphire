@@ -1,6 +1,6 @@
 """Member-access and module-path resolution visitors for TypeChecker."""
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from src.parser.ast import (
   ASTNode,
@@ -60,7 +60,7 @@ else:
 class MemberAccessVisitorMixin(_TypeCheckerBase):
   """Provides AST visitor and helper methods for member access resolution."""
 
-  def _get_dotted_path(self, expr: Any) -> Optional[List[str]]:
+  def _get_dotted_path(self, expr: Any) -> list[str] | None:
     """Returns the dotted identifier path components of an expression."""
     if isinstance(expr, IdentifierNode):
       return [expr.name]
@@ -70,7 +70,7 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
         return recv + [expr.member]
     return None
 
-  def _find_imported_module_by_path(self, path: str) -> Optional[ModuleSymbol]:
+  def _find_imported_module_by_path(self, path: str) -> ModuleSymbol | None:
     """Finds an imported ModuleSymbol by its full import path."""
     root_scope = self.symbol_table.current_scope
     while root_scope.parent:
@@ -82,12 +82,12 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
 
   def _find_imported_modules_with_prefix(
     self, prefix: str
-  ) -> List[ModuleSymbol]:
+  ) -> list[ModuleSymbol]:
     """Returns all imported ModuleSymbols starting with prefix."""
     root_scope = self.symbol_table.current_scope
     while root_scope.parent:
       root_scope = root_scope.parent
-    res: List[ModuleSymbol] = []
+    res: list[ModuleSymbol] = []
     prefix_dot = prefix + "."
     for sym in root_scope.symbols.values():
       if isinstance(sym, ModuleSymbol) and sym.module_path.startswith(
@@ -98,7 +98,7 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
 
   def _diagnose_unaliased_module_access(
     self, node: MemberAccessNode
-  ) -> Optional[Type]:
+  ) -> Type | None:
     """Detects unaliased dotted module paths (e.g. `std.os.args`) and suggests
     alias.
     """
@@ -193,7 +193,7 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
 
   def _resolve_builtin_receiver_member(
     self, node: MemberAccessNode, receiver_type: Type
-  ) -> Optional[Type]:
+  ) -> Type | None:
     """Resolves member access on builtin, module, enum, and trait types."""
     if isinstance(receiver_type, StringType):
       if node.member == "from":

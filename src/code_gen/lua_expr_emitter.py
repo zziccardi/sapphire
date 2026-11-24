@@ -1,7 +1,7 @@
 """Expression, literal, and initializer code generation mixin for LuaTranspiler.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from src.code_gen.intrinsics import IntrinsicRegistry
 from src.parser.ast import (
@@ -297,11 +297,13 @@ class LuaExprMixin(_LuaTranspilerBase):
     if lifted and id(node) in lifted:
       self.emit(lifted[id(node)])
       return
-    is_opt_target = isinstance(node.target_type, OptionalTypeNode)
-    inner_type = (
-      node.target_type.base_type if is_opt_target else node.target_type
-    )
-    target = inner_type.name if hasattr(inner_type, "name") else str(inner_type)
+    if isinstance(node.target_type, OptionalTypeNode):
+      is_opt_target = True
+      inner_type = node.target_type.base_type
+    else:
+      is_opt_target = False
+      inner_type = node.target_type
+    target = getattr(inner_type, "name", str(inner_type))
     cast_fn_map = {
       "float": "_SP_RT._sapphire_cast_float",
       "int": "_SP_RT._sapphire_cast_int",
@@ -341,7 +343,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     return False
 
   def _emit_lua_call_args_list(
-    self, exprs: List[ASTNode], node: Optional[CallNode] = None
+    self, exprs: list[ASTNode], node: CallNode | None = None
   ) -> None:
     """Emits comma-separated Lua argument expressions, preserving omitted
     optional
@@ -364,7 +366,7 @@ class LuaExprMixin(_LuaTranspilerBase):
 
   def _format_reordered_slot_temps(
     self, node: CallNode, total_slots: int
-  ) -> List[str]:
+  ) -> list[str]:
     """Binds side-effecting call args in source order and returns slot list."""
     for arg_idx, arg in enumerate(node.arguments):
       self.emit(f"local _a{arg_idx} = ")
@@ -374,7 +376,7 @@ class LuaExprMixin(_LuaTranspilerBase):
       slot: f"_a{arg_idx}"
       for arg_idx, slot in enumerate(getattr(node, "_eval_order_slots", []))
     }
-    res: List[str] = []
+    res: list[str] = []
     for i in range(total_slots):
       if i in slot_to_temp:
         res.append(slot_to_temp[i])
@@ -537,7 +539,7 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.visit(node.receiver)
       self.emit(f".{member_name}")
 
-  def _save_nested_fn_state(self) -> Dict[str, Any]:
+  def _save_nested_fn_state(self) -> dict[str, Any]:
     """Saves outer RAII, loop, match, and writeback state before a nested
     function
     body.
@@ -570,7 +572,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     self._loop_stack = []
     return saved
 
-  def _restore_nested_fn_state(self, saved: Dict[str, Any]) -> None:
+  def _restore_nested_fn_state(self, saved: dict[str, Any]) -> None:
     """Restores outer RAII, loop, match, and writeback state after a nested
     function body.
     """

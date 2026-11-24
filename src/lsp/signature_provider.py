@@ -1,7 +1,7 @@
 """LSP signature help provider for Sapphire."""
 
 import re
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from lsprotocol.types import (
   MarkupContent,
@@ -40,7 +40,7 @@ def _strip_trailing_type_args(text: str) -> str:
   return s
 
 
-def _struct_constructor_signature(st: Any) -> Optional[FunctionType]:
+def _struct_constructor_signature(st: Any) -> FunctionType | None:
   """Builds a constructor FunctionType from `__init__` if defined, else struct
   fields.
   """
@@ -89,14 +89,14 @@ class SignatureProvider:
   """Resolves active call signatures and parameter hints for Sapphire code."""
 
   @staticmethod
-  def _parse_active_call(text_before_cursor: str) -> Optional[Tuple[str, int]]:
+  def _parse_active_call(text_before_cursor: str) -> tuple[str, int] | None:
     """Scans forward to cursor to find active `(callee_name, active_param_idx)`.
     """
     stack: list = []  # Each entry: [open_char, index, comma_count]
     matching = {")": "(", "]": "[", "}": "{"}
     n = len(text_before_cursor)
     i = 0
-    in_string: Optional[str] = None
+    in_string: str | None = None
     in_line_comment = False
     in_block_comment = False
 
@@ -172,7 +172,7 @@ class SignatureProvider:
   @staticmethod
   def _resolve_module_export_callable(
     mod_sym: Any, member_name: str
-  ) -> Optional[FunctionType]:
+  ) -> FunctionType | None:
     """Resolves a callable function or struct constructor exported from a
     module.
     """
@@ -201,7 +201,7 @@ class SignatureProvider:
     line: int,
     sym_table: Any,
     node_types: dict,
-  ) -> Tuple[Optional[FunctionType], str]:
+  ) -> tuple[FunctionType | None, str]:
     """Resolves a dotted `obj.method` or `mod.func` call to its FunctionType and
     display name.
     """
@@ -300,7 +300,7 @@ class SignatureProvider:
   @staticmethod
   def _resolve_direct_callee(
     callee_name: str, sym_table: Any
-  ) -> Optional[FunctionType]:
+  ) -> FunctionType | None:
     """Resolves a direct function call or struct constructor signature."""
     sym = sym_table.lookup(callee_name)
     if sym:
@@ -318,7 +318,7 @@ class SignatureProvider:
   @classmethod
   def provide_signature_help(
     cls, ls: Any, params: SignatureHelpParams
-  ) -> Optional[SignatureHelp]:
+  ) -> SignatureHelp | None:
     """Computes SignatureHelp for the call expression at the cursor."""
     uri = params.text_document.uri
     if uri not in ls.symbol_table_cache:  # pragma: no cover

@@ -5,7 +5,8 @@ detects circular inheritance, and validates shadowing or duplicate field
 layouts.
 """
 
-from typing import Any, Iterator, List, Optional, Set, Tuple
+from collections.abc import Iterator
+from typing import Any
 
 from src.parser.ast import ProgramNode, StructDeclNode, VarDeclNode
 from src.semantics.symbol_table import (
@@ -33,18 +34,18 @@ class StructLayoutPass:
       yield ftype
 
   @staticmethod
-  def check_unboxed_recursion(checker: Any, struct_types: List[Any]) -> None:
+  def check_unboxed_recursion(checker: Any, struct_types: list[Any]) -> None:
     """Rejects direct or mutual unboxed recursion across non-proto structs."""
-    reported_cycles: Set[frozenset] = getattr(
+    reported_cycles: set[frozenset] = getattr(
       checker, "_reported_recursive_struct_cycles", None
     )
     if reported_cycles is None:
       reported_cycles = set()
       checker._reported_recursive_struct_cycles = reported_cycles
 
-    fully_checked: Set[str] = set()
+    fully_checked: set[str] = set()
 
-    def dfs(st: StructType, path: List[str]) -> None:
+    def dfs(st: StructType, path: list[str]) -> None:
       for field_name, field_obj in st.fields.items():
         for target_st in StructLayoutPass._iter_inline_structs(
           field_obj.field_type
@@ -153,7 +154,7 @@ class StructLayoutPass:
       visiting.remove(node.name)
       processed.add(node.name)
 
-    prechecked_restores: List[Tuple[str, Any]] = []
+    prechecked_restores: list[tuple[str, Any]] = []
     for decl in program.declarations:
       if (
         isinstance(decl, StructDeclNode)
@@ -196,7 +197,7 @@ class StructLayoutPass:
     StructLayoutPass.check_arena_field_ordering(checker, resolved_types)
 
   @staticmethod
-  def _type_contains_proto(t: Type, seen: Optional[Set[str]] = None) -> bool:
+  def _type_contains_proto(t: Type, seen: set[str] | None = None) -> bool:
     """Returns True if `t` is a proto type or contains one inline."""
     if isinstance(t, OptionalType):
       return StructLayoutPass._type_contains_proto(t.base_type, seen)
@@ -223,7 +224,7 @@ class StructLayoutPass:
     return False
 
   @staticmethod
-  def _type_contains_arena(t: Type, seen: Optional[Set[str]] = None) -> bool:
+  def _type_contains_arena(t: Type, seen: set[str] | None = None) -> bool:
     """Returns True if `t` is an Arena or inline struct owning an Arena."""
     if isinstance(t, ArenaType):
       return True
@@ -250,12 +251,12 @@ class StructLayoutPass:
     return False
 
   @staticmethod
-  def check_arena_field_ordering(checker: Any, struct_types: List[Any]) -> None:
+  def check_arena_field_ordering(checker: Any, struct_types: list[Any]) -> None:
     """Enforces that Arena fields precede proto-referencing fields."""
     for st in struct_types:
       if not isinstance(st, StructType):
         continue
-      first_proto_field: Optional[str] = None
+      first_proto_field: str | None = None
       for field_name, field in st.fields.items():
         if StructLayoutPass._type_contains_arena(field.field_type):
           if first_proto_field is not None:

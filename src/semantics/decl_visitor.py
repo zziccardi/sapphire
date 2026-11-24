@@ -1,6 +1,6 @@
 """Declaration and block AST visitor methods for TypeChecker."""
 
-from typing import TYPE_CHECKING, Dict, List, Set, Tuple
+from typing import TYPE_CHECKING
 
 from src.parser.ast import (
   ASTNode,
@@ -132,7 +132,7 @@ class DeclVisitorMixin(_TypeCheckerBase):
       for m_name in trait_type.methods:
         if m_name in struct_type.methods:
           continue
-        providers: List[Tuple[StructType, StructMethod]] = []
+        providers: list[tuple[StructType, StructMethod]] = []
         for parent in struct_type.parent_types:
           m = parent.get_method(m_name, self.symbol_table)
           if m is not None:
@@ -161,7 +161,7 @@ class DeclVisitorMixin(_TypeCheckerBase):
     pass
 
   def _check_no_explicit_self(
-    self, parameters: List[ParameterNode], node: ASTNode
+    self, parameters: list[ParameterNode], node: ASTNode
   ) -> None:
     """Rejects explicit 'self' parameters in functions, methods, and traits."""
     for p in parameters:
@@ -174,12 +174,12 @@ class DeclVisitorMixin(_TypeCheckerBase):
         return
 
   def _check_duplicate_params(
-    self, parameters: List[ParameterNode], node: ASTNode
+    self, parameters: list[ParameterNode], node: ASTNode
   ) -> None:
     """Rejects duplicate parameter names in function, method, and trait
     signatures.
     """
-    seen: Set[str] = set()
+    seen: set[str] = set()
     for p in parameters:
       if p.name in seen:
         self.error(
@@ -220,7 +220,7 @@ class DeclVisitorMixin(_TypeCheckerBase):
                 trait_m_name, trait_sig, None
               )
         else:
-          trait_type_map: Dict[str, Type] = {}
+          trait_type_map: dict[str, Type] = {}
           if trait_type.type_params and getattr(node, "trait_type_args", None):
             resolved_args = [
               self._resolve_type_node(t) for t in node.trait_type_args
@@ -314,8 +314,8 @@ class DeclVisitorMixin(_TypeCheckerBase):
 
   def _check_parameter_defaults(
     self,
-    parameters: List[ParameterNode],
-    resolved_types: List[Type],
+    parameters: list[ParameterNode],
+    resolved_types: list[Type],
   ) -> None:
     """Type-checks parameter default expressions against declared parameter
     types.

@@ -6,7 +6,7 @@ for structs, enums, traits, externs, and functions).
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any
 
 from antlr4 import CommonTokenStream, InputStream
 
@@ -65,7 +65,7 @@ class DeclarationPass:
 
   # Cache of clean, cycle-free parsed and typechecked modules on disk:
   # abs_file_path -> (mtime, file_size, exports_dict, dep_stats)
-  _module_cache: Dict[str, Any] = {}
+  _module_cache: dict[str, Any] = {}
 
   @classmethod
   def clear_cache(cls) -> None:
@@ -78,7 +78,7 @@ class DeclarationPass:
 
   @staticmethod
   def validate_annotations(
-    checker: Any, annotations: List[Any], node: Optional[Any] = None
+    checker: Any, annotations: list[Any], node: Any | None = None
   ) -> None:
     """Validates that @extern and @export string arguments are well-formed
     identifier paths.
@@ -94,7 +94,7 @@ class DeclarationPass:
 
   @staticmethod
   def validate_parameter_defaults(
-    checker: Any, parameters: List[ParameterNode]
+    checker: Any, parameters: list[ParameterNode]
   ) -> None:
     """Validates that parameters without default values do not follow parameters
     with default values.
@@ -112,7 +112,7 @@ class DeclarationPass:
 
   @staticmethod
   def _is_cache_entry_valid(
-    cached_entry: Any, mtime: Optional[int], fsize: Optional[int]
+    cached_entry: Any, mtime: int | None, fsize: int | None
   ) -> bool:
     """Returns True if a cached module and all transitive deps match disk."""
     if (
@@ -135,7 +135,7 @@ class DeclarationPass:
 
   @staticmethod
   def _propagate_import_errors(
-    checker: Any, imp: Any, mod_errors: List[str], reported_errors: Set[str]
+    checker: Any, imp: Any, mod_errors: list[str], reported_errors: set[str]
   ) -> None:
     """Propagates imported module diagnostics to the importing checker."""
     if not mod_errors:
@@ -180,9 +180,9 @@ class DeclarationPass:
   @staticmethod
   def _extract_module_exports(
     sub_checker: Any, sub_ast: Any, mod_sym: ModuleSymbol
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """Collects exported symbols and types from a checked imported module."""
-    computed_exports: Dict[str, Any] = {}
+    computed_exports: dict[str, Any] = {}
     defining_mod = mod_sym.file_path or mod_sym.module_path
     if getattr(sub_ast, "export_block", None):
       for spec in sub_ast.export_block.specifiers:
@@ -246,9 +246,9 @@ class DeclarationPass:
     mod_file_path: str,
     sub_code: str,
     mod_sym: ModuleSymbol,
-    checked_results: Dict[str, Any],
-    active_stack: Set[str],
-  ) -> Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]:
+    checked_results: dict[str, Any],
+    active_stack: set[str],
+  ) -> tuple[dict[str, Any], list[str], dict[str, tuple[int, int]], bool]:
     """Parses and type-checks *target_file*, returning exports, errors, deps,
     and
     cycle flag.
@@ -264,9 +264,9 @@ class DeclarationPass:
     sub_parser.addErrorListener(err_listener)
     sub_tree = sub_parser.program()
 
-    mod_errors: List[str] = list(err_listener.error_messages)
-    computed_exports: Dict[str, Any] = {}
-    sub_deps: Dict[str, Tuple[int, int]] = {}
+    mod_errors: list[str] = list(err_listener.error_messages)
+    computed_exports: dict[str, Any] = {}
+    sub_deps: dict[str, tuple[int, int]] = {}
     sub_hit_cycle = False
 
     if err_listener.errors == 0:
@@ -323,18 +323,18 @@ class DeclarationPass:
     target_file: str,
     mod_sym: ModuleSymbol,
     is_builtin: bool,
-    checked_results: Dict[str, Any],
-    active_stack: Set[str],
-    reported_errors: Set[str],
-    resolved_dep_stats: Dict[str, Tuple[int, int]],
+    checked_results: dict[str, Any],
+    active_stack: set[str],
+    reported_errors: set[str],
+    resolved_dep_stats: dict[str, tuple[int, int]],
   ) -> None:
     """Parses, typechecks, caches, and extracts exports for *target_file*."""
     mod_file_path = os.path.abspath(target_file)
     mod_sym.file_path = mod_file_path
     try:
       stat_res = os.stat(mod_file_path)
-      mtime: Optional[int] = stat_res.st_mtime_ns
-      fsize: Optional[int] = stat_res.st_size
+      mtime: int | None = stat_res.st_mtime_ns
+      fsize: int | None = stat_res.st_size
     except OSError:
       mtime = None
       fsize = None
@@ -381,7 +381,7 @@ class DeclarationPass:
       return
 
     try:
-      with open(target_file, "r", encoding="utf-8") as f:
+      with open(target_file, encoding="utf-8") as f:
         sub_code = f.read()
     except OSError as os_err:
       checker.error(
@@ -457,7 +457,7 @@ class DeclarationPass:
       active_stack.add(abs_src_path)
       added_self = True
 
-    seen_import_names: Dict[str, str] = {}
+    seen_import_names: dict[str, str] = {}
     try:
       for imp in getattr(program, "imports", []):
         module_name = imp.alias if imp.alias else imp.path.split(".")[-1]
@@ -562,10 +562,10 @@ class DeclarationPass:
         f"Enum '{decl.name}' cannot mix integer and string variant values.",
         node=decl,
       )
-    current_val: Union[int, str] = "" if has_str_val else 0
+    current_val: int | str = "" if has_str_val else 0
     is_string_enum = has_str_val
-    variants: Dict[str, Union[int, str]] = {}
-    seen_members: Set[str] = set()
+    variants: dict[str, int | str] = {}
+    seen_members: set[str] = set()
     for member in decl.members:
       if member.name in seen_members:
         checker.error(

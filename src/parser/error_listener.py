@@ -3,7 +3,7 @@ Sapphire.
 """
 
 import sys
-from typing import Any, List, Optional
+from typing import Any
 
 from antlr4.error.ErrorListener import ErrorListener
 
@@ -68,8 +68,8 @@ class CustomErrorListener(ErrorListener):
 
   def __init__(
     self,
-    file_path: Optional[str] = None,
-    source_content: Optional[Any] = None,
+    file_path: str | None = None,
+    source_content: Any | None = None,
     quiet: bool = False,
   ):
     super().__init__()
@@ -78,7 +78,7 @@ class CustomErrorListener(ErrorListener):
     self.source_content = source_content
     self.quiet = quiet
     self.error_messages = []
-    self.diagnostics: List[Diagnostic] = []
+    self.diagnostics: list[Diagnostic] = []
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     self.errors += 1

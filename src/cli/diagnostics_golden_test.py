@@ -17,7 +17,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from typing import List, Tuple
 
 _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
@@ -41,8 +40,8 @@ class TestDiagnosticsGolden(unittest.TestCase):
   """Verifies exact CLI diagnostic formatting, spans, exit codes, and source maps."""
 
   def _run_cli_on_fixture(
-      self, fixture_name: str, cli_args: List[str]
-  ) -> Tuple[int, str]:
+      self, fixture_name: str, cli_args: list[str]
+  ) -> tuple[int, str]:
     src_fixture = os.path.join(_FIXTURE_DIR, f"{fixture_name}.sp.fixture")
     self.assertTrue(
         os.path.isfile(src_fixture), f"Missing fixture: {src_fixture}"
@@ -82,7 +81,7 @@ class TestDiagnosticsGolden(unittest.TestCase):
       self,
       fixture_name: str,
       golden_name: str,
-      cli_args: List[str],
+      cli_args: list[str],
       expected_exit_code: int,
   ) -> None:
     rc, actual = self._run_cli_on_fixture(fixture_name, cli_args)
@@ -98,7 +97,7 @@ class TestDiagnosticsGolden(unittest.TestCase):
         os.path.isfile(golden_path),
         f"Missing golden snapshot {golden_path}. Re-run with UPDATE_GOLDENS=1.",
     )
-    with open(golden_path, "r", encoding="utf-8") as f:
+    with open(golden_path, encoding="utf-8") as f:
       expected = f.read()
     self.assertEqual(
         actual,

@@ -6,21 +6,21 @@ import subprocess
 import sys
 import threading
 import unittest
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
 )
 
 
-def _encode_lsp_message(payload: Dict[str, Any]) -> bytes:
+def _encode_lsp_message(payload: dict[str, Any]) -> bytes:
   body = json.dumps(payload).encode("utf-8")
   header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
   return header + body
 
 
-def _read_lsp_message(stream) -> Optional[Dict[str, Any]]:
-  headers: Dict[str, str] = {}
+def _read_lsp_message(stream) -> dict[str, Any] | None:
+  headers: dict[str, str] = {}
   while True:
     line = stream.readline()
     if not line:
@@ -44,8 +44,8 @@ class _StdioLspClient:
 
   def __init__(self, proc: subprocess.Popen):
     self.proc = proc
-    self.notifications: List[Dict[str, Any]] = []
-    self._responses: Dict[int, Dict[str, Any]] = {}
+    self.notifications: list[dict[str, Any]] = []
+    self._responses: dict[int, dict[str, Any]] = {}
     self._cond = threading.Condition()
     self._closed = False
     self._next_id = 1
@@ -70,16 +70,16 @@ class _StdioLspClient:
         self._cond.notify_all()
 
   def notify(self, method: str, params: Any = None) -> None:
-    msg: Dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+    msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
     if params is not None:
       msg["params"] = params
     self.proc.stdin.write(_encode_lsp_message(msg))
     self.proc.stdin.flush()
 
-  def request(self, method: str, params: Any = None, timeout: float = 10.0) -> Dict[str, Any]:
+  def request(self, method: str, params: Any = None, timeout: float = 10.0) -> dict[str, Any]:
     req_id = self._next_id
     self._next_id += 1
-    msg: Dict[str, Any] = {"jsonrpc": "2.0", "id": req_id, "method": method}
+    msg: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id, "method": method}
     if params is not None:
       msg["params"] = params
     self.proc.stdin.write(_encode_lsp_message(msg))
@@ -93,7 +93,7 @@ class _StdioLspClient:
         raise TimeoutError(f"Timed out waiting for LSP response to {method} (id={req_id})")
       return self._responses.pop(req_id)
 
-  def wait_for_diagnostics(self, uri: str, min_count: int = 1, timeout: float = 10.0) -> Dict[str, Any]:
+  def wait_for_diagnostics(self, uri: str, min_count: int = 1, timeout: float = 10.0) -> dict[str, Any]:
     def _matching():
       return [
           n for n in self.notifications

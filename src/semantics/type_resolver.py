@@ -1,6 +1,6 @@
 """Type resolution and pre-pass global/lambda analysis for TypeChecker."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 from src.parser.ast import (
   ArrayTypeNode,
@@ -106,7 +106,7 @@ class TypeResolverMixin(_TypeCheckerBase):
       return True
     return False
 
-  def _get_impl_type_params(self, decl: ImplBlockNode) -> List[str]:
+  def _get_impl_type_params(self, decl: ImplBlockNode) -> list[str]:
     type_params = list(decl.type_params) if decl.type_params else []
     struct_type = self.symbol_table.lookup_type(decl.struct_name)
     trait_type = (
@@ -168,7 +168,7 @@ class TypeResolverMixin(_TypeCheckerBase):
     decl.type_params = type_params
     return type_params
 
-  def _substitute_type_params(self, t: Type, type_map: Dict[str, Type]) -> Type:
+  def _substitute_type_params(self, t: Type, type_map: dict[str, Type]) -> Type:
     if isinstance(t, GenericTypeParameter) and t.name in type_map:
       return type_map[t.name]
     if isinstance(t, OptionalType):
@@ -212,166 +212,156 @@ class TypeResolverMixin(_TypeCheckerBase):
       )
     return t
 
-  def _register_impl_signatures(self, program: ProgramNode) -> None:
-    """Pre-pass to register methods defined inside impl blocks onto struct
-    types.
-    """
+  @staticmethod
+  def _is_void_return_list(ret_type: Any) -> bool:
+    """Returns True if a resolved return-type list represents void/none."""
+    return len(ret_type) == 0 or (
+      len(ret_type) == 1
+      and (
+        isinstance(ret_type[0], NoneType)
+        or (
+          isinstance(ret_type[0], PrimitiveType)
+          and ret_type[0].name in ("none", "void")
+        )
+      )
+    )
+
+  def _register_impl_methods(self, program: ProgramNode) -> None:
+    """Sub-pass 2a: registers impl block methods onto target structs."""
     for decl in program.declarations:
-      if isinstance(decl, ImplBlockNode):
-        for member in decl.members:
-          self._validate_parameter_defaults(member.func_decl.parameters)
-        if self._get_impl_type_params(decl):
+      if not isinstance(decl, ImplBlockNode):
+        continue
+      for member in decl.members:
+        self._validate_parameter_defaults(member.func_decl.parameters)
+      if self._get_impl_type_params(decl):
+        continue
+      struct_type = self.symbol_table.lookup_type(decl.struct_name)
+      if not struct_type or not isinstance(struct_type, StructType):
+        self.error(
+          "Cannot implement members for undefined struct "
+          f"'{decl.struct_name}'."
+        )
+        continue
+
+      trait_type = None
+      if decl.trait_name:
+        trait_type = self.symbol_table.lookup_type(decl.trait_name)
+        if not trait_type or not isinstance(trait_type, TraitType):
+          self.error(f"Cannot implement undefined trait '{decl.trait_name}'.")
           continue
-        struct_type = self.symbol_table.lookup_type(decl.struct_name)
-        if not struct_type or not isinstance(struct_type, StructType):
+        struct_type.implemented_traits.add(trait_type.name)
+        struct_type.implemented_trait_types[trait_type.name] = trait_type
+        trait_type.add_implementor(struct_type)
+
+      for member in decl.members:
+        if trait_type and member.func_decl.name in trait_type.methods:
+          trait_method = trait_type.methods[member.func_decl.name]
+          if (
+            member.modifier is None
+            and getattr(trait_method.ast_decl, "modifier", None) == "static"
+          ):
+            member.modifier = "static"
+        func_decl = member.func_decl
+        param_types = []
+        param_mutabilities = []
+        for p in func_decl.parameters:
+          if p.name == "self" and p.param_type is None:
+            ptype = trait_type if trait_type else struct_type
+          else:
+            ptype = self._resolve_type_node(p.param_type)
+          param_types.append(ptype)
+          param_mutabilities.append(p.is_mutable)
+        ret_type = self._resolve_return_types(func_decl)
+        num_defaults = sum(
+          1
+          for p in func_decl.parameters
+          if getattr(p, "default_expr", None) is not None
+        )
+        param_defaults = [
+          getattr(p, "default_expr", None) for p in func_decl.parameters
+        ]
+        signature = FunctionType(
+          param_types,
+          ret_type,
+          param_mutabilities,
+          param_names=[p.name for p in func_decl.parameters],
+          num_defaults=num_defaults,
+          param_defaults=param_defaults,
+          ast_decl=func_decl,
+        )
+
+        method = StructMethod(
+          func_decl.name,
+          signature,
+          member.modifier,
+          impl_trait_name=trait_type.name if trait_type else None,
+        )
+
+        # Validate __del__ destructor and __init__ constructor
+        if func_decl.name == "__del__":
+          if member.modifier == "static":
+            self.error("Destructor '__del__' cannot be static.")
+          if len(func_decl.parameters) > 0:
+            self.error(
+              "Destructor '__del__' must take 0 parameters; 'self' is "
+              "implicitly available."
+            )
+          if not self._is_void_return_list(ret_type):
+            self.error("Destructor '__del__' must return void.")
+        elif func_decl.name == "__init__":
+          if member.modifier == "static":
+            self.error(
+              "Constructor '__init__' cannot be static.", node=func_decl
+            )
+          if not self._is_void_return_list(ret_type):
+            self.error(
+              "Constructor '__init__' must return void.", node=func_decl
+            )
+
+        if func_decl.name in struct_type.methods:
           self.error(
-            "Cannot implement members for undefined struct "
+            f"Method '{func_decl.name}' redefined in struct "
             f"'{decl.struct_name}'."
           )
-          continue
+        struct_type.methods[func_decl.name] = method
 
-        # If implementing a trait
-        trait_type = None
-        if decl.trait_name:
-          trait_type = self.symbol_table.lookup_type(decl.trait_name)
-          if not trait_type or not isinstance(trait_type, TraitType):
-            self.error(f"Cannot implement undefined trait '{decl.trait_name}'.")
-            continue
-          struct_type.implemented_traits.add(trait_type.name)
-          struct_type.implemented_trait_types[trait_type.name] = trait_type
-          trait_type.add_implementor(struct_type)
-
-        for member in decl.members:
-          if trait_type and member.func_decl.name in trait_type.methods:
-            trait_method = trait_type.methods[member.func_decl.name]
-            if (
-              member.modifier is None
-              and getattr(trait_method.ast_decl, "modifier", None) == "static"
-            ):
-              member.modifier = "static"
-          func_decl = member.func_decl
-          # Resolve parameters
-          param_types = []
-          param_mutabilities = []
-          for p in func_decl.parameters:
-            if p.name == "self" and p.param_type is None:
-              ptype = trait_type if trait_type else struct_type
-            else:
-              ptype = self._resolve_type_node(p.param_type)
-            param_types.append(ptype)
-            param_mutabilities.append(p.is_mutable)
-          ret_type = self._resolve_return_types(func_decl)
-          num_defaults = sum(
-            1
-            for p in func_decl.parameters
-            if getattr(p, "default_expr", None) is not None
-          )
-          param_defaults = [
-            getattr(p, "default_expr", None) for p in func_decl.parameters
-          ]
-          signature = FunctionType(
-            param_types,
-            ret_type,
-            param_mutabilities,
-            param_names=[p.name for p in func_decl.parameters],
-            num_defaults=num_defaults,
-            param_defaults=param_defaults,
-            ast_decl=func_decl,
-          )
-
-          method = StructMethod(
-            func_decl.name,
-            signature,
-            member.modifier,
-            impl_trait_name=trait_type.name if trait_type else None,
-          )
-
-          # Validate __del__ destructor and __init__ constructor
-          if func_decl.name == "__del__":
-            if member.modifier == "static":
-              self.error("Destructor '__del__' cannot be static.")
-            if len(func_decl.parameters) > 0:
-              self.error(
-                "Destructor '__del__' must take 0 parameters; 'self' is "
-                "implicitly available."
-              )
-            is_void = len(ret_type) == 0 or (
-              len(ret_type) == 1
-              and (
-                isinstance(ret_type[0], NoneType)
-                or (
-                  isinstance(ret_type[0], PrimitiveType)
-                  and ret_type[0].name in ("none", "void")
-                )
-              )
-            )
-            if not is_void:
-              self.error("Destructor '__del__' must return void.")
-          elif func_decl.name == "__init__":
-            if member.modifier == "static":
-              self.error(
-                "Constructor '__init__' cannot be static.", node=func_decl
-              )
-            is_void = len(ret_type) == 0 or (
-              len(ret_type) == 1
-              and (
-                isinstance(ret_type[0], NoneType)
-                or (
-                  isinstance(ret_type[0], PrimitiveType)
-                  and ret_type[0].name in ("none", "void")
-                )
-              )
-            )
-            if not is_void:
-              self.error(
-                "Constructor '__init__' must return void.", node=func_decl
-              )
-
-          # Check for duplicate definitions
-          if func_decl.name in struct_type.methods:
-            self.error(
-              f"Method '{func_decl.name}' redefined in struct "
-              f"'{decl.struct_name}'."
-            )
-          struct_type.methods[func_decl.name] = method
-
-          # Register on trait if needed
-          if trait_type:
-            pass
-
-    # Propagate nominal trait implementations to child structs (including
-    # transitively across imported parent modules via parent_types).
+  def _propagate_inherited_traits(self, program: ProgramNode) -> None:
+    """Sub-pass 2b: propagates nominal trait impls to child structs."""
     for decl in program.declarations:
-      if isinstance(decl, StructDeclNode) and decl.parent_names:
-        child_type = self.symbol_table.lookup_type(decl.name)
-        if isinstance(child_type, StructType):
-          visited_ids: Set[int] = set()
-          stack: List[StructType] = list(child_type.parent_types)
-          if not stack:
-            for p_name in decl.parent_names:
-              p_type = self.symbol_table.lookup_type(p_name)
-              if isinstance(p_type, StructType):
-                stack.append(p_type)
-          while stack:
-            p_type = stack.pop()
-            if id(p_type) in visited_ids:
-              continue
-            visited_ids.add(id(p_type))
-            child_type.implemented_traits.update(p_type.implemented_traits)
-            for t_name, t_obj in p_type.implemented_trait_types.items():
-              child_type.implemented_trait_types.setdefault(t_name, t_obj)
-              t_obj.add_implementor(child_type)
-            if p_type.parent_types:
-              stack.extend(p_type.parent_types)
-            else:
-              for gp_name in p_type.parent_names:
-                gp_type = self.symbol_table.lookup_type(gp_name)
-                if isinstance(gp_type, StructType):
-                  stack.append(gp_type)
+      if not isinstance(decl, StructDeclNode) or not decl.parent_names:
+        continue
+      child_type = self.symbol_table.lookup_type(decl.name)
+      if not isinstance(child_type, StructType):
+        continue
+      visited_ids: set[int] = set()
+      stack: list[StructType] = list(child_type.parent_types)
+      if not stack:
+        for p_name in decl.parent_names:
+          p_type = self.symbol_table.lookup_type(p_name)
+          if isinstance(p_type, StructType):
+            stack.append(p_type)
+      while stack:
+        p_type = stack.pop()
+        if id(p_type) in visited_ids:
+          continue
+        visited_ids.add(id(p_type))
+        child_type.implemented_traits.update(p_type.implemented_traits)
+        for t_name, t_obj in p_type.implemented_trait_types.items():
+          child_type.implemented_trait_types.setdefault(t_name, t_obj)
+          t_obj.add_implementor(child_type)
+        if p_type.parent_types:
+          stack.extend(p_type.parent_types)
+        else:
+          for gp_name in p_type.parent_names:
+            gp_type = self.symbol_table.lookup_type(gp_name)
+            if isinstance(gp_type, StructType):
+              stack.append(gp_type)
 
-    # Sub-pass 2c: Attach trait default methods onto implementing structs when
-    # not overridden in `impl Trait for Struct` and not inherited from a parent.
-    # Precedence: Child impl Trait > Parent impl Trait > Trait default.
+  def _attach_default_trait_methods(self, program: ProgramNode) -> None:
+    """Sub-pass 2c: attaches non-overridden trait default methods to structs.
+
+    Precedence: Child impl Trait > Parent impl Trait > Trait default.
+    """
     for decl in program.declarations:
       if not isinstance(decl, ImplBlockNode) or not decl.trait_name:
         continue
@@ -386,7 +376,7 @@ class TypeResolverMixin(_TypeCheckerBase):
       if not trait_type.default_methods:
         continue
       decl.default_trait_members = []
-      trait_type_map: Dict[str, Type] = {}
+      trait_type_map: dict[str, Type] = {}
       if trait_type.type_params and getattr(decl, "trait_type_args", None):
         resolved_args = [
           self._resolve_type_node(t) for t in decl.trait_type_args
@@ -408,8 +398,6 @@ class TypeResolverMixin(_TypeCheckerBase):
             )
           continue
         if struct_type.get_method(m_name, self.symbol_table) is not None:
-          # Inherited from an ancestor struct (Parent impl Trait > Trait
-          # default)
           continue
         trait_sig = trait_type.methods[m_name]
         expected_sig = (
@@ -428,7 +416,15 @@ class TypeResolverMixin(_TypeCheckerBase):
           (decl.trait_name, m_name, trait_member.modifier, trait_member)
         )
 
-  def _resolve_return_types(self, node: Any) -> List[Type]:
+  def _register_impl_signatures(self, program: ProgramNode) -> None:
+    """Pre-pass to register methods defined inside impl blocks onto struct
+    types.
+    """
+    self._register_impl_methods(program)
+    self._propagate_inherited_traits(program)
+    self._attach_default_trait_methods(program)
+
+  def _resolve_return_types(self, node: Any) -> list[Type]:
     if isinstance(node, FunctionTypeNode):
       return [self._resolve_type_node(t) for t in node.return_types]
     if hasattr(node, "return_types") and node.return_types:
@@ -438,14 +434,14 @@ class TypeResolverMixin(_TypeCheckerBase):
     else:
       return [PrimitiveType("none")]
 
-  def _resolve_type_node(self, node: Optional[TypeNode]) -> Type:
+  def _resolve_type_node(self, node: TypeNode | None) -> Type:
     """Helper to map an AST TypeNode into a semantic Type object."""
     res = self._do_resolve_type_node(node)
     if node and res:
       self.context.record_type(node, res)
     return res
 
-  def _do_resolve_type_node(self, node: Optional[TypeNode]) -> Type:
+  def _do_resolve_type_node(self, node: TypeNode | None) -> Type:
     if not node:
       return PrimitiveType("none")
     if isinstance(node, BasicTypeNode):
@@ -547,8 +543,8 @@ class TypeResolverMixin(_TypeCheckerBase):
 
   def _analyze_global_accesses(self, program: ProgramNode) -> None:
     """Pre-analyzes module-level mutable var globals and call graph accesses."""
-    self.module_var_globals: Set[str] = set()
-    self.exported_symbols: Set[str] = set()
+    self.module_var_globals: set[str] = set()
+    self.exported_symbols: set[str] = set()
     for decl in program.declarations:
       if (
         isinstance(decl, VarDeclNode)
@@ -562,9 +558,9 @@ class TypeResolverMixin(_TypeCheckerBase):
         self.exported_symbols.add(spec.symbol)
     self.exported_var_globals = self.module_var_globals & self.exported_symbols
 
-    self.func_direct_globals: Dict[str, Set[str]] = {}
-    self.func_direct_calls: Dict[str, Set[str]] = {}
-    self.func_has_dynamic: Set[str] = set()
+    self.func_direct_globals: dict[str, set[str]] = {}
+    self.func_direct_calls: dict[str, set[str]] = {}
+    self.func_has_dynamic: set[str] = set()
 
     for decl in program.declarations:
       if isinstance(decl, FuncDeclNode):
@@ -608,10 +604,10 @@ class TypeResolverMixin(_TypeCheckerBase):
 
   def _analyze_method_self_fields(self, program: ProgramNode) -> None:
     """Computes bounded self.<field> access sets for struct methods."""
-    self._method_self_field_accesses: Dict[
-      Tuple[str, str], Optional[Set[str]]
+    self._method_self_field_accesses: dict[
+      tuple[str, str], set[str] | None
     ] = {}
-    direct_calls: Dict[Tuple[str, str], Set[str]] = {}
+    direct_calls: dict[tuple[str, str], set[str]] = {}
 
     def _scan_method(struct_name: str, fdecl: FuncDeclNode) -> None:
       key = (struct_name, fdecl.name)
@@ -619,8 +615,8 @@ class TypeResolverMixin(_TypeCheckerBase):
         self._method_self_field_accesses[key] = None
         return
 
-      fields: Set[str] = set()
-      calls: Set[str] = set()
+      fields: set[str] = set()
+      calls: set[str] = set()
       unknown = False
 
       def _walk(node: Any, parent: Any = None) -> None:
@@ -691,11 +687,11 @@ class TypeResolverMixin(_TypeCheckerBase):
     self,
     func_id: str,
     decl: FuncDeclNode,
-    struct_name: Optional[str] = None,
+    struct_name: str | None = None,
   ) -> None:
-    direct_globals: Set[str] = set()
-    direct_calls: Set[str] = set()
-    local_names: Set[str] = {p.name for p in decl.parameters}
+    direct_globals: set[str] = set()
+    direct_calls: set[str] = set()
+    local_names: set[str] = {p.name for p in decl.parameters}
     if struct_name:
       local_names.add("self")
 
@@ -798,10 +794,10 @@ class TypeResolverMixin(_TypeCheckerBase):
     self.func_direct_globals[func_id] = direct_globals
     self.func_direct_calls[func_id] = direct_calls
 
-  def _scan_lambda_stack_borrows(self, lambda_node: LambdaNode) -> Set[str]:
+  def _scan_lambda_stack_borrows(self, lambda_node: LambdaNode) -> set[str]:
     """Finds enclosing local stack non-primitive or var bindings in lambda."""
-    local_names: Set[str] = {p.name for p in lambda_node.parameters}
-    borrows: Set[str] = set()
+    local_names: set[str] = {p.name for p in lambda_node.parameters}
+    borrows: set[str] = set()
 
     def walk(node: Any) -> None:
       if node is None:
@@ -884,13 +880,13 @@ class TypeResolverMixin(_TypeCheckerBase):
 
   def _scan_lambda_capture_modes(
     self, lambda_node: LambdaNode
-  ) -> Tuple[Set[str], Set[str]]:
+  ) -> tuple[set[str], set[str]]:
     """Returns `(mutated_captures, read_captures)` for outer variables in
     *lambda_node*.
     """
-    local_names: Set[str] = {p.name for p in lambda_node.parameters}
-    mutated: Set[str] = set()
-    read: Set[str] = set()
+    local_names: set[str] = {p.name for p in lambda_node.parameters}
+    mutated: set[str] = set()
+    read: set[str] = set()
     collection_mutators = {
       "push",
       "pop",

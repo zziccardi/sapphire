@@ -5,10 +5,10 @@ signatures used by the semantic analyzer and LSP.
 """
 
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Optional
 
 
-def _modules_match(m1: Optional[str], m2: Optional[str]) -> bool:
+def _modules_match(m1: str | None, m2: str | None) -> bool:
   """Returns True if two optional defining_module paths refer to the same
   module.
   """
@@ -56,8 +56,8 @@ class Type:
 
   def is_move_only_type(
     self,
-    symbol_table: Optional[Any] = None,
-    _seen: Optional[Set[str]] = None,
+    symbol_table: Any | None = None,
+    _seen: set[str] | None = None,
   ) -> bool:
     """Returns True if values of this type have Move-Only ownership."""
     if isinstance(self, (RefType, ArenaType, CoroutineType)):
@@ -141,7 +141,7 @@ class OptionalType(Type):
 class MultiReturnType(Type):
   """Represents a multi-return type tuple (e.g. (float, float))."""
 
-  def __init__(self, types: List[Type]):
+  def __init__(self, types: list[Type]):
     self.types = types
 
   def __eq__(self, other: object) -> bool:
@@ -163,15 +163,15 @@ class FunctionType(Type):
 
   def __init__(
     self,
-    param_types: List[Type],
+    param_types: list[Type],
     return_type: Any,
-    param_mutabilities: Optional[List[bool]] = None,
-    param_names: Optional[List[str]] = None,
+    param_mutabilities: list[bool] | None = None,
+    param_names: list[str] | None = None,
     has_self: bool = False,
-    extern_name: Optional[str] = None,
+    extern_name: str | None = None,
     num_defaults: int = 0,
-    param_defaults: Optional[List[Any]] = None,
-    ast_decl: Optional[Any] = None,
+    param_defaults: list[Any] | None = None,
+    ast_decl: Any | None = None,
   ):
     self.param_types = param_types
     if isinstance(return_type, list):
@@ -193,9 +193,11 @@ class FunctionType(Type):
     self.num_defaults = num_defaults
     self.param_defaults = param_defaults or [None] * len(param_types)
     self.ast_decl = ast_decl
+    self.comments: Any = None
+    self.is_testing_assertion: bool = False
 
   @property
-  def return_types(self) -> List[Type]:
+  def return_types(self) -> list[Type]:
     if isinstance(self.return_type, MultiReturnType):
       return self.return_type.types
     elif isinstance(self.return_type, NoneType) or (
@@ -294,9 +296,9 @@ class StructMethod:
     self,
     name: str,
     method_type: FunctionType,
-    modifier: Optional[str],
+    modifier: str | None,
     is_trait_default: bool = False,
-    impl_trait_name: Optional[str] = None,
+    impl_trait_name: str | None = None,
   ):
     self.name = name
     self.method_type = method_type
@@ -329,13 +331,13 @@ class StructType(Type):
   def __init__(
     self,
     name: str,
-    parent_names: Optional[Union[str, List[str]]] = None,
+    parent_names: str | list[str] | None = None,
     is_prototype: bool = False,
-    comments: Optional[str] = None,
-    type_params: Optional[List[str]] = None,
-    ast_decl: Optional[Any] = None,
-    parent_name: Optional[str] = None,
-    defining_module: Optional[str] = None,
+    comments: str | None = None,
+    type_params: list[str] | None = None,
+    ast_decl: Any | None = None,
+    parent_name: str | None = None,
+    defining_module: str | None = None,
     is_imported: bool = False,
   ):
     self.name = name
@@ -345,11 +347,11 @@ class StructType(Type):
       self.parent_names = [parent_names]
     else:
       self.parent_names = list(parent_names)
-    self.parent_types: List["StructType"] = []
-    self.fields: Dict[str, StructField] = {}
-    self.methods: Dict[str, StructMethod] = {}
-    self.implemented_traits: Set[str] = set()
-    self.implemented_trait_types: Dict[str, "TraitType"] = {}
+    self.parent_types: list[StructType] = []
+    self.fields: dict[str, StructField] = {}
+    self.methods: dict[str, StructMethod] = {}
+    self.implemented_traits: set[str] = set()
+    self.implemented_trait_types: dict[str, TraitType] = {}
     self.is_cloned = False  # Set during clone-tracking analysis
     self.is_prototype = is_prototype
     self.comments = comments or ""
@@ -359,7 +361,7 @@ class StructType(Type):
     self.is_imported = is_imported
 
   @property
-  def parent_name(self) -> Optional[str]:
+  def parent_name(self) -> str | None:
     return self.parent_names[0] if self.parent_names else None
 
   @property
@@ -368,8 +370,8 @@ class StructType(Type):
 
   def has_any_destructor(
     self,
-    symbol_table: Optional[Any] = None,
-    _seen: Optional[Set[str]] = None,
+    symbol_table: Any | None = None,
+    _seen: set[str] | None = None,
   ) -> bool:
     """Returns True if this struct or any ancestor struct defines '__del__'."""
     if "__del__" in self.methods:
@@ -393,7 +395,7 @@ class StructType(Type):
     return False
 
   @parent_name.setter
-  def parent_name(self, value: Optional[str]) -> None:
+  def parent_name(self, value: str | None) -> None:
     if value is None:
       self.parent_names = []
     else:
@@ -402,8 +404,8 @@ class StructType(Type):
   def has_ancestor(
     self,
     target: "StructType",
-    symbol_table: Optional[Any] = None,
-    _seen: Optional[Set[Tuple[Optional[str], str]]] = None,
+    symbol_table: Any | None = None,
+    _seen: set[tuple[str | None, str]] | None = None,
   ) -> bool:
     """Returns True if *target* is a strict transitive parent of this struct."""
     seen = set() if _seen is None else set(_seen)
@@ -412,7 +414,7 @@ class StructType(Type):
       return False
     seen.add(key)
 
-    parents: List[StructType] = list(self.parent_types)
+    parents: list[StructType] = list(self.parent_types)
     if not parents and self.parent_names and symbol_table:
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)
@@ -430,7 +432,7 @@ class StructType(Type):
     return False
 
   def get_method(
-    self, name: str, symbol_table: Optional[Any] = None
+    self, name: str, symbol_table: Any | None = None
   ) -> Optional["StructMethod"]:
     """Look up a method on this struct, falling back to parent structs if
     symbol_table is provided.
@@ -452,7 +454,7 @@ class StructType(Type):
     return None
 
   def implements_trait(
-    self, trait: "TraitType", symbol_table: Optional[Any] = None
+    self, trait: "TraitType", symbol_table: Any | None = None
   ) -> bool:
     """Returns True if this struct nominally implements the given trait
     (directly
@@ -495,19 +497,19 @@ class TraitType(Type):
   def __init__(
     self,
     name: str,
-    comments: Optional[str] = None,
-    type_params: Optional[List[str]] = None,
-    ast_decl: Optional[Any] = None,
-    defining_module: Optional[str] = None,
+    comments: str | None = None,
+    type_params: list[str] | None = None,
+    ast_decl: Any | None = None,
+    defining_module: str | None = None,
   ):
     self.name = name
-    self.methods: Dict[str, FunctionType] = {}
-    self.default_methods: Dict[str, Any] = {}
+    self.methods: dict[str, FunctionType] = {}
+    self.default_methods: dict[str, Any] = {}
     self.comments = comments or ""
     self.type_params = type_params or []
     self.ast_decl = ast_decl
     self.defining_module = defining_module
-    self.implementors: List[StructType] = []
+    self.implementors: list[StructType] = []
 
   def add_implementor(self, struct_type: "StructType") -> None:
     """Records a struct or proto that implements this trait."""
@@ -535,12 +537,12 @@ class EnumType(Type):
   def __init__(
     self,
     name: str,
-    variants: Optional[Dict[str, Union[int, str]]] = None,
-    comments: Optional[str] = None,
-    defining_module: Optional[str] = None,
+    variants: dict[str, int | str] | None = None,
+    comments: str | None = None,
+    defining_module: str | None = None,
   ):
     self.name = name
-    self.variants: Dict[str, Union[int, str]] = variants or {}
+    self.variants: dict[str, int | str] = variants or {}
     self.comments = comments or ""
     self.defining_module = defining_module
 
@@ -628,8 +630,8 @@ class ArrayType(Type):
   def __init__(
     self,
     element_type: Type,
-    size: Optional[int] = None,
-    is_fixed_size: Optional[bool] = None,
+    size: int | None = None,
+    is_fixed_size: bool | None = None,
   ):
     self.element_type = element_type
     self.size = size
@@ -704,7 +706,7 @@ class MapType(Type):
 class CoroutineType(Type):
   """Represents a Coroutine type (e.g. 'Coroutine<T>' or 'Coroutine<void>')."""
 
-  def __init__(self, yield_type: Optional[Type] = None):
+  def __init__(self, yield_type: Type | None = None):
     self.yield_type = yield_type if yield_type is not None else NoneType()
 
   def is_compatible(self, other: "Type") -> bool:
@@ -800,14 +802,14 @@ class WeakRefType(Type):
     return f"WeakRef<{self.inner_type}>"
 
 
-COROUTINE_METHODS: Set[str] = {
+COROUTINE_METHODS: set[str] = {
   "step",
   "is_done",
   "reset",
 }
 
 
-STRING_METHODS: Dict[str, FunctionType] = {
+STRING_METHODS: dict[str, FunctionType] = {
   "size": FunctionType(
     [StringType()],
     PrimitiveType("int"),
@@ -897,7 +899,7 @@ STRING_METHODS: Dict[str, FunctionType] = {
 }
 
 
-ARRAY_METHODS: Dict[str, bool] = {
+ARRAY_METHODS: dict[str, bool] = {
   "size": True,
   "empty": True,
   "contains": True,
@@ -917,7 +919,7 @@ ARRAY_METHODS: Dict[str, bool] = {
 }
 
 
-MAP_METHODS: Dict[str, bool] = {
+MAP_METHODS: dict[str, bool] = {
   "size": True,
   "empty": True,
   "contains": True,

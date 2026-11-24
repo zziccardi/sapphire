@@ -5,7 +5,8 @@ standard data structures (String, Array, Map, Range, and Enum) across Python
 and Lua backends.
 """
 
-from typing import Any, Callable, Dict, List, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from src.parser.ast import (
   ASTNode,
@@ -44,8 +45,8 @@ def emit_in_call_order(
   target: str,
   transpiler: Any,
   node: CallNode,
-  canonical_exprs: List[Any],
-  emit_fn: Callable[[List[Any]], None],
+  canonical_exprs: list[Any],
+  emit_fn: Callable[[list[Any]], None],
 ) -> None:
   """Emits an intrinsic call while preserving left-to-right source evaluation
   order.
@@ -70,8 +71,8 @@ def emit_in_call_order(
     return
 
   next_tmp = getattr(transpiler, "_next_temp_name", None)
-  params: List[str] = []
-  source_vals: List[Any] = []
+  params: list[str] = []
+  source_vals: list[Any] = []
   has_recv = isinstance(node.callee, MemberAccessNode)
   orig_recv = node.callee.receiver if has_recv else None
 
@@ -80,7 +81,7 @@ def emit_in_call_order(
     params.append(recv_tmp)
     source_vals.append(orig_recv)
 
-  expr_map: Dict[int, IdentifierNode] = {}
+  expr_map: dict[int, IdentifierNode] = {}
   for idx, expr in enumerate(source_exprs):
     arg_tmp = next_tmp("_ia") if next_tmp else f"_ia_{idx + 1}"
     params.append(arg_tmp)
@@ -125,7 +126,7 @@ class IntrinsicRegistry:
   operations.
   """
 
-  _handlers: Dict[Tuple[str, str, str], Callable[[Any, CallNode], None]] = {}
+  _handlers: dict[tuple[str, str, str], Callable[[Any, CallNode], None]] = {}
 
   @classmethod
   def register(cls, category: str, method: str, target: str):
@@ -213,7 +214,7 @@ class IntrinsicRegistry:
 # ==============================================================================
 
 
-def _resolve_range_args(node: CallNode) -> List[ASTNode]:
+def _resolve_range_args(node: CallNode) -> list[ASTNode]:
   """Resolves range() arguments into canonical (stop) / (start, stop[, step]).
   """
   pos_args = [arg for arg in node.arguments if not arg.name]
@@ -255,7 +256,7 @@ def _resolve_range_args(node: CallNode) -> List[ASTNode]:
 def _emit_range_py(transpiler: Any, node: CallNode) -> None:
   args = _resolve_range_args(node)
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("range(")
     for idx, expr in enumerate(exprs):
       if idx > 0:
@@ -270,7 +271,7 @@ def _emit_range_py(transpiler: Any, node: CallNode) -> None:
 def _emit_range_lua(transpiler: Any, node: CallNode) -> None:
   args = _resolve_range_args(node)
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_range(")
     for idx, expr in enumerate(exprs):
       if idx > 0:
@@ -281,7 +282,7 @@ def _emit_range_lua(transpiler: Any, node: CallNode) -> None:
   emit_in_call_order("lua", transpiler, node, args, _emit)
 
 
-def _resolve_assert_args(node: CallNode) -> Tuple[Any, Any]:
+def _resolve_assert_args(node: CallNode) -> tuple[Any, Any]:
   """Resolves assert(cond, msg?) arguments."""
   pos_args = [arg.expr for arg in node.arguments if not arg.name]
   named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
@@ -299,7 +300,7 @@ def _resolve_assert_args(node: CallNode) -> Tuple[Any, Any]:
 def _emit_assert_py(transpiler: Any, node: CallNode) -> None:
   cond_expr, msg_expr = _resolve_assert_args(node)
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_assert(")
     transpiler.visit(exprs[0])
     transpiler.emit(", ")
@@ -316,7 +317,7 @@ def _emit_assert_py(transpiler: Any, node: CallNode) -> None:
 def _emit_assert_lua(transpiler: Any, node: CallNode) -> None:
   cond_expr, msg_expr = _resolve_assert_args(node)
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("assert(")
     transpiler.visit(exprs[0])
     transpiler.emit(", ")
@@ -444,7 +445,7 @@ def _emit_str_strip_lua(transpiler: Any, node: CallNode) -> None:
   transpiler.emit(")")
 
 
-def _resolve_slice_args(node: CallNode) -> Tuple[Any, Any]:
+def _resolve_slice_args(node: CallNode) -> tuple[Any, Any]:
   """Resolves String.slice(start, end?) arguments."""
   pos_args = [arg.expr for arg in node.arguments if not arg.name]
   named_args = {arg.name: arg.expr for arg in node.arguments if arg.name}
@@ -461,7 +462,7 @@ def _resolve_slice_args(node: CallNode) -> Tuple[Any, Any]:
 def _emit_str_slice_py(transpiler: Any, node: CallNode) -> None:
   start_expr, end_expr = _resolve_slice_args(node)
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.visit(node.callee.receiver)
     transpiler.emit("[")
     transpiler.visit(exprs[0])
@@ -477,7 +478,7 @@ def _emit_str_slice_py(transpiler: Any, node: CallNode) -> None:
 def _emit_str_slice_lua(transpiler: Any, node: CallNode) -> None:
   start_expr, end_expr = _resolve_slice_args(node)
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_string_slice(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -542,7 +543,7 @@ def _emit_str_find_py(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "find", "lua")
 def _emit_str_find_lua(transpiler: Any, node: CallNode) -> None:
-  args_by_param: List[Any] = [None, None, None]
+  args_by_param: list[Any] = [None, None, None]
   param_names = ["sub", "start", "reverse"]
   for idx, arg in enumerate(node.arguments):
     if arg.name and arg.name in param_names:
@@ -553,7 +554,7 @@ def _emit_str_find_lua(transpiler: Any, node: CallNode) -> None:
   while args_by_param and args_by_param[-1] is None:
     args_by_param.pop()
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_string_find(")
     transpiler.visit(node.callee.receiver)
     for p_expr in exprs:

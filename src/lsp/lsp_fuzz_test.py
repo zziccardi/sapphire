@@ -100,7 +100,7 @@ class TestLspFuzz(unittest.TestCase):
     for rel_path in _CORPUS_FILES:
       full_path = os.path.join(_REPO_ROOT, rel_path)
       if os.path.isfile(full_path):
-        with open(full_path, "r", encoding="utf-8") as f:
+        with open(full_path, encoding="utf-8") as f:
           sources.append((rel_path, f.read()))
     self.assertGreater(len(sources), 0, "Expected non-empty Sapphire corpus")
     return sources

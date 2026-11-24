@@ -1,6 +1,6 @@
 """Statement and control-flow code generation mixin for LuaTranspiler."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from src.code_gen.base_transpiler import (
   extract_type_name,
@@ -53,7 +53,7 @@ _OPTIONAL_CAST_FN_MAP = {
 }
 
 
-def _get_optional_cast_fn(node: CastExprNode) -> Optional[str]:
+def _get_optional_cast_fn(node: CastExprNode) -> str | None:
   """Returns the Lua cast helper for an optional primitive cast, or None."""
   if not isinstance(node.target_type, OptionalTypeNode):
     return None
@@ -62,7 +62,7 @@ def _get_optional_cast_fn(node: CastExprNode) -> Optional[str]:
   return _OPTIONAL_CAST_FN_MAP.get(target)
 
 
-def _extract_const_int(expr: Any) -> Optional[int]:
+def _extract_const_int(expr: Any) -> int | None:
   """Extracts a compile-time integer literal (with optional unary +/-)."""
   if isinstance(expr, LiteralNode) and expr.lit_type == "int":
     return int(expr.value)
@@ -279,7 +279,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
   def _visit_block(
     self,
     node: BlockNode,
-    extra_destructibles: Optional[List[str]] = None,
+    extra_destructibles: list[str] | None = None,
   ) -> None:
     """Visits a BlockNode with LIFO RAII teardown and Lua 5.1 terminator safety.
     """
@@ -530,7 +530,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
         if isinstance(v, (ASTNode, list)):
           self._lift_match_expressions(v)
 
-  def _emit_writebacks(self, targets: List[Any]) -> None:
+  def _emit_writebacks(self, targets: list[Any]) -> None:
     """Emits writeback statements for any `if var`/`guard var`/`for var`
     bindings
     in *targets*.
@@ -567,7 +567,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
 
   def _emit_binding_rhs_and_writeback(
     self, binding: Any, val_var: str
-  ) -> Optional[tuple]:
+  ) -> tuple | None:
     """Emits evaluation of a header/guard binding into `val_var` and returns
     writeback metadata.
     """
@@ -1012,7 +1012,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
     self._pending_destroy_moved_vars.clear()
 
   def _emit_match_statement(
-    self, node: MatchExprNode, target_var: Optional[str] = ""
+    self, node: MatchExprNode, target_var: str | None = ""
   ) -> str:
     self._lift_match_expressions(node.subject)
 
@@ -1026,7 +1026,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
     self.emit(f"local {subj_var} = ")
     self.visit(node.subject)
 
-    done_flag: Optional[str] = None
+    done_flag: str | None = None
     if target_var and any(
       self._arm_needs_done_flag(c.body) for c in node.cases
     ):
@@ -1222,7 +1222,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
 
       self.indent()
       self.newline()
-      mangled_names: List[str] = []
+      mangled_names: list[str] = []
       if len(let_names) > 1:
         for idx, name in enumerate(let_names):
           m_n = self._mangle_name(name)
@@ -1235,7 +1235,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
         mangled_names.append(m_n)
         self.emit(f"local {m_n} = {val_var}")
 
-      extra_destructibles: List[str] = []
+      extra_destructibles: list[str] = []
       if is_owned_destructible:
         for m_n in mangled_names:
           self.variable_types[m_n] = st_name
@@ -1285,7 +1285,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
     self.newline()
     self.emit("end")
 
-  def _emit_multi_binding_if(self, node: IfNode, bindings: List[Any]) -> None:
+  def _emit_multi_binding_if(self, node: IfNode, bindings: list[Any]) -> None:
     """Emits multi-binding `if` with sequential short-circuiting and LIFO
     cleanup.
     """
@@ -1296,8 +1296,8 @@ class LuaStmtMixin(_LuaTranspilerBase):
 
     def emit_binding_level(
       idx: int,
-      prior_destructibles: List[str],
-      wb_entries: Dict[str, tuple],
+      prior_destructibles: list[str],
+      wb_entries: dict[str, tuple],
     ) -> None:
       if idx < len(bindings):
         b = bindings[idx]
@@ -1317,7 +1317,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
           self.emit(f"if {val_var} ~= nil then")
           self.indent()
           self.newline()
-          mangled_names: List[str] = []
+          mangled_names: list[str] = []
           if len(let_names) > 1:
             for n_idx, name in enumerate(let_names):
               m_n = self._mangle_name(name)
@@ -1504,7 +1504,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
       is_mut = getattr(node, "is_mutable", False)
 
       close_guard_if = False
-      array_elem_binding: Optional[str] = None
+      array_elem_binding: str | None = None
       is_direct_range = (
         isinstance(node.iterable, CallNode)
         and isinstance(node.iterable.callee, IdentifierNode)
@@ -1688,7 +1688,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
           self.emit("end")
           self.newline()
 
-        mangled_names: List[str] = []
+        mangled_names: list[str] = []
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
             m_n = self._mangle_name(name)

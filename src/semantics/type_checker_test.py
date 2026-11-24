@@ -2507,7 +2507,7 @@ class TestTypeChecker(unittest.TestCase):
     """Verifies that type checking graphics.sp automatically resolves lib.love2d.enums."""
     import os
     graphics_path = os.path.join("lib", "love2d", "graphics.sp")
-    with open(graphics_path, "r", encoding="utf-8") as f:
+    with open(graphics_path, encoding="utf-8") as f:
       code = f.read()
 
     input_stream = InputStream(code)

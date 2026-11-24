@@ -5,7 +5,8 @@ checks, container mutation freezes, and call-site mutable reference
 aliasing checks from ArenaChecker.
 """
 
-from typing import Any, Callable, List, Optional, Set, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from src.parser.ast import (
   ArrayLiteralNode,
@@ -51,7 +52,7 @@ class BorrowChecker:
   @staticmethod
   def collect_stack_borrow_symbols(
     symbol_table: SymbolTable, node: Any, checker: Any = None
-  ) -> Set[str]:
+  ) -> set[str]:
     """Collects variable names of local stack borrows attached to *node*."""
     if node is None:
       return set()
@@ -76,7 +77,7 @@ class BorrowChecker:
         symbol_table, node.expr, checker
       )
     if isinstance(node, BinaryOpNode):
-      out: Set[str] = set()
+      out: set[str] = set()
       out.update(
         BorrowChecker.collect_stack_borrow_symbols(
           symbol_table, node.left, checker
@@ -321,8 +322,8 @@ class BorrowChecker:
   def validate_container_mutation(
     checker: Any,
     receiver_expr: ASTNode,
-    value_exprs: List[ASTNode],
-    error_node: Optional[ASTNode] = None,
+    value_exprs: list[ASTNode],
+    error_node: ASTNode | None = None,
   ) -> None:
     """Propagates arena deps from *value_exprs* into *receiver_expr*'s root."""
     root = ArenaChecker.get_root_identifier(receiver_expr)
@@ -417,7 +418,7 @@ class BorrowChecker:
       param_muts = param_muts[1:]
       param_names = param_names[1:] if param_names else []
 
-    var_indices: List[int] = []
+    var_indices: list[int] = []
     for idx, arg in enumerate(node.arguments):
       param_idx = idx
       if arg.name and param_names and arg.name in param_names:
@@ -428,7 +429,7 @@ class BorrowChecker:
     if not var_indices:
       return
 
-    other_exprs: List[ASTNode] = list(arg_exprs)
+    other_exprs: list[ASTNode] = list(arg_exprs)
     if isinstance(node.callee, MemberAccessNode):
       other_exprs.append(node.callee.receiver)
 
@@ -443,7 +444,7 @@ class BorrowChecker:
   @staticmethod
   def get_lvalue_path(
     symbol_table: SymbolTable, node: ASTNode
-  ) -> Optional[Tuple[str, List[str]]]:
+  ) -> tuple[str, list[str]] | None:
     """Resolves an AST node to its root variable name and field path if it is an
     lvalue.
     """
@@ -479,7 +480,7 @@ class BorrowChecker:
     checker: Any,
     node: CallNode,
     is_constructor: bool,
-    borrows: List[Tuple[str, List[str], bool]],
+    borrows: list[tuple[str, list[str], bool]],
   ) -> None:
     """Records and validates the implicit `self` borrow for non-static method
     calls.
@@ -504,7 +505,7 @@ class BorrowChecker:
     if checker.has_shared_ref_base(receiver_node):
       is_shared_ref = True
 
-    modifier: Optional[str] = None
+    modifier: str | None = None
     has_method = False
     if isinstance(receiver_type, StructType):
       method = receiver_type.get_method(
@@ -585,7 +586,7 @@ class BorrowChecker:
     node: CallNode,
     signature: FunctionType,
     is_constructor: bool,
-    borrows: List[Tuple[str, List[str], bool]],
+    borrows: list[tuple[str, list[str], bool]],
   ) -> None:
     """Records and validates borrows for call arguments (references and `var`
     params).
@@ -661,13 +662,13 @@ class BorrowChecker:
   def _collect_closure_capture_borrows(
     checker: Any,
     expr: ASTNode,
-    borrows: List[Tuple[str, List[str], bool]],
+    borrows: list[tuple[str, list[str], bool]],
   ) -> None:
     """Appends borrows for outer variables captured by a closure callee or
     argument.
     """
-    mut_caps: Set[str] = set()
-    read_caps: Set[str] = set()
+    mut_caps: set[str] = set()
+    read_caps: set[str] = set()
     if isinstance(expr, LambdaNode):
       mut_caps = set(getattr(expr, "closure_mutated_captures", set()))
       read_caps = set(getattr(expr, "closure_read_captures", set()))
@@ -685,7 +686,7 @@ class BorrowChecker:
   def _check_borrow_conflicts(
     checker: Any,
     node: CallNode,
-    borrows: List[Tuple[str, List[str], bool]],
+    borrows: list[tuple[str, list[str], bool]],
   ) -> None:
     """Checks pairwise exclusivity and prototype-ancestor conflicts among
     borrows.
@@ -752,7 +753,7 @@ class BorrowChecker:
     """Verifies that call receiver, arguments, and closure captures do not alias
     mutably.
     """
-    borrows: List[Tuple[str, List[str], bool]] = []
+    borrows: list[tuple[str, list[str], bool]] = []
     BorrowChecker._collect_receiver_borrow(
       checker, node, is_constructor, borrows
     )

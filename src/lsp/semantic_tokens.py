@@ -6,7 +6,7 @@ format required
 by the Language Server Protocol.
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from src.parser.ast import ASTNode
 from src.semantics.symbol_table import (
@@ -67,7 +67,7 @@ def utf16_to_codepoint(line_text: str, utf16_col: int) -> int:
 
 def codepoint_span_to_utf16(
   line_text: str, start_cp: int, length_cp: int
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
   """Converts a (start_col, length) code-point span to UTF-16 (start, length).
   """
   start_u16 = codepoint_to_utf16(line_text, start_cp)
@@ -75,7 +75,7 @@ def codepoint_span_to_utf16(
   return start_u16, max(0, end_u16 - start_u16)
 
 
-def get_doc_line(ls: Any, uri: str, line_1based: int) -> Optional[str]:
+def get_doc_line(ls: Any, uri: str, line_1based: int) -> str | None:
   """Returns the 1-based line text for *uri* from the workspace if available."""
   try:
     workspace = getattr(ls, "workspace", None)
@@ -92,7 +92,7 @@ def get_doc_line(ls: Any, uri: str, line_1based: int) -> Optional[str]:
   return None
 
 
-def extract_comments_above(doc_text: str, start_line: Optional[int]) -> str:
+def extract_comments_above(doc_text: str, start_line: int | None) -> str:
   """Extracts comments directly above start_line (1-based)."""
   if start_line is None:
     return ""
@@ -157,17 +157,17 @@ class SemanticTokensTypeChecker(TypeChecker):
   """Subclass of TypeChecker that extracts semantic tokens during analysis."""
 
   def __init__(
-    self, doc_text: Optional[str] = None, source_file_path: Optional[str] = None
+    self, doc_text: str | None = None, source_file_path: str | None = None
   ):
     super().__init__(source_content=doc_text, source_file_path=source_file_path)
     self.doc_text = doc_text
     # List of raw tokens: (line, column, length, token_type, modifier_bitmask)
-    self.raw_tokens: List[Tuple[int, int, int, str, int]] = []
-    self.current_node: Optional[ASTNode] = None
-    self.lsp_errors: List[dict] = []
-    self.lsp_warnings: List[dict] = []
+    self.raw_tokens: list[tuple[int, int, int, str, int]] = []
+    self.current_node: ASTNode | None = None
+    self.lsp_errors: list[dict] = []
+    self.lsp_warnings: list[dict] = []
     self.node_types: dict = self.context.node_types
-    self.current_trait: Optional[Any] = None
+    self.current_trait: Any | None = None
     self._in_monomorphization: bool = False
 
   def visit(self, node: ASTNode) -> Any:
@@ -197,7 +197,7 @@ class SemanticTokensTypeChecker(TypeChecker):
             self.visit(item)
     return None
 
-  def _resolve_type_node(self, node: Optional[ASTNode]) -> Any:
+  def _resolve_type_node(self, node: ASTNode | None) -> Any:
     if node:
       self.visit(node)
     res = super()._resolve_type_node(node)
@@ -206,8 +206,8 @@ class SemanticTokensTypeChecker(TypeChecker):
     return res
 
   def _build_lsp_diagnostic(
-    self, message: str, severity: int, node: Optional[ASTNode] = None
-  ) -> Tuple[Optional[ASTNode], dict]:
+    self, message: str, severity: int, node: ASTNode | None = None
+  ) -> tuple[ASTNode | None, dict]:
     target_node = node or self.current_node
     line = 1
     col = 0
@@ -240,21 +240,21 @@ class SemanticTokensTypeChecker(TypeChecker):
       "source": "sapphire-semantic",
     }
 
-  def error(self, message: str, node: Optional[ASTNode] = None) -> None:
+  def error(self, message: str, node: ASTNode | None = None) -> None:
     target_node, diagnostic = self._build_lsp_diagnostic(message, 1, node)
     self.lsp_errors.append(diagnostic)
     super().error(message, node=target_node)
 
-  def warning(self, message: str, node: Optional[ASTNode] = None) -> None:
+  def warning(self, message: str, node: ASTNode | None = None) -> None:
     target_node, diagnostic = self._build_lsp_diagnostic(message, 2, node)
     self.lsp_warnings.append(diagnostic)
     super().warning(message, node=target_node)
 
   def add_token(
     self,
-    line: Optional[int],
-    col: Optional[int],
-    length: Optional[int],
+    line: int | None,
+    col: int | None,
+    length: int | None,
     token_type: str,
     modifiers: int = 0,
   ) -> None:
@@ -827,9 +827,9 @@ class SemanticTokensTypeChecker(TypeChecker):
 
 
 def encode_semantic_tokens(
-  raw_tokens: List[Tuple[int, int, int, str, int]],
-  doc_text: Optional[str] = None,
-) -> List[int]:
+  raw_tokens: list[tuple[int, int, int, str, int]],
+  doc_text: str | None = None,
+) -> list[int]:
   """Converts absolute token coordinate tuples into delta-encoded LSP format."""
   lines = doc_text.splitlines() if isinstance(doc_text, str) else None
 
@@ -854,7 +854,7 @@ def encode_semantic_tokens(
   # 3. Deduplicate and drop overlapping tokens (LSP requires strictly
   # non-overlapping ranges)
   unique_tokens = []
-  last_end: Optional[Tuple[int, int]] = None
+  last_end: tuple[int, int] | None = None
   for t in valid_tokens:
     t_line, t_col, t_len = t[0], t[1], t[2]
     if last_end is not None and t_line == last_end[0] and t_col < last_end[1]:
@@ -863,7 +863,7 @@ def encode_semantic_tokens(
     last_end = (t_line, t_col + t_len)
 
   # 4. Generate delta-encoded array
-  delta_tokens: List[int] = []
+  delta_tokens: list[int] = []
   last_line = 0
   last_col = 0
 
@@ -885,7 +885,7 @@ def encode_semantic_tokens(
 
 def find_node_at_position(
   node: ASTNode, line: int, col: int
-) -> Optional[ASTNode]:
+) -> ASTNode | None:
   """Recursively finds the most specific AST node containing (line, col).
 
   Line is 1-based, col is 0-based (code-point offset; end_column is exclusive).

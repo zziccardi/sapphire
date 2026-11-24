@@ -5,7 +5,7 @@ tokens for accurate syntax highlighting in Visual Studio Code.
 """
 
 import os
-from typing import Any, List, Optional
+from typing import Any
 
 from antlr4 import CommonTokenStream, InputStream
 from antlr4.error.ErrorListener import ErrorListener
@@ -87,7 +87,7 @@ server = SapphireLanguageServer("sapphire-lsp", "v0.1.0")
 class ANTLRDiagnosticListener(ErrorListener):
   """Listener to translate ANTLR parser/lexer errors to LSP Diagnostics."""
 
-  def __init__(self, doc_text: Optional[str] = None):
+  def __init__(self, doc_text: str | None = None):
     super().__init__()
     self.diagnostics = []
     self._lines = doc_text.splitlines() if isinstance(doc_text, str) else None
@@ -170,7 +170,7 @@ def _preload_module_dependencies(
   ls: SapphireLanguageServer,
   doc_uri: str,
   ast: Any,
-  ws_root: Optional[str] = None,
+  ws_root: str | None = None,
 ) -> None:
   from pygls.uris import from_fs_path
 
@@ -196,7 +196,7 @@ def _preload_module_dependencies(
           mtime_key is not None and cached_mtime != mtime_key
         ):
           try:
-            with open(mod_path_fs, "r", encoding="utf-8") as f:
+            with open(mod_path_fs, encoding="utf-8") as f:
               sub_code = f.read()
             sub_stream = InputStream(sub_code)
             sub_lexer = SapphireLexer(sub_stream)
@@ -456,7 +456,7 @@ def document_symbol(
 
 
 @server.feature(TEXT_DOCUMENT_HOVER)
-def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
+def hover(ls: SapphireLanguageServer, params: HoverParams) -> Hover | None:
   """Triggered when user hovers over an identifier."""
   return HoverProvider.provide_hover(
     ls, params, find_node_fn=find_node_at_position
@@ -466,7 +466,7 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
 @server.feature(TEXT_DOCUMENT_DEFINITION)
 def definition(
   ls: SapphireLanguageServer, params: DefinitionParams
-) -> Optional[Location]:
+) -> Location | None:
   """Triggered when user requests Go to Definition (F12 or Cmd+Click)."""
   return DefinitionProvider.provide_definition(
     ls, params, find_node_fn=find_node_at_position
@@ -482,7 +482,7 @@ SIGNATURE_HELP_TRIGGER_CHARACTERS = ["(", ","]
 )
 def signature_help(
   ls: SapphireLanguageServer, params: SignatureHelpParams
-) -> Optional[SignatureHelp]:
+) -> SignatureHelp | None:
   """Triggered when user types '(' or ',' or requests parameter hints."""
   from src.lsp.signature_provider import SignatureProvider
 
@@ -556,7 +556,7 @@ def _get_scope_completion_items(
   uri: str,
   ls: SapphireLanguageServer,
   node_types: dict,
-) -> List[CompletionItem]:
+) -> list[CompletionItem]:
   """Backward-compatible wrapper around
   completion_provider.get_scope_completion_items.
   """

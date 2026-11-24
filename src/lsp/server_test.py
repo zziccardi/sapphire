@@ -2374,7 +2374,7 @@ func run() {
 
       self.ls.workspace.root_uri = from_fs_path(repo_root)
 
-      with open(demo_file, "r", encoding="utf-8") as f:
+      with open(demo_file, encoding="utf-8") as f:
         demo_code = f.read()
 
       validate_source(self.ls, demo_uri, demo_code)

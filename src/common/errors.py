@@ -1,6 +1,5 @@
 """Domain-specific exception hierarchy for the Sapphire compiler and runtime."""
 
-from typing import Optional
 
 
 class SapphireError(Exception):
@@ -9,9 +8,9 @@ class SapphireError(Exception):
   def __init__(
     self,
     message: str,
-    file_path: Optional[str] = None,
-    line: Optional[int] = None,
-    column: Optional[int] = None,
+    file_path: str | None = None,
+    line: int | None = None,
+    column: int | None = None,
   ):
     super().__init__(message)
     self.message = message

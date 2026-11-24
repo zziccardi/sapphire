@@ -1,6 +1,6 @@
 """Semantic lint checks for Sapphire."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.parser.ast import (
   AssignmentNode,
@@ -33,7 +33,7 @@ _BUILTIN_MUTATING_METHODS = frozenset(
 )
 
 
-def _exprs_equal(a: Optional[ASTNode], b: Optional[ASTNode]) -> bool:
+def _exprs_equal(a: ASTNode | None, b: ASTNode | None) -> bool:
   """Returns True when two AST expressions are structurally identical."""
   if a is None or b is None or type(a) is not type(b):
     return False
@@ -61,8 +61,8 @@ def _exprs_equal(a: Optional[ASTNode], b: Optional[ASTNode]) -> bool:
 
 
 def _extract_map_contains(
-  expr: Optional[ASTNode], node_types: Dict[ASTNode, Any]
-) -> Optional[Tuple[CallNode, ASTNode, ASTNode]]:
+  expr: ASTNode | None, node_types: dict[ASTNode, Any]
+) -> tuple[CallNode, ASTNode, ASTNode] | None:
   """Extracts `(call, receiver, key_expr)` if `expr` is `map.contains(k)`."""
   if not (
     isinstance(expr, CallNode)
@@ -81,17 +81,17 @@ def _extract_map_contains(
 
 
 def _collect_contains_in_and_chain(
-  cond: Optional[ASTNode], node_types: Dict[ASTNode, Any]
-) -> List[Tuple[CallNode, ASTNode, ASTNode, List[ASTNode]]]:
+  cond: ASTNode | None, node_types: dict[ASTNode, Any]
+) -> list[tuple[CallNode, ASTNode, ASTNode, list[ASTNode]]]:
   """Finds `map.contains(k)` checks in `cond` and the RHS subtrees guarded by
   them.
   """
-  results: List[Tuple[CallNode, ASTNode, ASTNode, List[ASTNode]]] = []
+  results: list[tuple[CallNode, ASTNode, ASTNode, list[ASTNode]]] = []
   if cond is None:
     return results
 
   # Flatten left- or right-associated `&&` chains in evaluation order.
-  terms: List[ASTNode] = []
+  terms: list[ASTNode] = []
 
   def _flatten_and(node: ASTNode) -> None:
     if isinstance(node, BinaryOpNode) and node.op == "&&":
@@ -126,7 +126,7 @@ def _is_matching_map_get(node: ASTNode, recv: ASTNode, key: ASTNode) -> bool:
 
 
 def _is_rooted_at_matching_index(
-  node: Optional[ASTNode], recv: ASTNode, key: ASTNode
+  node: ASTNode | None, recv: ASTNode, key: ASTNode
 ) -> bool:
   """Returns True if `node` is `recv[key]` or a member/index chain rooted at it.
   """
@@ -144,8 +144,8 @@ def _is_rooted_at_matching_index(
 
 
 def _scan_subtrees_for_map_access(
-  checker: Any, roots: List[ASTNode], recv: ASTNode, key: ASTNode
-) -> Tuple[bool, bool, bool, bool]:
+  checker: Any, roots: list[ASTNode], recv: ASTNode, key: ASTNode
+) -> tuple[bool, bool, bool, bool]:
   """Scans AST subtrees for matching map accesses and conflicting mutations.
 
   Returns `(has_access, has_in_place_mutation, has_direct_overwrite,
@@ -255,7 +255,7 @@ def _maybe_warn_contains_access(
   call_node: CallNode,
   recv: ASTNode,
   key_expr: ASTNode,
-  subtrees: List[ASTNode],
+  subtrees: list[ASTNode],
   kind: str,
 ) -> None:
   has_access, has_in_place_mutation, has_direct_overwrite, has_recv_mutation = (
@@ -283,7 +283,7 @@ def check_if_contains_access(checker: Any, node: IfNode) -> None:
   for call_node, recv, key_expr, rhs_exprs in _collect_contains_in_and_chain(
     node.condition, checker.node_types
   ):
-    subtrees: List[ASTNode] = list(rhs_exprs)
+    subtrees: list[ASTNode] = list(rhs_exprs)
     subtrees.append(node.then_block)
     _maybe_warn_contains_access(
       checker, call_node, recv, key_expr, subtrees, "if"
@@ -291,7 +291,7 @@ def check_if_contains_access(checker: Any, node: IfNode) -> None:
 
 
 def check_guard_contains_access(
-  checker: Any, guard_node: GuardStmtNode, remaining_stmts: List[ASTNode]
+  checker: Any, guard_node: GuardStmtNode, remaining_stmts: list[ASTNode]
 ) -> None:
   """Warns on `guard map.contains(k)` followed by `map[k]` / `map.get(k)`."""
   if not remaining_stmts:
@@ -306,7 +306,7 @@ def check_guard_contains_access(
     for call_node, recv, key_expr, rhs_exprs in _collect_contains_in_and_chain(
       cond, checker.node_types
     ):
-      subtrees: List[ASTNode] = list(rhs_exprs) + list(remaining_stmts)
+      subtrees: list[ASTNode] = list(rhs_exprs) + list(remaining_stmts)
       _maybe_warn_contains_access(
         checker, call_node, recv, key_expr, subtrees, "guard"
       )

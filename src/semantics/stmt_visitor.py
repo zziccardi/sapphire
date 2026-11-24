@@ -1,7 +1,6 @@
 """Statement AST visitor methods for TypeChecker."""
 
 import os
-from typing import List, Optional
 
 from src.parser.ast import (
   AssignmentNode,
@@ -215,7 +214,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         checker=self,
       )
 
-  def _collect_expr_proto_ancestors(self, expr_node: Optional[ASTNode]) -> set:
+  def _collect_expr_proto_ancestors(self, expr_node: ASTNode | None) -> set:
     """Collects prototype ancestor names propagated through an expression."""
     if expr_node is None:
       return set()
@@ -244,7 +243,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
   def _propagate_binding_metadata(
     self,
     target_sym: VariableSymbol,
-    expr_node: Optional[ASTNode],
+    expr_node: ASTNode | None,
     replace: bool,
   ) -> None:
     """Propagates prototype ancestry and closure capture modes to *target_sym*.
@@ -650,7 +649,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     self.visit(node.expr)
 
   def _mark_rvo_return_moved(
-    self, expr_node: Optional[ASTNode], expr_type: Type
+    self, expr_node: ASTNode | None, expr_type: Type
   ) -> None:
     """Marks local move-only/SharedRef RVO bindings moved between multi-return
     siblings.
@@ -697,7 +696,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         )
       return
 
-    actual_ret_types: List[Type] = []
+    actual_ret_types: list[Type] = []
     if node.expressions:
       old_expected = self.expected_type
       try:

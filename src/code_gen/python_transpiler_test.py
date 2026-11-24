@@ -2721,7 +2721,7 @@ class TestSharedFixtures(unittest.TestCase):
       transpile_file(sp_path, py_path, target="python", quiet=True, use_runtime_module=True)
       rt_path = os.path.join(tmpdir, "_sapphire_runtime.py")
       self.assertTrue(os.path.exists(rt_path))
-      with open(py_path, "r", encoding="utf-8") as f:
+      with open(py_path, encoding="utf-8") as f:
         py_content = f.read()
       self.assertIn("from _sapphire_runtime import *", py_content)
       self.assertNotIn("class _LazyCoWProxy:", py_content)
@@ -3439,7 +3439,7 @@ class TestPhase5PythonFixes(unittest.TestCase):
       transpile_file(alias_sp, output_file=out_py, target="python", quiet=True)
 
       base_py = os.path.join(tmpdir, "base_traits.py")
-      with open(base_py, "r", encoding="utf-8") as f:
+      with open(base_py, encoding="utf-8") as f:
         base_src = f.read()
       self.assertIn("class Combatant:", base_src)
 

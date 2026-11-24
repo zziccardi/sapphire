@@ -5,7 +5,7 @@ monolithic TypeChecker.
 """
 
 import copy
-from typing import Any, Dict, List
+from typing import Any
 
 from src.parser.ast import ASTNode, BasicTypeNode, ImplBlockNode, TypeNode
 from src.semantics.symbol_table import (
@@ -31,7 +31,7 @@ class GenericsChecker:
   """Helper class for generic AST substitutions and type mangling."""
 
   @staticmethod
-  def substitute_ast(node: Any, param_map: Dict[str, TypeNode]) -> Any:
+  def substitute_ast(node: Any, param_map: dict[str, TypeNode]) -> Any:
     """Recursively replaces generic parameter identifiers with concrete
     TypeNodes
     in an AST snippet.
@@ -99,8 +99,8 @@ class GenericsChecker:
   def _build_impl_param_map(
     decl: ImplBlockNode,
     generic_struct_type: StructType,
-    type_arg_nodes: List[TypeNode],
-  ) -> Dict[str, TypeNode]:
+    type_arg_nodes: list[TypeNode],
+  ) -> dict[str, TypeNode]:
     """Builds a substitution map keyed by the impl block's own type parameters.
     """
     impl_map = dict(
@@ -121,7 +121,7 @@ class GenericsChecker:
     return impl_map
 
   @staticmethod
-  def _is_void_return(ret_t: List[Type]) -> bool:
+  def _is_void_return(ret_t: list[Type]) -> bool:
     return len(ret_t) == 0 or (
       len(ret_t) == 1
       and (
@@ -137,8 +137,8 @@ class GenericsChecker:
   def monomorphize_struct(
     checker: Any,
     generic_struct_type: StructType,
-    type_arg_nodes: List[TypeNode],
-    resolved_type_args: List[Type],
+    type_arg_nodes: list[TypeNode],
+    resolved_type_args: list[Type],
   ) -> StructType:
     """Monomorphizes a generic struct template for a specific set of concrete
     type
@@ -322,8 +322,8 @@ class GenericsChecker:
   def monomorphize_function(
     checker: Any,
     func_sym: FunctionSymbol,
-    type_arg_nodes: List[TypeNode],
-    resolved_type_args: List[Type],
+    type_arg_nodes: list[TypeNode],
+    resolved_type_args: list[Type],
   ) -> str:
     """Monomorphizes a generic function template for a specific set of concrete
     type arguments.

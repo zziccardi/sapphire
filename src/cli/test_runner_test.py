@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from typing import List
 from unittest.mock import patch
 
 from src.cli.test_runner import (
@@ -173,7 +172,7 @@ func test_unannotated_standalone() {}
 func normal_helper() {}
 """)
     ast = parse_ast(warn_sp)
-    warnings: List[str] = []
+    warnings: list[str] = []
     standalone, suites = discover_tests(ast, warnings=warnings)
 
     # Annotated tests are discovered
@@ -196,7 +195,7 @@ func normal_helper() {}
     # Normal transpile: @test function should be omitted
     out_normal = os.path.join(self.temp_dir, "normal.py")
     transpile_file(self.sample_sp, out_normal, target="python", test_mode=False, quiet=True)
-    with open(out_normal, "r", encoding="utf-8") as f:
+    with open(out_normal, encoding="utf-8") as f:
       content = f.read()
     self.assertNotIn("def test_standalone_pass", content)
     self.assertNotIn("def test_suite_pass", content)
@@ -205,7 +204,7 @@ func normal_helper() {}
     # Test transpile: @test function should be emitted
     out_test = os.path.join(self.temp_dir, "test_mode.py")
     transpile_file(self.sample_sp, out_test, target="python", test_mode=True, quiet=True)
-    with open(out_test, "r", encoding="utf-8") as f:
+    with open(out_test, encoding="utf-8") as f:
       content = f.read()
     self.assertIn("def test_standalone_pass", content)
     self.assertIn("def test_suite_pass", content)
@@ -480,7 +479,7 @@ func test_bare_fail() {
     standalone, suites = discover_tests(ast)
 
     out_py = transpile_file(bare_sp, target="python", test_mode=True, quiet=True)
-    with open(out_py, "r") as f:
+    with open(out_py) as f:
       content = f.read()
     content_no_map = "\n".join(
         line for line in content.splitlines()
@@ -867,7 +866,7 @@ impl NotATestCaseHelper for MySuite {
       passed, failed, _ = run_tests_python(test_sp, ["test_val"], {})
     self.assertEqual((passed, failed), (1, 0))
     # Pre-existing .py was untouched and helper.py was not leaked in source dir.
-    with open(existing_py, "r", encoding="utf-8") as f:
+    with open(existing_py, encoding="utf-8") as f:
       self.assertEqual(f.read(), "# pre-existing file\n")
     self.assertFalse(os.path.exists(os.path.join(self.temp_dir, "iso_helper.py")))
 

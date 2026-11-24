@@ -6,18 +6,18 @@ in a structured, easy-to-analyze form.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 
 @dataclass(frozen=True)
 class SourceSpan:
   """Structured source location span (1-indexed lines, 0-indexed columns)."""
 
-  start_line: Optional[int] = None
-  start_column: Optional[int] = None
-  end_line: Optional[int] = None
-  end_column: Optional[int] = None
-  length: Optional[int] = None
+  start_line: int | None = None
+  start_column: int | None = None
+  end_line: int | None = None
+  end_column: int | None = None
+  length: int | None = None
 
 
 @dataclass(eq=False)
@@ -27,12 +27,12 @@ class ASTNode:
   is_parenthesized: bool = field(default=False, init=False, repr=False)
 
   # Source position metadata used by diagnostics, source maps, and the LSP.
-  start_line: Optional[int] = field(default=None, init=False, repr=False)
-  start_column: Optional[int] = field(default=None, init=False, repr=False)
-  end_line: Optional[int] = field(default=None, init=False, repr=False)
-  end_column: Optional[int] = field(default=None, init=False, repr=False)
-  length: Optional[int] = field(default=None, init=False, repr=False)
-  name_span: Optional[SourceSpan] = field(default=None, init=False, repr=False)
+  start_line: int | None = field(default=None, init=False, repr=False)
+  start_column: int | None = field(default=None, init=False, repr=False)
+  end_line: int | None = field(default=None, init=False, repr=False)
+  end_column: int | None = field(default=None, init=False, repr=False)
+  length: int | None = field(default=None, init=False, repr=False)
+  name_span: SourceSpan | None = field(default=None, init=False, repr=False)
 
   @property
   def span(self) -> SourceSpan:
@@ -45,7 +45,7 @@ class ASTNode:
       length=self.length,
     )
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Returns a dictionary representation of the AST node for
     serialization/debugging.
     """
@@ -101,7 +101,7 @@ class BasicTypeNode(TypeNode):
   """
 
   name: str
-  type_args: List[TypeNode] = field(default_factory=list)
+  type_args: list[TypeNode] = field(default_factory=list)
 
   def __post_init__(self) -> None:
     if self.type_args is None:
@@ -120,7 +120,7 @@ class ArrayTypeNode(TypeNode):
   """Represents an array type wrapper (e.g. '[int]' or '[int; 3]')."""
 
   element_type: TypeNode
-  size: Optional[int] = None
+  size: int | None = None
 
 
 @dataclass(eq=False)
@@ -140,8 +140,8 @@ class FunctionTypeNode(TypeNode):
 
   def __init__(
     self,
-    param_types: List[TypeNode],
-    return_types: Union[TypeNode, List[TypeNode]],
+    param_types: list[TypeNode],
+    return_types: TypeNode | list[TypeNode],
   ):
     self.param_types = param_types
     if isinstance(return_types, list):
@@ -150,7 +150,7 @@ class FunctionTypeNode(TypeNode):
       self.return_types = [return_types]
 
   @property
-  def return_type(self) -> Optional[TypeNode]:
+  def return_type(self) -> TypeNode | None:
     return self.return_types[0] if self.return_types else None
 
 
@@ -173,7 +173,7 @@ class ImportStmtNode(ASTNode):
   """
 
   path: str
-  alias: Optional[str] = None
+  alias: str | None = None
 
 
 @dataclass(eq=False)
@@ -183,8 +183,8 @@ class ExportSpecifierNode(ASTNode):
   """
 
   symbol: str
-  module_prefix: Optional[str] = None
-  alias: Optional[str] = None
+  module_prefix: str | None = None
+  alias: str | None = None
 
   @property
   def exported_name(self) -> str:
@@ -197,7 +197,7 @@ class ExportStmtNode(ASTNode):
   new_image };').
   """
 
-  specifiers: List[ExportSpecifierNode]
+  specifiers: list[ExportSpecifierNode]
 
 
 @dataclass(eq=False)
@@ -207,9 +207,9 @@ class ProgramNode(ASTNode):
   and optional export manifest.
   """
 
-  declarations: List[ASTNode]
-  imports: List[ImportStmtNode] = field(default_factory=list)
-  export_block: Optional[ExportStmtNode] = None
+  declarations: list[ASTNode]
+  imports: list[ImportStmtNode] = field(default_factory=list)
+  export_block: ExportStmtNode | None = None
 
   def __post_init__(self) -> None:
     if self.imports is None:
@@ -224,8 +224,8 @@ class StructFieldNode(ASTNode):
 
   is_mutable: bool
   name: str
-  field_type: Optional[TypeNode] = None
-  default_expr: Optional[ASTNode] = None
+  field_type: TypeNode | None = None
+  default_expr: ASTNode | None = None
 
 
 @dataclass(eq=False)
@@ -235,7 +235,7 @@ class AnnotationNode(ASTNode):
   """
 
   name: str
-  arg: Optional[str] = None
+  arg: str | None = None
 
 
 @dataclass(eq=False, init=False)
@@ -245,11 +245,11 @@ class StructDeclNode(DeclNode):
   def __init__(
     self,
     name: str,
-    parent_names: Optional[Union[str, List[str]]] = None,
-    fields: Optional[List[StructFieldNode]] = None,
+    parent_names: str | list[str] | None = None,
+    fields: list[StructFieldNode] | None = None,
     is_prototype: bool = False,
-    type_params: Optional[List[str]] = None,
-    parent_name: Optional[str] = None,
+    type_params: list[str] | None = None,
+    parent_name: str | None = None,
   ):
     self.name = name
     if parent_names is None:
@@ -261,14 +261,14 @@ class StructDeclNode(DeclNode):
     self.fields = fields or []
     self.is_prototype = is_prototype
     self.type_params = type_params or []
-    self.parent_names_info: List[Dict[str, Any]] = []
+    self.parent_names_info: list[dict[str, Any]] = []
 
   @property
-  def parent_name(self) -> Optional[str]:
+  def parent_name(self) -> str | None:
     return self.parent_names[0] if self.parent_names else None
 
   @parent_name.setter
-  def parent_name(self, value: Optional[str]) -> None:
+  def parent_name(self, value: str | None) -> None:
     if value is None:
       self.parent_names = []
     else:
@@ -280,7 +280,7 @@ class EnumMemberNode(ASTNode):
   """Represents a member/variant in an enum declaration."""
 
   name: str
-  value: Optional[Union[int, str]] = None
+  value: int | str | None = None
 
 
 @dataclass(eq=False)
@@ -288,7 +288,7 @@ class EnumDeclNode(DeclNode):
   """Represents an enum declaration."""
 
   name: str
-  members: List[EnumMemberNode]
+  members: list[EnumMemberNode]
 
 
 @dataclass(eq=False)
@@ -297,8 +297,8 @@ class ParameterNode(ASTNode):
 
   is_mutable: bool
   name: str
-  param_type: Optional[TypeNode] = None
-  default_expr: Optional[ASTNode] = None
+  param_type: TypeNode | None = None
+  default_expr: ASTNode | None = None
 
 
 @dataclass(eq=False, init=False)
@@ -310,13 +310,13 @@ class FuncDeclNode(DeclNode):
   def __init__(
     self,
     name: str,
-    parameters: List[ParameterNode],
-    return_types: Optional[Union[TypeNode, List[TypeNode]]] = None,
+    parameters: list[ParameterNode],
+    return_types: TypeNode | list[TypeNode] | None = None,
     body: Optional["BlockNode"] = None,
-    annotations: Optional[List[AnnotationNode]] = None,
-    return_type: Optional[TypeNode] = None,
-    type_params: Optional[List[str]] = None,
-    base_initializers: Optional[List["CallNode"]] = None,
+    annotations: list[AnnotationNode] | None = None,
+    return_type: TypeNode | None = None,
+    type_params: list[str] | None = None,
+    base_initializers: list["CallNode"] | None = None,
   ):
     self.name = name
     self.parameters = parameters
@@ -335,7 +335,7 @@ class FuncDeclNode(DeclNode):
     self.base_initializers = base_initializers or []
 
   @property
-  def return_type(self) -> Optional[TypeNode]:
+  def return_type(self) -> TypeNode | None:
     return self.return_types[0] if self.return_types else None
 
 
@@ -345,7 +345,7 @@ class ImplMemberNode(ASTNode):
   methods).
   """
 
-  modifier: Optional[str]
+  modifier: str | None
   func_decl: FuncDeclNode
 
 
@@ -354,11 +354,11 @@ class ImplBlockNode(DeclNode):
   """Represents a Rust-style implementation block."""
 
   struct_name: str
-  trait_name: Optional[str]
-  members: List[ImplMemberNode]
-  type_params: List[str] = field(default_factory=list)
-  trait_type_args: List[TypeNode] = field(default_factory=list)
-  struct_type_args: List[TypeNode] = field(default_factory=list)
+  trait_name: str | None
+  members: list[ImplMemberNode]
+  type_params: list[str] = field(default_factory=list)
+  trait_type_args: list[TypeNode] = field(default_factory=list)
+  struct_type_args: list[TypeNode] = field(default_factory=list)
 
   def __post_init__(self) -> None:
     if self.type_params is None:
@@ -378,12 +378,12 @@ class TraitMemberNode(ASTNode):
   def __init__(
     self,
     name: str,
-    parameters: List[ParameterNode],
-    return_types: Optional[Union[TypeNode, List[TypeNode]]] = None,
-    modifier: Optional[str] = None,
-    return_type: Optional[TypeNode] = None,
-    annotations: Optional[List[AnnotationNode]] = None,
-    type_params: Optional[List[str]] = None,
+    parameters: list[ParameterNode],
+    return_types: TypeNode | list[TypeNode] | None = None,
+    modifier: str | None = None,
+    return_type: TypeNode | None = None,
+    annotations: list[AnnotationNode] | None = None,
+    type_params: list[str] | None = None,
     body: Optional["BlockNode"] = None,
   ):
     self.name = name
@@ -403,7 +403,7 @@ class TraitMemberNode(ASTNode):
     self.body = body
 
   @property
-  def return_type(self) -> Optional[TypeNode]:
+  def return_type(self) -> TypeNode | None:
     return self.return_types[0] if self.return_types else None
 
 
@@ -412,8 +412,8 @@ class TraitDeclNode(DeclNode):
   """Represents a trait declaration."""
 
   name: str
-  members: List[TraitMemberNode]
-  type_params: List[str] = field(default_factory=list)
+  members: list[TraitMemberNode]
+  type_params: list[str] = field(default_factory=list)
 
   def __post_init__(self) -> None:
     if self.type_params is None:
@@ -436,7 +436,7 @@ class StmtNode(ASTNode):
 class BlockNode(StmtNode):
   """Represents a block of statements enclosed in curly braces."""
 
-  statements: List[StmtNode]
+  statements: list[StmtNode]
 
 
 @dataclass(eq=False, init=False)
@@ -448,13 +448,13 @@ class VarDeclNode(StmtNode):
   def __init__(
     self,
     is_mutable: bool,
-    names: Optional[Union[str, List[str]]] = None,
-    val_types: Optional[Union[TypeNode, List[Optional[TypeNode]]]] = None,
-    exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
-    annotations: Optional[List[AnnotationNode]] = None,
-    val_type: Optional[TypeNode] = None,
-    expr: Optional[ASTNode] = None,
-    name: Optional[str] = None,
+    names: str | list[str] | None = None,
+    val_types: TypeNode | list[TypeNode | None] | None = None,
+    exprs: ASTNode | list[ASTNode] | None = None,
+    annotations: list[AnnotationNode] | None = None,
+    val_type: TypeNode | None = None,
+    expr: ASTNode | None = None,
+    name: str | None = None,
   ):
     self.is_mutable = is_mutable
     if names is not None:
@@ -494,14 +494,14 @@ class VarDeclNode(StmtNode):
     return self.names[0] if self.names else ""
 
   @property
-  def val_type(self) -> Optional[TypeNode]:
+  def val_type(self) -> TypeNode | None:
     return self.val_types[0] if self.val_types else None
 
   @property
-  def expr(self) -> Optional[ASTNode]:
+  def expr(self) -> ASTNode | None:
     return self.exprs[0] if self.exprs else None
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     res = super().to_dict()
     res["name"] = self.name
     res["val_type"] = self.val_type.to_dict() if self.val_type else None
@@ -515,11 +515,11 @@ class AssignmentNode(StmtNode):
 
   def __init__(
     self,
-    targets: Union[ASTNode, List[ASTNode]],
+    targets: ASTNode | list[ASTNode],
     op: str,
-    exprs: Union[ASTNode, List[ASTNode]],
-    target: Optional[ASTNode] = None,
-    expr: Optional[ASTNode] = None,
+    exprs: ASTNode | list[ASTNode],
+    target: ASTNode | None = None,
+    expr: ASTNode | None = None,
   ):
     if targets is not None and not (
       isinstance(targets, list) and len(targets) == 0
@@ -553,7 +553,7 @@ class AssignmentNode(StmtNode):
   def expr(self) -> ASTNode:
     return self.exprs[0]
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     res = super().to_dict()
     res["target"] = self.target.to_dict() if self.targets else None
     res["expr"] = self.expr.to_dict() if self.exprs else None
@@ -575,8 +575,8 @@ class ReturnNode(StmtNode):
 
   def __init__(
     self,
-    exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
-    expr: Optional[ASTNode] = None,
+    exprs: ASTNode | list[ASTNode] | None = None,
+    expr: ASTNode | None = None,
   ):
     if exprs is not None:
       if isinstance(exprs, list):
@@ -589,10 +589,10 @@ class ReturnNode(StmtNode):
       self.expressions = []
 
   @property
-  def expr(self) -> Optional[ASTNode]:
+  def expr(self) -> ASTNode | None:
     return self.expressions[0] if self.expressions else None
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     res = super().to_dict()
     res["expr"] = self.expr.to_dict() if self.expr is not None else None
     return res
@@ -606,8 +606,8 @@ class YieldNode(StmtNode):
 
   def __init__(
     self,
-    exprs: Optional[Union[ASTNode, List[ASTNode]]] = None,
-    expr: Optional[ASTNode] = None,
+    exprs: ASTNode | list[ASTNode] | None = None,
+    expr: ASTNode | None = None,
   ):
     if exprs is not None:
       if isinstance(exprs, list):
@@ -620,10 +620,10 @@ class YieldNode(StmtNode):
       self.expressions = []
 
   @property
-  def expr(self) -> Optional[ASTNode]:
+  def expr(self) -> ASTNode | None:
     return self.expressions[0] if self.expressions else None
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     res = super().to_dict()
     res["exprs"] = [e.to_dict() for e in self.expressions]
     res["expr"] = self.expr.to_dict() if self.expr is not None else None
@@ -653,10 +653,10 @@ class HeaderBindingNode(ASTNode):
 
   is_mutable: bool
   let_name: str
-  type_node: Optional[ASTNode]
+  type_node: ASTNode | None
   expr: ASTNode
   is_unwrap: bool
-  let_names: Optional[List[str]] = None
+  let_names: list[str] | None = None
 
   def __post_init__(self) -> None:
     if self.let_names is None:
@@ -669,8 +669,8 @@ class GuardClauseNode(ASTNode):
   condition).
   """
 
-  binding: Optional[HeaderBindingNode] = None
-  condition: Optional[ASTNode] = None
+  binding: HeaderBindingNode | None = None
+  condition: ASTNode | None = None
 
 
 @dataclass(eq=False, init=False)
@@ -681,10 +681,10 @@ class GuardStmtNode(StmtNode):
 
   def __init__(
     self,
-    clauses: Optional[List[GuardClauseNode]] = None,
-    else_block: Optional[BlockNode] = None,
-    bindings: Optional[List[HeaderBindingNode]] = None,
-    condition: Optional[ASTNode] = None,
+    clauses: list[GuardClauseNode] | None = None,
+    else_block: BlockNode | None = None,
+    bindings: list[HeaderBindingNode] | None = None,
+    condition: ASTNode | None = None,
   ):
     if clauses is not None:
       self.clauses = clauses
@@ -708,11 +708,11 @@ class IfNode(StmtNode):
 
   def __init__(
     self,
-    init_binding: Optional[HeaderBindingNode] = None,
-    condition: Optional[ASTNode] = None,
-    then_block: Optional[BlockNode] = None,
-    else_block: Optional[Union[BlockNode, "IfNode"]] = None,
-    bindings: Optional[List[HeaderBindingNode]] = None,
+    init_binding: HeaderBindingNode | None = None,
+    condition: ASTNode | None = None,
+    then_block: BlockNode | None = None,
+    else_block: Union[BlockNode, "IfNode"] | None = None,
+    bindings: list[HeaderBindingNode] | None = None,
   ):
     if bindings is not None:
       self.bindings = bindings
@@ -725,11 +725,11 @@ class IfNode(StmtNode):
     self.else_block = else_block
 
   @property
-  def init_binding(self) -> Optional[HeaderBindingNode]:
+  def init_binding(self) -> HeaderBindingNode | None:
     return self.bindings[0] if self.bindings else None
 
   @init_binding.setter
-  def init_binding(self, val: Optional[HeaderBindingNode]):
+  def init_binding(self, val: HeaderBindingNode | None):
     if val is not None:
       self.bindings = [val]
     else:
@@ -752,8 +752,8 @@ class ForNode(StmtNode):
   loop_var: str
   iterable: ASTNode
   block: BlockNode
-  key_var: Optional[str] = None
-  val_var: Optional[str] = None
+  key_var: str | None = None
+  val_var: str | None = None
 
   def __post_init__(self) -> None:
     if self.val_var is None:
@@ -784,7 +784,7 @@ class LiteralNode(ExprNode):
 class InterpolatedStringNode(ExprNode):
   """Represents an interpolated string (f"Hello {name}")."""
 
-  parts: List[ASTNode]
+  parts: list[ASTNode]
 
 
 @dataclass(eq=False)
@@ -837,7 +837,7 @@ class ArgumentNode(ASTNode):
   5').
   """
 
-  name: Optional[str]
+  name: str | None
   expr: ASTNode
 
 
@@ -846,9 +846,9 @@ class CallNode(ExprNode):
   """Represents a function or method call."""
 
   callee: ASTNode
-  arguments: List[ArgumentNode]
-  type_args: List[TypeNode] = field(default_factory=list)
-  arena_expr: Optional[ASTNode] = None
+  arguments: list[ArgumentNode]
+  type_args: list[TypeNode] = field(default_factory=list)
+  arena_expr: ASTNode | None = None
 
   def __post_init__(self) -> None:
     if self.type_args is None:
@@ -874,8 +874,8 @@ class CloneNode(ExprNode):
   """
 
   expr: ASTNode
-  initializer_block: Optional[List[StmtNode]] = None
-  arena_expr: Optional[ASTNode] = None
+  initializer_block: list[StmtNode] | None = None
+  arena_expr: ASTNode | None = None
 
 
 @dataclass(eq=False)
@@ -892,7 +892,7 @@ class LambdaParamNode(ASTNode):
   """Represents a parameter in a lambda expression."""
 
   name: str
-  param_type: Optional[TypeNode] = None
+  param_type: TypeNode | None = None
 
 
 @dataclass(eq=False)
@@ -901,16 +901,16 @@ class LambdaNode(ExprNode):
   }').
   """
 
-  parameters: List[LambdaParamNode]
-  return_type: Optional[TypeNode]
-  body: Union[BlockNode, ASTNode]
+  parameters: list[LambdaParamNode]
+  return_type: TypeNode | None
+  body: BlockNode | ASTNode
 
 
 @dataclass(eq=False)
 class ArrayLiteralNode(ExprNode):
   """Represents an array literal (e.g. '[1, 2, 3]')."""
 
-  elements: List[ASTNode]
+  elements: list[ASTNode]
 
 
 @dataclass(eq=False)
@@ -925,7 +925,7 @@ class MapEntryNode(ASTNode):
 class MapLiteralNode(ExprNode):
   """Represents a map literal (e.g. '{"a": 1, "b": 2}')."""
 
-  entries: List[MapEntryNode]
+  entries: list[MapEntryNode]
 
 
 @dataclass(eq=False)
@@ -944,9 +944,9 @@ class StructInitializerNode(ExprNode):
   """
 
   struct_name: str
-  fields: List[ArgumentNode]
-  arena_expr: Optional[ASTNode] = None
-  type_args: List[TypeNode] = field(default_factory=list)
+  fields: list[ArgumentNode]
+  arena_expr: ASTNode | None = None
+  type_args: list[TypeNode] = field(default_factory=list)
 
   def __post_init__(self) -> None:
     if self.type_args is None:
@@ -966,10 +966,10 @@ class MatchCaseNode(ASTNode):
 
   def __init__(
     self,
-    pattern: Union[ASTNode, List[ASTNode]],
-    body: Union[BlockNode, ASTNode],
+    pattern: ASTNode | list[ASTNode],
+    body: BlockNode | ASTNode,
   ):
-    self.patterns: List[ASTNode] = (
+    self.patterns: list[ASTNode] = (
       pattern if isinstance(pattern, list) else [pattern]
     )
     self.body = body  # BlockNode or single ExprNode
@@ -987,5 +987,5 @@ class MatchExprNode(ExprNode):
   """
 
   subject: ASTNode
-  cases: List[MatchCaseNode]
+  cases: list[MatchCaseNode]
   is_statement: bool = False

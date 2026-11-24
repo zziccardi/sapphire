@@ -1,6 +1,6 @@
 """Intrinsic code generation handlers for Sapphire Array and Map methods."""
 
-from typing import Any, List
+from typing import Any
 
 from src.code_gen.intrinsics import IntrinsicRegistry, emit_in_call_order
 from src.parser.ast import CallNode
@@ -66,7 +66,7 @@ def _emit_arr_map_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "in_place" or (idx == 1 and not arg.name):
       in_place_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_array_map(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -91,7 +91,7 @@ def _emit_arr_map_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "in_place" or (idx == 1 and not arg.name):
       in_place_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_array_map(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -114,7 +114,7 @@ def _emit_arr_filter_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "in_place" or (idx == 1 and not arg.name):
       in_place_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_array_filter(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -139,7 +139,7 @@ def _emit_arr_filter_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "in_place" or (idx == 1 and not arg.name):
       in_place_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_array_filter(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -165,7 +165,7 @@ def _emit_arr_reduce_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "reverse" or (idx == 2 and not arg.name):
       reverse_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_array_reduce(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -195,7 +195,7 @@ def _emit_arr_reduce_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "reverse" or (idx == 2 and not arg.name):
       reverse_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_array_reduce(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -263,7 +263,7 @@ def _emit_arr_sort_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "in_place" or (idx == 2 and not arg.name):
       in_place_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_array_sort(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -299,7 +299,7 @@ def _emit_arr_sort_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "in_place" or (idx == 2 and not arg.name):
       in_place_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_array_sort(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -384,7 +384,7 @@ def _emit_arr_insert_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "element" or (idx == 1 and not arg.name):
       element_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_array_insert(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -408,7 +408,7 @@ def _emit_arr_insert_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "element" or (idx == 1 and not arg.name):
       element_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_array_insert(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -462,7 +462,7 @@ def _emit_arr_swap_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "j" or (idx == 1 and not arg.name):
       j_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_array_swap(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -484,7 +484,7 @@ def _emit_arr_swap_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "j" or (idx == 1 and not arg.name):
       j_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_array_swap(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -603,7 +603,7 @@ def _emit_map_insert_py(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "value" or (idx == 1 and not arg.name):
       val_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_sapphire_map_insert(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")
@@ -625,7 +625,7 @@ def _emit_map_insert_lua(transpiler: Any, node: CallNode) -> None:
     elif arg.name == "value" or (idx == 1 and not arg.name):
       val_expr = arg.expr
 
-  def _emit(exprs: List[Any]) -> None:
+  def _emit(exprs: list[Any]) -> None:
     transpiler.emit("_SP_RT._sapphire_map_insert(")
     transpiler.visit(node.callee.receiver)
     transpiler.emit(", ")

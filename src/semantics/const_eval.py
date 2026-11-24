@@ -4,7 +4,6 @@ Validates whether an AST expression can be statically resolved at compile
 time for module-level constants and declarations.
 """
 
-from typing import Optional, Tuple
 
 from src.parser.ast import (
   ArrayLiteralNode,
@@ -51,7 +50,7 @@ _DISALLOWED_CONST_NODES = {
 
 def _check_ident_const(
   node: IdentifierNode, symbol_table: SymbolTable
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
   sym = symbol_table.lookup(node.name)
   if sym is None:
     # Could be an enum variant name if scoped, or an enum type.
@@ -89,7 +88,7 @@ def _is_zero_literal(node: ASTNode) -> bool:
 
 def _check_member_const(
   node: MemberAccessNode, symbol_table: SymbolTable
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
   # Allow Enum.Variant or constant module.CONSTANT.
   if isinstance(node.receiver, IdentifierNode):
     type_obj = symbol_table.lookup_type(node.receiver.name)
@@ -141,7 +140,7 @@ def _check_member_const(
 
 def _check_struct_init_const(
   node: StructInitializerNode, symbol_table: SymbolTable
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
   if node.arena_expr is not None:
     return False, (
       "Arena allocation is not permitted in a compile-time constant expression."
@@ -181,7 +180,7 @@ def _check_struct_init_const(
 
 def is_constant_expression(
   node: ASTNode, symbol_table: SymbolTable
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
   """Validates if an AST node is a compile-time constant expression."""
   if isinstance(node, LiteralNode):
     return True, None
@@ -229,8 +228,10 @@ def is_constant_expression(
     return True, None
   if isinstance(node, MapLiteralNode):
     for entry in node.entries:
-      k = entry.key if hasattr(entry, "key") else entry[0]
-      v = entry.value if hasattr(entry, "value") else entry[1]
+      if isinstance(entry, tuple):
+        k, v = entry[0], entry[1]
+      else:
+        k, v = entry.key, entry.value
       for child in (k, v):
         ok, err = is_constant_expression(child, symbol_table)
         if not ok:

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from antlr4 import CommonTokenStream, FileStream
 
@@ -30,7 +30,7 @@ class TestDiscoveryError(SapphireError):
   pass
 
 
-def find_sp_files(path: str) -> List[str]:
+def find_sp_files(path: str) -> list[str]:
   """Finds all .sp files in a path (file or directory)."""
   if os.path.isfile(path):
     return [path]
@@ -73,8 +73,8 @@ def parse_ast(sp_file: str):
 
 
 def discover_tests(
-  ast, warnings: Optional[List[str]] = None
-) -> Tuple[List[str], Dict[str, List[str]]]:
+  ast, warnings: list[str] | None = None
+) -> tuple[list[str], dict[str, list[str]]]:
   """Discovers standalone @test functions and struct-based TestCase methods.
 
   Args:
@@ -137,10 +137,10 @@ def discover_tests(
   return standalone_tests, suite_tests
 
 
-def get_source_line(sp_file: str, lineno: int) -> Optional[str]:
+def get_source_line(sp_file: str, lineno: int) -> str | None:
   """Reads a specific 1-indexed line from a source file."""
   try:
-    with open(sp_file, "r", encoding="utf-8") as f:
+    with open(sp_file, encoding="utf-8") as f:
       lines = f.readlines()
       if 1 <= lineno <= len(lines):
         return lines[lineno - 1].rstrip("\r\n")
@@ -149,7 +149,7 @@ def get_source_line(sp_file: str, lineno: int) -> Optional[str]:
   return None
 
 
-def find_lua_binary() -> Optional[str]:
+def find_lua_binary() -> str | None:
   """Locates Lua interpreter across PATH and standard OS installation paths."""
   binary = (
     shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
@@ -218,7 +218,7 @@ def _print_python_test_failures(
   label: str,
   sp_file: str,
   ctx_failures: list,
-  err: Optional[str],
+  err: str | None,
   sp_line_map: dict,
 ) -> None:
   """Prints the failure header and formatted assertion details for one test."""
@@ -283,7 +283,7 @@ def _is_protected_module(
   mod_name: str,
   mod_obj: Any,
   sp_dir: str,
-  out_dir: Optional[str],
+  out_dir: str | None,
   compiler_lib_dir: str,
 ) -> bool:
   """Returns True if *mod_name* belongs to Python stdlib or the compiler."""
@@ -311,7 +311,7 @@ def _is_protected_module(
 
 
 def _prepare_python_test_paths(
-  sp_file: str, out_dir: Optional[str] = None
+  sp_file: str, out_dir: str | None = None
 ) -> str:
   """Configures sys.path and clears stale local test modules for *sp_file*."""
   workspace_root = os.path.abspath(
@@ -384,10 +384,10 @@ def _prepare_python_test_paths(
 
 def run_tests_python(
   sp_file: str,
-  standalone_tests: List[str],
-  suite_tests: Dict[str, List[str]],
-  filter_pattern: Optional[str] = None,
-) -> Tuple[int, int, List[str]]:
+  standalone_tests: list[str],
+  suite_tests: dict[str, list[str]],
+  filter_pattern: str | None = None,
+) -> tuple[int, int, list[str]]:
   """Executes discovered tests in Python target backend."""
   orig_sys_path = list(sys.path)
   orig_modules = set(sys.modules.keys())
@@ -442,7 +442,7 @@ def run_tests_python(
 
       passed = 0
       failed = 0
-      logs: List[str] = []
+      logs: list[str] = []
       sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
 
       for fn_name in standalone_tests:
@@ -585,41 +585,7 @@ def _escape_lua_string(s: str) -> str:
   return s.replace("\\", "/").replace('"', '\\"')
 
 
-def _build_lua_test_harness(
-  sp_file: str,
-  out_lua: str,
-  standalone_tests: List[str],
-  suite_tests: Dict[str, List[str]],
-  filter_pattern: Optional[str],
-) -> str:
-  """Constructs a self-contained Lua 5.1 script that executes discovered tests.
-  """
-  workspace_root = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..")
-  )
-  sp_dir = os.path.dirname(os.path.abspath(sp_file))
-  out_dir = os.path.dirname(os.path.abspath(out_lua))
-  esc_workspace_root = _escape_lua_string(workspace_root)
-  esc_sp_dir = _escape_lua_string(sp_dir)
-  esc_out_dir = _escape_lua_string(out_dir)
-  esc_out_lua = _escape_lua_string(out_lua)
-  esc_sp_basename = _escape_lua_string(os.path.basename(sp_file))
-
-  pkg_path = (
-    f'package.path = "{esc_out_dir}/?.lua;{esc_out_dir}/?/init.lua;'
-    f"{esc_workspace_root}/?.lua;"
-    f"{esc_workspace_root}/?/init.lua;"
-    f"{esc_workspace_root}/lib/?.lua;"
-    f"{esc_workspace_root}/lib/?/init.lua;"
-    f'{esc_sp_dir}/?.lua;{esc_sp_dir}/?/init.lua;" .. package.path'
-  )
-  dofile_stmt = (
-    f"local target_mod_ok, target_mod = pcall(function() "
-    f'return dofile("{esc_out_lua}") end)'
-  )
-  lua_script_lines = [
-    pkg_path,
-    """
+_LUA_RELATIVE_LOADER = """
 local function _sp_install_loader()
   if _G._SP_RELATIVE_LOADER_INSTALLED then return end
   _G._SP_RELATIVE_LOADER_INSTALLED = true
@@ -707,17 +673,9 @@ local function _sp_install_loader()
   table.insert(loaders, 2, relative_loader)
 end
 _sp_install_loader()
-""",
-    'local testing = require("std.testing")',
-    dofile_stmt,
-    "if not target_mod_ok then",
-    f'  print("[ FAIL ] {esc_sp_basename} (module load error)")',
-    '  print("  " .. tostring(target_mod))',
-    "  os.exit(1)",
-    "end",
-    "local total_passed = 0",
-    "local total_failed = 0",
-    """
+"""
+
+_LUA_HARNESS_HELPERS = """
 local function get_sp_info(line_num)
   local map = (type(target_mod) == "table" and target_mod._SP_LINE_MAP)
     or _G._SP_LINE_MAP or _SP_LINE_MAP
@@ -773,15 +731,22 @@ local function get_first_sp_line(failures)
   end
   return 0
 end
-""",
-  ]
+"""
 
+
+def _emit_lua_standalone_tests(
+  standalone_tests: list[str],
+  esc_sp_basename: str,
+  filter_pattern: str | None,
+) -> list[str]:
+  """Emits Lua runner blocks for standalone `@test` functions."""
+  blocks: list[str] = []
   for fn_name in standalone_tests:
     if filter_pattern and filter_pattern not in fn_name:
       continue
     esc_fn = _escape_lua_string(fn_name)
     esc_lua_fn = _escape_lua_string(_mangle_lua_name(fn_name))
-    lua_script_lines.append(f'''
+    blocks.append(f'''
   do
     local ctx = testing.TestContext.init("{esc_fn}")
     testing.set_active_context(ctx)
@@ -824,6 +789,16 @@ end
   end
   ''')
 
+  return blocks
+
+
+def _emit_lua_suite_tests(
+  suite_tests: dict[str, list[str]],
+  esc_sp_basename: str,
+  filter_pattern: str | None,
+) -> list[str]:
+  """Emits Lua runner blocks for struct `@test` suite methods."""
+  blocks: list[str] = []
   for struct_name, methods in suite_tests.items():
     for m_name in methods:
       full_name = f"{struct_name}.{m_name}"
@@ -838,7 +813,7 @@ end
       esc_m = _escape_lua_string(m_name)
       esc_lua_m = _escape_lua_string(_mangle_lua_name(m_name))
       esc_full = _escape_lua_string(full_name)
-      lua_script_lines.append(f'''
+      blocks.append(f'''
   do
     local ctx = testing.TestContext.init("{esc_full}")
     testing.set_active_context(ctx)
@@ -942,17 +917,74 @@ end
   end
   ''')
 
+  return blocks
+
+
+def _build_lua_test_harness(
+  sp_file: str,
+  out_lua: str,
+  standalone_tests: list[str],
+  suite_tests: dict[str, list[str]],
+  filter_pattern: str | None,
+) -> str:
+  """Constructs a self-contained Lua 5.1 script that executes discovered tests.
+  """
+  workspace_root = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")
+  )
+  sp_dir = os.path.dirname(os.path.abspath(sp_file))
+  out_dir = os.path.dirname(os.path.abspath(out_lua))
+  esc_workspace_root = _escape_lua_string(workspace_root)
+  esc_sp_dir = _escape_lua_string(sp_dir)
+  esc_out_dir = _escape_lua_string(out_dir)
+  esc_out_lua = _escape_lua_string(out_lua)
+  esc_sp_basename = _escape_lua_string(os.path.basename(sp_file))
+
+  pkg_path = (
+    f'package.path = "{esc_out_dir}/?.lua;{esc_out_dir}/?/init.lua;'
+    f"{esc_workspace_root}/?.lua;"
+    f"{esc_workspace_root}/?/init.lua;"
+    f"{esc_workspace_root}/lib/?.lua;"
+    f"{esc_workspace_root}/lib/?/init.lua;"
+    f'{esc_sp_dir}/?.lua;{esc_sp_dir}/?/init.lua;" .. package.path'
+  )
+  dofile_stmt = (
+    f"local target_mod_ok, target_mod = pcall(function() "
+    f'return dofile("{esc_out_lua}") end)'
+  )
+  lua_script_lines = [
+    pkg_path,
+    _LUA_RELATIVE_LOADER,
+    'local testing = require("std.testing")',
+    dofile_stmt,
+    "if not target_mod_ok then",
+    f'  print("[ FAIL ] {esc_sp_basename} (module load error)")',
+    '  print("  " .. tostring(target_mod))',
+    "  os.exit(1)",
+    "end",
+    "local total_passed = 0",
+    "local total_failed = 0",
+    _LUA_HARNESS_HELPERS,
+  ]
+  lua_script_lines.extend(
+    _emit_lua_standalone_tests(
+      standalone_tests, esc_sp_basename, filter_pattern
+    )
+  )
+  lua_script_lines.extend(
+    _emit_lua_suite_tests(suite_tests, esc_sp_basename, filter_pattern)
+  )
   lua_script_lines.append("os.exit((total_failed > 0) and 1 or 0)")
   return "\n".join(lua_script_lines)
 
 
 def run_tests_lua(
   sp_file: str,
-  standalone_tests: List[str],
-  suite_tests: Dict[str, List[str]],
-  filter_pattern: Optional[str] = None,
+  standalone_tests: list[str],
+  suite_tests: dict[str, list[str]],
+  filter_pattern: str | None = None,
   sourcemap: bool = True,
-) -> Tuple[int, int, List[str]]:
+) -> tuple[int, int, list[str]]:
   """Executes discovered tests in Lua 5.1 target backend."""
   stem = os.path.splitext(os.path.basename(sp_file))[0]
   with tempfile.TemporaryDirectory(prefix="sapphire_test_lua_") as tmp_dir:
@@ -1005,7 +1037,7 @@ def run_tests_lua(
     ]
     passed = sum(1 for line in stdout_lines if line.startswith("[ PASS ]"))
     failed = sum(1 for line in stdout_lines if line.startswith("[ FAIL ]"))
-    errs: List[str] = []
+    errs: list[str] = []
     if stderr_text:
       errs.append(stderr_text)
     if res.returncode != 0 and failed == 0:
@@ -1021,10 +1053,10 @@ def run_tests_lua(
     return passed, failed, errs
 
 
-def _parse_test_output_lines(output: str, sp_file: str) -> List[Dict[str, Any]]:
+def _parse_test_output_lines(output: str, sp_file: str) -> list[dict[str, Any]]:
   """Parses [ PASS ] / [ FAIL ] lines from captured test runner output."""
-  records: List[Dict[str, Any]] = []
-  current: Optional[Dict[str, Any]] = None
+  records: list[dict[str, Any]] = []
+  current: dict[str, Any] | None = None
   for raw_line in output.splitlines():
     stripped = raw_line.strip()
     if stripped.startswith("[ PASS ] "):
@@ -1048,7 +1080,7 @@ def _parse_test_output_lines(output: str, sp_file: str) -> List[Dict[str, Any]]:
 def run_tests(
   path: Any,
   target: str = "python",
-  filter_pattern: Optional[str] = None,
+  filter_pattern: str | None = None,
   sourcemap: bool = True,
   json_output: bool = False,
 ) -> int:
@@ -1058,7 +1090,7 @@ def run_tests(
     Exit code (0 for success, 1 for failure).
   """
   paths = [path] if isinstance(path, str) else list(path or ["."])
-  sp_files: List[str] = []
+  sp_files: list[str] = []
   seen_files = set()
   for p in paths:
     if json_output and not os.path.exists(p):
@@ -1115,8 +1147,8 @@ def run_tests(
   total_passed = 0
   total_failed = 0
   tests_found = 0
-  test_records: List[Dict[str, Any]] = []
-  file_errors: List[Dict[str, Any]] = []
+  test_records: list[dict[str, Any]] = []
+  file_errors: list[dict[str, Any]] = []
   start_time = time.time()
   use_lua_backend = target.lower() in ("lua", "lua5.1", "love2d", "love")
 
@@ -1126,7 +1158,7 @@ def run_tests(
   for sp_file in sp_files:
     try:
       ast = parse_ast(sp_file)
-      disc_warnings: List[str] = []
+      disc_warnings: list[str] = []
       standalone_tests, suite_tests = discover_tests(
         ast, warnings=disc_warnings
       )

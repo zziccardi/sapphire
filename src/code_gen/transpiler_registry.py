@@ -2,7 +2,8 @@
 Principle).
 """
 
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from collections.abc import Callable
+from typing import Any
 
 from src.common.errors import SapphireTranspileError
 
@@ -15,8 +16,8 @@ class TranspilerTarget:
     name: str,
     display_name: str,
     default_extension: str,
-    transpiler_cls: Type[Any],
-    factory: Optional[Callable[..., Any]] = None,
+    transpiler_cls: type[Any],
+    factory: Callable[..., Any] | None = None,
   ):
     self.name = name
     self.display_name = display_name
@@ -28,19 +29,19 @@ class TranspilerTarget:
 class TranspilerRegistry:
   """Registry managing available transpiler backends."""
 
-  _targets: Dict[str, TranspilerTarget] = {}
+  _targets: dict[str, TranspilerTarget] = {}
 
   @classmethod
   def register(
     cls,
-    aliases: Union[str, List[str]],
+    aliases: str | list[str],
     display_name: str,
     default_extension: str,
-    factory: Optional[Callable[..., Any]] = None,
-  ) -> Callable[[Type[Any]], Type[Any]]:
+    factory: Callable[..., Any] | None = None,
+  ) -> Callable[[type[Any]], type[Any]]:
     """Decorator to register a transpiler class for target aliases."""
 
-    def decorator(transpiler_cls: Type[Any]) -> Type[Any]:
+    def decorator(transpiler_cls: type[Any]) -> type[Any]:
       alias_list = [aliases] if isinstance(aliases, str) else aliases
       target_obj = TranspilerTarget(
         name=alias_list[0],
@@ -68,6 +69,6 @@ class TranspilerRegistry:
     return cls._targets[target_lower]
 
   @classmethod
-  def list_targets(cls) -> List[str]:
+  def list_targets(cls) -> list[str]:
     """Returns a list of all registered target alias names."""
     return sorted(list(cls._targets.keys()))

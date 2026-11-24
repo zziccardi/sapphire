@@ -1,7 +1,8 @@
 """LSP code completion provider for Sapphire."""
 
 import re
-from typing import Any, Callable, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from lsprotocol.types import CompletionItem, CompletionList, CompletionParams
 
@@ -52,7 +53,7 @@ _KEYWORDS = [
 
 
 def _collect_block_stmt_locals(
-  stmts: List[Any],
+  stmts: list[Any],
   line: int,
   node_types: dict,
   add_item: Callable[[str, int, str], None],
@@ -128,7 +129,7 @@ def _collect_block_stmt_locals(
     elif isinstance(stmt, ForNode):
       if not _line_in_node_span(stmt, line):
         continue
-      if getattr(stmt, "key_var", None):
+      if stmt.key_var:
         add_item(stmt.key_var, 6, f"(variable) {stmt.key_var}")
       val_var = getattr(stmt, "val_var", stmt.loop_var)
       add_item(val_var, 6, f"(variable) {val_var}")
@@ -155,9 +156,9 @@ def get_scope_completion_items(
   uri: str,
   ls: Any,
   node_types: dict,
-) -> List[CompletionItem]:
+) -> list[CompletionItem]:
   """Collects scope-visible locals, symbols, keywords, and document words."""
-  items: List[CompletionItem] = []
+  items: list[CompletionItem] = []
   seen: set = set()
 
   def add_item(label: str, kind: int, detail: str) -> None:
@@ -271,7 +272,7 @@ def get_scope_completion_items(
 
 def _find_enclosing_impl_struct(
   ast: Any, sym_table: Any, line: int
-) -> Optional[Any]:
+) -> Any | None:
   """Returns the StructType of the ImplBlockNode enclosing *line*, if any."""
   if not ast or not sym_table:
     return None
@@ -291,7 +292,7 @@ class CompletionProvider:
     receiver_name: str,
     line: int,
     node_types: dict,
-  ) -> Optional[CompletionList]:
+  ) -> CompletionList | None:
     """Resolves member completions for `<receiver_name>.`."""
     ast = ls.ast_cache.get(uri)
     sym_table = ls.symbol_table_cache.get(uri)

@@ -1,6 +1,6 @@
 """Expression, literal, and initializer AST visitor methods for TypeChecker."""
 
-from typing import TYPE_CHECKING, List, Optional, Set
+from typing import TYPE_CHECKING
 
 from src.parser.ast import (
   ArrayLiteralNode,
@@ -352,7 +352,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
       return PrimitiveType("none")
 
     # Verify struct is a prototype struct (or inherits from one)
-    def check_proto(st: StructType, visited: Set[str]) -> bool:
+    def check_proto(st: StructType, visited: set[str]) -> bool:
       if st.name in visited:
         return False
       visited.add(st.name)
@@ -488,7 +488,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
 
   def _infer_lambda_param_type(
     self, param_name: str, body: "ASTNode"
-  ) -> Optional[Type]:
+  ) -> Type | None:
     """Infer the type of a lambda parameter from its usage in *body*.
 
     Performs a lightweight structural scan of the body AST — not a full
@@ -504,7 +504,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
     def references_param(node: "ASTNode") -> bool:
       return isinstance(node, IdentifierNode) and node.name == param_name
 
-    def scan(node: "ASTNode") -> Optional[Type]:
+    def scan(node: "ASTNode") -> Type | None:
       if node is None:
         return None
 
@@ -596,7 +596,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
     if isinstance(expected_func, OptionalType):
       expected_func = expected_func.base_type
 
-    seen_param_names: Set[str] = set()
+    seen_param_names: set[str] = set()
     param_types = []
     for idx, p in enumerate(node.parameters):
       if p.name in seen_param_names:
@@ -654,7 +654,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
 
     # Resolve any InferredType placeholders: if the body produced a concrete
     # return type, use it to back-fill params that remained unconstrained.
-    resolved_param_types: List[Type] = []
+    resolved_param_types: list[Type] = []
     for p, pt in zip(node.parameters, param_types, strict=False):
       if isinstance(pt, InferredType):
         if not isinstance(body_type, (NoneType, InferredType)) and not (
@@ -826,7 +826,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
 
     return MapType(inferred_key, inferred_val)
 
-  def _get_const_int_value(self, expr: ASTNode) -> Optional[int]:
+  def _get_const_int_value(self, expr: ASTNode) -> int | None:
     if isinstance(expr, LiteralNode) and expr.lit_type == "int":
       return int(expr.value)
     if (
