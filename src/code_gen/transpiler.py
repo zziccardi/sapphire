@@ -176,6 +176,33 @@ def _parse_and_check(
   return ast, src_content
 
 
+def _ensure_isolated_python_packages(
+    isolated_root: str, sub_output: str
+) -> None:
+  """Writes pkgutil.extend_path __init__.py markers for isolated Python packages.
+
+  Regular packages (with __init__.py) take precedence over namespace packages
+  under PEP 420 regardless of sys.path order. Emitting extend_path markers lets
+  freshly transpiled modules under isolated_root (e.g. tmp_dir/lib/love2d/)
+  shadow stale prebuilt files in the repo's regular lib/ package while still
+  allowing hand-written stdlib modules (e.g. lib/std/testing.py) to resolve.
+  """
+  abs_root = os.path.abspath(isolated_root)
+  curr = os.path.dirname(os.path.abspath(sub_output))
+  while curr != abs_root and _is_path_under(curr, abs_root):
+    init_py = os.path.join(curr, "__init__.py")
+    if not os.path.exists(init_py):
+      with open(init_py, "w", encoding="utf-8") as f:
+        f.write(
+            "from pkgutil import extend_path\n"
+            "__path__ = extend_path(__path__, __name__)\n"
+        )
+    parent = os.path.dirname(curr)
+    if parent == curr:
+      break
+    curr = parent
+
+
 def _transpile_imports(
     ast: Any,
     input_file: str,
@@ -202,6 +229,8 @@ def _transpile_imports(
         continue
       sub_output = os.path.join(isolated_root, *imp.path.split(".")) + ext
       os.makedirs(os.path.dirname(sub_output), exist_ok=True)
+      if ext == ".py":
+        _ensure_isolated_python_packages(isolated_root, sub_output)
     else:
       sub_output = os.path.splitext(sub_source)[0] + ext
     transpile_file(
