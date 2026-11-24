@@ -227,7 +227,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code3 = self._transpile(code3)
-    self.assertIn("((function() local _v_1 = opt_val; if _v_1 ~= nil then return _v_1 else return 99 end end)())", lua_code3)
+    self.assertIn("local _sc_1 = opt_val\n  if _sc_1 == nil then\n    _sc_1 = 99\n  end\n  local val = _sc_1", lua_code3)
+    self.assertNotIn("((function()", lua_code3)
 
     # 4. standard if let (no unwrap)
     code4 = """
@@ -409,7 +410,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("((function(_r) if _r ~= nil then return _r.hp else return nil end end)(t))", lua_code)
+    self.assertIn("local _opt_r_1 = t\n  local _opt_res_1 = nil\n  if _opt_r_1 ~= nil then\n    _opt_res_1 = _opt_r_1.hp\n  end\n  local hp_val = _opt_res_1", lua_code)
+    self.assertNotIn("((function(_r)", lua_code)
     self.assertIn("while (count > 0) do", lua_code)
 
   def test_optional_chaining_method_call(self):
@@ -429,7 +431,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("((function(_r) if _r ~= nil then return _r:get_hp() else return nil end end)(t))", lua_code)
+    self.assertIn("local _opt_r_1 = t\n  local _opt_res_1 = nil\n  if _opt_r_1 ~= nil then\n    _opt_res_1 = _opt_r_1:get_hp()\n  end\n  local val = _opt_res_1", lua_code)
+    self.assertNotIn("((function(_r)", lua_code)
 
   def test_prototypal_inheritance_and_clone_variations(self):
     """Verifies clone node transpilation with arena and without initializer block."""
@@ -1553,7 +1556,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("for i in _SP_RT._sapphire_range(0, 10, 2) do", lua_code)
+    self.assertIn("for i = (0), (10) - 1, 2 do", lua_code)
     self.assertIn("_SP_RT._sapphire_range =", lua_code)
 
   def test_guard_statement_lua(self):
@@ -3017,7 +3020,7 @@ class TestSharedFixtures(unittest.TestCase):
     """
     lua_code = self._transpile_fixture(code)
     self.assertIn("_val_a", lua_code)
-    self.assertIn("_r:add(4, 5)", lua_code)
+    self.assertIn(":add(4, 5)", lua_code)
     self.assertIn("_sapphire_del(r)", lua_code)
 
   def test_host_interop_extern_trait_export_and_on_reload(self):

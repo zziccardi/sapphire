@@ -134,7 +134,8 @@ class TernaryOperatorTest(unittest.TestCase):
     ast, checker = parse_and_check(code)
     lua_transpiler = LuaTranspiler()
     output = lua_transpiler.transpile(ast)
-    self.assertIn('((function() if (age >= 18) then return "Adult" else return "Minor" end end)())', output)
+    self.assertIn('if (age >= 18) then\n  _sc_1 = "Adult"\nelse\n  _sc_1 = "Minor"\nend', output)
+    self.assertNotIn("((function()", output)
 
 
 if __name__ == "__main__":

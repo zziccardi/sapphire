@@ -238,6 +238,10 @@ class LuaExprMixin:
     self.emit(")")
 
   def visit_CastExprNode(self, node: CastExprNode) -> None:
+    lifted = getattr(self, "_lifted_short_circuits", None)
+    if lifted and id(node) in lifted:
+      self.emit(lifted[id(node)])
+      return
     is_opt_target = isinstance(node.target_type, OptionalTypeNode)
     inner_type = node.target_type.base_type if is_opt_target else node.target_type
     target = inner_type.name if hasattr(inner_type, "name") else str(inner_type)
@@ -443,6 +447,10 @@ class LuaExprMixin:
       self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
+    lifted = getattr(self, "_lifted_short_circuits", None)
+    if lifted and id(node) in lifted:
+      self.emit(lifted[id(node)])
+      return
     member_name = getattr(node, "target_name", None) or self._mangle_name(node.member)
     if node.is_optional:
       self.emit("((function(_r) if _r ~= nil then return _r.")

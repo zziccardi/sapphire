@@ -159,6 +159,152 @@ class TestLuaStmtEmitter(unittest.TestCase):
     out = self._transpile_and_run_lua(code, "print(run_while(1), run_while(2))")
     self.assertEqual(out, "30\t200")
 
+  def _transpile_lua(self, code: str) -> str:
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    ast = ASTBuilder().visitProgram(parser.program())
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(checker.errors, [], f"Unexpected errors: {checker.errors}")
+    return LuaTranspiler().transpile(ast)
+
+  def test_direct_range_for_lowers_to_numeric_for(self):
+    """Verifies direct for-in-range lowers to native Lua numeric for loops."""
+    code = """
+    func sum_ranges(dyn_pos: int, dyn_neg: int, dyn_zero: int): int {
+      var total = 0;
+      for a in range(5) {
+        total += a;
+      }
+      for b in range(2, 6) {
+        total += b;
+      }
+      for c in range(0, 10, 3) {
+        total += c;
+      }
+      for d in range(10, 0, -3) {
+        total += d;
+      }
+      for e in range(0, 6, dyn_pos) {
+        total += e;
+      }
+      for f in range(6, 0, dyn_neg) {
+        total += f;
+      }
+      for g in range(0, 5, dyn_zero) {
+        total += 1000;
+      }
+      for h in range(0, 5, 0) {
+        total += 1000;
+      }
+      let stored = range(1, 5);
+      for s in stored {
+        total += s;
+      }
+      return total;
+    }
+    """
+    lua_code = self._transpile_lua(code)
+    user_code = lua_code.split("local sum_ranges", 1)[1]
+    self.assertIn("for a = 0, (5) - 1 do", user_code)
+    self.assertIn("for b = (2), (6) - 1 do", user_code)
+    self.assertIn("for c = (0), (10) - 1, 3 do", user_code)
+    self.assertIn("for d = (10), (0) + 1, -3 do", user_code)
+    self.assertIn("~= 0 then", user_code)
+    self.assertIn("local stored = _SP_RT._sapphire_range(1, 5)", user_code)
+    self.assertIn("for s in stored do", user_code)
+    # 0+1+2+3+4=10, 2+3+4+5=14, 0+3+6+9=18, 10+7+4+1=22,
+    # 0+2+4=6, 6+4+2=12, 0, 0, 1+2+3+4=10 => 92
+    out = self._transpile_and_run_lua(code, "print(sum_ranges(2, -2, 0))")
+    self.assertEqual(out, "92")
+
+  def test_lifted_expressions_emit_zero_iifes_and_preserve_short_circuit(self):
+    """Verifies ??, ?:, ?., optional cast, and chained map.get emit zero IIFEs."""
+    code = """
+    var calls: int = 0;
+
+    struct Box {
+      var val: int;
+    }
+    impl Box {
+      func add(x: int): int {
+        return self.val + x;
+      }
+    }
+
+    func bump(x: int): int {
+      calls += 1;
+      return x;
+    }
+
+    func run(present: bool): int {
+      calls = 0;
+      let b: Box? = present ? Box { val = 10 } : none;
+      let field_v = b?.val ?? bump(100);
+      let call_v = b?.add(bump(5)) ?? 0;
+      let cast_opt: int? = present ? (7 as int?) : none;
+      let cast_v = cast_opt ?? 0;
+      let grid: [int: [int: int]] = { 0: { 1: 42 } };
+      let hit = grid.get(0)?.get(1) ?? -1;
+      let miss = grid.get(9)?.get(1) ?? bump(3);
+      let flag = present && ((b?.val ?? 0) > 0);
+      let flag_v = flag ? 1 : 0;
+      return field_v + call_v + cast_v + hit + miss + flag_v + calls * 1000;
+    }
+    """
+    lua_code = self._transpile_lua(code)
+    user_code = lua_code.split("local calls = 0", 1)[1]
+    self.assertNotIn("(function(", user_code)
+    # present=true:
+    #   field_v=10 (no bump), call_v=15 (bump #1), cast_v=7,
+    #   hit=42, miss=3 (bump #2), flag_v=1, calls=2 => 2078
+    # present=false:
+    #   field_v=100 (bump #1), call_v=0 (no bump!), cast_v=0,
+    #   hit=42, miss=3 (bump #2), flag_v=0, calls=2 => 2145
+    out = self._transpile_and_run_lua(code, "print(run(true), run(false))")
+    self.assertEqual(out, "2078\t2145")
+
+  def test_luajit_trace_friendly_nested_range_map_coalesce(self):
+    """Verifies nested range + map.get + ?? compiles without LuaJIT trace aborts."""
+    luajit_bin = shutil.which("luajit")
+    if not luajit_bin:
+      self.skipTest("luajit not found on PATH")
+    code = """
+    func bench_grid(): int {
+      var grid: [int: [int: int]] = {};
+      for y in range(0, 40) {
+        var row: [int: int] = {};
+        for x in range(0, 40) {
+          row[x] = (x + y) % 3;
+        }
+        grid[y] = row;
+      }
+      var total = 0;
+      for rep in range(0, 20) {
+        for y in range(0, 40) {
+          for x in range(0, 40) {
+            let v = grid.get(y)?.get(x) ?? 0;
+            total += v;
+          }
+        }
+      }
+      return total;
+    }
+    """
+    lua_code = self._transpile_lua(code) + "\nprint(bench_grid())\n"
+    proc = subprocess.run(
+        [luajit_bin, "-jv", "-"],
+        input=lua_code,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+      self.fail(f"LuaJIT execution failed:\n{proc.stderr}")
+    self.assertEqual(proc.stdout.strip(), "31980")
+    self.assertNotIn("NYI: bytecode FNEW", proc.stderr)
+    self.assertNotIn("NYI: bytecode UCLO", proc.stderr)
+    self.assertNotIn("inner loop in root trace", proc.stderr)
+
 
 if __name__ == "__main__":
   unittest.main()

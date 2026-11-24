@@ -433,3 +433,32 @@ impl testing.TestCase for MathTestSuite {
   `Arena`, leave inherited fields untouched inside the `clone` block so the
   system under test triggers Copy-on-Write mutation on the clone while the base
   prototype's state remains unchanged.
+
+## 8. Performance & Writing Efficient Sapphire Code
+
+- **In-place nested container mutation (`if var`)**: Assigning a local map,
+  array, or struct back into a container (`grid[y] = row`) triggers
+  `_sapphire_copy` to preserve value semantics. Inside a loop over columns,
+  copy-out/write-back (`var row = grid.get(y) ?? {}; row[x] = true;
+  grid[y] = row;`) turns row population into O(W^2) table copying. Mutate
+  existing inner containers in place via `if var`:
+  ```sapphire
+  func set_coord_flag(var grid: [int: [int: bool]], x: int, y: int) {
+    if var row ?= grid.get(y) {
+      row[x] = true;
+    } else {
+      grid[y] = { x: true };
+    }
+  }
+  ```
+- **Hoist outer container lookups & accumulators out of inner loops**: Unwrap
+  outer rows once before iterating columns (`if let row ?= data.get(y)` before
+  `for x in range(0, width)`), and accumulate per-pass counts in a local `var`
+  (writing back to a map key once after the loop) instead of reading and
+  writing a map entry on every iteration.
+- **Measuring performance in Love2D & LuaJIT**: Time hot paths with
+  `love.timer.getTime()` (or FFI `clock_gettime` in headless `luajit`), inspect
+  JIT compilation ratios and line hotspots with `luajit -jp=vlF` (`jit.p`), and
+  check for trace compilation aborts with `luajit -jv` (`jit.v`). Avoid
+  `debug.sethook` during performance profiling because it disables JIT traces.
+
