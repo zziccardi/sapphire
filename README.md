@@ -15,7 +15,7 @@
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0" />
   </a>
   <a href="https://github.com/zziccardi/sapphire/blob/main/pyproject.toml">
-    <img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+" />
+    <img src="https://img.shields.io/badge/python-3.12%2B-3776AB.svg" alt="Python 3.12+" />
   </a>
 </p>
 
@@ -195,7 +195,7 @@ func main() {
 
 ### Compiler and runtime CLI
 
-Install the Sapphire CLI package using `pip` (Python 3.10+):
+Install the Sapphire CLI package using `pip` (Python 3.12+):
 
 ```bash
 pip install sapphire-lang
@@ -275,14 +275,15 @@ sapphire lsp
   [development guide](docs/development.md), [builtins](docs/builtins.md),
   [standard library](docs/stdlib.md), and [testing guide](docs/testing.md).
 * `grammar/`: ANTLR4 grammar specification (`Sapphire.g4`).
-* `lib/`: Sapphire standard library (`lib/std/`) and host-engine bindings
-  (`lib/love2d/`).
 * `samples/`: Example scripts demonstrating core language features (see
   [samples/README.md](samples/README.md)).
-* `src/`: Compiler pipeline and tooling:
+* `sapphire/`: Compiler pipeline, standard library, and tooling:
   * `cli/`: Unified `sapphire` CLI entry point (`sapphire.py`) and test runner
     (`test_runner.py`).
-  * `common/`: Domain exception hierarchy (`errors.py`).
+  * `common/`: Core diagnostic model (`diagnostics.py`), stable error codes
+    (`error_codes.py`), and domain exception hierarchy (`errors.py`).
+  * `lib/`: Sapphire standard library (`sapphire/lib/std/`) and host-engine
+    bindings (`sapphire/lib/love2d/`).
   * `parser/`: AST definitions (`ast.py`), visitor builder (`ast_builder.py`),
     centralized error listener (`error_listener.py`), and ANTLR-generated
     parser.

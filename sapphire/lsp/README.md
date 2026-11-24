@@ -31,7 +31,7 @@ It leverages the compiler's lexer, parser, and `TypeChecker` to inspect document
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.12+
 - `pygls` package (installed via Pipfile)
 
 ## Files
