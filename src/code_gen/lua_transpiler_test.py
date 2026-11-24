@@ -3163,49 +3163,73 @@ class TestSharedFixtures(unittest.TestCase):
       if not expectations:
         return  # Nothing to assert at runtime
 
-      lib_path = str(_E2E_DIR.parent.parent / "lib")
-      for fn_name, expected in expectations.items():
-        with self.subTest(fixture=fixture_name, fn=fn_name):
-          # Wrap the fixture in a Lua driver that executes within an IIFE
-          # and has package.path configured for std and lib modules.
-          driver = (
-              f"package.path = \"{lib_path}/?.lua;{lib_path}/?/init.lua;\" .. package.path\n"
-              "local __mod = (function()\n"
-              f"{lua_code}\n"
-              "end)()\n"
-              f"local fn = (__mod and __mod.{fn_name}) or {fn_name}\n"
-              f"print(tostring(fn()))\n"
-          )
-          with tempfile.NamedTemporaryFile(
-              suffix=".lua", mode="w", delete=False, encoding="utf-8"
-          ) as tmp:
-            tmp.write(driver)
-            tmp_path = tmp.name
-          try:
-            proc = subprocess.run(
-                [lua_bin, tmp_path],
-                capture_output=True, text=True, timeout=10,
-            )
-            if proc.returncode != 0:
-              self.fail(
-                  f"Lua execution failed for {fn_name}: {proc.stderr.strip()}"
+      repo_root = _E2E_DIR.parent.parent
+      lib_path = str(repo_root / "lib")
+      extra_lua_path = ""
+      dep_tmp_ctx = None
+      if "import testing.e2e." in source:
+        dep_tmp_ctx = tempfile.TemporaryDirectory()
+        dep_root = pathlib.Path(dep_tmp_ctx.name)
+        for line in source.splitlines():
+          stripped = line.strip()
+          if stripped.startswith("import testing.e2e."):
+            mod_path = stripped.split()[1].rstrip(";")
+            parts = mod_path.split(".")
+            sp_path = repo_root.joinpath(*parts).with_suffix(".sp")
+            if sp_path.exists():
+              dep_lua = self._transpile_fixture(
+                  sp_path.read_text(encoding="utf-8")
               )
-            raw = proc.stdout.strip()
-            # Coerce to the same Python type as the expected value
-            if isinstance(expected, bool):
-              actual = raw == "true"
-            elif isinstance(expected, int):
-              actual = int(float(raw))
-            elif isinstance(expected, float):
-              actual = float(raw)
-            else:
-              actual = raw
-            self.assertEqual(
-                actual, expected,
-                f"{fixture_name}::{fn_name} expected {expected!r}, Lua returned {raw!r}",
+              out_file = dep_root.joinpath(*parts).with_suffix(".lua")
+              out_file.parent.mkdir(parents=True, exist_ok=True)
+              out_file.write_text(dep_lua, encoding="utf-8")
+        extra_lua_path = f"{dep_root}/?.lua;{dep_root}/?/init.lua;"
+      try:
+        for fn_name, expected in expectations.items():
+          with self.subTest(fixture=fixture_name, fn=fn_name):
+            # Wrap the fixture in a Lua driver that executes within an IIFE
+            # and has package.path configured for std and lib modules.
+            driver = (
+                f"package.path = \"{extra_lua_path}{lib_path}/?.lua;{lib_path}/?/init.lua;\" .. package.path\n"
+                "local __mod = (function()\n"
+                f"{lua_code}\n"
+                "end)()\n"
+                f"local fn = (__mod and __mod.{fn_name}) or {fn_name}\n"
+                f"print(tostring(fn()))\n"
             )
-          finally:
-            os.unlink(tmp_path)
+            with tempfile.NamedTemporaryFile(
+                suffix=".lua", mode="w", delete=False, encoding="utf-8"
+            ) as tmp:
+              tmp.write(driver)
+              tmp_path = tmp.name
+            try:
+              proc = subprocess.run(
+                  [lua_bin, tmp_path],
+                  capture_output=True, text=True, timeout=10,
+              )
+              if proc.returncode != 0:
+                self.fail(
+                    f"Lua execution failed for {fn_name}: {proc.stderr.strip()}"
+                )
+              raw = proc.stdout.strip()
+              # Coerce to the same Python type as the expected value
+              if isinstance(expected, bool):
+                actual = raw == "true"
+              elif isinstance(expected, int):
+                actual = int(float(raw))
+              elif isinstance(expected, float):
+                actual = float(raw)
+              else:
+                actual = raw
+              self.assertEqual(
+                  actual, expected,
+                  f"{fixture_name}::{fn_name} expected {expected!r}, Lua returned {raw!r}",
+              )
+            finally:
+              os.unlink(tmp_path)
+      finally:
+        if dep_tmp_ctx is not None:
+          dep_tmp_ctx.cleanup()
 
     _test.__name__ = f"test_fixture_{fixture_name.removesuffix('.sp')}"
     _test.__doc__ = f"Shared fixture: {fixture_name}"

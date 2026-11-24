@@ -2512,20 +2512,58 @@ class TestSharedFixtures(unittest.TestCase):
     if checker.errors:
       raise AssertionError(f"Type errors in code:\n{source}\nErrors: {checker.errors}")
     py_code = Transpiler(test_mode=True).transpile(ast)
-    lib_path = str(_E2E_DIR.parent.parent / "lib")
+    repo_root = _E2E_DIR.parent.parent
+    lib_path = str(repo_root / "lib")
     if lib_path not in sys.path:
       sys.path.insert(0, lib_path)
-    ctx: dict = {}
-    exec(py_code, ctx)  # pylint: disable=exec-used
-    results = {}
-    for name, obj in ctx.items():
-      if name.startswith("test_") and callable(obj):
-        val = obj()
-        # Normalise enum members to their underlying value
-        if hasattr(val, "value"):
-          val = val.value
-        results[name] = val
-    return results
+
+    # Transpile any local `testing.e2e.*` helper modules imported by the fixture.
+    local_imports = [
+        line.strip().split()[1].rstrip(";")
+        for line in source.splitlines()
+        if line.strip().startswith("import testing.e2e.")
+    ]
+    loaded_mods: list[str] = []
+    if local_imports:
+      import types as _types
+      import testing as _testing_pkg
+      e2e_pkg = sys.modules.get("testing.e2e")
+      if e2e_pkg is None:
+        e2e_pkg = _types.ModuleType("testing.e2e")
+        sys.modules["testing.e2e"] = e2e_pkg
+      setattr(_testing_pkg, "e2e", e2e_pkg)
+      for mod_path in local_imports:
+        parts = mod_path.split(".")
+        sp_path = repo_root.joinpath(*parts).with_suffix(".sp")
+        if sp_path.exists():
+          dep_src = sp_path.read_text(encoding="utf-8")
+          dep_lexer = _Lexer(InputStream(dep_src))
+          dep_parser = _Parser(CommonTokenStream(dep_lexer))
+          dep_ast = _Builder().visit(dep_parser.program())
+          dep_checker = _Checker()
+          dep_checker.check(dep_ast)
+          dep_py = Transpiler(test_mode=True).transpile(dep_ast)
+          dep_mod = _types.ModuleType(mod_path)
+          exec(dep_py, dep_mod.__dict__)  # pylint: disable=exec-used
+          sys.modules[mod_path] = dep_mod
+          setattr(e2e_pkg, parts[-1], dep_mod)
+          loaded_mods.append(mod_path)
+
+    try:
+      ctx: dict = {}
+      exec(py_code, ctx)  # pylint: disable=exec-used
+      results = {}
+      for name, obj in ctx.items():
+        if name.startswith("test_") and callable(obj):
+          val = obj()
+          # Normalise enum members to their underlying value
+          if hasattr(val, "value"):
+            val = val.value
+          results[name] = val
+      return results
+    finally:
+      for mod_path in loaded_mods:
+        sys.modules.pop(mod_path, None)
 
   def test_omitted_type_annotations_transpilation(self):
     """Verifies Python transpilation and execution of structs and global variables with omitted explicit types."""

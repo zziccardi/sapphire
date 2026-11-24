@@ -51,6 +51,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_optional_callback_default_param": 712,
         "test_closures_stored_in_map": 33,
         "test_lambda_capturing_self_and_local": 33,
+        "test_closure_capturing_self_and_optional_callback_forwarded": 3458,
     },
     "control_flow_test.sp": {
         "test_if_else": 1,
@@ -102,6 +103,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_guard_var_nested_map_get": 3,
         "test_multi_binding_if_let_with_condition": 10,
         "test_chained_optional_map_get": 40,
+        "test_if_var_nested_map_remove_and_outer_prune": 170,
     },
     "strings_test.sp": {
         "test_interpolation": "Hello, World!",
@@ -114,6 +116,8 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_nested_quotes": "Alice: true",
         "test_to_int_valid": 35,
         "test_to_int_invalid": -2,
+        "test_split_basic_and_newline": "3:second",
+        "test_slice_positive_and_negative": "bcd:ef",
     },
     "arrays_test.sp": {
         "test_array_indexing": 20,
@@ -130,6 +134,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_ternary_expression": 100,
         "test_optional_chaining": 42,
         "test_optional_chaining_none": -1,
+        "test_string_enum_to_string_cast": "Player:Enemy",
     },
     "functions_and_returns_test.sp": {
         "test_default_parameter": 20,
@@ -151,6 +156,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_proto_shadowing": 250,
         "test_live_proto_mutation": 30,
         "test_nested_struct_cow_isolation": 409920,
+        "test_proto_trait_impl_in_struct_arena_map_with_if_var_dispatch": 132020,
     },
     "structs_and_methods_test.sp": {
         "test_default_fields": 0,
@@ -190,6 +196,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_nested_trait_map_literal": 73,
         "test_inherited_trait_partial_override": 70,
         "test_trait_default_method_and_override": 95,
+        "test_trait_stack_mixing_move_only_arena_and_copy_structs_with_factory": 64,
     },
     "feature_interactions_test.sp": {
         "test_struct_with_enum_matching_in_loop": 200,
@@ -206,6 +213,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_unique_ref": 42,
         "test_shared_ref_cycle_breaking": 42,
         "test_shared_from_move": 99,
+        "test_shared_ref_in_maps_with_trait_fields_and_aliases": 111,
     },
     "recursion_test.sp": {
         "test_direct_recursion": 120,
@@ -245,5 +253,8 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_loop_reinit_and_conditional_move_drop_flags": 123,
         "test_shared_weak_ref_upgrade_in_closure": 142,
         "test_proto_nested_struct_cow_isolation": 100350,
+    },
+    "cross_module_test.sp": {
+        "test_cross_module_inheritance_trait_and_ancestor_dispatch": 127,
     },
 }

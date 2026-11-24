@@ -119,3 +119,34 @@ func test_chained_optional_map_get(): int {
   let miss_outer = grid.get(9)?.get("hp") ?? -1;
   return hit + miss_inner + miss_outer;
 }
+
+@test
+func test_if_var_nested_map_remove_and_outer_prune(): int {
+  var grid: [int: [int: int]] = {
+    1: {2: 50},
+    3: {4: 60, 5: 70},
+  };
+
+  var empty_1 = false;
+  if var row ?= grid.get(1) {
+    row.remove(2);
+    empty_1 = row.empty();
+  }
+  if empty_1 {
+    grid.remove(1);
+  }
+
+  var empty_3 = false;
+  if var row ?= grid.get(3) {
+    row.remove(4);
+    empty_3 = row.empty();
+  }
+  if empty_3 {
+    grid.remove(3);
+  }
+
+  let has_1 = grid.contains(1) ? 10 : 0;
+  let rem = grid.get(3)?.get(5) ?? 0;
+  // grid.size() == 1, has_1 == 0, rem == 70 -> 170
+  return grid.size() * 100 + has_1 + rem;
+}
