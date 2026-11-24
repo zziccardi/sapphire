@@ -189,6 +189,10 @@ class GenericsChecker:
               trait_type = checker.symbol_table.lookup_type(cloned_impl.trait_name)
               if isinstance(trait_type, TraitType):
                 mono_struct_type.implemented_traits.add(trait_type.name)
+                mono_struct_type.implemented_trait_types[trait_type.name] = (
+                    trait_type
+                )
+                trait_type.add_implementor(mono_struct_type)
               else:
                 checker.error(
                     f"Cannot implement undefined trait '{cloned_impl.trait_name}'."

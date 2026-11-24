@@ -1338,7 +1338,11 @@ that must outlive lexical scopes, Sapphire provides first-class smart pointers:
 * **Heap self-containment**: Because `Ref<T>` and `SharedRef<T>` can outlive
   any lexical `Arena`, wrapping an arena-allocated `proto` or any value
   transitively holding an `Arena` dependency in `Ref(...)` or `SharedRef(...)`
-  is rejected at compile time.
+  is rejected at compile time. For closed-world `trait` types (including host
+  resource handle traits), boxing is permitted when no known implementor in the
+  program is a `proto` or transitively holds an arena reference; traits with
+  any `proto` implementor, open `Dynamic<Trait>` objects, and unbounded generic
+  type parameters remain rejected.
 * **Weak observer (`WeakRef<T>`)**: Non-owning reference created via
   `s.downgrade()`. Prevents cycles. Safely upgraded to `SharedRef<T>?` via
   `if let active ?= w.upgrade() { ... }`.

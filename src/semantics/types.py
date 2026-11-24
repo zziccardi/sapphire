@@ -461,6 +461,14 @@ class TraitType(Type):
     self.type_params = type_params or []
     self.ast_decl = ast_decl
     self.defining_module = defining_module
+    self.implementors: List[StructType] = []
+
+  def add_implementor(self, struct_type: "StructType") -> None:
+    """Records a struct or proto that implements this trait."""
+    for existing in self.implementors:
+      if existing is struct_type or existing == struct_type:
+        return
+    self.implementors.append(struct_type)
 
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, TraitType):
