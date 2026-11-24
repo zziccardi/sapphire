@@ -23,7 +23,6 @@
     "src/lsp/semantic_tokens.py",
     "src/lsp/server.py",
     "src/lsp/signature_provider.py",
-    "src/parser/ast.py",
     "src/parser/ast_builder.py",
     "src/semantics/arena_checker.py",
     "src/semantics/call_visitor.py",

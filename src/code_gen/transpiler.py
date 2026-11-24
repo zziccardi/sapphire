@@ -217,7 +217,7 @@ def _parse_and_check(
       print(f"\nSemantic Analysis failed with errors:\n{e}", file=sys.stderr)
     sys.exit(1)
 
-  return ast, src_content
+  return ast, src_content, checker.context
 
 
 def _ensure_isolated_python_packages(
@@ -302,6 +302,7 @@ def _instantiate_transpiler(
   test_mode: bool,
   dev_mode: bool,
   use_runtime_module: bool,
+  semantic_context: Any = None,
 ) -> Any:
   """Constructs a target transpiler passing only kwargs accepted by its factory.
   """
@@ -314,10 +315,13 @@ def _instantiate_transpiler(
       test_mode=test_mode,
       dev_mode=dev_mode,
       use_runtime_module=use_runtime_module,
+      semantic_context=semantic_context,
     )
   if target_info.name == "python":
     return target_info.factory(
-      test_mode=test_mode, use_runtime_module=use_runtime_module
+      test_mode=test_mode,
+      use_runtime_module=use_runtime_module,
+      semantic_context=semantic_context,
     )
 
   try:
@@ -327,10 +331,14 @@ def _instantiate_transpiler(
       p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
     )
     if accepts_var_kw or "test_mode" in params:
-      return target_info.factory(test_mode=test_mode)
+      inst = target_info.factory(test_mode=test_mode)
+      inst.semantic_context = semantic_context
+      return inst
   except (TypeError, ValueError):
     pass
-  return target_info.factory()
+  inst = target_info.factory()
+  inst.semantic_context = semantic_context
+  return inst
 
 
 def transpile_file(
@@ -371,7 +379,7 @@ def transpile_file(
     return output_file
   visited.add(abs_input_file)
 
-  ast, src_content = _parse_and_check(
+  ast, src_content, semantic_context = _parse_and_check(
     input_file, quiet, raise_on_error, verbose=verbose
   )
   _transpile_imports(
@@ -401,6 +409,7 @@ def transpile_file(
     test_mode,
     dev_mode,
     use_runtime_module,
+    semantic_context=semantic_context,
   )
 
   if verbose and not quiet:

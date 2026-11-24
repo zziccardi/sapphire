@@ -1,7 +1,7 @@
 """Control-flow AST visitor methods for TypeChecker (if, guard, match, loops).
 """
 
-from typing import Any, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Set, Tuple
 
 from src.parser.ast import (
   ASTNode,
@@ -45,8 +45,13 @@ from src.semantics.symbol_table import (
   VariableSymbol,
 )
 
+if TYPE_CHECKING:
+  from src.semantics.type_checker import TypeChecker as _TypeCheckerBase
+else:
+  _TypeCheckerBase = object
 
-class ControlFlowVisitorMixin:
+
+class ControlFlowVisitorMixin(_TypeCheckerBase):
   """Provides AST visitor methods for branches, pattern matching, and loops."""
 
   def _bind_header_binding(

@@ -86,7 +86,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
         )
       ):
         return False
-    inferred = getattr(expr, "inferred_type", None)
+    inferred = self.get_inferred_type(expr)
     if inferred is None:
       return False
     from src.semantics.types import (
@@ -933,8 +933,11 @@ class PythonStmtMixin(_PythonTranspilerBase):
       st_name = None
       if type_name and type_name in self.structs_with_destructor:
         st_name = type_name
-      elif val_type and getattr(val_type, "inferred_type", None) is not None:
-        st_name = self._type_needs_destructor(val_type.inferred_type)
+      elif (
+        val_type
+        and (val_inferred := self.get_inferred_type(val_type)) is not None
+      ):
+        st_name = self._type_needs_destructor(val_inferred)
       elif node.exprs and idx < len(node.exprs):
         st_name = self._expr_destructible_struct(node.exprs[idx])
       elif node.exprs and len(node.exprs) == 1:
@@ -956,8 +959,8 @@ class PythonStmtMixin(_PythonTranspilerBase):
       return False
     from src.semantics.types import PrimitiveType
 
-    tt = getattr(node.target, "inferred_type", None)
-    et = getattr(node.expr, "inferred_type", None)
+    tt = self.get_inferred_type(node.target)
+    et = self.get_inferred_type(node.expr)
     return (
       isinstance(tt, PrimitiveType)
       and tt.name == "int"

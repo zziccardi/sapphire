@@ -167,13 +167,27 @@ class BaseTranspiler(ABC):
     *,
     test_mode: bool = False,
     use_runtime_module: bool = False,
+    semantic_context: Any = None,
   ) -> None:
     """Initializes shared transpiler state and the root output buffer."""
     self.state = EmitterState(
       test_mode=test_mode,
       use_runtime_module=use_runtime_module,
     )
+    self.semantic_context: Any = semantic_context
     self._buffers: list[OutputBuffer] = [OutputBuffer()]
+
+  def get_inferred_type(self, node: Any) -> Any:
+    """Returns the resolved semantic Type for *node* from SemanticContext or
+    AST fallback.
+    """
+    if node is None:
+      return None
+    if self.semantic_context is not None:
+      typ = self.semantic_context.get_type(node)
+      if typ is not None:
+        return typ
+    return getattr(node, "inferred_type", None)
 
   # ------------------------------------------------------------------
   # Scoped output buffer management
@@ -547,7 +561,7 @@ class BaseTranspiler(ABC):
     """
     if expr is None:
       return None
-    inferred = getattr(expr, "inferred_type", None)
+    inferred = self.get_inferred_type(expr)
     if inferred is not None:
       from src.semantics.types import MultiReturnType
 

@@ -116,10 +116,12 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     test_mode: bool = False,
     dev_mode: bool = False,
     use_runtime_module: bool = False,
+    semantic_context: Any = None,
   ):
     super().__init__(
       test_mode=test_mode,
       use_runtime_module=use_runtime_module,
+      semantic_context=semantic_context,
     )
     # Lua-specific source-map and module metadata
     self.current_line = 1

@@ -1,6 +1,6 @@
 """Expression, literal, and initializer AST visitor methods for TypeChecker."""
 
-from typing import List, Optional, Set
+from typing import TYPE_CHECKING, List, Optional, Set
 
 from src.parser.ast import (
   ArrayLiteralNode,
@@ -45,8 +45,13 @@ from src.semantics.symbol_table import (
   VariableSymbol,
 )
 
+if TYPE_CHECKING:
+  from src.semantics.type_checker import TypeChecker as _TypeCheckerBase
+else:
+  _TypeCheckerBase = object
 
-class ExprVisitorMixin:
+
+class ExprVisitorMixin(_TypeCheckerBase):
   """Provides AST visitor methods for expressions, literals, and initializers.
   """
 

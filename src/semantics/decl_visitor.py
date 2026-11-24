@@ -1,6 +1,6 @@
 """Declaration and block AST visitor methods for TypeChecker."""
 
-from typing import Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 
 from src.parser.ast import (
   ASTNode,
@@ -36,8 +36,13 @@ from src.semantics.symbol_table import (
   VariableSymbol,
 )
 
+if TYPE_CHECKING:
+  from src.semantics.type_checker import TypeChecker as _TypeCheckerBase
+else:
+  _TypeCheckerBase = object
 
-class DeclVisitorMixin:
+
+class DeclVisitorMixin(_TypeCheckerBase):
   """Provides AST visitor methods for top-level declarations and blocks."""
 
   def visit_ProgramNode(self, node: ProgramNode) -> None:

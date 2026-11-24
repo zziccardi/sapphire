@@ -68,7 +68,7 @@ class TypeChecker(
     self.node_types: Dict[ASTNode, Type] = self.context.node_types
     self.errors: List[str] = []
     self.warnings: List[str] = []
-    self.diagnostics: List[Diagnostic] = []
+    self.diagnostics: List[Diagnostic] = self.context.diagnostics
     self.source_file_path: Optional[str] = source_file_path
     self.source_content: Optional[Any] = source_content
     self.current_function: Optional[FunctionType] = None
@@ -96,6 +96,42 @@ class TypeChecker(
     self._reported_import_errors: Set[str] = set()
     self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
     self._current_node: Optional[ASTNode] = None
+
+  @property
+  def temporary_frozen_lvalues(self) -> List[Tuple[str, List[str], str]]:
+    """Public accessor for temporary frozen lvalues used by helper passes."""
+    return self._temporary_frozen_lvalues
+
+  def find_immutable_field_in_chain(self, expr: ASTNode) -> Any:
+    """Public wrapper for `_find_immutable_field_in_chain`."""
+    return self._find_immutable_field_in_chain(expr)
+
+  def check_value_ownership_transfer(
+    self,
+    expr_node: ASTNode,
+    expr_type: Type,
+    node: Optional[ASTNode] = None,
+  ) -> None:
+    """Public wrapper for `_check_value_ownership_transfer`."""
+    self._check_value_ownership_transfer(expr_node, expr_type, node=node)
+
+  def resolve_type_node(self, type_node: Any) -> Type:
+    """Public wrapper for `_resolve_type_node`."""
+    return self._resolve_type_node(type_node)
+
+  def resolve_return_types(self, decl: Any) -> Type:
+    """Public wrapper for `_resolve_return_types`."""
+    return self._resolve_return_types(decl)
+
+  def get_lvalue_path(
+    self, node: ASTNode
+  ) -> Optional[Tuple[str, List[str]]]:
+    """Public wrapper for `_get_lvalue_path`."""
+    return self._get_lvalue_path(node)
+
+  def is_reference_type(self, type_obj: Type) -> bool:
+    """Public wrapper for `_is_reference_type`."""
+    return self._is_reference_type(type_obj)
 
   def _restore_moved_symbols(self, target_moved: Set[VariableSymbol]) -> None:
     """Restores `moved_symbols` to *target_moved* and keeps `sym.is_moved`

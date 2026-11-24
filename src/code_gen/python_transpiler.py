@@ -114,10 +114,16 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self._loop_vars_stack[-1].append(py_name)
     return py_name
 
-  def __init__(self, test_mode: bool = False, use_runtime_module: bool = False):
+  def __init__(
+    self,
+    test_mode: bool = False,
+    use_runtime_module: bool = False,
+    semantic_context: Any = None,
+  ):
     super().__init__(
       test_mode=test_mode,
       use_runtime_module=use_runtime_module,
+      semantic_context=semantic_context,
     )
     # Python-specific metadata & scoping state
     self.struct_traits: Dict[str, Set[str]] = {}

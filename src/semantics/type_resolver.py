@@ -1,6 +1,6 @@
 """Type resolution and pre-pass global/lambda analysis for TypeChecker."""
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import (
   ArrayTypeNode,
@@ -48,8 +48,13 @@ from src.semantics.symbol_table import (
   WeakRefType,
 )
 
+if TYPE_CHECKING:
+  from src.semantics.type_checker import TypeChecker as _TypeCheckerBase
+else:
+  _TypeCheckerBase = object
 
-class TypeResolverMixin:
+
+class TypeResolverMixin(_TypeCheckerBase):
   """Provides type-node resolution and global/lambda static analysis helpers."""
 
   def _resolve_field_type(self, f: StructFieldNode, struct_name: str) -> Type:

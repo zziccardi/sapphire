@@ -327,7 +327,7 @@ class CollectionChecker:
           f"variable '{r}'."
         )
       else:
-        immut = checker._find_immutable_field_in_chain(receiver)
+        immut = checker.find_immutable_field_in_chain(receiver)
         if immut is not None:
           field_name, struct_name = immut
           checker.error(
@@ -374,14 +374,14 @@ class CollectionChecker:
     checker.expected_type = expected_fn_type
     recv_res = ArenaChecker.get_lvalue_path(checker.symbol_table, receiver)
     if recv_res:
-      checker._temporary_frozen_lvalues.append(
+      checker.temporary_frozen_lvalues.append(
         (recv_res[0], recv_res[1], freeze_label)
       )
     try:
       return checker.visit(callback_expr)
     finally:
       if recv_res:
-        checker._temporary_frozen_lvalues.pop()
+        checker.temporary_frozen_lvalues.pop()
       checker.expected_type = old_expected
 
   @staticmethod
@@ -642,7 +642,7 @@ class CollectionChecker:
         return elem_type
       arg_expr = node.arguments[0].expr
       arg_t = checker.visit(arg_expr)
-      checker._check_value_ownership_transfer(arg_expr, arg_t, node=node)
+      checker.check_value_ownership_transfer(arg_expr, arg_t, node=node)
       if not arg_t.is_compatible(elem_type):
         checker.error(
           f"Argument type mismatch in .push(). Expected '{elem_type}', "
@@ -682,7 +682,7 @@ class CollectionChecker:
           f"Argument 'index' in .insert() must be 'int', got '{idx_t}'."
         )
       elem_t = checker.visit(element_arg.expr)
-      checker._check_value_ownership_transfer(
+      checker.check_value_ownership_transfer(
         element_arg.expr, elem_t, node=node
       )
       if not elem_t.is_compatible(elem_type):
@@ -888,14 +888,14 @@ class CollectionChecker:
       return v_type
 
     k_arg_type = checker.visit(key_arg.expr)
-    checker._check_value_ownership_transfer(key_arg.expr, k_arg_type, node=node)
+    checker.check_value_ownership_transfer(key_arg.expr, k_arg_type, node=node)
     if not k_arg_type.is_compatible(k_type):
       checker.error(
         f"Argument 'key' in .insert() must be '{k_type}', got '{k_arg_type}'."
       )
 
     v_arg_type = checker.visit(val_arg.expr)
-    checker._check_value_ownership_transfer(val_arg.expr, v_arg_type, node=node)
+    checker.check_value_ownership_transfer(val_arg.expr, v_arg_type, node=node)
     if not v_arg_type.is_compatible(v_type):
       checker.error(
         f"Argument 'value' in .insert() must be '{v_type}', got '{v_arg_type}'."
