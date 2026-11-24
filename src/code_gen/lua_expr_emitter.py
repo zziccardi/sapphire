@@ -59,7 +59,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     if isinstance(expr, LiteralNode) and expr.lit_type == "none":
       self.emit("_SP_RT._SP_NONE")
       return
-    inferred = getattr(expr, "inferred_type", None)
+    inferred = self.get_inferred_type(expr)
     if is_optional_slot or isinstance(inferred, OptionalType):
       self.emit("_SP_RT._wrap_opt(")
       self.visit(expr)
@@ -85,7 +85,7 @@ class LuaExprMixin(_LuaTranspilerBase):
       WeakRefType,
     )
 
-    recv_t = getattr(member_node.receiver, "inferred_type", None)
+    recv_t = self.get_inferred_type(member_node.receiver)
     if isinstance(recv_t, OptionalType):
       recv_t = recv_t.base_type
     if isinstance(recv_t, CoroutineType) and member_node.member in (
@@ -185,9 +185,9 @@ class LuaExprMixin(_LuaTranspilerBase):
     if node.op == "/":
       from src.semantics.types import PrimitiveType
 
-      lt = getattr(node.left, "inferred_type", None)
-      rt = getattr(node.right, "inferred_type", None)
-      it = getattr(node, "inferred_type", None)
+      lt = self.get_inferred_type(node.left)
+      rt = self.get_inferred_type(node.right)
+      it = self.get_inferred_type(node)
       if (
         isinstance(lt, PrimitiveType)
         and lt.name == "int"
@@ -202,8 +202,8 @@ class LuaExprMixin(_LuaTranspilerBase):
         return
 
     if node.op in ("==", "!="):
-      lt = _unwrap_ref_opt_type(getattr(node.left, "inferred_type", None))
-      rt = _unwrap_ref_opt_type(getattr(node.right, "inferred_type", None))
+      lt = _unwrap_ref_opt_type(self.get_inferred_type(node.left))
+      rt = _unwrap_ref_opt_type(self.get_inferred_type(node.right))
       if isinstance(lt, (ArrayType, MapType)) or isinstance(
         rt, (ArrayType, MapType)
       ):
@@ -331,7 +331,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     """
     from src.semantics.types import FunctionType, OptionalType
 
-    callee_t = getattr(node.callee, "inferred_type", None)
+    callee_t = self.get_inferred_type(node.callee)
     if (
       isinstance(callee_t, FunctionType)
       and slot_idx < len(callee_t.param_types)
@@ -463,9 +463,7 @@ class LuaExprMixin(_LuaTranspilerBase):
         use_colon = True
       elif getattr(node.callee, "is_static_method", False):
         use_colon = False
-      elif isinstance(
-        getattr(node.callee, "inferred_type", None), FunctionType
-      ):
+      elif isinstance(self.get_inferred_type(node.callee), FunctionType):
         use_colon = False
       else:
         use_colon = not (
@@ -632,7 +630,7 @@ class LuaExprMixin(_LuaTranspilerBase):
   def visit_ArrayLiteralNode(self, node: ArrayLiteralNode) -> None:
     from src.semantics.types import OptionalType
 
-    arr_t = getattr(node, "inferred_type", None)
+    arr_t = self.get_inferred_type(node)
     is_opt_arr = isinstance(arr_t, ArrayType) and isinstance(
       arr_t.element_type, OptionalType
     )
@@ -646,7 +644,7 @@ class LuaExprMixin(_LuaTranspilerBase):
   def visit_MapLiteralNode(self, node: MapLiteralNode) -> None:
     from src.semantics.types import OptionalType
 
-    map_t = getattr(node, "inferred_type", None)
+    map_t = self.get_inferred_type(node)
     is_opt_map = isinstance(map_t, MapType) and isinstance(
       map_t.value_type, OptionalType
     )
@@ -661,7 +659,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit("}")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
-    recv_t = _unwrap_ref_opt_type(getattr(node.array, "inferred_type", None))
+    recv_t = _unwrap_ref_opt_type(self.get_inferred_type(node.array))
     if isinstance(recv_t, MapType):
       self.emit("_SP_RT._sapphire_map_at(")
       self.visit(node.array)

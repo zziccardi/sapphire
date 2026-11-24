@@ -98,9 +98,9 @@ class PythonExprMixin(_PythonTranspilerBase):
     if node.op == "/":
       from src.semantics.types import PrimitiveType
 
-      lt = getattr(node.left, "inferred_type", None)
-      rt = getattr(node.right, "inferred_type", None)
-      it = getattr(node, "inferred_type", None)
+      lt = self.get_inferred_type(node.left)
+      rt = self.get_inferred_type(node.right)
+      it = self.get_inferred_type(node)
       if (
         isinstance(lt, PrimitiveType)
         and lt.name == "int"

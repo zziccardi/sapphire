@@ -76,6 +76,24 @@ class TestEmitterStateAndBuffers(unittest.TestCase):
     lt._identifier_map["y"] = "_y_1"
     self.assertEqual(lt.capture_expr(IdentifierNode("y")), "_y_1")
 
+  def test_get_inferred_type_uses_semantic_context_and_fallback(self):
+    from src.semantics.semantic_context import SemanticContext
+    from src.semantics.types import PrimitiveType
+
+    ctx = SemanticContext()
+    node = IdentifierNode("v")
+    int_t = PrimitiveType("int")
+    ctx.record_type(node, int_t)
+
+    pt = PythonTranspiler(semantic_context=ctx)
+    self.assertIsNone(pt.get_inferred_type(None))
+    self.assertEqual(pt.get_inferred_type(node), int_t)
+
+    # Fallback to AST inferred_type when not in SemanticContext
+    other = IdentifierNode("w")
+    other.inferred_type = PrimitiveType("bool")
+    self.assertEqual(pt.get_inferred_type(other), PrimitiveType("bool"))
+
 
 if __name__ == "__main__":
   unittest.main()

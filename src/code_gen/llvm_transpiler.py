@@ -99,12 +99,18 @@ from src.code_gen.transpiler_registry import TranspilerRegistry
 class LLVMTranspiler(BaseTranspiler):
   """Transpiles a type-checked Sapphire AST into LLVM IR."""
 
-  def __init__(self, module_name="sapphire_module", target_triple=None):
+  def __init__(
+    self,
+    module_name="sapphire_module",
+    target_triple=None,
+    semantic_context: Any = None,
+  ):
     if ir is None:  # pragma: no cover
       raise ImportError(
         "The experimental LLVM backend requires 'llvmlite'. "
         "Install it with: pip install 'sapphire-lang[llvm]'"
       )
+    super().__init__(semantic_context=semantic_context)
     # 1. Initialize an isolated LLVM context and module per transpiler instance
     self.context = ir.Context()
     self.module = ir.Module(name=module_name, context=self.context)
@@ -192,7 +198,7 @@ class LLVMTranspiler(BaseTranspiler):
     """
     if expr is None:
       return None
-    inferred = getattr(expr, "inferred_type", None)
+    inferred = self.get_inferred_type(expr)
     if inferred is not None:
       return self.get_llvm_type(inferred)
     if isinstance(expr, LiteralNode):

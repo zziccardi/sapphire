@@ -133,7 +133,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
         )
       ):
         return False
-    inferred = getattr(expr, "inferred_type", None)
+    inferred = self.get_inferred_type(expr)
     if inferred is None:
       return False
     from src.semantics.types import (
@@ -172,7 +172,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
     """
     from src.semantics.types import OptionalType, RefType, SharedRefType
 
-    t = getattr(expr, "inferred_type", None)
+    t = self.get_inferred_type(expr)
     while isinstance(t, (OptionalType, RefType, SharedRefType)):
       t = t.base_type if isinstance(t, OptionalType) else t.inner_type
     return isinstance(t, MapType)
@@ -185,7 +185,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
       return True
     if isinstance(expr, InterpolatedStringNode):
       return True
-    t = getattr(expr, "inferred_type", None)
+    t = self.get_inferred_type(expr)
     return isinstance(t, PrimitiveType) and t.name == "String"
 
   def _contains_liftable_expr(
@@ -443,7 +443,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
           for arg in node.arguments:
             self._lift_match_expressions(arg.expr)
           recv_id = IdentifierNode(recv_tmp)
-          recv_id.inferred_type = getattr(orig_recv, "inferred_type", None)
+          recv_id.inferred_type = self.get_inferred_type(orig_recv)
           node.callee.receiver = recv_id
           node.callee.is_optional = False
           self.newline()
@@ -676,8 +676,11 @@ class LuaStmtMixin(_LuaTranspilerBase):
       st_name = None
       if type_name and type_name in self.structs_with_destructor:
         st_name = type_name
-      elif val_type and getattr(val_type, "inferred_type", None) is not None:
-        st_name = self._type_needs_destructor(val_type.inferred_type)
+      elif (
+        val_type
+        and (val_inferred := self.get_inferred_type(val_type)) is not None
+      ):
+        st_name = self._type_needs_destructor(val_inferred)
       elif node.exprs and idx < len(node.exprs):
         st_name = self._expr_destructible_struct(node.exprs[idx])
       elif node.exprs and len(node.exprs) == 1:
@@ -700,8 +703,8 @@ class LuaStmtMixin(_LuaTranspilerBase):
       return False
     from src.semantics.types import PrimitiveType
 
-    tt = getattr(node.target, "inferred_type", None)
-    et = getattr(node.expr, "inferred_type", None)
+    tt = self.get_inferred_type(node.target)
+    et = self.get_inferred_type(node.expr)
     return (
       isinstance(tt, PrimitiveType)
       and tt.name == "int"
@@ -937,7 +940,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
       from src.semantics.types import MultiReturnType
 
       if len(node.expressions) == 1:
-        inferred = getattr(node.expressions[0], "inferred_type", None)
+        inferred = self.get_inferred_type(node.expressions[0])
         if isinstance(inferred, MultiReturnType):
           ret_tbl = self._next_temp_name("_ret_vals")
           arity = len(inferred.types)
@@ -1581,9 +1584,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
             self.newline()
             self.emit(f"for {val_var} = {start_tmp}, {stop_tmp}, {step_tmp} do")
             close_guard_if = True
-      elif isinstance(
-        getattr(node.iterable, "inferred_type", None), RangeType
-      ) or (
+      elif isinstance(self.get_inferred_type(node.iterable), RangeType) or (
         isinstance(node.iterable, CallNode)
         and isinstance(node.iterable.callee, IdentifierNode)
         and node.iterable.callee.name == "range"

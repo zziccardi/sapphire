@@ -253,6 +253,42 @@ class TestASTNodes(unittest.TestCase):
     if_empty = IfNode(condition=cond, then_block=BlockNode([]))
     self.assertEqual(if_empty.bindings, [])
 
+  def test_source_span_and_dataclass_identity(self):
+    """Verifies SourceSpan, ASTNode.span, identity hashing, and None defaults."""
+    from src.parser.ast import (
+        CallNode,
+        ImplBlockNode,
+        ProgramNode,
+        SourceSpan,
+        StructInitializerNode,
+        TraitDeclNode,
+    )
+
+    n1 = IdentifierNode("x")
+    n2 = IdentifierNode("x")
+    # eq=False preserves identity-based hashing for SemanticContext side-tables
+    self.assertNotEqual(n1, n2)
+    mapping = {n1: "first", n2: "second"}
+    self.assertEqual(mapping[n1], "first")
+    self.assertEqual(mapping[n2], "second")
+
+    n1.start_line = 3
+    n1.start_column = 4
+    n1.end_line = 3
+    n1.end_column = 5
+    n1.length = 1
+    n1.name_span = SourceSpan(3, 4, 3, 5, 1)
+    self.assertEqual(n1.span, SourceSpan(3, 4, 3, 5, 1))
+    self.assertNotIn("name_span", n1.to_dict())
+
+    # Passing None explicitly for list fields normalizes cleanly to []
+    self.assertEqual(BasicTypeNode("T", None).type_args, [])
+    self.assertEqual(ProgramNode([], None).imports, [])
+    self.assertEqual(ImplBlockNode("S", None, [], None, None, None).type_params, [])
+    self.assertEqual(TraitDeclNode("Tr", [], None).type_params, [])
+    self.assertEqual(CallNode(n1, [], None).type_args, [])
+    self.assertEqual(StructInitializerNode("S", [], None, None).type_args, [])
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -1,6 +1,6 @@
 """Member-access and module-path resolution visitors for TypeChecker."""
 
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from src.parser.ast import (
   ASTNode,
@@ -51,7 +51,13 @@ _ASSERTION_NAMES = (
 )
 
 
-class MemberAccessVisitorMixin:
+if TYPE_CHECKING:
+  from src.semantics.type_checker import TypeChecker as _TypeCheckerBase
+else:
+  _TypeCheckerBase = object
+
+
+class MemberAccessVisitorMixin(_TypeCheckerBase):
   """Provides AST visitor and helper methods for member access resolution."""
 
   def _get_dotted_path(self, expr: Any) -> Optional[List[str]]:
