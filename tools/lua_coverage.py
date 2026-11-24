@@ -15,7 +15,7 @@ from typing import Dict, Set
 
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_STD_DIR = os.path.join(_REPO_ROOT, "lib", "std")
+_STD_DIR = os.path.join(_REPO_ROOT, "sapphire", "lib", "std")
 
 _LUA_HOOK_TEMPLATE = r"""
 local _cov_out = os.getenv("SAPPHIRE_LUA_COV_LOG")
@@ -89,7 +89,7 @@ def run_lua_coverage(fail_under: float = 0.0) -> int:
     )
 
     proc = subprocess.run(
-        [sys.executable, "-m", "src.cli.sapphire", "test", "-t", "lua"],
+        [sys.executable, "-m", "sapphire.cli.sapphire", "test", "-t", "lua"],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
@@ -131,7 +131,7 @@ def run_lua_coverage(fail_under: float = 0.0) -> int:
     pct = (100.0 * len(hit_lines) / stmts) if stmts else 100.0
     total_stmts += stmts
     total_miss += miss
-    print(f"lib/std/{fname:<20} {stmts:>6} {miss:>6} {pct:>5.0f}%")
+    print(f"sapphire/lib/std/{fname:<11} {stmts:>6} {miss:>6} {pct:>5.0f}%")
 
   total_pct = (
       100.0 * (total_stmts - total_miss) / total_stmts if total_stmts else 100.0

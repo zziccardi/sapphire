@@ -1,0 +1,341 @@
+"""Unit tests for Generics (Parametric Polymorphism) in Sapphire."""
+
+import unittest
+
+from antlr4 import CommonTokenStream, InputStream
+
+from sapphire.code_gen.lua_transpiler import LuaTranspiler
+from sapphire.code_gen.python_transpiler import PythonTranspiler
+from sapphire.parser.ast_builder import ASTBuilder
+from sapphire.parser.gen.SapphireLexer import SapphireLexer
+from sapphire.parser.gen.SapphireParser import SapphireParser
+from sapphire.semantics.symbol_table import (
+  GenericTypeParameter,
+  PrimitiveType,
+  StructType,
+  TraitType,
+)
+from sapphire.semantics.type_checker import SemanticError, TypeChecker
+
+
+class TestGenerics(unittest.TestCase):
+  """Suite of unit tests verifying generic struct and function behavior."""
+
+  def _check(self, code: str):
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    parser.removeErrorListeners()
+    tree = parser.program()
+    if parser.getNumberOfSyntaxErrors() > 0:
+      raise SyntaxError(f"Syntax error while parsing code string for type checking:\n{code}")
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    return ast
+
+  def test_generic_struct_and_impl(self):
+    """Verifies that generic structs and generic impl blocks monomorphize cleanly."""
+    code = """
+    struct Box<T> {
+      var val: T;
+    }
+
+    impl Box<T> {
+      func __init__(val: T) {
+        self.val = val;
+      }
+    }
+
+    func main() {
+      let b1 = Box<int>(val = 42);
+      let b2 = Box<int>(val = 100);
+    }
+    """
+    ast = self._check(code)
+    py_code = PythonTranspiler().transpile(ast)
+    self.assertIn("class Box__int", py_code)
+    lua_code = LuaTranspiler().transpile(ast)
+    self.assertIn("Box__int", lua_code)
+
+  def test_generic_function_inference(self):
+    """Verifies contextual inference for generic function arguments."""
+    code = """
+    func identity<T>(val: T): T {
+      return val;
+    }
+
+    func main() {
+      let x = identity(100);
+      let y = identity<float>(3.14);
+      let z = identity(200);
+    }
+    """
+    ast = self._check(code)
+    py_code = PythonTranspiler().transpile(ast)
+    self.assertIn("def identity__int", py_code)
+    self.assertIn("def identity__float", py_code)
+    lua_code = LuaTranspiler().transpile(ast)
+    self.assertIn("function identity__int", lua_code)
+    self.assertIn("function identity__float", lua_code)
+
+  def test_generic_struct_initializer(self):
+    """Verifies struct initializers with generic type arguments."""
+    code = """
+    struct Pair<K, V> {
+      var key: K;
+      var value: V;
+    }
+
+    func main() {
+      let p = Pair<String, int> {
+        key = "score",
+        value = 100,
+      };
+    }
+    """
+    ast = self._check(code)
+    py_code = PythonTranspiler().transpile(ast)
+    self.assertIn("class Pair__String_int", py_code)
+    lua_code = LuaTranspiler().transpile(ast)
+    self.assertIn("Pair__String_int", lua_code)
+
+  def test_generic_trait_declaration_and_impl_variations(self):
+    """Verifies generic trait declarations and impl syntax variations."""
+    code = """
+    trait Container<T> {
+      func get(): T;
+    }
+
+    struct Item<T> {
+      var val: T;
+    }
+
+    struct Simple {
+      var count: int;
+    }
+
+    impl Container<T> for Item<T> {
+      func get(): T {
+        return self.val;
+      }
+    }
+
+    impl Container<T> for Simple {
+      func get(): T {
+        return 0;
+      }
+    }
+
+    impl Container for Item<T> {
+      func get(): int {
+        return 1;
+      }
+    }
+
+    func main() {}
+    """
+    self._check(code)
+
+    # Verify concrete struct type argument in impl is type-checked
+    concrete_impl_code = """
+    trait Container<T> {
+      func get(): T;
+    }
+    struct Payload {
+      var v: int;
+    }
+    struct Box {
+      var p: Payload;
+    }
+    impl Container<Payload> for Box {
+      func get(): Payload {
+        return self.p;
+      }
+    }
+    func main(): int {
+      let b = Box { p = Payload { v = 7 } };
+      return b.get().v;
+    }
+    """
+    ast_concrete = self._check(concrete_impl_code)
+    py_code = PythonTranspiler().transpile(ast_concrete)
+    self.assertIn("def get(self)", py_code)
+
+    bad_concrete_impl_code = """
+    trait Container<T> {
+      func get(): T;
+    }
+    struct Payload {
+      var v: int;
+    }
+    struct Box {
+      var p: Payload;
+    }
+    impl Container<Payload> for Box {
+      func get(): int {
+        return 123;
+      }
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(bad_concrete_impl_code)
+    self.assertIn("has signature () -> int, but trait 'Container' requires () -> Payload", str(ctx.exception))
+
+  def test_nested_generic_type_substitution(self):
+    """Verifies nested generic type parameter substitution."""
+    code = """
+    struct Inner<T> {
+      var val: T;
+    }
+
+    struct Outer<U> {
+      var item: Inner<U>;
+    }
+
+    func main() {
+      let o = Outer<int> {
+        item = Inner<int> { val = 10 }
+      };
+    }
+    """
+    self._check(code)
+
+  def test_generic_type_errors(self):
+    """Verifies errors when invoking generic struct constructor or initializer without type arguments."""
+    code1 = """
+    struct Box<T> {
+      var val: T;
+    }
+    impl<T> Box<T> {
+      func __init__(val: T) { self.val = val; }
+    }
+    func main() {
+      let b = Box(val = 1);
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code1)
+    self.assertIn("requires explicit type arguments", str(ctx.exception))
+
+    code2 = """
+    struct Box<T> {
+      var val: T;
+    }
+    func main() {
+      let b = Box { val = 1 };
+    }
+    """
+    with self.assertRaises(SemanticError) as ctx:
+      self._check(code2)
+    self.assertIn("requires explicit type arguments", str(ctx.exception))
+
+  def test_generic_symbol_table_helpers(self):
+    """Verifies GenericTypeParameter methods and repr output for generic types."""
+    gt1 = GenericTypeParameter("T")
+    gt2 = GenericTypeParameter("T")
+    gt3 = GenericTypeParameter("U")
+    self.assertEqual(gt1, gt2)
+    self.assertNotEqual(gt1, gt3)
+    self.assertNotEqual(gt1, "T")
+    self.assertTrue(gt1.is_compatible(gt2))
+    self.assertTrue(gt1.is_compatible(gt3))
+    self.assertEqual(repr(gt1), "T")
+
+    st = StructType("Box", type_params=["T"])
+    self.assertEqual(repr(st), "Box<T>")
+
+    tt = TraitType("Container", type_params=["T"])
+    self.assertEqual(repr(tt), "trait Container<T>")
+
+  def test_substitute_ast_helpers(self):
+    """Verifies AST substitution on None and non-generic BasicTypeNode."""
+    tc = TypeChecker()
+    self.assertIsNone(tc._substitute_ast(None, {}))
+    from sapphire.parser.ast import BasicTypeNode
+
+    btn = BasicTypeNode("int")
+    sub = tc._substitute_ast(btn, {})
+    self.assertEqual(sub.name, "int")
+
+  def test_complex_generic_monomorphization(self):
+    """Verifies monomorphization for generic structs with optional and primitive types."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func main() {
+      let b1 = Box<int?> { item = none };
+      let b2 = Box<String> { item = "hello" };
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertIsNotNone(checker.symbol_table.lookup_type("Box__Opt_int"))
+    self.assertIsNotNone(checker.symbol_table.lookup_type("Box__String"))
+
+  def test_mangle_type_name_complex_types(self):
+    from sapphire.semantics.symbol_table import (
+      ArrayType,
+      FunctionType,
+      MapType,
+      StringType,
+    )
+
+    tc = TypeChecker()
+    arr_t = ArrayType(PrimitiveType("int"))
+    map_t = MapType(StringType(), PrimitiveType("int"))
+    fn_t = FunctionType([PrimitiveType("int")], PrimitiveType("float"))
+    self.assertEqual(tc._mangle_type_name(arr_t), "Arr_int")
+    self.assertEqual(tc._mangle_type_name(map_t), "Map_String_int")
+    self.assertEqual(tc._mangle_type_name(fn_t), "Fn_int_to_float")
+
+  def test_imported_module_generic_function_call(self):
+    """Verifies monomorphization when calling a generic function exported by a module with explicit type args."""
+    from sapphire.parser.ast import (
+      BasicTypeNode,
+      BlockNode,
+      FuncDeclNode,
+      IdentifierNode,
+      ParameterNode,
+      ReturnNode,
+    )
+    from sapphire.semantics.symbol_table import (
+      FunctionSymbol,
+      FunctionType,
+      GenericTypeParameter,
+      ModuleSymbol,
+    )
+
+    tc = TypeChecker()
+    mod_sym = ModuleSymbol("math_utils", "lib.math_utils")
+    fn_type = FunctionType([GenericTypeParameter("T")], GenericTypeParameter("T"))
+    func_ast = FuncDeclNode("identity", parameters=[ParameterNode(False, "x", BasicTypeNode("T"))], return_type=BasicTypeNode("T"), type_params=["T"], body=BlockNode([ReturnNode([IdentifierNode("x")])]))
+    fn_sym = FunctionSymbol("identity", fn_type, type_params=["T"], ast_decl=func_ast)
+    mod_sym.exports["identity"] = fn_sym
+    tc.symbol_table.define("math_utils", mod_sym)
+
+    code = """
+    func main() {
+      let x = math_utils.identity<int>(42);
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+    tc.check(ast)
+    self.assertIsNotNone(tc.symbol_table.lookup("identity__int"))
+    self.assertEqual(mod_sym.exports["identity__int"].name, "identity__int")

@@ -74,11 +74,11 @@ def parse_source(
   """Parses a Sapphire source string into an AST ProgramNode."""
   from antlr4 import CommonTokenStream, InputStream
 
-  from src.common.errors import SapphireSyntaxError
-  from src.parser.ast_builder import ASTBuilder
-  from src.parser.error_listener import CustomErrorListener
-  from src.parser.gen.SapphireLexer import SapphireLexer
-  from src.parser.gen.SapphireParser import SapphireParser
+  from sapphire.common.errors import SapphireSyntaxError
+  from sapphire.parser.ast_builder import ASTBuilder
+  from sapphire.parser.error_listener import CustomErrorListener
+  from sapphire.parser.gen.SapphireLexer import SapphireLexer
+  from sapphire.parser.gen.SapphireParser import SapphireParser
 
   input_stream = InputStream(source)
   error_listener = CustomErrorListener(
@@ -109,7 +109,7 @@ def parse_and_check(
   target: str | None = None,
 ) -> tuple[Any, Any]:
   """Parses and type-checks Sapphire source, returning (ast, checker)."""
-  from src.semantics.type_checker import TypeChecker
+  from sapphire.semantics.type_checker import TypeChecker
 
   ast = parse_source(source, file_path=file_path)
   checker = TypeChecker(
@@ -137,8 +137,8 @@ class TypeCheckerTestBase:
 
   def _check(self, code: str, source_file_path: str | None = None) -> Any:
     """Parses and runs the semantic checker on a Sapphire source string."""
-    from src.common.errors import SapphireSyntaxError
-    from src.semantics.type_checker import TypeChecker
+    from sapphire.common.errors import SapphireSyntaxError
+    from sapphire.semantics.type_checker import TypeChecker
 
     try:
       ast = parse_source(code, file_path=source_file_path, quiet=True)

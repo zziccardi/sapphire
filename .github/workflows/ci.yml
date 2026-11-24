@@ -51,7 +51,7 @@ jobs:
       - name: Verify ANTLR-generated parser files are up-to-date
         run: |
           pipenv run antlr
-          git diff --exit-code src/parser/gen
+          git diff --exit-code sapphire/parser/gen
 
       - name: Verify TextMate grammar is up-to-date
         run: |

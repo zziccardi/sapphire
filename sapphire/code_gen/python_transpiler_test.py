@@ -1,0 +1,3461 @@
+"""Unit tests for the Sapphire-to-Python transpiler.
+
+This module validates that transpiled Python code is syntactically correct
+and preserves all Sapphire runtime semantics, including prototypal delegation.
+"""
+
+import os
+import pathlib
+import sys
+import tempfile
+import unittest
+from typing import Any
+
+from antlr4 import CommonTokenStream, InputStream
+
+from sapphire.code_gen.base_transpiler import get_default_value_for_type_node
+from sapphire.code_gen.python_transpiler import PythonTranspiler, Transpiler
+from sapphire.code_gen.transpiler import transpile_file
+from sapphire.parser.ast import (
+  BasicTypeNode,
+  GuardClauseNode,
+  HeaderBindingNode,
+  LiteralNode,
+  YieldNode,
+)
+from sapphire.parser.ast_builder import ASTBuilder
+from sapphire.parser.gen.SapphireLexer import SapphireLexer
+from sapphire.parser.gen.SapphireParser import SapphireParser
+from sapphire.semantics.type_checker import TypeChecker
+
+
+class TestPythonTranspiler(unittest.TestCase):
+  """Suite of unit tests verifying correct code generation and execution."""
+
+  def _transpile(self, code: str) -> str:
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    parser.removeErrorListeners()
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
+    transpiler = Transpiler()
+    return transpiler.transpile(ast)
+
+  def _transpile_and_run(self, code: str, run_expr: str) -> Any:
+    """Helper to transpile Sapphire code, execute it in Python, and return run_expr value."""
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
+
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+
+    # Context for execution
+    ctx = {}
+    exec(py_code, ctx)  # pylint: disable=exec-used
+    return eval(run_expr, ctx)  # pylint: disable=eval-used
+
+  def test_basic_arithmetic(self):
+    """Verifies that variable assignments and arithmetic execute correctly."""
+    code = """
+    let x = 10;
+    let y = 20;
+    let z = x + y * 3;
+    """
+    result = self._transpile_and_run(code, "z")
+    self.assertEqual(result, 70)
+
+  def test_optional_unwrapping(self):
+    """Verifies that optional unwrapping block resolves and executes correctly."""
+    code = """
+    func run_if_let(): int {
+      var opt_val: int? = 42;
+      var out = 0;
+      if let active ?= opt_val {
+        out = active;
+      }
+      return out;
+    }
+    """
+    result = self._transpile_and_run(code, "run_if_let()")
+    self.assertEqual(result, 42)
+
+  def test_init_statements_and_coalesce(self):
+    """Verifies Python transpilation of init-statements and ?? coalescing."""
+    # 1. if let with condition
+    code1 = """
+    func run_if_let_cond(): int {
+      var opt_val: int? = 42;
+      var out = 0;
+      if let active ?= opt_val; active > 40 {
+        out = active;
+      }
+      return out;
+    }
+    """
+    result1 = self._transpile_and_run(code1, "run_if_let_cond()")
+    self.assertEqual(result1, 42)
+
+    # 2. standard while loop
+    code2 = """
+    func run_while(): int {
+      var count = 5;
+      var out = 0;
+      while count > 0 {
+        out += count;
+        count -= 1;
+      }
+      return out;
+    }
+    """
+    result2 = self._transpile_and_run(code2, "run_while()")
+    self.assertEqual(result2, 15)
+
+    # 3. ?? operator
+    code3 = """
+    func run_coalesce(): int {
+      var opt_val: int? = none;
+      let val = opt_val ?? 99;
+      return val;
+    }
+    """
+    result3 = self._transpile_and_run(code3, "run_coalesce()")
+    self.assertEqual(result3, 99)
+
+    # 4. standard if let (no unwrap)
+    code4 = """
+    func run_standard_if(): int {
+      var out = 0;
+      if let x = 10; x > 5 {
+        out = x;
+      }
+      return out;
+    }
+    """
+    result4 = self._transpile_and_run(code4, "run_standard_if()")
+    self.assertEqual(result4, 10)
+
+    # 5. multi-clause if let
+    code5 = """
+    func run_multi_if(): int {
+      var opt_a: int? = 10;
+      var opt_b: int? = 20;
+      var out = 0;
+      if let a ?= opt_a; let b ?= opt_b; a + b == 30 {
+        out = a + b;
+      }
+      return out;
+    }
+    """
+    result5 = self._transpile_and_run(code5, "run_multi_if()")
+    self.assertEqual(result5, 30)
+
+  def test_prototypal_inheritance_live_updates(self):
+    """Verifies that cloned objects delegate live property lookups and allow shadowing."""
+    code = """
+    proto Item {
+      var price: int;
+      var stock: int;
+    }
+    impl Item {
+      func __init__(p: int) {
+        self.price = p;
+        self.stock = 10;
+      }
+    }
+    func test_delegation(): [int] {
+      var a = Arena();
+      var base = Item(p = 100) in a;
+      var promo_item = clone base {
+        self.price = 80;
+      };
+
+      let initial_promo_price = promo_item.price; // Shadowed (80)
+      let initial_promo_stock = promo_item.stock; // Delegated (10)
+
+      base.stock = 5; // Mutating prototype should reflect live on clone
+      let final_promo_stock = promo_item.stock;
+
+      return [initial_promo_price, initial_promo_stock, final_promo_stock];
+    }
+    """
+    result = self._transpile_and_run(code, "test_delegation()")
+    self.assertEqual(result, [80, 10, 5])
+
+  def test_control_flow_loops(self):
+    """Verifies while loops, for loops, and boolean logic transpile correctly."""
+    code = """
+    func run_loops(): [int] {
+      var sum = 0;
+      var count = 3;
+      while count > 0 {
+        sum += count;
+        count -= 1;
+      }
+
+      let scores = [10, 20, 30];
+      var loop_sum = 0;
+      for score in scores {
+        loop_sum += score;
+      }
+
+      return [sum, loop_sum];
+    }
+    """
+    result = self._transpile_and_run(code, "run_loops()")
+    self.assertEqual(result, [6, 60])
+
+  def test_proto_explicit_arena_execution(self):
+    """Verifies that proto constructor and struct initializer with explicit arenas compile and execute properly."""
+    code = """
+    proto Entity {
+      var hp: int;
+    }
+    impl Entity {
+      func __init__(hp: int) {
+        self.hp = hp;
+      }
+    }
+    func run_proto_test(): int {
+      var a = Arena();
+      let e1 = Entity(hp = 75) in a;
+      let e2 = clone e1 {
+        self.hp = 120;
+      };
+      return e1.hp + e2.hp;
+    }
+    """
+    result = self._transpile_and_run(code, "run_proto_test()")
+    self.assertEqual(result, 195)
+
+  def test_static_methods(self):
+    """Verifies static method decorators and const struct methods compile and run."""
+    code = """
+    struct Counter {
+      var val: int;
+    }
+    impl Counter {
+      func __init__(v: int) {
+        self.val = v;
+      }
+      func get_val(): int {
+        return self.val;
+      }
+      static func create_default(): Counter {
+        return Counter(v = 100);
+      }
+    }
+    func test_static(): int {
+      let c = Counter.create_default();
+      return c.get_val();
+    }
+    """
+    result = self._transpile_and_run(code, "test_static()")
+    self.assertEqual(result, 100)
+
+  def test_optional_chaining(self):
+    """Verifies optional chaining (?.) expressions return correctly."""
+    code = """
+    struct Node {
+      var score: int;
+    }
+    impl Node {
+      func __init__(s: int) {
+        self.score = s;
+      }
+    }
+    func test_chain(): [int?] {
+      var n1: Node? = none;
+      var n2: Node? = Node(s = 99);
+
+      let val1 = n1?.score;
+      let val2 = n2?.score;
+      return [val1, val2];
+    }
+    """
+    result = self._transpile_and_run(code, "test_chain()")
+    self.assertEqual(result, [None, 99])
+
+  def test_optional_method_call_with_arguments(self):
+    """Verifies optional method chaining with positional and named arguments."""
+    code = """
+    struct Calculator {
+      var base: int;
+    }
+    impl Calculator {
+      func add_bonus(bonus: int, factor: int = 1): int {
+        return (self.base + bonus) * factor;
+      }
+    }
+    func test_calc(): int {
+      var c: Calculator? = Calculator { base = 10 };
+      let res = c?.add_bonus(5, factor = 2);
+      var c_none: Calculator? = none;
+      let res_none = c_none?.add_bonus(5, factor = 2);
+      if res_none == none {
+        return res ?? 0;
+      }
+      return -1;
+    }
+    """
+    result = self._transpile_and_run(code, "test_calc()")
+    self.assertEqual(result, 30)
+
+  def test_unary_operators(self):
+    """Verifies logical NOT (!) and arithmetic negation (-) transpile correctly."""
+    code = """
+    func test_unary(): bool, int {
+      let is_true = true;
+      let is_false = !is_true;
+      let num = 5;
+      let neg_num = -num;
+      return is_false, neg_num;
+    }
+    """
+    result = self._transpile_and_run(code, "test_unary()")
+    self.assertEqual(result, (False, -5))
+
+
+  def test_lambda_expression(self):
+    """Verifies that lambda functions can be transpiled and executed."""
+    code = """
+    func run_lambda(): int {
+      var f = x -> x + 5;
+      return f(10);
+    }
+    """
+    result = self._transpile_and_run(code, "run_lambda()")
+    self.assertEqual(result, 15)
+
+  def test_array_indexing(self):
+    """Verifies that array indexing transpiles and executes correctly."""
+    code = """
+    func run_index(): int {
+      let arr = [100, 200];
+      return arr[1];
+    }
+    """
+    result = self._transpile_and_run(code, "run_index()")
+    self.assertEqual(result, 200)
+
+  def test_fixed_size_array_and_negative_indexing(self):
+    """Verifies that fixed-size arrays and negative indexing execute correctly in Python."""
+    code = """
+    func run_fixed_and_negative(): int {
+      let scores: [int; 3] = [10, 20, 30];
+      let last = scores[-1];
+      let first = scores[-3];
+      return last + first;
+    }
+    """
+    result = self._transpile_and_run(code, "run_fixed_and_negative()")
+    self.assertEqual(result, 40)
+
+
+  def test_additional_transpiler_features(self):
+    """Verifies standard conditionals, unary ops, strings, default params, empty constructors/methods, and clones."""
+    code = """
+    struct Empty {}
+    proto Base {
+      var x: int;
+      var y: int;
+    }
+    impl Base {
+      func __init__() {
+        self.x = 1;
+        self.y = 2;
+      }
+    }
+    func multiply(a: int, b: int = 2): int {
+      if a > 10 {
+        return a * b;
+      } else if a > 5 {
+        return a * b + 1;
+      } else {
+        return a * b + 2;
+      }
+    }
+    func test_features(): int {
+      var a = Arena();
+      let b1 = Base() in a;
+      let b2 = clone b1 {
+        self.x = 10;
+        self.y = 20;
+      };
+      var target: Base? = b2;
+      var out = 0;
+      if let active ?= target {
+        out = active.x;
+      } else {
+        out = -1;
+      }
+
+      let s = "hello";
+      let neg = -out;
+      let pos = +out;
+
+      return multiply(10, 3) + multiply(3, 3) + b2.y;
+    }
+    """
+    result = self._transpile_and_run(code, "test_features()")
+    # multiply(10, 3) -> 10 * 3 + 1 = 31
+    # multiply(3, 3) -> 3 * 3 + 2 = 11
+    # b2.y -> 20
+    # total -> 62
+    self.assertEqual(result, 62)
+
+  def test_empty_statements_and_returns(self):
+    """Verifies transpilation of empty block, empty returns, and expression statements."""
+    code = """
+    func dummy() {}
+    func empty_fn() {
+      dummy();
+      return;
+    }
+    """
+    result = self._transpile_and_run(code, "empty_fn()")
+    self.assertIsNone(result)
+
+  def test_direct_transpiler_visitors(self):
+    """Directly tests transpiler visitors that are not invoked during standard program traversal."""
+    from sapphire.parser.ast import (
+      ASTNode,
+      BasicTypeNode,
+      BlockNode,
+      LambdaNode,
+      LambdaParamNode,
+      StructFieldNode,
+      TraitDeclNode,
+    )
+
+
+    transpiler = Transpiler()
+
+    # 1. StructFieldNode
+    field_node = StructFieldNode(False, "x", BasicTypeNode("int"))
+    transpiler.visit(field_node)
+
+    # 2. TraitDeclNode
+    trait_node = TraitDeclNode("Actor", [])
+    transpiler.visit(trait_node)
+
+    # 3. Block lambda
+    lnode = LambdaNode([LambdaParamNode("x", None)], None, BlockNode([]))
+    transpiler.visit(lnode)
+
+    # 4. generic_visit NotImplementedError
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit(ASTNode())
+
+    self.assertTrue(len(transpiler.get_output()) > 0)
+
+  def test_block_body_typed_lambda(self):
+    """Verifies that block-body multi-parameter typed lambdas transpile and execute correctly."""
+    code = """
+    func run_block_lambda(): int {
+      let add = (a: int, b: int) -> int {
+        let sum = a + b;
+        return sum * 2;
+      };
+      return add(3, 4);
+    }
+    """
+    res = self._transpile_and_run(code, "run_block_lambda()")
+    self.assertEqual(res, 14)
+
+    inline_code = """
+    func apply(fn: (int, int) -> int): int {
+      return fn(10, 20);
+    }
+    func run_inline_block_lambda(): int {
+      return apply((x: int, y: int) -> int {
+        let factor = 3;
+        return (x + y) * factor;
+      });
+    }
+    """
+    inline_res = self._transpile_and_run(inline_code, "run_inline_block_lambda()")
+    self.assertEqual(inline_res, 90)
+
+  def test_prototypal_inheritance_with_static_inheritance(self):
+    """Verifies that inherited struct constructors propagate proto correctly for cloning."""
+    code = """
+    proto GameObject {
+      var id: int;
+    }
+    proto Character: GameObject {
+      var health: int;
+    }
+    impl Character {
+      func __init__(id_val: int, hp: int) {
+        self.id = id_val;
+        self.health = hp;
+      }
+    }
+    func test_inherited_cloning(): [int] {
+      var a = Arena();
+      var base = Character(id_val = 1, hp = 100) in a;
+      var derived_clone = clone base {
+        self.health = 80;
+      };
+
+      let initial_clone_health = derived_clone.health; // Shadowed (80)
+      let initial_clone_id = derived_clone.id;         // Delegated (1)
+
+      base.id = 10; // Mutating prototype's inherited field should reflect on clone
+      let final_clone_id = derived_clone.id;
+
+      return [initial_clone_health, initial_clone_id, final_clone_id];
+    }
+    """
+    result = self._transpile_and_run(code, "test_inherited_cloning()")
+    self.assertEqual(result, [80, 1, 10])
+
+  def test_cow_nested_references(self):
+    """Verifies that nested reference modifications on cloned objects copy-on-write correctly."""
+    code = """
+    proto Weapon {
+      var damage: int;
+    }
+    proto Player {
+      var weapon: Weapon;
+    }
+    impl Player {
+      func __init__(w: Weapon) {
+        self.weapon = w;
+      }
+    }
+    func run_cow_test(): [int] {
+      var a = Arena();
+      var original_weapon = Weapon { damage = 10 } in a;
+      var base_player = Player(w = original_weapon) in a;
+      var clone_player = clone base_player in a;
+
+      // Mutating clone player's weapon damage
+      clone_player.weapon.damage = 15;
+
+      let base_dmg = base_player.weapon.damage; // Should remain 10 (CoW)
+      let clone_dmg = clone_player.weapon.damage; // Should be 15
+
+      return [base_dmg, clone_dmg];
+    }
+    """
+    result = self._transpile_and_run(code, "run_cow_test()")
+    self.assertEqual(result, [10, 15])
+
+  def test_struct_initializer_transpilation(self):
+    """Verifies that struct initializers compile and evaluate defaults/assigned values correctly."""
+    code = """
+    struct Point {
+      var x: int;
+      var y: int = 10;
+    }
+    func test_init(): [int] {
+      let p = Point { x = 5 };
+      return [p.x, p.y];
+    }
+    """
+    result = self._transpile_and_run(code, "test_init()")
+    self.assertEqual(result, [5, 10])
+
+  def test_proto_struct_defaults_and_multi_field_init(self):
+    """Verifies prototype structs with default fields and multiple fields in struct initializers transpile correctly."""
+    code = """
+    proto Item {
+      var price: int = 100;
+      var stock: int = 5;
+    }
+    func test_defaults(): [int] {
+      var a = Arena();
+      let it = Item { price = 50, stock = 2 } in a;
+      return [it.price, it.stock];
+    }
+    """
+    result = self._transpile_and_run(code, "test_defaults()")
+    self.assertEqual(result, [50, 2])
+
+
+  def test_explicit_arenas_and_raii(self):
+    """Verifies that allocating inside explicit arenas works and obeys RAII destruction."""
+    code = """
+    proto Enemy {
+      var hp: int;
+    }
+    struct Point {
+      var x: int;
+    }
+
+    func run_scope(var my_arena: Arena, var other_arena: Arena): [int] {
+      let base = Enemy { hp = 100 } in my_arena;
+
+      // Implicit clone arena propagation
+      let cloned = clone base;
+
+      // Explicit clone arena override
+      let cloned_override = clone base in other_arena;
+
+      // Explicit struct allocation in arena
+      let pt = Point { x = 42 } in my_arena;
+
+      return [cloned.hp, pt.x, cloned_override.hp];
+    }
+
+    func test_arena_raii(): [int] {
+      var my_arena = Arena();
+      var other_arena = Arena();
+      let vals = run_scope(my_arena = my_arena, other_arena = other_arena);
+      return [vals[0], vals[1], vals[2]];
+    }
+    """
+    result = self._transpile_and_run(code, "test_arena_raii()")
+    self.assertEqual(result, [100, 42, 100])
+
+  def test_enum_transpilation(self):
+    """Verifies that enums transpile to IntEnum and execute correctly with integer backing."""
+    code = """
+    enum Direction {
+        North,
+        East,
+        South,
+        West,
+    }
+
+    enum Status {
+        Ok = 200,
+        NotFound = 404,
+    }
+
+    func check_direction(): int {
+      let d = Direction.South;
+      let s = Status.NotFound;
+      let val: int = d as int;
+      return val + (s as int);
+    }
+    """
+    result = self._transpile_and_run(code, "check_direction()")
+    self.assertEqual(result, 2 + 404)
+
+  def test_empty_enum_transpilation(self):
+    """Verifies that an empty enum transpiles with pass statement."""
+    code = """
+    enum Empty {}
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+    self.assertIn("class Empty(IntEnum):", py_code)
+    self.assertIn("pass", py_code)
+
+  def test_top_level_script_transpilation_without_main(self):
+    """Verifies that module constants transpile at module scope without main block."""
+    code = """
+    let MAX_SPEED: int = 100;
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+    self.assertIn("MAX_SPEED = 100", py_code)
+    self.assertNotIn('if __name__ == "__main__":', py_code)
+
+  def test_top_level_script_with_main_function(self):
+    """Verifies that defining main() appends main() call inside if __name__ == '__main__': block."""
+    code = """
+    func main() {
+      let x = 1;
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = Transpiler()
+    py_code = transpiler.transpile(ast)
+    self.assertIn('if __name__ == "__main__":', py_code)
+    self.assertIn('main()', py_code)
+
+  def test_coroutine_python_transpilation(self):
+    """Verifies that Coroutines transpile to Python generator wrappers and execute correctly."""
+    code = """
+    func count_down(from_val: int): Coroutine<int> {
+      var curr = from_val;
+      while curr > 0 {
+        yield curr;
+        curr -= 1;
+      }
+    }
+
+    func run_coro(): int {
+      var co = count_down(3);
+      let v1 = co.step() ?? 0;
+      let v2 = co.step() ?? 0;
+      let v3 = co.step() ?? 0;
+      let done1 = co.is_done() ? 1 : 0;
+      let v4 = co.step() ?? 0;
+      let done2 = co.is_done() ? 1 : 0;
+      co.reset();
+      let v_reset = co.step() ?? 0;
+      return v1 * 1000 + v2 * 100 + v3 * 10 + v_reset;
+    }
+    """
+    result = self._transpile_and_run(code, "run_coro()")
+    self.assertEqual(result, 3213)
+
+  def test_transpile_file_success(self):
+    """Verifies transpile_file default and custom output file handling."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      sp_file = os.path.join(temp_dir, "test.sp")
+      with open(sp_file, "w", encoding="utf-8") as f:
+        f.write("let val: int = 100;\n")
+      out_path = transpile_file(sp_file, quiet=True)
+      self.assertEqual(out_path, os.path.join(temp_dir, "test.py"))
+      self.assertTrue(os.path.exists(out_path))
+
+  def test_transpile_file_read_error(self):
+    """Verifies transpile_file handles missing source files by exiting when raise_on_error=False."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      non_existent = os.path.join(temp_dir, "missing.sp")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(non_existent, quiet=True, raise_on_error=False)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_transpile_file_syntax_error(self):
+    """Verifies transpile_file handles syntax errors by exiting when raise_on_error=False."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      bad_sp = os.path.join(temp_dir, "syntax.sp")
+      with open(bad_sp, "w", encoding="utf-8") as f:
+        f.write("let x: int = ;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(bad_sp, quiet=True, raise_on_error=False)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_transpile_file_semantic_error(self):
+    """Verifies transpile_file handles semantic errors by exiting when raise_on_error=False."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      semantic_sp = os.path.join(temp_dir, "semantic.sp")
+      with open(semantic_sp, "w", encoding="utf-8") as f:
+        f.write("return 42;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(semantic_sp, quiet=True, raise_on_error=False)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_transpile_file_raise_on_error_modes(self):
+    """Verifies transpile_file raises domain exceptions when raise_on_error is True."""
+    from sapphire.common.errors import (
+      SapphireError,
+      SapphireSyntaxError,
+      SapphireTranspileError,
+      SapphireTypeError,
+    )
+    with tempfile.TemporaryDirectory() as temp_dir:
+      # Missing file
+      with self.assertRaises(SapphireError):
+        transpile_file(os.path.join(temp_dir, "missing.sp"), raise_on_error=True)
+
+      # Syntax error
+      bad_syntax = os.path.join(temp_dir, "syntax.sp")
+      with open(bad_syntax, "w") as f:
+        f.write("let x: int = ;")
+      with self.assertRaises(SapphireSyntaxError):
+        transpile_file(bad_syntax, raise_on_error=True)
+
+      # Semantic error
+      bad_sem = os.path.join(temp_dir, "sem.sp")
+      with open(bad_sem, "w") as f:
+        f.write("return 42;")
+      with self.assertRaises(SapphireTypeError):
+        transpile_file(bad_sem, raise_on_error=True)
+
+      # Write error
+      valid_sp = os.path.join(temp_dir, "valid.sp")
+      with open(valid_sp, "w") as f:
+        f.write("let x = 10;")
+      with self.assertRaises(SapphireTranspileError):
+        transpile_file(valid_sp, output_file="/invalid_dir_xyz/out.py", raise_on_error=True)
+
+  def test_export_and_extern_annotations_python(self):
+    """Verifies Python transpiler safely handles @export and erases @extern."""
+    code = """
+    trait Graphics {
+      func setColor(r: float);
+    }
+
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+
+    @export("love.update")
+    func update(dt: float) {
+      let x = dt;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def update(dt):", py_code)
+    self.assertNotIn("love =", py_code)
+
+  def test_extern_assignment_targets_builtins_python(self):
+    """Verifies assigning to @extern variables targets Python builtins for cross-module visibility."""
+    import builtins
+    code = """
+    struct Engine {
+      var speed: int;
+    }
+
+    @extern
+    var engine: Engine;
+
+    func install_engine() {
+      engine = Engine { speed = 42 };
+    }
+
+    func read_speed(): int {
+      return engine.speed;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("__import__('builtins').engine = Engine(speed=42)", py_code)
+
+    env = {}
+    try:
+      exec(py_code, env)
+      env["install_engine"]()
+      self.assertTrue(hasattr(builtins, "engine"))
+      self.assertEqual(env["read_speed"](), 42)
+    finally:
+      if hasattr(builtins, "engine"):
+        delattr(builtins, "engine")
+
+  def test_export_function_alias_binding_python(self):
+    """Verifies that @export("alias") binds the alias name at module scope."""
+    code = """
+    @export("app")
+    func handle_request(path: String): String {
+      return "Response: " + path;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def handle_request(path):", py_code)
+    self.assertIn("app = handle_request", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("app", env)
+    self.assertEqual(env["app"]("/api/v1"), "Response: /api/v1")
+
+  def test_export_dotted_path_binding_python(self):
+    """Verifies that @export("host.callback") safely binds to host object properties."""
+    code = """
+    trait HostServer {
+      func start();
+    }
+
+    @extern
+    var server: HostServer;
+
+    @export("server.on_request")
+    func handle(status: int): String {
+      return "Status: " + String.from(status);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("server.on_request = handle", py_code)
+
+    class MockServer:
+      def __init__(self):
+        self.on_request = None
+
+    mock = MockServer()
+    env = {"server": mock}
+    exec(py_code, env)
+    self.assertIsNotNone(mock.on_request)
+    self.assertEqual(mock.on_request(200), "Status: 200")
+
+  def test_extern_module_import_python(self):
+    """Verifies that @extern("module.name") generates import statements for host modules."""
+    code = """
+    trait JsonModule {
+      func dumps(obj: String): String;
+    }
+
+    @extern("json")
+    var json_mod: JsonModule;
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import json as json_mod", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("json_mod", env)
+    import json
+    self.assertIs(env["json_mod"], json)
+
+  def test_python_stdlib_wsgiref_interop_execution(self):
+    """Verifies end-to-end Python stdlib interop with wsgiref using @extern and @export."""
+    code = """
+    trait WsgiServer {
+      func server_close();
+    }
+
+    trait WsgiModule {
+      func make_server(host: String, port: int, app: (Map<String, String>, (String, [[String]]) -> void) -> [String]): WsgiServer;
+    }
+
+    @extern("wsgiref.simple_server")
+    var wsgiref: WsgiModule;
+
+    @export("app")
+    func wsgi_app(environ: Map<String, String>, start_response: (String, [[String]]) -> void): [String] {
+      return ["Hello from Sapphire!"];
+    }
+
+    func build_server(): WsgiServer {
+      return wsgiref.make_server("127.0.0.1", 0, wsgi_app);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import wsgiref.simple_server as wsgiref", py_code)
+    self.assertIn("app = wsgi_app", py_code)
+
+    env = {}
+    exec(py_code, env)
+    self.assertIn("app", env)
+    server = env["build_server"]()
+    self.assertIsNotNone(server)
+    server.server_close()
+
+
+  def test_python_multi_return_transpilation(self):
+    """Verifies Python transpilation for multi-return functions, declarations, and assignments."""
+    code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+    func test() {
+      let x, y = get_pos();
+      var a, b = 1.0, 2.0;
+      a, b = get_pos();
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("def get_pos():", py_code)
+    self.assertIn("return 10.0, 20.0", py_code)
+    self.assertIn("x, y = get_pos()", py_code)
+    self.assertIn("a, b = 1.0, 2.0", py_code)
+    self.assertIn("a, b = get_pos()", py_code)
+
+  def test_python_compound_assignment(self):
+    """Verifies Python transpilation of compound assignment operators and empty return."""
+    code = """
+    func test() {
+      var x = 10;
+      x += 5;
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 3.0, 4.0;
+      return;
+    }
+    """
+    py_cmp = self._transpile(code)
+    self.assertIn("x += 5", py_cmp)
+    self.assertIn("a, b = 3.0, 4.0", py_cmp)
+
+  def test_python_string_enum_transpilation(self):
+    """Verifies Python transpilation for string-backed enums."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Mode(str, Enum):", py_code)
+    self.assertIn('Fill = "fill"', py_code)
+    self.assertIn('Line = "line"', py_code)
+    self.assertIn('Default = "Default"', py_code)
+
+  def test_python_resource_handle_method_transpilation(self):
+    """Verifies Python transpilation for resource handles."""
+    code = """
+    trait ImageHandle {
+      func draw(x: float, y: float);
+    }
+    @extern("hero")
+    var hero_img: ImageHandle;
+
+    func main() {
+      hero_img.draw(10.0, 20.0);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("hero_img.draw(10.0, 20.0)", py_code)
+
+  def test_python_export_method_alias_transpilation(self):
+    """Verifies Python transpilation for trait methods with @export method aliases."""
+    code = """
+    trait Graphics {
+      @export("setColor")
+      func setColorRGBA(r: float, g: float, b: float);
+    }
+    @extern("g")
+    var g: Graphics;
+
+    func main() {
+      g.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("g.setColor(1.0, 0.0, 0.0)", py_code)
+
+
+  def test_python_module_import_and_export_transpilation(self):
+    """Verifies Python transpilation for module imports and export manifests."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics as gfx;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    }
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("import lib.love2d.enums", py_code)
+    self.assertIn("import lib.love2d.graphics as gfx", py_code)
+    self.assertIn('__all__ = ["Player", "create_player", "DrawMode"]', py_code)
+
+  def test_python_transpile_file_with_transitive_imports(self):
+    """Verifies that transpile_file recursively transpiles imported module dependencies for Python."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sub_sp = os.path.join(tmpdir, "sub.sp")
+      with open(sub_sp, "w") as f:
+        f.write("export { item } let item = 42;\n")
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      with open(main_sp, "w") as f:
+        f.write("import sub;\n")
+
+      out_py = os.path.join(tmpdir, "main.py")
+      transpile_file(main_sp, output_file=out_py, target="python", quiet=True)
+      self.assertTrue(os.path.exists(out_py))
+      sub_py = os.path.join(tmpdir, "sub.py")
+      self.assertTrue(os.path.exists(sub_py))
+
+  def test_uninitialized_var_decl_python(self):
+    """Verifies that uninitialized variable declarations emit reasonable type defaults in Python."""
+    code = """
+    func test() {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+      var s: String;
+    }
+    """
+    py = self._transpile(code)
+    self.assertIn("i = 0", py)
+    self.assertIn("f = 0.0", py)
+    self.assertIn("b = False", py)
+    self.assertIn("opt = None", py)
+    self.assertIn("s = None", py)
+    self.assertIsNone(get_default_value_for_type_node(None))
+    self.assertIsNone(get_default_value_for_type_node(BasicTypeNode("String")))
+
+  def test_implicit_struct_field_and_var_defaults_execution_python(self):
+    """Verifies runtime values for uninitialized struct fields (int=0, float=0.0, bool=False, T?=None)."""
+    code = """
+    struct DefaultsTest {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+    }
+
+    func get_i(): int {
+      var d = DefaultsTest {};
+      return d.i;
+    }
+
+    func get_f(): float {
+      var d = DefaultsTest {};
+      return d.f;
+    }
+
+    func get_b(): bool {
+      var d = DefaultsTest {};
+      return d.b;
+    }
+
+    func is_opt_none(): bool {
+      var d = DefaultsTest {};
+      return d.opt == none;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(code, "get_i()"), 0)
+    self.assertEqual(self._transpile_and_run(code, "get_f()"), 0.0)
+    self.assertEqual(self._transpile_and_run(code, "get_b()"), False)
+    self.assertEqual(self._transpile_and_run(code, "is_opt_none()"), True)
+
+  def test_python_match_empty_and_multi_yield(self):
+    """Verifies Python transpilation of empty yield and multi-yield inline match expressions."""
+    code = """
+    func test_yields(val: int): int, int {
+      let opt_val: int? = (match val {
+        1 -> { yield 10; },
+        2 -> { yield; },
+        ... -> { yield 30; }
+      });
+      return match val {
+        1 -> { yield 10, 20; },
+        ... -> { yield 30, 40; }
+      };
+    }
+    """
+    py = self._transpile(code)
+    self.assertIn("None", py)
+
+
+  def test_python_multi_pattern_match_and_execution(self):
+    """Verifies Python transpilation and execution for multi-pattern match arms."""
+    code = """
+    func map_key(k: String): String {
+      return match k {
+        "up", "w" -> "up",
+        "down", "s" -> "down",
+        ... -> "other",
+      };
+    }
+    """
+    self.assertEqual(self._transpile_and_run(code, 'map_key("w")'), "up")
+    self.assertEqual(self._transpile_and_run(code, 'map_key("down")'), "down")
+    self.assertEqual(self._transpile_and_run(code, 'map_key("x")'), "other")
+
+  def test_match_expression_transpilation_and_execution(self):
+    """Verifies Python transpilation and execution of match expressions."""
+    code = """
+    enum Status { Ok, NotFound, Error }
+
+    func get_code(s: Status): int {
+      let code = match s {
+        Status.Ok -> 200,
+        Status.NotFound -> {
+          yield 404;
+        },
+        ... -> 500,
+      };
+      return code;
+    }
+    """
+    res1 = self._transpile_and_run(code, "get_code(Status.Ok)")
+    self.assertEqual(res1, 200)
+
+    res2 = self._transpile_and_run(code, "get_code(Status.NotFound)")
+    self.assertEqual(res2, 404)
+
+    res3 = self._transpile_and_run(code, "get_code(Status.Error)")
+    self.assertEqual(res3, 500)
+
+    # Match in assignment statement
+    assign_code = """
+    func test_assign(n: int): int {
+      var x = 0;
+      x = match n {
+        1 -> 10,
+        ... -> 20,
+      };
+      return x;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(assign_code, "test_assign(1)"), 10)
+
+    # Match in return statement
+    ret_code = """
+    func test_ret(n: int): int {
+      return match n {
+        1 -> 100,
+        ... -> 200,
+      };
+    }
+    """
+    self.assertEqual(self._transpile_and_run(ret_code, "test_ret(1)"), 100)
+
+    # Match in expression statement with empty block
+    stmt_code = """
+    func test_stmt(n: int) {
+      match n {
+        1 -> {},
+        ... -> {},
+      };
+    }
+    """
+    py_out = self._transpile(stmt_code)
+    self.assertIn("pass", py_out)
+
+    # Multi-target assignment with match
+    multi_code = """
+    func test_multi(n: int): int {
+      var a = 0;
+      var b = 0;
+      a, b = match n { 1 -> 10, ... -> 20 }, 30;
+      return a + b;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(multi_code, "test_multi(1)"), 40)
+
+    # Wildcard ...
+    wildcard_code = """
+    func test_wildcard(n: int): int {
+      return match n {
+        ... -> 999,
+      };
+    }
+    """
+    self.assertEqual(self._transpile_and_run(wildcard_code, "test_wildcard(5)"), 999)
+
+    # Compound assignment with match
+    comp_code = """
+    func test_comp(n: int): int {
+      var x = 1;
+      x += match n { 1 -> 2, ... -> 3 };
+      return x;
+    }
+    """
+    self.assertEqual(self._transpile_and_run(comp_code, "test_comp(1)"), 3)
+
+    # Direct visitor calls
+    from sapphire.parser.ast import (
+      EllipsisPatternNode,
+      LiteralNode,
+      MatchCaseNode,
+      MatchExprNode,
+    )
+
+
+    pt = PythonTranspiler()
+    pt.visit(MatchExprNode(LiteralNode(1, "int"), [MatchCaseNode(EllipsisPatternNode(), LiteralNode(2, "int"))]))
+    pt.visit_EllipsisPatternNode(EllipsisPatternNode())
+    self.assertIn("_match_res_1", "".join(pt.code))
+
+
+  def test_match_statement_without_semicolon(self):
+    """Verifies that standalone match statement ending in '}' does not require a semicolon."""
+    code = """
+    func compute(): int {
+      var count = 0;
+      match 1 {
+        1 -> { count = 10; },
+        ... -> { count = 20; },
+      }
+      return count;
+    }
+    """
+    res = self._transpile_and_run(code, "compute()")
+    self.assertEqual(res, 10)
+
+  def test_missing_semicolon_after_match_error_message(self):
+    """Verifies clear syntax error message when semicolon is omitted after match expression."""
+    import io
+    import sys
+    bad_code = """
+    func main() {
+      let x = match 1 {
+        1 -> 1,
+        ... -> 2,
+      }
+      let y = 10;
+    }
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".sp", delete=False) as f:
+      f.write(bad_code)
+      fname = f.name
+
+    captured_stderr = io.StringIO()
+    old_stderr = sys.stderr
+    try:
+      sys.stderr = captured_stderr
+      with self.assertRaises(SystemExit):
+        transpile_file(fname, raise_on_error=False)
+    finally:
+      sys.stderr = old_stderr
+      if os.path.exists(fname):
+        os.remove(fname)
+
+    err_output = captured_stderr.getvalue()
+    self.assertIn("Missing semicolon ';' after closing brace '}' of match expression", err_output)
+
+  def test_map_literal_transpilation_and_execution(self):
+    """Verifies Python transpilation and execution of map literals and map indexing."""
+    code = """
+    func get_score(): int {
+      let scores = {"alice": 100, "bob": 95,};
+      return scores["alice"];
+    }
+    """
+    res = self._transpile_and_run(code, "get_score()")
+    self.assertEqual(res, 100)
+
+  def test_while_loop_execution(self):
+    """Verifies that a while loop executes cleanly."""
+    code = """
+    func test_while(): int {
+      var out = 0;
+      var count = 5;
+      while count > 0 {
+        out += count;
+        count -= 1;
+      }
+      return out;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("while (count > 0):", py_code)
+    res = self._transpile_and_run(code, "test_while()")
+    self.assertEqual(res, 15)
+
+  def test_cow_live_prototype_update(self):
+    """Verifies that reading a nested reference on a clone does not break live prototype delegation until a write occurs."""
+    code = """
+    struct Vector {
+      var x: int;
+    }
+    proto Entity {
+      var pos: Vector;
+    }
+    func test_cow(): int {
+      var a = Arena();
+      var base = Entity { pos = Vector { x = 10 } } in a;
+      var cloned = clone base in a;
+      let initial_read = cloned.pos.x;
+      base.pos.x = 20;
+      let live_read = cloned.pos.x;
+      cloned.pos.x = 99;
+      let after_write_clone = cloned.pos.x;
+      let after_write_base = base.pos.x;
+      return live_read + after_write_clone + after_write_base;
+    }
+    """
+    res = self._transpile_and_run(code, "test_cow()")
+    self.assertEqual(res, 20 + 99 + 20)
+
+  def test_map_iteration_python(self):
+    """Verifies Python transpilation and execution for map iteration."""
+    code = """
+    func test_map(): int {
+      let m = {"a": 10, "b": 20};
+      var sum = 0;
+      for k, v in m {
+        sum = sum + v;
+      }
+      return sum;
+    }
+    """
+    res = self._transpile_and_run(code, "test_map()")
+    self.assertEqual(res, 30)
+
+
+  def test_string_methods_python(self):
+    """Verifies Python transpilation and execution of all String instance methods."""
+    code = """
+    func test_str(): bool {
+      let s = "  hello world  ";
+      let sz = s.size();
+      let emp = s.empty();
+      let clean = s.strip();
+      let slash_stripped = "///path///".strip("/");
+      let low = clean.lower();
+      let up = clean.upper();
+      let has = clean.contains("world");
+      let first_o = clean.find("o");
+      let last_o = clean.find("o", reverse = true);
+      let parts = clean.split();
+      let csv_parts = "a,b,c".split(",");
+      let concat_var = "Result: " + clean;
+      let cond1 = sz == 15 && emp == false && clean == "hello world" && slash_stripped == "path";
+      let cond2 = low == "hello world" && up == "HELLO WORLD" && has == true && csv_parts[0] == "a";
+      let cond3 = first_o == 4 && last_o == 7 && parts[0] == "hello" && parts[1] == "world" && concat_var == "Result: hello world";
+      return cond1 && cond2 && cond3;
+    }
+    """
+    res = self._transpile_and_run(code, "test_str()")
+    self.assertTrue(res)
+
+  def test_casting_and_conversions_python(self):
+    """Verifies Python transpilation and execution of casting (as) and String conversions."""
+    code = """
+    enum Status { Active = 1, Inactive = 2 }
+    enum LogLevel { Info = "INFO", Warn = "WARN" }
+
+    struct Parent { var hp: int; }
+    struct Child: Parent { var mp: int; }
+
+    func test_conv(): bool {
+      let f = 10 as float;
+      let i = 3.14 as int;
+      let b = 1 as bool;
+      let s0 = String.from(10);
+      let s1 = String.from(42);
+      let s2 = String.from(true);
+
+      let p_int = "123".to_int();
+      let p_hex = "FF".to_int(radix = 16);
+      let p_float = "3.14".to_float();
+      let p_bool = "true".to_bool();
+      let bad_int = "abc".to_int();
+
+      let e1 = Status.from(1);
+      let e2 = Status.from("Active");
+      let e_bad = Status.from(999);
+
+      let l1 = LogLevel.from("INFO");
+      let l2 = LogLevel.from("Warn");
+      let l_bad = LogLevel.from("DEBUG");
+
+      let c = Child { hp = 100, mp = 50 };
+      let hp = c.hp;
+
+      let cond1 = f == 10.0 && i == 3 && b == true && s0 == "10" && s1 == "42" && s2 == "true";
+      let cond2 = p_int == 123 && p_hex == 255 && p_float == 3.14 && p_bool == true && bad_int == none && hp == 100;
+      let cond3 = e1 == Status.Active && e2 == Status.Active && e_bad == none && l1 == LogLevel.Info && l2 == LogLevel.Warn && l_bad == none;
+      return cond1 && cond2 && cond3;
+    }
+    """
+    res = self._transpile_and_run(code, "test_conv()")
+    self.assertTrue(res)
+
+  def test_array_methods_python(self):
+    """Verifies Python transpilation and execution of array built-in methods."""
+    code = """
+    func test_array_ops(): bool {
+      let nums = [1, 2, 3, 4, 5];
+      let sz = nums.size();
+      let is_empty = nums.empty();
+
+      let doubled = nums.map(x -> x * 2);
+      let evens = nums.filter(x -> x % 2 == 0);
+      let sum = nums.reduce(0, (acc, x) -> acc + x);
+      let sub_rev = nums.reduce(0, (acc, x) -> acc - x, reverse = true);
+      let named_red = nums.reduce(initial = 10, fn = (acc, x) -> acc + x, reverse = false);
+      let pos3_red = nums.reduce(0, (acc, x) -> acc - x, true);
+
+      let has_three = nums.contains(3);
+      let not_has_99 = nums.contains(99);
+      let rev = nums.reverse();
+      let sorted_asc = [3, 1, 2].sort();
+      let sorted_custom = [3, 1, 2].sort(by = (a, b) -> b - a, reverse = false);
+      let sorted_pos = [3, 1, 2].sort((a, b) -> b - a, true);
+      let joined = ["a", "b", "c"].join("-");
+
+      var mut_arr = [10, 20];
+      let p_val = mut_arr.push(30); // returns 30
+      let i_val = mut_arr.insert(1, 15); // returns 15
+      let i_named = mut_arr.insert(index = 0, element = 5);
+      let pop_val = mut_arr.pop() ?? 0; // 30
+      let rem_val = mut_arr.remove(2) ?? 0; // 15
+      mut_arr.clear();
+
+      var inp_num = [5, 1, 4, 2, 3];
+      inp_num.map(x -> x * 2, in_place = true); // [10, 2, 8, 4, 6]
+      inp_num.map(fn = x -> x * 1, false);
+      inp_num.filter(x -> x > 4, in_place = true); // [10, 8, 6]
+      inp_num.filter(fn = x -> x > 0, false);
+      inp_num.sort(in_place = true); // [6, 8, 10]
+      inp_num.reverse(in_place = true); // [10, 8, 6]
+      inp_num.reverse(false);
+
+      var temp = [3, 1, 2];
+      temp.sort((a, b) -> a - b, false, true);
+
+      let got_val = nums.get(2) ?? 0;
+      let got_oob = nums.get(99) == none;
+
+      let c1 = sz == 5 && is_empty == false && got_val == 3 && got_oob == true;
+      let c2 = doubled[0] == 2 && doubled[4] == 10;
+      let c3 = evens.size() == 2 && evens[0] == 2 && evens[1] == 4;
+      let c4 = sum == 15;
+      let c5 = sub_rev == -15 && named_red == 25 && pos3_red == -15;
+      let c6 = has_three == true && not_has_99 == false && rev[0] == 5 && rev[4] == 1;
+      let c7 = sorted_asc[0] == 1 && sorted_custom[0] == 3 && joined == "a-b-c";
+      let c8 = p_val == 30 && i_val == 15 && pop_val == 30 && rem_val == 15 && mut_arr.empty() == true;
+      let c9 = inp_num.size() == 3 && inp_num[0] == 10 && inp_num[1] == 8 && inp_num[2] == 6;
+
+      return c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9;
+    }
+    """
+    res = self._transpile_and_run(code, "test_array_ops()")
+    self.assertTrue(res)
+
+  def test_map_methods_python(self):
+    """Verifies Python transpilation and execution of map built-in methods."""
+    code = """
+    func test_map_ops(): bool {
+      let m = {"a": 10, "b": 20};
+      let sz = m.size();
+      let is_empty = m.empty();
+      let has_a = m.contains("a");
+      let has_z = m.contains("z");
+      let got_a = m.get("a") ?? 0;
+      let got_z = m.get("z") == none;
+      let k_list = m.keys();
+      let v_list = m.values();
+
+      var mut_m = {"x": 100};
+      let ins_val = mut_m.insert("y", 200);
+      let ins_named = mut_m.insert(key = "z", value = 300);
+      let rem_val = mut_m.remove("x") ?? 0;
+      let missing_rem = mut_m.remove("nonexistent") == none;
+      mut_m.clear();
+
+      let c1 = sz == 2 && is_empty == false && got_a == 10 && got_z == true;
+      let c2 = has_a == true && has_z == false;
+      let c3 = k_list.size() == 2 && v_list.size() == 2;
+      let c4 = ins_val == 200 && ins_named == 300 && rem_val == 100 && missing_rem == true && mut_m.empty() == true;
+
+      return c1 && c2 && c3 && c4;
+    }
+    """
+    res = self._transpile_and_run(code, "test_map_ops()")
+    self.assertTrue(res)
+
+  def test_interpolated_string_python(self):
+    """Verifies Python transpilation and execution of f-strings."""
+    code = """
+    enum FStringStatus { Active = "active" }
+
+    func test_fstring(): String {
+      let name = "Hero";
+      let count = 42;
+      let status = FStringStatus.Active;
+      let empty_s = f"";
+      let single_l = f"just text";
+      let single_e = f"{count}";
+      return f"Hello {name}, status: {status}, count: {count + 1}, none: {none}";
+    }
+    """
+    res = self._transpile_and_run(code, "test_fstring()")
+    self.assertEqual(res, "Hello Hero, status: active, count: 43, none: None")
+
+  def test_interpolated_string_enum_and_nested_quotes_python(self):
+    """Verifies Python transpilation of IntEnum and nested unescaped quotes in f-strings."""
+    code = """
+    enum Direction { North = 1, South = 2 }
+
+    func test_enum_interp(): String {
+      let d = Direction.South;
+      let s_single = f"{d}";
+      let s_multi = f"Direction: {d}";
+      let m = {"key": 100};
+      let s_quote = f"Has key: {m.contains("key")}";
+      return f"{s_single}|{s_multi}|{s_quote}";
+    }
+    """
+    res = self._transpile_and_run(code, "test_enum_interp()")
+    self.assertEqual(res, "2|Direction: 2|Has key: true")
+
+  def test_nested_match_expression_transpilation_and_execution(self):
+    """Verifies Python transpilation and execution of match expressions used inline within sub-expressions."""
+    code = """
+    func test_nested_match(val: int): int {
+      let x = (match val { 1 -> 10, ... -> 20 }) + 5;
+      return x;
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_nested_match(1)")
+    res2 = self._transpile_and_run(code, "test_nested_match(2)")
+    self.assertEqual(res1, 15)
+    self.assertEqual(res2, 25)
+
+  def test_generic_struct_optional_mangling(self):
+    """Verifies that generic structs instantiated with optional types generate valid mangled Python identifiers."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func test_opt_box(): int {
+      let b = Box<int?> { item = none };
+      if let val ?= b.item {
+        return val;
+      }
+      return -1;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Box__Opt_int", py_code)
+    res = self._transpile_and_run(code, "test_opt_box()")
+    self.assertEqual(res, -1)
+
+  def test_cow_proxy_operators_and_methods(self):
+    """Verifies Python runtime _LazyCoWProxy supports arithmetic operators and compound assignments."""
+    code = """
+    proto Container {
+      var count: int;
+    }
+    func test_proxy_ops(): int {
+      var a = Arena();
+      let base = Container { count = 10 } in a;
+      var c = clone base in a;
+      c.count += 5;
+      return c.count + base.count;
+    }
+    """
+    res = self._transpile_and_run(code, "test_proxy_ops()")
+    self.assertEqual(res, 15 + 10)
+
+  def test_multi_hop_nested_struct_cow_python(self):
+    """Verifies multi-hop nested struct Copy-on-Write materializes ancestors without corrupting prototype."""
+    code = """
+    struct Stats {
+      var hp: int;
+    }
+    impl Stats {
+      var func take_damage(dmg: int) {
+        self.hp -= dmg;
+      }
+    }
+    struct Unit {
+      var stats: Stats;
+    }
+    proto Monster {
+      var unit: Unit;
+    }
+    func test_multi_hop(): int {
+      var a = Arena();
+      let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
+      var c1 = clone base in a;
+      var c2 = clone c1 in a;
+      c1.unit.stats.hp = 100;
+      c1.unit.stats.take_damage(15);
+      c2.unit.stats.hp = 50;
+      return c1.unit.stats.hp * 10000 + c2.unit.stats.hp * 100 + base.unit.stats.hp;
+    }
+    """
+    res = self._transpile_and_run(code, "test_multi_hop()")
+    self.assertEqual(res, 855020)
+
+  def test_lift_match_expressions_none(self):
+    """Verifies _lift_match_expressions handles None gracefully."""
+    pt = PythonTranspiler()
+    pt._lift_match_expressions(None)
+
+  def test_break_and_continue_python(self):
+    """Verifies Python transpilation and execution of break and continue statements in while and for loops."""
+    code = """
+    func test_break_continue(): int {
+      var sum = 0;
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 != 0 {
+          continue;
+        }
+        if i > 6 {
+          break;
+        }
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    res = self._transpile_and_run(code, "test_break_continue()")
+    self.assertEqual(res, 2 + 4 + 6)
+
+  def test_multi_parent_struct_python(self):
+    """Verifies transpilation and execution of multi-parent struct declarations in Python."""
+    code = """
+    struct Position {
+      var x: int = 10;
+      var y: int = 20;
+    }
+    struct Health {
+      var hp: int = 100;
+    }
+    struct Player: Position, Health {
+      var name: String;
+    }
+    func test_player(): int {
+      let p = Player { name = "Hero" };
+      return p.x + p.y + p.hp;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("class Player(Position, Health):", py_code)
+    res = self._transpile_and_run(code, "test_player()")
+    self.assertEqual(res, 130)
+
+  def test_range_iteration_python(self):
+    """Verifies transpilation and execution of range() loops in Python."""
+    code = """
+    func test_range(): int {
+      var sum = 0;
+      for i in range(0, 10, 2) {
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("for i in range(0, 10, 2):", py_code)
+    res = self._transpile_and_run(code, "test_range()")
+    self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
+
+  def test_range_iteration_with_keyword_arguments(self):
+    """Verifies Python transpilation and execution of range() loops with keyword arguments."""
+    code = """
+    func test_range_kw(): int {
+      var sum = 0;
+      for i in range(0, 10, step = 2) {
+        sum += i;
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("for i in range(0, 10, 2):", py_code)
+    res = self._transpile_and_run(code, "test_range_kw()")
+    self.assertEqual(res, 0 + 2 + 4 + 6 + 8)
+
+  def test_optional_chaining_method_call_execution(self):
+    """Verifies Python transpilation and execution of method calls on optional targets."""
+    code = """
+    struct Hero {
+      var name: String;
+    }
+    impl Hero {
+      func get_greeting(): String {
+        return "Hello " + self.name;
+      }
+    }
+    func test_opt_call(h: Hero?): String {
+      let greeting = h?.get_greeting();
+      return greeting ?? "None";
+    }
+    """
+    res1 = self._transpile_and_run(code, 'test_opt_call(Hero(name="Link"))')
+    self.assertEqual(res1, "Hello Link")
+    res2 = self._transpile_and_run(code, "test_opt_call(None)")
+    self.assertEqual(res2, "None")
+
+  def test_guard_statement_execution(self):
+    """Verifies Python transpilation and execution of guard statements with semicolon clause separation."""
+    code = """
+    func test_guard(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag && x > 0 else {
+        return -1;
+      }
+      return x * 10;
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_guard(15, True)")
+    self.assertEqual(res1, 150)
+
+    res2 = self._transpile_and_run(code, "test_guard(None, True)")
+    self.assertEqual(res2, -1)
+
+    res3 = self._transpile_and_run(code, "test_guard(15, False)")
+    self.assertEqual(res3, -1)
+
+    res4 = self._transpile_and_run(code, "test_guard(-5, True)")
+    self.assertEqual(res4, -1)
+
+  def test_multi_binding_if_statement_execution(self):
+    """Verifies Python transpilation and execution of multi-binding if statements."""
+    code = """
+    func test_multi_if(opt_a: int?, opt_b: int?, flag: bool): int {
+      if let a ?= opt_a; let b ?= opt_b; flag && (a + b > 10) {
+        return a + b;
+      } else {
+        return -1;
+      }
+    }
+    """
+    res1 = self._transpile_and_run(code, "test_multi_if(6, 7, True)")
+    self.assertEqual(res1, 13)
+
+    res2 = self._transpile_and_run(code, "test_multi_if(None, 7, True)")
+    self.assertEqual(res2, -1)
+
+    res3 = self._transpile_and_run(code, "test_multi_if(6, None, True)")
+    self.assertEqual(res3, -1)
+
+    res4 = self._transpile_and_run(code, "test_multi_if(6, 7, False)")
+    self.assertEqual(res4, -1)
+
+    res5 = self._transpile_and_run(code, "test_multi_if(2, 3, True)")
+    self.assertEqual(res5, -1)
+
+  def test_multi_binding_if_raii_lifo_cleanup(self):
+    """Verifies that multi-binding if cleans up partially acquired resources on failure and all on block exit."""
+    code = """
+    var events: [String] = [];
+
+    struct Resource {
+      var name: String;
+      var is_closed: bool;
+    }
+    impl Resource {
+      func __del__() {
+        if !self.is_closed {
+          self.is_closed = true;
+          events.push("dispose:" + self.name);
+        }
+      }
+    }
+
+    func get_res(name: String, ok: bool): Resource? {
+      if ok {
+        return Resource { name = name, is_closed = false };
+      }
+      return none;
+    }
+
+    func run_test(ok_a: bool, ok_b: bool, cond: bool) {
+      if let a ?= get_res(name = "resA", ok = ok_a);
+         let b ?= get_res(name = "resB", ok = ok_b);
+         cond {
+        events.push("inside");
+      } else {
+        events.push("fallback");
+      }
+    }
+    """
+    # Case 1: Both succeed and condition holds -> inside -> LIFO dispose resB then resA
+    res1 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = true, cond = true); return events; }", "main()")
+    self.assertEqual(res1, ["inside", "dispose:resB", "dispose:resA"])
+
+    # Case 2: First succeeds, second fails -> dispose resA before fallback
+    res2 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = false, cond = true); return events; }", "main()")
+    self.assertEqual(res2, ["dispose:resA", "fallback"])
+
+    # Case 3: Both succeed, but condition fails -> dispose resB, resA before fallback
+    res3 = self._transpile_and_run(code + "\nfunc main(): [String] { run_test(ok_a = true, ok_b = true, cond = false); return events; }", "main()")
+    self.assertEqual(res3, ["dispose:resB", "dispose:resA", "fallback"])
+
+  def test_guard_destructuring_and_clause_node(self):
+    """Verifies Python transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
+    code = """
+    func test_destruct(arr: [int]): int {
+      guard let a, b = arr else {
+        return 0;
+      }
+      return a + b;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("a = _guard_val_1[0]", py_code)
+    self.assertIn("b = _guard_val_1[1]", py_code)
+
+    # Directly visit GuardClauseNode to cover visitor
+    clause1 = GuardClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="x", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
+    clause2 = GuardClauseNode(condition=LiteralNode(True, "bool"))
+    tr = PythonTranspiler()
+    tr.visit_GuardClauseNode(clause1)
+    tr.visit_GuardClauseNode(clause2)
+    self.assertIn("1", tr.get_output())
+
+  def test_dynamic_indexing_execution(self):
+    """Verifies Python transpilation and execution of array and map .get() and direct indexing."""
+    code = """
+    func test_subscript(): int {
+      let arr = [10, 20, 30];
+      let m = {"a": 100};
+      var idx = 5;
+      var key = "b";
+
+      guard let val1 ?= arr.get(idx) else {
+        guard let val2 ?= m.get(key) else {
+          let direct_arr = arr[0];
+          let direct_map = m["a"];
+          return direct_arr + direct_map;
+        }
+        return val2;
+      }
+      return val1;
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    ast = ASTBuilder().visit(parser.program())
+    TypeChecker().check(ast)
+    py_code = PythonTranspiler().transpile(ast)
+    self.assertIn("_sapphire_array_get", py_code)
+    self.assertIn("_sapphire_map_get", py_code)
+    res = self._transpile_and_run(code, "test_subscript()")
+    self.assertEqual(res, 110)
+
+  def test_coroutine_transpilation_and_methods(self):
+    """Verifies Python transpilation of top-level and struct method coroutines and yield expressions."""
+    code = """
+    func zero_param_coro(): Coroutine<void> {
+      yield;
+    }
+
+    struct GenHolder {
+      var val: int;
+    }
+
+    impl GenHolder {
+      func inst_gen(): Coroutine<int> {
+        yield self.val;
+      }
+
+      static func stat_gen(): Coroutine<int> {
+        yield 42;
+      }
+    }
+
+    func test_coroutine_runner(): int {
+      let c1 = zero_param_coro();
+      c1.step();
+
+      let holder = GenHolder { val = 100 };
+      let c2 = holder.inst_gen();
+      let val2 = c2.step();
+
+      let c3 = GenHolder.stat_gen();
+      let val3 = c3.step();
+
+      return (val2 ?? 0) + (val3 ?? 0);
+    }
+    """
+    res = self._transpile_and_run(code, "test_coroutine_runner()")
+    self.assertEqual(res, 142)
+
+    # Directly verify YieldNode with multiple expressions
+    transpiler = PythonTranspiler()
+    multi_yield = YieldNode(exprs=[LiteralNode(1, "int"), LiteralNode(2, "int")])
+    transpiler.visit(multi_yield)
+    self.assertIn("yield 1, 2", transpiler.get_output())
+
+  def test_destructor_block_exit_lifo(self):
+    """Verifies that destructors are called in reverse order of declaration (LIFO) at block exit in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let r1 = Resource { id = 1 };
+      let r2 = Resource { id = 2 };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r2)", py_code)
+    self.assertIn("_sapphire_del(r1)", py_code)
+    idx_r2 = py_code.index("_sapphire_del(r2)")
+    idx_r1 = py_code.index("_sapphire_del(r1)")
+    self.assertLess(idx_r2, idx_r1)
+
+  def test_destructor_return_rvo_elision(self):
+    """Verifies that returned identifiers are elided from local destructor calls upon function return in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func create_resource(): Resource {
+      let temp = Resource { id = 10 };
+      let keep = Resource { id = 20 };
+      return keep;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(temp)", py_code)
+    self.assertNotIn("_sapphire_del(keep)", py_code)
+
+  def test_destructor_loop_break(self):
+    """Verifies that destructors run before break statements in loops in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      while true {
+        let r = Resource { id = 1 };
+        break;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    func_idx = py_code.index("def loop_test")
+    del_idx = py_code.index("_sapphire_del(r)", func_idx)
+    break_idx = py_code.index("break", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_return_complex_expression(self):
+    """Verifies that non-trivial return expressions evaluate to temporaries before destructors run in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func calc(): int {
+      let r = Resource { id = 10 };
+      return r.id * 2;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_ret_val_1 = ", py_code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    self.assertIn("return _ret_val_1", py_code)
+    ret_calc_idx = py_code.index("_ret_val_1 = ")
+    del_idx = py_code.index("_sapphire_del(r)", ret_calc_idx)
+    ret_idx = py_code.index("return _ret_val_1", del_idx)
+    self.assertLess(ret_calc_idx, del_idx)
+    self.assertLess(del_idx, ret_idx)
+
+  def test_destructor_loop_continue(self):
+    """Verifies that destructors run before continue statements in loops in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      for i in range(5) {
+        let r = Resource { id = i };
+        continue;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+    func_idx = py_code.index("def loop_test")
+    del_idx = py_code.index("_sapphire_del(r)", func_idx)
+    cont_idx = py_code.index("continue", func_idx)
+    self.assertLess(del_idx, cont_idx)
+
+  def test_destructor_from_function_and_method_call(self):
+    """Verifies that variables receiving results from functions/methods returning destructible types are tracked in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      static func create(): Resource {
+        return Resource { id = 1 };
+      }
+    }
+    func make_res(): Resource {
+      return Resource { id = 2 };
+    }
+    func test() {
+      let r1 = make_res();
+      let r2 = Resource.create();
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r1)", py_code)
+    self.assertIn("_sapphire_del(r2)", py_code)
+
+  def test_destructor_from_variable_assignment(self):
+    """Verifies that variables moved from destructible variables are tracked and conditional moves emit drop-flag resets in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test(cond: bool) {
+      let a = Resource { id = 1 };
+      if cond {
+        let b = move a;
+        consume(move b);
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("a = None", py_code)
+    self.assertIn("_sapphire_del(a)", py_code)
+
+  def test_destructor_live_var_reassignment(self):
+    """Verifies reassigning a live destructible var destroys the prior value first in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      var a = Resource { id = 1 };
+      a = Resource { id = 2 };
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertGreaterEqual(test_body.count("_sapphire_del(a)"), 2)
+
+  def test_destructor_move_suppresses_source_destructor(self):
+    """Verifies that moving a resource suppresses destructor on the source."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = move a;
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", py_code)
+    self.assertNotIn("_sapphire_del(a)", py_code)
+
+  def test_destructor_move_into_function_destroys_once_after_call(self):
+    """Verifies move into borrowed function destroys source once after call (no leak or double-drop)."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      let a = Resource { id = 1 };
+      consume(move a);
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertEqual(test_body.count("_sapphire_del(a)"), 1)
+    self.assertLess(test_body.index("consume(a)"), test_body.index("_sapphire_del(a)"))
+    self.assertLess(test_body.index("_sapphire_del(a)"), test_body.index("a = None"))
+
+  def test_destructor_move_reinitialization(self):
+    """Verifies that reinitializing a moved variable restores its destructor."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      var a = Resource { id = 1 };
+      consume(move a);
+      a = Resource { id = 2 };
+    }
+    """
+    py_code = self._transpile(code)
+    test_idx = py_code.index("def test():")
+    test_body = py_code[test_idx:]
+    self.assertIn("_sapphire_del(a)", test_body)
+
+  def test_destructor_inherited_from_parent(self):
+    """Verifies that child structs inherit parent destructor tracking in Python."""
+    code = """
+    struct BaseResource {
+      var id: int;
+    }
+    impl BaseResource {
+      func __del__() {}
+    }
+    struct ChildResource: BaseResource {
+      var tag: String;
+    }
+    func test() {
+      let c = ChildResource { id = 1, tag = "test" };
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(c)", py_code)
+
+  def test_destructor_optional_unwrapping(self):
+    """Verifies that variables unwrapped via `if let x ?= opt` have their destructors called at block exit in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func get_opt(ok: bool): Resource? {
+      if ok {
+        return Resource { id = 1 };
+      }
+      return none;
+    }
+    func test() {
+      if let r ?= get_opt(ok = true) {
+        let x = r.id;
+      }
+    }
+    """
+    py_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", py_code)
+
+  def test_destructor_multi_return_destructuring(self):
+    """Verifies that multi-return values are both elided on return, and tracked on destructuring assignment in Python."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func make_pair(): Resource, Resource {
+      let a = Resource { id = 1 };
+      let b = Resource { id = 2 };
+      return a, b;
+    }
+    func test() {
+      let x, y = make_pair();
+    }
+    """
+    py_code = self._transpile(code)
+    func_pair = py_code.index("def make_pair")
+    func_test = py_code.index("def test()")
+    # In make_pair, neither a nor b should be destroyed (both elided by RVO)
+    make_pair_code = py_code[func_pair:func_test]
+    self.assertNotIn("_sapphire_del(a)", make_pair_code)
+    self.assertNotIn("_sapphire_del(b)", make_pair_code)
+    # In test(), both x and y should be destroyed in LIFO order (y then x)
+    test_code = py_code[func_test:]
+    self.assertIn("_sapphire_del(y)", test_code)
+    self.assertIn("_sapphire_del(x)", test_code)
+    self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
+
+  def test_constructor_chaining_execution(self):
+    """Verifies that constructor chaining executes parent constructors and correctly initializes state."""
+    code = """
+    struct Transform2D {
+      var x: float;
+      var y: float;
+    }
+    impl Transform2D {
+      func __init__(x: float, y: float) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    struct Health {
+      var hp: int;
+    }
+    impl Health {
+      func __init__(max_hp: int) {
+        self.hp = max_hp;
+      }
+    }
+    struct Player: Transform2D, Health {
+      var name: String;
+    }
+    impl Player {
+      func __init__(name: String, x: float, y: float, hp: int):
+          Transform2D(x = x, y = y),
+          Health(max_hp = hp) {
+        self.name = name;
+      }
+      func get_stats(): float {
+        return self.x + self.y + (self.hp as float);
+      }
+    }
+    func test_player(): float {
+      let p = Player(name = "Hero", x = 10.5, y = 20.5, hp = 100);
+      return p.get_stats();
+    }
+    """
+    res = self._transpile_and_run(code, "test_player()")
+    self.assertEqual(res, 131.0)
+
+  def test_module_let_constants_in_defaults_and_base_init_python(self):
+    """Verifies module-level let constants in struct fields, method/fn defaults, and base initializers."""
+    code = """
+    let STANDING_FRAME: int = 1;
+    let BOOST: int = STANDING_FRAME + 4;
+
+    struct Base {
+      var val: int;
+    }
+    impl Base {
+      func __init__(val: int) {
+        self.val = val;
+      }
+    }
+
+    struct Character: Base {
+      var frame: int = STANDING_FRAME;
+      var extra = BOOST;
+    }
+    impl Character {
+      func __init__(v: int): Base(val = v + STANDING_FRAME) {}
+      func total(offset: int = BOOST): int {
+        return self.val + self.frame + self.extra + offset;
+      }
+    }
+
+    func global_step(step: int = STANDING_FRAME): int {
+      return step + 10;
+    }
+
+    func run_test(): int {
+      let c = Character(v = 2);
+      return c.total() + global_step();
+    }
+    """
+    res = self._transpile_and_run(code, "run_test()")
+    self.assertEqual(res, (3 + 1 + 5 + 5) + 11)
+
+  def test_scoped_buffer_preserves_state_python(self):
+    """Verifies PythonTranspiler.capture_expr preserves state while isolating output."""
+    from sapphire.parser.ast import IdentifierNode
+
+    pt = PythonTranspiler(test_mode=True)
+    pt._identifier_map["local_var"] = "_val_local_var"
+    pt.extern_vars["love"] = "love"
+    pt.global_vars.add("G_CONST")
+    pt.emit("root_prefix")
+    captured = pt.capture_expr(IdentifierNode("local_var"))
+    self.assertEqual(captured, "_val_local_var")
+    self.assertEqual(pt.get_output(), "root_prefix")
+    self.assertTrue(pt.test_mode)
+    self.assertEqual(pt.extern_vars["love"], "love")
+    self.assertIn("G_CONST", pt.global_vars)
+
+  def test_named_args_skipped_defaults_eval_order_and_false_bool_python(self):
+    """Verifies skipped defaults, reordered side-effect eval, base init, ?., and false bool."""
+    result = self._transpile_and_run(
+        """
+        var log: String = "";
+
+        func step(tag: String, val: int): int {
+          log = log + tag;
+          return val;
+        }
+
+        func create_enemy(id: int, hp: int = 10, unit_hp: int = 5): int {
+          return id * 100 + hp + unit_hp;
+        }
+
+        struct Flag {
+          var v: bool;
+        }
+
+        impl Flag {
+          func __init__(v: bool = true) {
+            self.v = v;
+          }
+        }
+
+        struct Base {
+          var a: int;
+          var b: int;
+          var c: int;
+        }
+
+        impl Base {
+          func __init__(a: int, b: int = 10, c: int = 20) {
+            self.a = a;
+            self.b = b;
+            self.c = c;
+          }
+
+          func calc(a: int, b: int = 10, c: int = 20): int {
+            return a * 100 + b * 10 + c;
+          }
+        }
+
+        struct Derived: Base {
+          var ok: bool;
+        }
+
+        impl Derived {
+          func __init__(z: int, x: int) : Base(c = step("C", z), a = step("A", x)) {
+            self.ok = true;
+          }
+        }
+
+        func run_test(): String {
+          let r1 = create_enemy(id = 1, unit_hp = 19);
+          let f = Flag(v = false);
+          let d = Derived(z = 7, x = 3);
+          let opt: Derived? = d;
+          let r2 = opt?.calc(c = step("Y", 5), a = step("X", 2));
+          let none_opt: Derived? = none;
+          let r3 = none_opt?.calc(c = step("N", 9), a = step("M", 8));
+          let has_r3 = r3 != none;
+          return f"{r1},{f.v},{d.a},{d.b},{d.c},{r2 ?? -1},{has_r3},{log}";
+        }
+        """,
+        "run_test()",
+    )
+    self.assertEqual(result, "129,false,3,10,7,305,false,CAYX")
+
+  def test_qualified_ancestor_static_dispatch_python(self):
+    """Verifies multi-parent, transitive, and named-arg ancestor dispatch in Python."""
+    result = self._transpile_and_run(
+        """
+        struct Entity {
+          var hp: int;
+        }
+
+        impl Entity {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            self.hp = self.hp + dt * mult + bonus;
+          }
+        }
+
+        struct Character: Entity {
+          var shield: int;
+        }
+
+        impl Character {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            Entity.update(self, mult = mult, dt = dt);
+            self.shield = self.shield + 1;
+          }
+        }
+
+        struct Flyer {
+          var alt: int;
+        }
+
+        impl Flyer {
+          var func glide(d: int) {
+            self.alt = self.alt + d;
+          }
+        }
+
+        struct Enemy: Character, Flyer {
+          var rage: int;
+        }
+
+        impl Enemy {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            Character.update(self, mult = mult, dt = dt);
+            Flyer.glide(self, 3);
+            self.rage = self.hp;
+          }
+        }
+
+        func run_test(): String {
+          var e = Enemy { hp = 5, shield = 0, alt = 2, rage = 0 };
+          e.update(4, mult = 3);
+          return f"{e.hp},{e.shield},{e.alt},{e.rage}";
+        }
+        """,
+        "run_test()",
+    )
+    self.assertEqual(result, "27,1,5,27")
+
+
+# ---------------------------------------------------------------------------
+# End-to-end integration tests
+# ---------------------------------------------------------------------------
+
+_E2E_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "e2e"
+_FIXTURES_DIR = _E2E_DIR
+
+
+class TestSharedFixtures(unittest.TestCase):
+  """Compiles each shared .sp e2e test with PythonTranspiler and executes it."""
+
+  @classmethod
+  def _load_expectations(cls):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_expectations", _E2E_DIR / "_expectations.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.EXPECTATIONS
+
+  def _transpile_and_exec(self, source: str) -> dict:
+    """Transpile *source* to Python, exec it, return {fn_name: result}."""
+    input_stream = InputStream(source)
+    from sapphire.parser.ast_builder import ASTBuilder as _Builder
+    from sapphire.parser.gen.SapphireLexer import SapphireLexer as _Lexer
+    from sapphire.parser.gen.SapphireParser import SapphireParser as _Parser
+    from sapphire.semantics.type_checker import TypeChecker as _Checker
+
+
+    lexer = _Lexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = _Parser(stream)
+    tree = parser.program()
+    ast = _Builder().visit(tree)
+    checker = _Checker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{source}\nErrors: {checker.errors}")
+    py_code = Transpiler(test_mode=True).transpile(ast)
+    repo_root = _E2E_DIR.parent.parent
+    lib_path = str(repo_root / "sapphire" / "lib")
+    if lib_path not in sys.path:
+      sys.path.insert(0, lib_path)
+
+    # Transpile any local `testing.e2e.*` helper modules imported by the fixture.
+    local_imports = [
+        line.strip().split()[1].rstrip(";")
+        for line in source.splitlines()
+        if line.strip().startswith("import testing.e2e.")
+    ]
+    loaded_mods: list[str] = []
+    created_e2e_pkg = False
+    prev_testing_e2e_attr = None
+    had_testing_e2e_attr = False
+    e2e_pkg = None
+    _testing_pkg = None
+    if local_imports:
+      import types as _types
+
+      import testing as _testing_pkg
+      e2e_pkg = sys.modules.get("testing.e2e")
+      if e2e_pkg is None:
+        e2e_pkg = _types.ModuleType("testing.e2e")
+        e2e_pkg.__path__ = [str(_E2E_DIR)]
+        sys.modules["testing.e2e"] = e2e_pkg
+        created_e2e_pkg = True
+      had_testing_e2e_attr = hasattr(_testing_pkg, "e2e")
+      if had_testing_e2e_attr:
+        prev_testing_e2e_attr = _testing_pkg.e2e
+      _testing_pkg.e2e = e2e_pkg
+      for mod_path in local_imports:
+        parts = mod_path.split(".")
+        sp_path = repo_root.joinpath(*parts).with_suffix(".sp")
+        if sp_path.exists():
+          dep_src = sp_path.read_text(encoding="utf-8")
+          dep_lexer = _Lexer(InputStream(dep_src))
+          dep_parser = _Parser(CommonTokenStream(dep_lexer))
+          dep_ast = _Builder().visit(dep_parser.program())
+          dep_checker = _Checker()
+          dep_checker.check(dep_ast)
+          dep_py = Transpiler(test_mode=True).transpile(dep_ast)
+          dep_mod = _types.ModuleType(mod_path)
+          exec(dep_py, dep_mod.__dict__)  # pylint: disable=exec-used
+          sys.modules[mod_path] = dep_mod
+          setattr(e2e_pkg, parts[-1], dep_mod)
+          loaded_mods.append(mod_path)
+
+    try:
+      ctx: dict = {}
+      exec(py_code, ctx)  # pylint: disable=exec-used
+      results = {}
+      for name, obj in ctx.items():
+        if name.startswith("test_") and callable(obj):
+          val = obj()
+          # Normalise enum members to their underlying value
+          if hasattr(val, "value"):
+            val = val.value
+          results[name] = val
+      return results
+    finally:
+      for mod_path in loaded_mods:
+        sys.modules.pop(mod_path, None)
+        if e2e_pkg is not None:
+          short_name = mod_path.rsplit(".", 1)[-1]
+          if hasattr(e2e_pkg, short_name):
+            delattr(e2e_pkg, short_name)
+      if created_e2e_pkg:
+        sys.modules.pop("testing.e2e", None)
+      if _testing_pkg is not None:
+        if had_testing_e2e_attr:
+          _testing_pkg.e2e = prev_testing_e2e_attr
+        elif hasattr(_testing_pkg, "e2e"):
+          delattr(_testing_pkg, "e2e")
+
+  def test_omitted_type_annotations_transpilation(self):
+    """Verifies Python transpilation and execution of structs and global variables with omitted explicit types."""
+    code = """
+    let OFFSET = 50;
+    var FACTOR = 2;
+
+    struct Config {
+      var base = 10;
+      let multiplier = 3;
+    }
+
+    func test_compute(): int {
+      let cfg = Config {};
+      return (cfg.base * cfg.multiplier) + OFFSET * FACTOR;
+    }
+    """
+    res = self._transpile_and_exec(code)["test_compute"]
+    self.assertEqual(res, 130)
+
+  def test_heap_smart_refs_execution(self):
+    """Verifies Ref, SharedRef, and WeakRef execution in Python backend."""
+    code = """
+    struct Node {
+      var val: int;
+    }
+    impl Node {
+      func double_val(): int {
+        return self.val * 2;
+      }
+    }
+
+    func test_ref(): int {
+      let r = Ref(Node { val = 21 });
+      return r.double_val();
+    }
+
+    func test_shared_ref(): int {
+      let s1 = SharedRef(Node { val = 42 });
+      let s2 = s1.share();
+      let w = s1.downgrade();
+      if let active ?= w.upgrade() {
+        return active.val;
+      }
+      return 0;
+    }
+
+    func test_shared_from_move(): int {
+      var r = Ref(Node { val = 99 });
+      let s = SharedRef(move r);
+      return s.val;
+    }
+    """
+    res = self._transpile_and_exec(code)
+    self.assertEqual(res["test_ref"], 42)
+    self.assertEqual(res["test_shared_ref"], 42)
+    self.assertEqual(res["test_shared_from_move"], 99)
+
+  def test_coroutine_yield_in_match_statement(self):
+    """Verifies that a coroutine can yield directly inside a statement-level match block."""
+    code = """
+    enum Step { First, Second }
+
+    func gen(s: Step): Coroutine<int> {
+      match s {
+        Step.First -> {
+          yield 10;
+        },
+        Step.Second -> {
+          yield 20;
+        },
+      };
+      yield 30;
+    }
+
+    func test_coro_match(): int {
+      var c = gen(Step.First);
+      let a = c.step() ?? 0;
+      let b = c.step() ?? 0;
+      return a + b;
+    }
+    """
+    res = self._transpile_and_exec(code)
+    self.assertEqual(res["test_coro_match"], 40)
+
+  def test_transpile_file_with_shared_runtime_module(self):
+    """Verifies that transpile_file(use_runtime_module=True) emits _sapphire_runtime.py and executes cleanly."""
+    import subprocess
+    code = """
+    func main() {
+      var arr = [1, 2, 3];
+      arr.push(4);
+      let doubled = arr.map(x -> x * 2);
+      print(doubled.join(","));
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sp_path = os.path.join(tmpdir, "app.sp")
+      py_path = os.path.join(tmpdir, "app.py")
+      with open(sp_path, "w", encoding="utf-8") as f:
+        f.write(code)
+      transpile_file(sp_path, py_path, target="python", quiet=True, use_runtime_module=True)
+      rt_path = os.path.join(tmpdir, "_sapphire_runtime.py")
+      self.assertTrue(os.path.exists(rt_path))
+      with open(py_path, encoding="utf-8") as f:
+        py_content = f.read()
+      self.assertIn("from _sapphire_runtime import *", py_content)
+      self.assertNotIn("class _LazyCoWProxy:", py_content)
+      proc = subprocess.run([sys.executable, py_path], capture_output=True, text=True, check=True)
+      self.assertEqual(proc.stdout.strip(), "2,4,6,8")
+
+  def test_coroutines_and_methods_mutating_globals_and_if_multi_bindings(self):
+    """Verifies global emission in coroutines/methods, multi-binding if-let destructuring, and @extern +=."""
+    code = """
+    @extern var host_counter: int;
+    var g_count: int = 0;
+
+    struct Counter {
+      var step_val: int;
+    }
+
+    impl Counter {
+      func bump() {
+        g_count = g_count + self.step_val;
+      }
+      func gen_counts(): Coroutine<int> {
+        g_count = g_count + 1;
+        yield g_count;
+      }
+    }
+
+    func global_coro(): Coroutine<int> {
+      g_count = g_count + 10;
+      yield g_count;
+    }
+
+    func maybe_pair(ok: bool): [int]? {
+      if ok {
+        return [3, 4];
+      }
+      return none;
+    }
+
+    func test_run_checks(): int {
+      host_counter += 1;
+      let c = Counter { step_val = 5 };
+      c.bump();
+      var co1 = c.gen_counts();
+      let v1 = co1.step() ?? 0;
+      var co2 = global_coro();
+      let v2 = co2.step() ?? 0;
+
+      var total = v1 + v2;
+      if let a, b ?= maybe_pair(true); a > 0 {
+        total = total + a + b;
+      }
+      if let base = 10; let p1, p2 ?= maybe_pair(true) {
+        total = total + base + p1 + p2;
+      }
+      return total;
+    }
+    """
+    import builtins
+    builtins.host_counter = 0
+    try:
+      res = self._transpile_and_exec(code)
+      self.assertEqual(res["test_run_checks"], 6 + 16 + 7 + 17)
+      self.assertEqual(builtins.host_counter, 1)
+    finally:
+      if hasattr(builtins, "host_counter"):
+        delattr(builtins, "host_counter")
+
+  def _make_fixture_test(fixture_name: str):  # noqa: N805 — intentionally not cls
+    """Factory producing a test method for *fixture_name*."""
+    def _test(self):
+      fixture_path = _E2E_DIR / fixture_name
+      if not fixture_path.exists():
+        self.skipTest(f"Fixture not found: {fixture_path}")
+      expectations = self._load_expectations().get(fixture_name, {})
+      if not expectations:
+        self.skipTest(f"No expectations registered for {fixture_name}")
+      source = fixture_path.read_text(encoding="utf-8")
+      results = self._transpile_and_exec(source)
+      for fn_name, expected in expectations.items():
+        with self.subTest(fixture=fixture_name, fn=fn_name):
+          self.assertIn(
+              fn_name, results,
+              f"{fn_name} was not found in transpiled output for {fixture_name}",
+          )
+          self.assertEqual(
+              results[fn_name], expected,
+              f"{fixture_name}::{fn_name} expected {expected!r}, got {results[fn_name]!r}",
+          )
+    _test.__name__ = f"test_fixture_{fixture_name.removesuffix('.sp')}"
+    _test.__doc__ = f"Shared fixture: {fixture_name}"
+    return _test
+
+  # Dynamically generate one test method per fixture file
+  if _E2E_DIR.exists():
+    for _fixture_file in sorted(_E2E_DIR.glob("*_test.sp")):
+      _name = f"test_fixture_{_fixture_file.stem}"
+      locals()[_name] = _make_fixture_test(_fixture_file.name)
+
+
+class TestPhase5PythonFixes(unittest.TestCase):
+  """Regression tests for Phase 5 shared codegen & Python backend/runtime fixes."""
+
+  def _run(self, source: str, func_name: str = "run") -> object:
+    from sapphire.semantics.type_checker import TypeChecker
+
+    lexer = SapphireLexer(InputStream(source))
+    tokens = CommonTokenStream(lexer)
+    parser = SapphireParser(tokens)
+    tree = parser.program()
+    ast = ASTBuilder().visit(tree)
+    TypeChecker().check(ast)
+    py_code = PythonTranspiler(test_mode=True).transpile(ast)
+    ns: dict = {}
+    exec(compile(py_code, "<sapphire>", "exec"), ns)
+    return ns[func_name]()
+
+  def test_integer_division_and_compound_div_assign(self):
+    src = """
+    func run(): [int] {
+      var a = -7;
+      a /= 2;
+      var b = 7;
+      b /= -2;
+      let c = -7 / -2;
+      let d = 17 / 4;
+      let f = 7.0 / 2.0;
+      let f_ok = f == 3.5 ? 1 : 0;
+      return [a, b, c, d, f_ok];
+    }
+    """
+    self.assertEqual(self._run(src), [-3, -3, 3, 4, 1])
+
+  def test_value_copy_semantics_on_assignment_and_var_decl(self):
+    src = """
+    struct Point {
+      var x: int = 0;
+      var y: int = 0;
+    }
+
+    proto Hero {
+      var hp: int = 100;
+    }
+
+    func run(): [int] {
+      let p1 = Point { x = 1, y = 2 };
+      var p2 = p1;
+      p2.x = 99;
+
+      let a1 = [1, 2];
+      var a2 = a1;
+      a2.push(3);
+
+      let m1 = {"k": 10};
+      var m2 = m1;
+      m2["k"] = 77;
+
+      var arena = Arena();
+      var h1 = Hero { hp = 50 } in arena;
+      var h2 = h1;
+      h2.hp = 10;
+
+      return [p1.x, p2.x, a1.size(), a2.size(), m1["k"], m2["k"], h1.hp, h2.hp];
+    }
+    """
+    self.assertEqual(self._run(src), [1, 99, 2, 3, 10, 77, 10, 10])
+
+  def test_lazy_cow_proxy_collections_underscore_fields_enums_and_map_keys(self):
+    src = """
+    enum Role {
+      Warrior = "warrior",
+      Mage = "mage",
+    }
+
+    struct Stats {
+      var _hp: int = 10;
+    }
+
+    proto Unit {
+      var stats: Stats = Stats { _hp = 10 };
+      var items: [int] = [1, 2];
+      var scores: [String: int] = {"a": 10, "keys": 5, "get": 9};
+      var role: Role = Role.Warrior;
+    }
+
+    func run(): [int] {
+      var arena = Arena();
+      let base = Unit {} in arena;
+      var c = clone base {} in arena;
+      c.items.push(3);
+      let got_a = c.scores.get("a") ?? -1;
+      let got_keys = c.scores.get("keys") ?? -1;
+      let keys_count = c.scores.keys().size();
+      c.scores.remove("a");
+      let base_has_a = base.scores.contains("a") ? 1 : 0;
+      let clone_has_a = c.scores.contains("a") ? 1 : 0;
+      c.scores.clear();
+      let base_sz = base.scores.size();
+      let clone_sz = c.scores.size();
+      c.stats._hp = 99;
+      let role_ok = c.role == Role.Warrior ? 1 : 0;
+      return [
+        base.items.size(),
+        c.items.size(),
+        got_a,
+        got_keys,
+        keys_count,
+        base_has_a,
+        clone_has_a,
+        base_sz,
+        clone_sz,
+        base.stats._hp,
+        c.stats._hp,
+        role_ok,
+      ];
+    }
+    """
+    self.assertEqual(
+        self._run(src),
+        [2, 3, 10, 5, 3, 1, 0, 3, 0, 10, 99, 1],
+    )
+
+  def test_array_join_and_string_concat_use_sapphire_string_from(self):
+    src = """
+    enum Color { Red = "red", Blue = "blue" }
+
+    func run(): String {
+      let arr = [true, false];
+      let j = arr.join(",");
+      let s = "flag=" + true + ",c=" + Color.Red;
+      return j + "|" + s;
+    }
+    """
+    self.assertEqual(self._run(src), "true,false|flag=true,c=red")
+
+  def test_raii_conditional_move_return_and_unconditional_move_reinit(self):
+    src = """
+    var log: [int] = [];
+
+    struct Res {
+      var id: int = 0;
+    }
+    impl Res {
+      func __del__() {
+        log.push(self.id);
+      }
+    }
+
+    struct Box {
+      var r: Res;
+    }
+
+    func make_box(flag: bool): Box {
+      var r = Res { id = 1 };
+      if flag {
+        return Box { r = move r };
+      }
+      return Box { r = Res { id = 2 } };
+    }
+
+    func cond_reinit(flag: bool) {
+      var a = Res { id = 10 };
+      let b = move a;
+      if flag {
+        a = Res { id = 20 };
+      }
+    }
+
+    func run(): [int] {
+      log = [];
+      let b1 = make_box(true);
+      let after_b1 = log.size();
+      let b2 = make_box(false);
+      cond_reinit(false);
+      cond_reinit(true);
+      return [after_b1, log.size()];
+    }
+    """
+    # after_b1 == 0 (r was moved into Box, NOT destroyed on early return!).
+    # b2 destroys id=1 (1); cond_reinit(false) destroys b=10 (2);
+    # cond_reinit(true) destroys b=10 and a=20 (4); total before return = 4.
+    self.assertEqual(self._run(src), [0, 4])
+
+  def test_diamond_inheritance_destructor_runs_base_once(self):
+    src = """
+    var log: [String] = [];
+
+    struct Base {}
+    impl Base { func __del__() { log.push("Base"); } }
+
+    struct Left: Base {}
+    impl Left { func __del__() { log.push("Left"); } }
+
+    struct Right: Base {}
+    impl Right { func __del__() { log.push("Right"); } }
+
+    struct Bottom: Left, Right {}
+    impl Bottom { func __del__() { log.push("Bottom"); } }
+
+    func run(): [String] {
+      log = [];
+      if true {
+        let b = Bottom {};
+      }
+      return log;
+    }
+    """
+    self.assertEqual(self._run(src), ["Bottom", "Right", "Base", "Left"])
+
+  def test_smart_refs_deterministic_raii_and_weak_ref_expiry(self):
+    src = """
+    var drops: [int] = [];
+
+    struct Res { var id: int = 0; }
+    impl Res { func __del__() { drops.push(self.id); } }
+
+    func run(): [int] {
+      drops = [];
+      if true {
+        let r = Ref(Res { id = 1 });
+      }
+      let after_unique = drops.size();
+
+      var w: WeakRef<Res>? = none;
+      var alive_mid = 0;
+      if true {
+        let s1 = SharedRef(Res { id = 2 });
+        w = s1.downgrade();
+        if true {
+          let s2 = s1.share();
+        }
+        if let u ?= w?.upgrade() {
+          alive_mid = u.id;
+        }
+      }
+      let after_shared = drops.size();
+      var alive_after = 0;
+      if let u2 ?= w?.upgrade() {
+        alive_after = u2.id;
+      }
+      return [after_unique, alive_mid, after_shared, alive_after];
+    }
+    """
+    self.assertEqual(self._run(src), [1, 2, 2, 0])
+
+  def test_raii_lambda_isolation_guard_if_let_and_short_circuit_moves(self):
+    src = """
+    var drops: [int] = [];
+
+    struct Res { var id: int = 0; }
+    impl Res { func __del__() { drops.push(self.id); } }
+
+    func maybe_res(ok: bool, id: int): Res? {
+      if ok { return Res { id = id }; }
+      return none;
+    }
+
+    func test_guard(): int {
+      guard let r ?= maybe_res(true, 30) else { return -1; }
+      return r.id;
+    }
+
+    func run(): [int] {
+      drops = [];
+      // 1. Block lambda must not destroy outer RAII local
+      var lambda_ok = 0;
+      if true {
+        let outer = Res { id = 10 };
+        let fn = (x: int) -> int { return x + outer.id; };
+        lambda_ok = fn(5);
+      }
+      let d1 = drops.size();
+
+      // 2. if let ...; false_cond must destroy owned unwrapped Res
+      if let r ?= maybe_res(true, 20); r.id == 999 {
+        lambda_ok += 1;
+      }
+      let d2 = drops.size();
+
+      // 3. guard let owned Res destroyed on scope exit
+      let g_id = test_guard();
+      let d3 = drops.size();
+
+      // 4. Conditional move in ternary only destroys untaken var on scope exit
+      if true {
+        var a = Res { id = 41 };
+        var b = Res { id = 42 };
+        let chosen = true ? move a : move b;
+      }
+      let d4 = drops.size();
+
+      // 5. Array.get borrowed view must NOT destroy element on if-let exit
+      let arr = [Res { id = 50 }];
+      var before_arr_drop = 0;
+      if let item ?= arr.get(0) {
+        before_arr_drop = drops.size();
+      }
+      let after_borrowed_unwrap = drops.size();
+
+      return [lambda_ok, d1, d2, g_id, d3, d4, before_arr_drop, after_borrowed_unwrap];
+    }
+    """
+    self.assertEqual(self._run(src), [15, 1, 2, 30, 3, 5, 5, 5])
+
+  def test_match_constants_early_yield_lifting_and_non_mutating_ast(self):
+    from sapphire.semantics.type_checker import TypeChecker
+
+    src = """
+    let TARGET: int = 42;
+
+    func classify(x: int, flag: bool): String {
+      var side = 0;
+      let res = match x {
+        TARGET -> "hit_const",
+        1 + 1 -> {
+          if flag {
+            yield "early";
+          }
+          side = 1;
+          yield "late";
+        },
+        3 -> {
+          for i in range(5) {
+            if i == 2 {
+              yield "from_loop";
+            }
+          }
+          yield "never";
+        },
+        ... -> "other",
+      };
+      return res + ":" + side;
+    }
+
+    func lifting_gauntlet(): [int] {
+      // match in match subject
+      let s1 = match (match 1 { 1 -> 10, ... -> 0 }) {
+        10 -> 100,
+        ... -> 0,
+      };
+      // match in shorthand lambda
+      let fn = (n: int) -> match n { 1 -> 11, ... -> 22 };
+      let s2 = fn(1) + fn(9);
+      // match in while condition
+      var idx = 0;
+      var acc = 0;
+      while (match idx { 0 -> true, 1 -> true, ... -> false }) {
+        acc += idx + 1;
+        idx += 1;
+      }
+      // match in if-let condition referencing bound var
+      let opt: int? = 2;
+      var s4 = 0;
+      if let v ?= opt; (match v { 2 -> true, ... -> false }) {
+        s4 = v * 10;
+      }
+      // match in short-circuiting ternary (untaken branch must NOT run)
+      var touched = 0;
+      let s5 = true ? 7 : (match 1 {
+        1 -> { touched = 1; yield 99; },
+        ... -> 0,
+      });
+      return [s1, s2, acc, s4, s5, touched];
+    }
+
+    func run(): String {
+      let a = classify(42, false);
+      let b = classify(2, true);
+      let c = classify(2, false);
+      let d = classify(3, false);
+      let g = lifting_gauntlet();
+      return a + "|" + b + "|" + c + "|" + d + "|" + g.join(",");
+    }
+    """
+    lexer = SapphireLexer(InputStream(src))
+    tokens = CommonTokenStream(lexer)
+    ast = ASTBuilder().visit(SapphireParser(tokens).program())
+    TypeChecker().check(ast)
+    # Transpiling the SAME AST twice must produce identical, working code (no AST mutation!)
+    py1 = PythonTranspiler(test_mode=True).transpile(ast)
+    py2 = PythonTranspiler(test_mode=True).transpile(ast)
+    self.assertEqual(py1, py2)
+    ns: dict = {}
+    exec(compile(py1, "<sapphire>", "exec"), ns)
+    self.assertEqual(
+        ns["run"](),
+        "hit_const:0|early:0|late:1|from_loop:0|100,33,3,20,7,0",
+    )
+
+  def test_clone_init_block_proto_inheritance_has_init_kwargs_and_coroutines(self):
+    src = """
+    var base_inits: int = 0;
+
+    struct PlainBase {
+      var x: int = 5;
+    }
+
+    proto ProtoChildOfStruct: PlainBase {
+      var y: int = 10;
+    }
+
+    func bump_base(): int {
+      base_inits += 1;
+      return 7;
+    }
+
+    proto ProtoParent {
+      var tag: int = bump_base();
+    }
+
+    proto ProtoChild: ProtoParent {
+      var extra: int = 2;
+    }
+
+    struct WithInitAndMethod {
+      var flag: bool = false;
+    }
+    impl WithInitAndMethod {
+      func __init__(reset: bool) {
+        self.flag = reset;
+      }
+      var func reset(): int {
+        self.flag = false;
+        return 42;
+      }
+    }
+
+    struct Nested { var v: int = 1; }
+    proto Entity {
+      var hp: int = 10;
+      var nested: Nested = Nested { v = 3 };
+      var arr: [int] = [1, 2];
+    }
+
+    func yieldless(): Coroutine<int> {
+      let x = 1;
+    }
+
+    func with_mut_default(var items: [int] = [1]): int {
+      items.push(2);
+      return items.size();
+    }
+
+    func run(): [int] {
+      base_inits = 0;
+      var arena = Arena();
+      let p1 = ProtoChildOfStruct {} in arena;
+      let p2 = clone p1 { self.y = 20; } in arena;
+      let pc = ProtoChild {} in arena;
+      var w = WithInitAndMethod(reset = true);
+      let reset_ret = w.reset();
+
+      let e1 = Entity {} in arena;
+      let e2 = clone e1 {
+        self.hp += 5;
+        self.nested.v = 99;
+        self.arr[0] = 77;
+      } in arena;
+
+      var co = yieldless();
+      let step_none = co.step() == none ? 1 : 0;
+      let done = co.is_done() ? 1 : 0;
+
+      let d1 = with_mut_default();
+      let d2 = with_mut_default();
+
+      return [
+        p2.x, p2.y, base_inits, reset_ret,
+        e1.hp, e2.hp, e1.nested.v, e2.nested.v, e1.arr[0], e2.arr[0],
+        step_none, done, d1, d2,
+      ];
+    }
+    """
+    self.assertEqual(
+        self._run(src),
+        [5, 20, 1, 42, 10, 15, 3, 99, 1, 77, 1, 1, 2, 2],
+    )
+
+  def test_shadowing_nonlocal_loop_closures_writebacks_and_syntax(self):
+    src = """
+    var g: int = 100;
+
+    enum Label {
+      First,
+      Second = "two",
+    }
+
+    struct Holder {
+      var opt: int? = 5;
+    }
+
+    func run(): [int] {
+      // 1. Block-scoped shadowing + global assignment in same function
+      g = 100;
+      var x = 1;
+      if true {
+        var x = x + 10;
+        x += 1;
+        var g = 5;
+        g += 1;
+      }
+      g += 1;
+
+      // 2. nonlocal in lifted block lambda
+      var count = 0;
+      let inc = () -> int {
+        count += 3;
+        return count;
+      };
+      let c1 = inc();
+      let c2 = inc();
+
+      // 3. Loop closure capture (shorthand & block lambdas)
+      var fns: [() -> int] = [];
+      for i in range(3) {
+        let f: () -> int = () -> i;
+        fns.push(f);
+      }
+      var loop_sum = 0;
+      for f in fns {
+        loop_sum += f();
+      }
+
+      // 4. if var writebacks (plain var & struct field) + for var primitive writeback
+      var opt_v: int? = 10;
+      if var v ?= opt_v {
+        v += 5;
+      }
+      var h = Holder { opt = 20 };
+      if var fv ?= h.opt {
+        fv = 33;
+      }
+      var nums = [1, 2, 3];
+      for var n in nums {
+        n *= 10;
+      }
+
+      // 5. Optional chaining on String/Array/Map intrinsics + OptionalTypeNode cast + assert in lambda
+      let os: String? = "hi";
+      let none_s: String? = none;
+      let s_len = os?.size() ?? -1;
+      let none_len = none_s?.size() ?? -1;
+      let cast_opt: float? = (5 as float?);
+      let cast_ok = (cast_opt ?? 0.0) == 5.0 ? 1 : 0;
+      let check = (ok: bool) -> int { assert(ok, "bad"); return 1; };
+      let assert_ok = check(true);
+      let label_ok = (Label.First as String) == "First" ? 1 : 0;
+      let cr_len = f"a\rb".size();
+
+      return [
+        x, g, c1, c2, loop_sum,
+        opt_v ?? -1, h.opt ?? -1,
+        nums[0] + nums[1] + nums[2],
+        s_len, none_len, cast_ok, assert_ok, label_ok, cr_len,
+      ];
+    }
+    """
+    self.assertEqual(
+        self._run(src),
+        [1, 101, 3, 6, 3, 15, 33, 60, 2, -1, 1, 1, 1, 3],
+    )
+
+  def test_export_alias_and_reexport_bindings(self):
+    from sapphire.parser.ast import (
+      BlockNode,
+      ExportSpecifierNode,
+      ExportStmtNode,
+      FuncDeclNode,
+      ProgramNode,
+    )
+
+    fn = FuncDeclNode("helper", [], None, BlockNode([]))
+    exp = ExportStmtNode([
+        ExportSpecifierNode("helper", alias="public_helper"),
+        ExportSpecifierNode("DrawMode", module_prefix="enums"),
+        ExportSpecifierNode("Align", module_prefix="enums", alias="TextAlign"),
+    ])
+    prog = ProgramNode([fn], export_block=exp)
+    py_code = PythonTranspiler().transpile(prog)
+    self.assertIn("public_helper = helper", py_code)
+    self.assertIn("DrawMode = enums.DrawMode", py_code)
+    self.assertIn("TextAlign = enums.Align", py_code)
+    self.assertIn('__all__ = ["public_helper", "DrawMode", "TextAlign"]', py_code)
+
+  def test_abstract_trait_emits_placeholder_and_supports_cross_module_alias(self):
+    """Verifies pure abstract traits emit placeholder classes for aliases/re-exports."""
+    import importlib.util
+    import sys
+    import tempfile
+
+    from sapphire.code_gen.transpiler import transpile_file
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      base_sp = os.path.join(tmpdir, "base_traits.sp")
+      alias_sp = os.path.join(tmpdir, "alias_mod.sp")
+      with open(base_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export { Combatant, Fighter }\n"
+            "trait Combatant {\n"
+            "  func get_hp(): int;\n"
+            "}\n"
+            "struct Fighter { var hp: int = 10; }\n"
+            "impl Combatant for Fighter {\n"
+            "  func get_hp(): int { return self.hp; }\n"
+            "}\n"
+        )
+      with open(alias_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "import base_traits;\n"
+            "export { Combatant, read_hp }\n"
+            "let Combatant = base_traits.Combatant;\n"
+            "func read_hp(c: Combatant): int { return c.get_hp(); }\n"
+        )
+
+      out_py = os.path.join(tmpdir, "alias_mod.py")
+      transpile_file(alias_sp, output_file=out_py, target="python", quiet=True)
+
+      base_py = os.path.join(tmpdir, "base_traits.py")
+      with open(base_py, encoding="utf-8") as f:
+        base_src = f.read()
+      self.assertIn("class Combatant:", base_src)
+
+      orig_path = list(sys.path)
+      sys.path.insert(0, tmpdir)
+      try:
+        spec = importlib.util.spec_from_file_location("alias_mod_test", out_py)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        fighter = mod.base_traits.Fighter(hp=25)
+        self.assertEqual(mod.read_hp(fighter), 25)
+        self.assertIs(mod.Combatant, mod.base_traits.Combatant)
+      finally:
+        sys.path[:] = orig_path
+        sys.modules.pop("base_traits", None)
+
+
+if __name__ == "__main__":
+  unittest.main()

@@ -30,8 +30,7 @@ function walkFiles(dir, repoRoot, out) {
 export function buildCompilerBundle(repoRoot) {
   /** @type {Record<string, string>} */
   const files = {};
-  walkFiles(path.join(repoRoot, 'src'), repoRoot, files);
-  walkFiles(path.join(repoRoot, 'lib', 'std'), repoRoot, files);
+  walkFiles(path.join(repoRoot, 'sapphire'), repoRoot, files);
   return {
     generatedAt: new Date().toISOString(),
     fileCount: Object.keys(files).length,

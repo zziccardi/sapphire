@@ -1,11 +1,11 @@
 [run]
 branch = True
 source =
-    src
+    sapphire
     tools/vscode-extension/scripts
 omit =
-    src/parser/gen/*
-    src/run_*.py
+    sapphire/parser/gen/*
+    sapphire/run_*.py
     *__init__.py
     *_test.py
     /tmp/*
@@ -15,8 +15,8 @@ omit =
 [report]
 show_missing = True
 omit =
-    src/parser/gen/*
-    src/run_*.py
+    sapphire/parser/gen/*
+    sapphire/run_*.py
     *__init__.py
     *_test.py
     /tmp/*

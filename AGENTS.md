@@ -10,7 +10,7 @@ This document is the primary operating guide for AI coding agents working in the
 3. Modern expressiveness (Swift-style optionals and `guard` clauses, Python-style f-strings and initializers).
 
 * **Transpiler Toolchain**: Compiles `.sp` files to **Python** (default) or **Lua 5.1** (e.g. Love2D), with an experimental **LLVM IR** generator.
-* **Tooling**: Built-in test runner (`sapphire test`), LSP server (`src/lsp`), and VS Code extension (`tools/vscode-extension`).
+* **Tooling**: Built-in test runner (`sapphire test`), LSP server (`sapphire/lsp`), and VS Code extension (`tools/vscode-extension`).
 * **Roadmap**: A native Rust/LLVM compiler is planned once the language specification stabilizes.
 
 ## 2. Core Philosophy & Language Non-Negotiables
@@ -29,8 +29,8 @@ For full syntax, types, and Love2D bindings, consult the `sapphire-lang` skill (
 ## 3. Repository & Documentation Map
 
 * `grammar/Sapphire.g4` — ANTLR4 grammar specification.
-* `src/` — Compiler, AST, semantic analyzer, transpilers, CLI, and LSP (see `src/AGENTS.md` and [`docs/compiler.md`](docs/compiler.md)).
-* `lib/` — Sapphire standard library (`lib/std/`) and Love2D bindings (`lib/love2d/`).
+* `sapphire/` — Compiler, AST, semantic analyzer, transpilers, CLI, and LSP (see `sapphire/AGENTS.md` and [`docs/compiler.md`](docs/compiler.md)).
+* `sapphire/lib/` — Sapphire standard library (`sapphire/lib/std/`) and Love2D bindings (`sapphire/lib/love2d/`).
 * `samples/` & `testing/` — Sample programs and cross-backend E2E tests.
 * `docs/` — Language docs ([`SPEC.md`](docs/SPEC.md), [`style_guide.md`](docs/style_guide.md), [`development.md`](docs/development.md), [`builtins.md`](docs/builtins.md), [`testing.md`](docs/testing.md), [`docs/AGENTS.md`](docs/AGENTS.md)).
 * `web/` — Astro documentation & playground site ([`web/AGENTS.md`](web/AGENTS.md)).

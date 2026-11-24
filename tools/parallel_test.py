@@ -15,7 +15,7 @@ from typing import List, Tuple
 
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_SEARCH_ROOTS = ("src", os.path.join("tools", "vscode-extension", "scripts"))
+_SEARCH_ROOTS = ("sapphire", os.path.join("tools", "vscode-extension", "scripts"))
 
 
 def _discover_test_files() -> List[str]:

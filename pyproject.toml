@@ -37,11 +37,11 @@ Repository = "https://github.com/zziccardi/sapphire"
 "Bug Tracker" = "https://github.com/zziccardi/sapphire/issues"
 
 [project.scripts]
-sapphire = "src.cli.sapphire:main"
+sapphire = "sapphire.cli.sapphire:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "lib*"]
+include = ["sapphire*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.sp", "*.lua", "*.lua.map"]
@@ -51,7 +51,7 @@ line-length = 80
 indent-width = 2
 target-version = "py312"
 exclude = [
-    "src/parser/gen",
+    "sapphire/parser/gen",
     ".git",
     "__pycache__",
     "htmlcov",
@@ -64,5 +64,5 @@ select = ["E", "F", "B", "I", "W", "UP"]
 # TODO: Address E501 line-length violations in test files.
 "*_test.py" = ["E501"]
 # Embedded Python/Lua runtime source templates.
-"src/code_gen/python_runtime.py" = ["E501"]
-"src/code_gen/lua_runtime.py" = ["E501"]
+"sapphire/code_gen/python_runtime.py" = ["E501"]
+"sapphire/code_gen/lua_runtime.py" = ["E501"]
