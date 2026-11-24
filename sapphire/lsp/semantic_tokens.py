@@ -1,0 +1,933 @@
+"""Semantic tokens extraction and LSP delta encoding for Sapphire.
+
+This module subclasses the Sapphire TypeChecker to gather semantic symbols
+during the type-checking pass and converts them into the 5-integer delta-encoded
+format required
+by the Language Server Protocol.
+"""
+
+from typing import Any
+
+from sapphire.parser.ast import ASTNode
+from sapphire.semantics.symbol_table import (
+  FunctionSymbol,
+  ModuleSymbol,
+  ModuleType,
+  StructSymbol,
+  TraitSymbol,
+  VariableSymbol,
+)
+from sapphire.semantics.type_checker import TypeChecker
+
+# Legend mappings for the LSP client
+TOKEN_TYPES = [
+  "type",  # 0
+  "class",  # 1
+  "struct",  # 2
+  "interface",  # 3
+  "parameter",  # 4
+  "variable",  # 5
+  "property",  # 6
+  "function",  # 7
+  "method",  # 8
+  "keyword",  # 9
+  "enum",  # 10
+  "enumMember",  # 11
+  "decorator",  # 12
+]
+
+TOKEN_MODIFIERS = [
+  "declaration",  # 1 << 0 = 1
+  "static",  # 1 << 1 = 2
+  "readonly",  # 1 << 2 = 4
+  "modification",  # 1 << 3 = 8
+]
+
+
+def codepoint_to_utf16(line_text: str, cp_col: int) -> int:
+  """Converts a 0-based Unicode code-point column to an LSP UTF-16 offset."""
+  if not line_text or cp_col <= 0:
+    return max(0, cp_col)
+  prefix = line_text[:cp_col]
+  extra = max(0, cp_col - len(line_text))
+  return (len(prefix.encode("utf-16-le")) // 2) + extra
+
+
+def utf16_to_codepoint(line_text: str, utf16_col: int) -> int:
+  """Converts an LSP 0-based UTF-16 offset to a Unicode code-point column."""
+  if not line_text or utf16_col <= 0:
+    return max(0, utf16_col)
+  units = 0
+  for idx, ch in enumerate(line_text):
+    if units >= utf16_col:
+      return idx
+    units += 2 if ord(ch) > 0xFFFF else 1
+  return len(line_text) + max(0, utf16_col - units)
+
+
+def codepoint_span_to_utf16(
+  line_text: str, start_cp: int, length_cp: int
+) -> tuple[int, int]:
+  """Converts a (start_col, length) code-point span to UTF-16 (start, length).
+  """
+  start_u16 = codepoint_to_utf16(line_text, start_cp)
+  end_u16 = codepoint_to_utf16(line_text, start_cp + max(0, length_cp))
+  return start_u16, max(0, end_u16 - start_u16)
+
+
+def get_doc_line(ls: Any, uri: str, line_1based: int) -> str | None:
+  """Returns the 1-based line text for *uri* from the workspace if available."""
+  try:
+    workspace = getattr(ls, "workspace", None)
+    if workspace is None:
+      return None
+    doc = workspace.get_text_document(uri)
+    source = getattr(doc, "source", None)
+    if isinstance(source, str):
+      lines = source.splitlines()
+      if 0 <= line_1based - 1 < len(lines):
+        return lines[line_1based - 1]
+  except Exception:  # pragma: no cover
+    return None
+  return None
+
+
+def extract_comments_above(doc_text: str, start_line: int | None) -> str:
+  """Extracts comments directly above start_line (1-based)."""
+  if start_line is None:
+    return ""
+  lines = doc_text.splitlines()
+  idx = start_line - 1
+  if idx <= 0 or idx >= len(lines):
+    return ""
+
+  comments = []
+  idx -= 1
+
+  in_block_comment = False
+  block_comment_lines = []
+
+  while idx >= 0:
+    line = lines[idx].strip()
+
+    if not line and not in_block_comment:
+      break
+
+    if line.endswith("*/"):
+      in_block_comment = True
+      block_comment_lines.insert(0, lines[idx])
+      if line.startswith("/*"):
+        in_block_comment = False
+      idx -= 1
+      continue
+
+    if in_block_comment:
+      block_comment_lines.insert(0, lines[idx])
+      if line.startswith("/*"):
+        in_block_comment = False
+      idx -= 1
+      continue
+
+    if line.startswith("//"):
+      comment_content = line[2:].strip()
+      comments.insert(0, comment_content)
+      idx -= 1
+    else:
+      break
+
+  if block_comment_lines:
+    block_text = "\n".join(block_comment_lines).strip()
+    if block_text.startswith("/*") and block_text.endswith("*/"):
+      block_content = block_text[2:-2].strip()
+      cleaned_lines = []
+      for line in block_content.splitlines():
+        line = line.strip()
+        if line.startswith("*"):
+          line = line[1:].strip()
+        cleaned_lines.append(line)
+      return "\n".join(cleaned_lines)
+
+  if comments:
+    return "\n".join(comments)
+
+  return ""
+
+
+class SemanticTokensTypeChecker(TypeChecker):
+  """Subclass of TypeChecker that extracts semantic tokens during analysis."""
+
+  def __init__(
+    self, doc_text: str | None = None, source_file_path: str | None = None
+  ):
+    super().__init__(source_content=doc_text, source_file_path=source_file_path)
+    self.doc_text = doc_text
+    # List of raw tokens: (line, column, length, token_type, modifier_bitmask)
+    self.raw_tokens: list[tuple[int, int, int, str, int]] = []
+    self.current_node: ASTNode | None = None
+    self.lsp_errors: list[dict] = []
+    self.lsp_warnings: list[dict] = []
+    self.node_types: dict = self.context.node_types
+    self.current_trait: Any | None = None
+    self._in_monomorphization: bool = False
+
+  def visit(self, node: ASTNode) -> Any:
+    old_node = self.current_node
+    old_mono = self._in_monomorphization
+    self.current_node = node
+    if getattr(node, "is_monomorphized", False):
+      self._in_monomorphization = True
+    try:
+      res = super().visit(node)
+      if res is not None:
+        self.node_types[node] = res
+      return res
+    finally:
+      self.current_node = old_node
+      self._in_monomorphization = old_mono
+
+  def generic_visit(self, node: ASTNode) -> Any:
+    # Safely traverse sub-nodes for semantic token generation without raising
+    # NotImplementedError
+    for _key, value in node.__dict__.items():
+      if isinstance(value, ASTNode):
+        self.visit(value)
+      elif isinstance(value, list):  # pragma: no cover
+        for item in value:
+          if isinstance(item, ASTNode):
+            self.visit(item)
+    return None
+
+  def _resolve_type_node(self, node: ASTNode | None) -> Any:
+    if node:
+      self.visit(node)
+    res = super()._resolve_type_node(node)
+    if node and res:
+      self.node_types[node] = res
+    return res
+
+  def _build_lsp_diagnostic(
+    self, message: str, severity: int, node: ASTNode | None = None
+  ) -> tuple[ASTNode | None, dict]:
+    target_node = node or self.current_node
+    line = 1
+    col = 0
+    length = 1
+    if target_node is not None:
+      if getattr(target_node, "start_line", None) is not None:
+        line = target_node.start_line
+      if getattr(target_node, "start_column", None) is not None:
+        col = target_node.start_column
+      if getattr(target_node, "length", None) is not None:
+        length = target_node.length
+
+    start_char = col
+    end_char = col + length
+    if isinstance(self.doc_text, str):
+      lines = self.doc_text.splitlines()
+      if 0 <= line - 1 < len(lines):
+        start_char, u16_len = codepoint_span_to_utf16(
+          lines[line - 1], col, length
+        )
+        end_char = start_char + u16_len
+
+    return target_node, {
+      "range": {
+        "start": {"line": line - 1, "character": start_char},
+        "end": {"line": line - 1, "character": end_char},
+      },
+      "message": message,
+      "severity": severity,
+      "source": "sapphire-semantic",
+    }
+
+  def error(self, message: str, node: ASTNode | None = None) -> None:
+    target_node, diagnostic = self._build_lsp_diagnostic(message, 1, node)
+    self.lsp_errors.append(diagnostic)
+    super().error(message, node=target_node)
+
+  def warning(self, message: str, node: ASTNode | None = None) -> None:
+    target_node, diagnostic = self._build_lsp_diagnostic(message, 2, node)
+    self.lsp_warnings.append(diagnostic)
+    super().warning(message, node=target_node)
+
+  def add_token(
+    self,
+    line: int | None,
+    col: int | None,
+    length: int | None,
+    token_type: str,
+    modifiers: int = 0,
+  ) -> None:
+    """Adds a raw semantic token if the positioning info is valid."""
+    if self._in_monomorphization:
+      return
+    if (
+      line is not None and col is not None and length is not None and length > 0
+    ):
+      self.raw_tokens.append((line, col, length, token_type, modifiers))
+
+  def visit_ProgramNode(self, node) -> None:
+    super().visit_ProgramNode(node)
+
+  def visit_ImportStmtNode(self, node) -> None:
+    alias_name = node.alias if node.alias else node.path.split(".")[-1]
+    sym = self.symbol_table.lookup(alias_name)
+    if sym:
+      self.node_types[node] = sym.symbol_type
+
+  def visit_ExportStmtNode(self, node) -> None:
+    super().visit_ExportStmtNode(node)
+    for spec in node.specifiers:
+      if spec.module_prefix:
+        mod_sym = self.symbol_table.lookup(spec.module_prefix)
+        if isinstance(mod_sym, ModuleSymbol):
+          exp_sym = mod_sym.lookup_export(spec.symbol)
+          if exp_sym is not None:
+            val_type = getattr(exp_sym, "symbol_type", exp_sym)
+            self.node_types[spec] = val_type
+      else:
+        sym = self.symbol_table.lookup(
+          spec.symbol
+        ) or self.symbol_table.lookup_type(spec.symbol)
+        if sym is not None:
+          val_type = getattr(sym, "symbol_type", sym)
+          self.node_types[spec] = val_type
+
+  def visit_StructDeclNode(self, node) -> None:
+    # Struct name declaration
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "struct",
+      1,
+    )  # declaration
+    for info in getattr(node, "parent_names_info", []):
+      self.add_token(info["line"], info["column"], info["length"], "struct")
+
+    struct_type = self.symbol_table.lookup_type(node.name)
+    old_struct = self.current_struct
+    self.current_struct = struct_type
+    try:
+      for field in node.fields:
+        self.visit(field)
+    finally:
+      self.current_struct = old_struct
+
+    super().visit_StructDeclNode(node)
+    if struct_type:
+      struct_type.ast_decl = node
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        sym.ast_decl = node
+      if self.doc_text:
+        comments = extract_comments_above(
+          self.doc_text, getattr(node, "start_line", None)
+        )
+        if comments:
+          struct_type.comments = comments
+
+  def visit_StructFieldNode(self, node) -> None:
+    # Field declaration
+    mods = 1  # declaration
+    if not node.is_mutable:
+      mods |= 4  # readonly
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "property",
+      mods,
+    )
+    if self.current_struct and node.name in self.current_struct.fields:
+      field = self.current_struct.fields[node.name]
+      if self.doc_text:
+        comments = extract_comments_above(
+          self.doc_text, getattr(node, "start_line", None)
+        )
+        if comments:
+          field.comments = comments
+      self.node_types[node] = field.field_type
+
+  def visit_TraitDeclNode(self, node) -> None:
+    # Trait name declaration
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "interface",
+      1,
+    )
+
+    trait_type = self.symbol_table.lookup_type(node.name)
+    old_trait = self.current_trait
+    self.current_trait = trait_type
+    try:
+      for member in node.members:
+        self.visit(member)
+    finally:
+      self.current_trait = old_trait
+
+    super().visit_TraitDeclNode(node)
+    if trait_type:
+      trait_type.ast_decl = node
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        sym.ast_decl = node
+      if self.doc_text:
+        comments = extract_comments_above(
+          self.doc_text, getattr(node, "start_line", None)
+        )
+        if comments:
+          trait_type.comments = comments
+
+  def visit_TraitMemberNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
+    # Trait method declaration
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "method",
+      1,
+    )
+    if self.current_trait and node.name in self.current_trait.methods:
+      method_type = self.current_trait.methods[node.name]
+      if self.doc_text:
+        comments = extract_comments_above(
+          self.doc_text, getattr(node, "start_line", None)
+        )
+        if comments:
+          method_type.comments = comments
+      self.node_types[node] = method_type
+      method_type.ast_decl = node
+
+  def visit_EnumDeclNode(self, node) -> None:
+    # Enum name declaration
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "enum",
+      1,
+    )
+    enum_type = self.symbol_table.lookup_type(node.name)
+    old_enum = getattr(self, "current_enum", None)
+    self.current_enum = enum_type
+    try:
+      for member in node.members:
+        self.visit(member)
+    finally:
+      self.current_enum = old_enum
+
+    super().visit_EnumDeclNode(node)
+    if enum_type:
+      enum_type.ast_decl = node
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        sym.ast_decl = node
+      if self.doc_text:
+        comments = extract_comments_above(
+          self.doc_text, getattr(node, "start_line", None)
+        )
+        if comments:
+          enum_type.comments = comments
+
+  def visit_EnumMemberNode(self, node) -> None:
+    # Enum member declaration (readonly)
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "enumMember",
+      1 | 4,
+    )
+    if getattr(self, "current_enum", None):
+      self.node_types[node] = self.current_enum
+
+  def visit_AnnotationNode(self, node) -> None:
+    at_line = getattr(node, "at_line", None)
+    at_col = getattr(node, "at_column", None)
+    if at_line is not None and at_col is not None:
+      self.add_token(at_line, at_col, 1, "decorator")
+    line = getattr(node, "line", None)
+    col = getattr(node, "column", None)
+    length = getattr(node, "length", None)
+    if line is not None and col is not None and length is not None:
+      self.add_token(line, col, length, "decorator")
+
+  def _on_parameters_defined(
+    self, parameters: list, resolved_params: list
+  ) -> None:
+    """Visits parameters inside the function/method scope once defined."""
+    for p, ptype in zip(parameters, resolved_params, strict=False):
+      self.visit(p)
+      if ptype is not None:
+        self.node_types[p] = ptype
+
+  def visit_FuncDeclNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
+    # Function declaration (only highlight if not a method; methods are handled
+    # by ImplMemberNode)
+    is_method = self.current_struct is not None
+    if not is_method:
+      self.add_token(
+        getattr(node, "name_line", None),
+        getattr(node, "name_column", None),
+        getattr(node, "name_length", None),
+        "function",
+        1,
+      )
+    if getattr(node, "type_params", None):
+      # Generic function bodies are skipped until monomorphized; emit parameter
+      # tokens without mutating outer scopes.
+      for p in node.parameters:
+        mods = 1 if p.is_mutable else (1 | 4)
+        self.add_token(
+          getattr(p, "name_line", None),
+          getattr(p, "name_column", None),
+          getattr(p, "name_length", None),
+          "parameter",
+          mods,
+        )
+        if getattr(p, "param_type", None) is not None:
+          self.visit(p.param_type)
+    super().visit_FuncDeclNode(node)
+    if not is_method:
+      sym = self.symbol_table.lookup(node.name)
+      if sym:
+        from sapphire.semantics.symbol_table import FunctionType
+
+        if isinstance(sym.symbol_type, FunctionType) and self.doc_text:
+          comments = extract_comments_above(
+            self.doc_text, getattr(node, "start_line", None)
+          )
+          if comments:
+            sym.symbol_type.comments = comments
+        self.node_types[node] = sym.symbol_type
+        sym.ast_decl = node
+
+  def visit_ImplMemberNode(self, node) -> None:
+    # Method declaration
+    mods = 1  # declaration
+    if node.modifier == "static":
+      mods |= 2  # static
+    func_decl = getattr(node, "func_decl", None)
+    if func_decl:
+      for ann in getattr(func_decl, "annotations", []):
+        self.visit(ann)
+      self.add_token(
+        getattr(func_decl, "name_line", None),
+        getattr(func_decl, "name_column", None),
+        getattr(func_decl, "name_length", None),
+        "method",
+        mods,
+      )
+    super().visit_ImplMemberNode(node)
+    if (
+      self.current_struct
+      and func_decl
+      and func_decl.name in self.current_struct.methods
+    ):
+      method_obj = self.current_struct.methods[func_decl.name]
+      method_type = method_obj.method_type
+      from sapphire.semantics.symbol_table import FunctionType
+
+      if isinstance(method_type, FunctionType) and self.doc_text:
+        comment_line = getattr(node, "start_line", None) or getattr(
+          func_decl, "start_line", None
+        )
+        comments = extract_comments_above(self.doc_text, comment_line)
+        if comments:
+          method_type.comments = comments
+      self.node_types[func_decl] = method_type
+      method_obj.ast_decl = func_decl
+      method_type.ast_decl = func_decl
+
+  def visit_ParameterNode(self, node) -> Any:
+    mods = 1
+    if not node.is_mutable:
+      mods |= 4
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "parameter",
+      mods,
+    )
+    # Only attach ast_decl to the parameter's own local scope symbol, never an
+    # outer global.
+    cur_scope = getattr(self.symbol_table, "current_scope", None)
+    sym = cur_scope.symbols.get(node.name) if cur_scope is not None else None
+    if sym:
+      sym.ast_decl = node
+      return sym.symbol_type
+    return None
+
+  def visit_VarDeclNode(self, node) -> None:
+    for ann in getattr(node, "annotations", []):
+      self.visit(ann)
+    mods = 1
+    if not node.is_mutable:
+      mods |= 4
+    bindings_info = getattr(node, "bindings_info", None)
+    if isinstance(bindings_info, list) and bindings_info:
+      for info in bindings_info:
+        self.add_token(
+          info.get("line"),
+          info.get("column"),
+          info.get("length"),
+          "variable",
+          mods,
+        )
+    else:
+      self.add_token(
+        getattr(node, "name_line", None),
+        getattr(node, "name_column", None),
+        getattr(node, "name_length", None),
+        "variable",
+        mods,
+      )
+    super().visit_VarDeclNode(node)
+    binding_types = {}
+    names = getattr(node, "names", None) or (
+      [node.name] if getattr(node, "name", None) else []
+    )
+    for b_name in names:
+      sym = self.symbol_table.lookup(b_name)
+      if sym:
+        binding_types[b_name] = sym.symbol_type
+        sym.ast_decl = node
+    if binding_types:
+      node.binding_types = binding_types
+      first_name = getattr(node, "name", None)
+      if first_name in binding_types:
+        self.node_types[node] = binding_types[first_name]
+
+  def visit_MoveNode(self, node) -> Any:
+    sym = self.symbol_table.lookup(node.name)
+    if isinstance(sym, VariableSymbol):
+      mods = 0 if sym.is_mutable else 4
+      token_type = "parameter" if sym.is_parameter else "variable"
+      self.add_token(
+        getattr(node, "name_line", None),
+        getattr(node, "name_column", None),
+        getattr(node, "name_length", None),
+        token_type,
+        mods,
+      )
+    return super().visit_MoveNode(node)
+
+  def visit_AssignmentNode(self, node) -> None:
+    super().visit_AssignmentNode(node)
+    targets = getattr(
+      node, "targets", [node.target] if hasattr(node, "target") else []
+    )
+    for target in targets:
+      self.visit(target)
+
+  def _record_header_binding_tokens(self, binding) -> None:
+    is_mut = getattr(binding, "is_mutable", False)
+    mods = 1 if (isinstance(is_mut, bool) and is_mut) else (1 | 4)
+    bindings_info = getattr(binding, "bindings_info", None)
+    if isinstance(bindings_info, list):
+      for info in bindings_info:
+        self.add_token(
+          info.get("line"),
+          info.get("column"),
+          info.get("length"),
+          "variable",
+          mods,
+        )
+        val_type = info.get("val_type")
+        if isinstance(val_type, ASTNode):
+          self.visit(val_type)
+    else:
+      self.add_token(
+        getattr(binding, "let_name_line", None),
+        getattr(binding, "let_name_column", None),
+        getattr(binding, "let_name_length", None),
+        "variable",
+        mods,
+      )
+      type_node = getattr(binding, "type_node", None)
+      if isinstance(type_node, ASTNode):
+        self.visit(type_node)
+
+  def visit_IfNode(self, node) -> None:
+    for binding in getattr(node, "bindings", []):
+      self._record_header_binding_tokens(binding)
+    super().visit_IfNode(node)
+
+  def visit_GuardStmtNode(self, node):
+    for binding in getattr(node, "bindings", []):
+      self._record_header_binding_tokens(binding)
+    return super().visit_GuardStmtNode(node)
+
+  def visit_ForNode(self, node) -> None:
+    mods = 1  # declaration
+    if not node.is_mutable:
+      mods |= 4  # readonly
+
+    key_var = getattr(node, "key_var", None)
+    if isinstance(key_var, str):
+      self.add_token(
+        getattr(node, "key_var_line", None),
+        getattr(node, "key_var_column", None),
+        getattr(node, "key_var_length", None),
+        "variable",
+        mods,
+      )
+    line = getattr(node, "val_var_line", getattr(node, "loop_var_line", None))
+    if line is not None and not isinstance(line, type(node)):
+      col = getattr(
+        node, "val_var_column", getattr(node, "loop_var_column", None)
+      )
+      length = getattr(
+        node, "val_var_length", getattr(node, "loop_var_length", None)
+      )
+      if (
+        isinstance(line, int)
+        and isinstance(col, int)
+        and isinstance(length, int)
+      ):
+        self.add_token(line, col, length, "variable", mods)
+
+    super().visit_ForNode(node)
+
+  def visit_IdentifierNode(self, node) -> None:
+    # Variable or symbol reference
+    sym = self.symbol_table.lookup(node.name)
+    if sym:
+      if isinstance(sym, StructSymbol):
+        self.add_token(
+          getattr(node, "name_line", None),
+          getattr(node, "name_column", None),
+          getattr(node, "name_length", None),
+          "struct",
+        )
+      elif isinstance(sym, TraitSymbol):
+        self.add_token(
+          getattr(node, "name_line", None),
+          getattr(node, "name_column", None),
+          getattr(node, "name_length", None),
+          "interface",
+        )
+      elif isinstance(sym, FunctionSymbol):
+        self.add_token(
+          getattr(node, "name_line", None),
+          getattr(node, "name_column", None),
+          getattr(node, "name_length", None),
+          "function",
+        )
+      elif isinstance(sym, VariableSymbol):
+        mods = 0
+        if not sym.is_mutable:
+          mods |= 4
+        token_type = "parameter" if sym.is_parameter else "variable"
+        self.add_token(
+          getattr(node, "name_line", None),
+          getattr(node, "name_column", None),
+          getattr(node, "name_length", None),
+          token_type,
+          mods,
+        )
+    return super().visit_IdentifierNode(node)
+
+  def visit_MemberAccessNode(self, node):
+    from sapphire.semantics.symbol_table import (
+      FunctionType,
+      OptionalType,
+      RefType,
+      SharedRefType,
+      StructType,
+    )
+
+    res = super().visit_MemberAccessNode(node)
+    receiver_type = self.node_types.get(node.receiver)
+    unwrapped_recv = receiver_type
+    if isinstance(unwrapped_recv, OptionalType):
+      unwrapped_recv = unwrapped_recv.base_type
+    if isinstance(unwrapped_recv, (SharedRefType, RefType)):
+      unwrapped_recv = unwrapped_recv.inner_type
+
+    token_type = "property"
+    mods = 0
+    if getattr(node, "is_qualified_ancestor_call", False):
+      token_type = "method"
+    elif isinstance(unwrapped_recv, ModuleType) and isinstance(res, StructType):
+      token_type = "struct"
+    elif unwrapped_recv:
+      if (
+        hasattr(unwrapped_recv, "methods")
+        and node.member in unwrapped_recv.methods
+      ):
+        token_type = "method"
+      elif (
+        hasattr(unwrapped_recv, "fields")
+        and node.member in unwrapped_recv.fields
+      ):
+        token_type = "property"
+        field = unwrapped_recv.fields[node.member]
+        if not getattr(field, "is_mutable", True):
+          mods |= 4
+      elif isinstance(res, FunctionType) and not isinstance(
+        unwrapped_recv, ModuleType
+      ):
+        token_type = "method"
+    self.add_token(
+      getattr(node, "member_line", None),
+      getattr(node, "member_column", None),
+      getattr(node, "member_length", None),
+      token_type,
+      mods,
+    )
+    return res
+
+  def visit_CallNode(self, node):
+    for arg in getattr(node, "type_args", []):
+      self.visit(arg)
+    return super().visit_CallNode(node)
+
+  def visit_StructInitializerNode(self, node):
+    # Struct initializer constructor name
+    self.add_token(
+      getattr(node, "name_line", None),
+      getattr(node, "name_column", None),
+      getattr(node, "name_length", None),
+      "struct",
+    )
+    for arg in getattr(node, "type_args", []):
+      self.visit(arg)
+    return super().visit_StructInitializerNode(node)
+
+  def visit_BasicTypeNode(self, node):
+    # Type reference
+    name_line = getattr(node, "name_line", None)
+    name_column = getattr(node, "name_column", None)
+    name_length = getattr(node, "name_length", None)
+    if node.name not in ("int", "float", "bool", "none", "void"):
+      from sapphire.semantics.symbol_table import (
+        GenericTypeParameter,
+        TraitType,
+      )
+
+      resolved = self.symbol_table.lookup_type(node.name)
+      if resolved and isinstance(resolved, TraitType):
+        self.add_token(name_line, name_column, name_length, "interface")
+      elif resolved and isinstance(resolved, GenericTypeParameter):
+        self.add_token(name_line, name_column, name_length, "type")
+      else:
+        self.add_token(name_line, name_column, name_length, "struct")
+    else:
+      self.add_token(name_line, name_column, name_length, "type")
+
+    for arg in getattr(node, "type_args", []):  # pragma: no cover
+      self.visit(arg)
+    return None
+
+
+def encode_semantic_tokens(
+  raw_tokens: list[tuple[int, int, int, str, int]],
+  doc_text: str | None = None,
+) -> list[int]:
+  """Converts absolute token coordinate tuples into delta-encoded LSP format."""
+  lines = doc_text.splitlines() if isinstance(doc_text, str) else None
+
+  # 1. Map absolute ANTLR coordinates (1-based lines, 0-based columns) to LSP
+  # (0-based lines, UTF-16 cols)
+  valid_tokens = []
+  for line, col, length, type_str, mods in raw_tokens:
+    if (
+      line is not None and col is not None and length is not None and length > 0
+    ):
+      lsp_line = line - 1
+      lsp_col = col
+      lsp_len = length
+      if lines is not None and 0 <= lsp_line < len(lines):
+        lsp_col, lsp_len = codepoint_span_to_utf16(lines[lsp_line], col, length)
+      if lsp_len > 0:
+        valid_tokens.append((lsp_line, lsp_col, lsp_len, type_str, mods))
+
+  # 2. Sort tokens: primary key = line, secondary key = column
+  valid_tokens.sort(key=lambda t: (t[0], t[1]))
+
+  # 3. Deduplicate and drop overlapping tokens (LSP requires strictly
+  # non-overlapping ranges)
+  unique_tokens = []
+  last_end: tuple[int, int] | None = None
+  for t in valid_tokens:
+    t_line, t_col, t_len = t[0], t[1], t[2]
+    if last_end is not None and t_line == last_end[0] and t_col < last_end[1]:
+      continue
+    unique_tokens.append(t)
+    last_end = (t_line, t_col + t_len)
+
+  # 4. Generate delta-encoded array
+  delta_tokens: list[int] = []
+  last_line = 0
+  last_col = 0
+
+  for line, col, length, type_str, mods in unique_tokens:
+    type_idx = TOKEN_TYPES.index(type_str) if type_str in TOKEN_TYPES else 0
+    if line == last_line:
+      delta_line = 0
+      delta_start = col - last_col
+    else:
+      delta_line = line - last_line
+      delta_start = col
+
+    delta_tokens.extend([delta_line, delta_start, length, type_idx, mods])
+    last_line = line
+    last_col = col
+
+  return delta_tokens
+
+
+def find_node_at_position(
+  node: ASTNode, line: int, col: int
+) -> ASTNode | None:
+  """Recursively finds the most specific AST node containing (line, col).
+
+  Line is 1-based, col is 0-based (code-point offset; end_column is exclusive).
+  """
+  if (
+    getattr(node, "start_line", None) is None
+    or getattr(node, "end_line", None) is None
+  ):
+    return None
+
+  # Check if line is within the node's line boundaries
+  if node.start_line <= line <= node.end_line:
+    # Check column boundary on start line
+    if line == node.start_line and col < node.start_column:
+      return None
+    # Check exclusive column boundary on end line
+    if line == node.end_line and col >= node.end_column:
+      return None
+
+    # Recursively check children for a tighter match
+    for key, value in node.__dict__.items():
+      if key in (
+        "current_node",
+        "lsp_errors",
+        "lsp_warnings",
+        "raw_tokens",
+        "node_types",
+      ):
+        continue
+      if isinstance(value, ASTNode):
+        found = find_node_at_position(value, line, col)
+        if found:
+          return found
+      elif isinstance(value, list):
+        for item in value:
+          if isinstance(item, ASTNode):
+            found = find_node_at_position(item, line, col)
+            if found:
+              return found
+
+    return node
+  return None

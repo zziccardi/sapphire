@@ -36,7 +36,7 @@ import os, sys
 if '/sapphire' not in sys.path:
     sys.path.insert(0, '/sapphire')
 os.chdir('/sapphire')
-from src.code_gen.transpiler import transpile_file
+from sapphire.code_gen.transpiler import transpile_file
 `);
 
       self.postMessage({ type: 'ready' });
@@ -56,7 +56,7 @@ async function compileAndRun(source) {
   pyodide.globals.set('_sapphire_source', source);
   const rawJson = await pyodide.runPythonAsync(`
 import contextlib, io, json, os, sys, traceback
-from src.code_gen.transpiler import transpile_file
+from sapphire.code_gen.transpiler import transpile_file
 
 with open('/sapphire/playground.sp', 'w', encoding='utf-8') as f:
     f.write(_sapphire_source)

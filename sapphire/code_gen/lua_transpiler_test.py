@@ -1,0 +1,3256 @@
+"""Unit tests for the Sapphire-to-Lua 5.1 transpiler.
+
+This module validates that transpiled Lua 5.1 code is syntactically correct
+and preserves all Sapphire runtime semantics, including prototypal delegation,
+compound assignment expansion, and array indexing adjustments.
+"""
+
+import os
+import pathlib
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+from antlr4 import CommonTokenStream, InputStream
+
+from sapphire.code_gen.lua_transpiler import LuaTranspiler
+from sapphire.code_gen.source_map import SourceMapBuilder
+from sapphire.code_gen.transpiler import transpile_file
+from sapphire.parser.ast import (
+  ArgumentNode,
+  ASTNode,
+  BinaryOpNode,
+  BlockNode,
+  CallNode,
+  ExprStmtNode,
+  GuardClauseNode,
+  HeaderBindingNode,
+  IdentifierNode,
+  LambdaNode,
+  LambdaParamNode,
+  LiteralNode,
+  MemberAccessNode,
+  StructFieldNode,
+  StructInitializerNode,
+  TraitDeclNode,
+  UnaryOpNode,
+  YieldNode,
+)
+from sapphire.parser.ast_builder import ASTBuilder
+from sapphire.parser.gen.SapphireLexer import SapphireLexer
+from sapphire.parser.gen.SapphireParser import SapphireParser
+from sapphire.semantics.type_checker import TypeChecker
+
+
+class DummyNode(ASTNode):
+  pass
+
+
+class TestLuaTranspiler(unittest.TestCase):
+  """Suite of unit tests verifying correct Lua code generation and execution."""
+
+  def _transpile(self, code: str) -> str:
+    """Helper to parse Sapphire code string and return transpiled Lua code."""
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    lexer.removeErrorListeners()
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    parser.removeErrorListeners()
+    tree = parser.program()
+
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    checker = TypeChecker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in code:\n{code}\nErrors: {checker.errors}")
+
+    transpiler = LuaTranspiler()
+    return transpiler.transpile(ast)
+
+  def test_generic_visit(self):
+    """Verifies generic_visit raises NotImplementedError for unknown AST nodes."""
+    transpiler = LuaTranspiler()
+    with self.assertRaises(NotImplementedError):
+      transpiler.visit(DummyNode())
+
+  def test_direct_visitor_nodes(self):
+    """Verifies direct visitor execution for edge-case AST nodes."""
+    transpiler = LuaTranspiler()
+    transpiler.known_structs.add("Point")
+
+    # StructFieldNode, TraitDeclNode, empty BlockNode, ExprStmtNode
+    transpiler.visit(StructFieldNode(False, "x", None))
+    transpiler.visit(TraitDeclNode("T", []))
+    transpiler.visit(BlockNode([]))
+    transpiler.visit(ExprStmtNode(IdentifierNode("x")))
+
+    # visit_ImplMemberNode raises when called directly (impl members are emitted
+    # via visit_StructDeclNode in the Lua backend, not standalone)
+    from sapphire.parser.ast import BlockNode as _BlockNode
+    from sapphire.parser.ast import FuncDeclNode as _FuncDeclNode
+    from sapphire.parser.ast import ImplMemberNode as _ImplMemberNode
+
+    _dummy_func = _FuncDeclNode("do_thing", [], None, _BlockNode([]), [])
+    with self.assertRaises(NotImplementedError):
+      LuaTranspiler().visit_ImplMemberNode(_ImplMemberNode(_dummy_func, None))
+
+    # BinaryOpNode with right-operand string concatenation
+    transpiler.visit(BinaryOpNode(LiteralNode(10, "int"), "+", LiteralNode("items", "string")))
+
+    # CallNode calling struct constructor with multiple args (named & positional)
+    transpiler.visit(CallNode(IdentifierNode("Point"), [ArgumentNode("x", LiteralNode(1, "int")), ArgumentNode(None, LiteralNode(2, "int"))]))
+    transpiler.visit(CallNode(IdentifierNode("Point"), [ArgumentNode("x", LiteralNode(1, "int"))], arena_expr=IdentifierNode("my_arena")))
+
+    # CallNode static method on struct name vs instance call
+    transpiler.visit(CallNode(MemberAccessNode(IdentifierNode("Point"), "create", False), [ArgumentNode(None, LiteralNode(1, "int")), ArgumentNode(None, LiteralNode(2, "int"))]))
+    transpiler.visit(CallNode(MemberAccessNode(IdentifierNode("pt"), "get_x", False), []))
+
+    # LambdaNode with expression body
+    transpiler.visit(LambdaNode([LambdaParamNode("x")], None, BinaryOpNode(IdentifierNode("x"), "*", LiteralNode(2, "int"))))
+
+    # StructInitializerNode with arena_expr and positional/named fields
+    transpiler.visit(StructInitializerNode("Point", [ArgumentNode("x", LiteralNode(1, "int")), ArgumentNode(None, LiteralNode(2, "int"))], arena_expr=IdentifierNode("my_arena")))
+
+    # UnaryOpNode with unary plus
+    transpiler.visit(UnaryOpNode("+", LiteralNode(10, "int")))
+
+    # String concat with CallNode and non-literal AST node
+    transpiler.visit(BinaryOpNode(LiteralNode("Val: ", "string"), "+", CallNode(IdentifierNode("get_val"), [])))
+    transpiler.visit(BinaryOpNode(LiteralNode("Res: ", "string"), "+", UnaryOpNode("-", LiteralNode(5, "int"))))
+
+    # Chained member call without static/instance annotation
+    transpiler.visit(CallNode(MemberAccessNode(MemberAccessNode(IdentifierNode("a"), "b", False), "c", False), []))
+
+    output = transpiler.get_output()
+    self.assertIn("-- pass", output)
+    self.assertIn('10 .. "items"', output)
+    self.assertIn("Point.init({x = 1, [2] = 2})", output)
+    self.assertIn("my_arena:register(Point.init({x = 1}))", output)
+    self.assertIn("Point.create(1, 2)", output)
+    self.assertIn("pt:get_x()", output)
+    self.assertIn("my_arena:register(Point.init({x = 1, [2] = 2}))", output)
+    self.assertIn("(10)", output)
+    self.assertIn('"Val: " .. tostring(get_val())', output)
+    self.assertIn('"Res: " .. (-5)', output)
+    self.assertIn("a.b.c()", output)
+
+  def test_basic_arithmetic(self):
+    """Verifies that variable declarations and arithmetic expressions transpile to Lua."""
+    code = """
+    let x = 10;
+    let y = 20;
+    let z = x + y * 3;
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local x = 10", lua_code)
+    self.assertIn("local y = 20", lua_code)
+    self.assertIn("local z = (x + (y * 3))", lua_code)
+
+  def test_enum_declaration(self):
+    """Verifies enum declarations with custom values transpile to Lua tables."""
+    code = """
+    enum State {
+      Idle,
+      Running = 10,
+      Jumping
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local State = {", lua_code)
+    self.assertIn("Idle = 0", lua_code)
+    self.assertIn("Running = 10", lua_code)
+    self.assertIn("Jumping = 11", lua_code)
+
+  def test_compound_assignments(self):
+    """Verifies that compound assignments (+=, -=) expand to simple assignments in Lua 5.1."""
+    code = """
+    func test() {
+      var val = 10;
+      val += 5;
+      val -= 2;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local val = 10", lua_code)
+    self.assertIn("val = val + 5", lua_code)
+    self.assertIn("val = val - 2", lua_code)
+
+  def test_optional_unwrapping(self):
+    """Verifies that optional unwrapping transpiles to Lua nil checks."""
+    code = """
+    func check_opt() {
+      var opt_val: int? = 42;
+      if let active ?= opt_val {
+        let x = active;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _val_active_1 = opt_val", lua_code)
+    self.assertIn("if _val_active_1 ~= nil then", lua_code)
+    self.assertIn("local active = _val_active_1", lua_code)
+
+  def test_init_statements_and_coalesce(self):
+    """Verifies Lua transpilation of init-statements and ?? coalescing."""
+    # 1. if let with condition
+    code1 = """
+    func check_if_cond() {
+      var opt_val: int? = 42;
+      if let active ?= opt_val; active > 40 {
+        let x = active;
+      }
+    }
+    """
+    lua_code1 = self._transpile(code1)
+    self.assertIn("local _val_active_1 = opt_val", lua_code1)
+    self.assertIn("if _val_active_1 ~= nil and (_val_active_1 > 40) then", lua_code1)
+
+    # 2. standard while loop
+    code2 = """
+    func check_while() {
+      var count = 5;
+      while count > 0 {
+        count -= 1;
+      }
+    }
+    """
+    lua_code2 = self._transpile(code2)
+    self.assertIn("while (count > 0) do", lua_code2)
+
+    # 3. ?? operator
+    code3 = """
+    func check_coalesce() {
+      var opt_val: int? = none;
+      let val = opt_val ?? 99;
+    }
+    """
+    lua_code3 = self._transpile(code3)
+    self.assertIn("local _sc_1 = opt_val\n  if _sc_1 == nil then\n    _sc_1 = 99\n  end\n  local val = _sc_1", lua_code3)
+    self.assertNotIn("((function()", lua_code3)
+
+    # 4. standard if let (no unwrap)
+    code4 = """
+    func check_std_if() {
+      if let x = 10; x > 5 {
+        let y = x;
+      }
+    }
+    """
+    lua_code4 = self._transpile(code4)
+    self.assertIn("local x = 10", lua_code4)
+    self.assertIn("if (x > 5) then", lua_code4)
+
+    # 5. multi-binding if
+    code5 = """
+    func check_multi_if() {
+      let a: int? = 10;
+      let b: int? = 20;
+      if let x ?= a; let y ?= b; x + y > 15 {
+        let z = x + y;
+      }
+    }
+    """
+    lua_code5 = self._transpile(code5)
+    self.assertIn("local _val_x_1 = a", lua_code5)
+    self.assertIn("local _val_y_1 = b", lua_code5)
+    self.assertIn("if ((x + y) > 15) then", lua_code5)
+
+  def test_array_indexing_and_loops(self):
+    """Verifies that 0-based array indexing routes through bounds-checked Lua helpers."""
+    code = """
+    func test() {
+      let numbers = [10, 20, 30];
+      let first = numbers[0];
+      var idx = 1;
+      let dynamic_elem = numbers[idx];
+      for n in numbers {
+        let x = n;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local numbers = {10, 20, 30}", lua_code)
+    self.assertIn("local first = _SP_RT._sapphire_array_at(numbers, 0)", lua_code)
+    self.assertIn("_SP_RT._sapphire_array_at(numbers, idx)", lua_code)
+    self.assertIn("local _for_arr_1 = _SP_RT._unwrap_read(numbers)", lua_code)
+    self.assertIn("for _for_idx_1 = 1, #_for_arr_1 do", lua_code)
+    self.assertIn("local n = _SP_RT._unwrap_opt(_for_arr_1[_for_idx_1])", lua_code)
+
+  def test_fixed_size_array_and_negative_indexing(self):
+    """Verifies Lua code generation for fixed-size arrays and negative indices."""
+    code = """
+    func test() {
+      let scores: [int; 3] = [10, 20, 30];
+      let last = scores[-1];
+      let first = scores[-3];
+      var idx = -1;
+      let dynamic_last = scores[idx];
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local scores = {10, 20, 30}", lua_code)
+    self.assertIn("local last = _SP_RT._sapphire_array_at(scores, (-1))", lua_code)
+    self.assertIn("local first = _SP_RT._sapphire_array_at(scores, (-3))", lua_code)
+    self.assertIn("_SP_RT._sapphire_array_at(scores, idx)", lua_code)
+
+  def test_struct_declaration_and_impl(self):
+    """Verifies struct constructor generation, field defaults, static methods, and traits."""
+    code = """
+    trait Damageable {
+      func take_damage(dmg: int);
+    }
+    struct Item {
+      var price: int = 100;
+    }
+    impl Item {
+      func __init__(p: int) {
+        self.price = p;
+      }
+      static func create_default(): Item {
+        return Item(100);
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("Item = {}", lua_code)
+    self.assertIn("function Item.init(...)", lua_code)
+    self.assertIn("Item._init_sapphire", lua_code)
+    self.assertIn("Item.init({[1] = 100})", lua_code)
+
+  def test_constructor_chaining_lua(self):
+    """Verifies that constructor chaining emits parent _init_sapphire calls in Lua."""
+    code = """
+    struct Transform2D {
+      var x: float;
+      var y: float;
+    }
+    impl Transform2D {
+      func __init__(x: float, y: float) {
+        self.x = x;
+        self.y = y;
+      }
+    }
+    struct Player: Transform2D {
+      var name: String;
+    }
+    impl Player {
+      func __init__(name: String, x: float, y: float): Transform2D(x = x, y = y) {
+        self.name = name;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("Transform2D._init_sapphire(self, x, y)", lua_code)
+
+  def test_func_default_params_and_void_return(self):
+    """Verifies default parameters and void returns transpile cleanly."""
+    code = """
+    func compute(x: int, y: int = 5): int {
+      if x > 0 {
+        return x + y;
+      } else {
+        return 0;
+      }
+    }
+    func void_action() {
+      return;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("if y == nil then y = 5 end", lua_code)
+    self.assertIn("return (x + y)", lua_code)
+    self.assertIn("return", lua_code)
+
+  def test_arena_scoped_execution(self):
+    """Verifies RAII Arena block scoping generates pcall cleanup."""
+    code = """
+    func run_arena() {
+      var local_arena = Arena();
+      let val = 42;
+      return;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local local_arena = Arena.init()", lua_code)
+    self.assertIn("local_arena:destroy()", lua_code)
+
+  def test_literals_unary_and_string_concat(self):
+    """Verifies boolean, none, string literals, string concatenation +, and unary ! ops."""
+    code = """
+    let is_active = false;
+    let opt_name: String? = none;
+    let greeting = "Hello " + "World";
+    var msg = "Score: " + 10;
+    let not_active = !is_active;
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local is_active = false", lua_code)
+    self.assertIn("local opt_name = nil", lua_code)
+    self.assertIn('"Hello " .. "World"', lua_code)
+    self.assertIn('"Score: " .. 10', lua_code)
+    self.assertIn("not is_active", lua_code)
+
+  def test_optional_chaining_and_while_loop(self):
+    """Verifies optional chaining and while loops."""
+    code = """
+    struct Target {
+      var hp: int;
+    }
+    impl Target {
+      var func set_hp(val: int = 42) {
+        self.hp = val;
+      }
+    }
+    func test_opt_chain(t: Target?) {
+      let hp_val = t?.hp;
+      var count = 3;
+      while count > 0 {
+        count -= 1;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _opt_r_1 = t\n  local _opt_res_1 = nil\n  if _opt_r_1 ~= nil then\n    _opt_res_1 = _opt_r_1.hp\n  end\n  local hp_val = _opt_res_1", lua_code)
+    self.assertNotIn("((function(_r)", lua_code)
+    self.assertIn("while (count > 0) do", lua_code)
+
+  def test_optional_chaining_method_call(self):
+    """Verifies optional chaining on method calls emits safe guard block."""
+    code = """
+    struct Target {
+      var hp: int;
+    }
+    impl Target {
+      func get_hp(): int {
+        return self.hp;
+      }
+    }
+    func test_call(t: Target?): int {
+      let val = t?.get_hp();
+      return val ?? 0;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _opt_r_1 = t\n  local _opt_res_1 = nil\n  if _opt_r_1 ~= nil then\n    _opt_res_1 = _opt_r_1:get_hp()\n  end\n  local val = _opt_res_1", lua_code)
+    self.assertNotIn("((function(_r)", lua_code)
+
+  def test_prototypal_inheritance_and_clone_variations(self):
+    """Verifies clone node transpilation with arena and without initializer block."""
+    code = """
+    proto Monster {
+      var hp: int;
+    }
+    impl Monster {
+      func __init__(h: int) {
+        self.hp = h;
+      }
+    }
+    func test_clone() {
+      var arena = Arena();
+      var base = Monster(h = 100) in arena;
+      var sub = clone base {
+        self.hp = 80;
+      };
+      var sub2 = clone base in arena;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_create_proto_object", lua_code)
+    self.assertIn("_clone_helper(base", lua_code)
+    self.assertIn("_clone_helper(base, nil, arena)", lua_code)
+
+  def test_multi_hop_nested_struct_cow_lua(self):
+    """Verifies multi-hop nested struct Copy-on-Write materializes ancestors in Lua without corrupting prototype."""
+    code = """
+    struct Stats {
+      var hp: int;
+    }
+    impl Stats {
+      var func take_damage(dmg: int) {
+        self.hp -= dmg;
+      }
+    }
+    struct Unit {
+      var stats: Stats;
+    }
+    proto Monster {
+      var unit: Unit;
+    }
+    func main() {
+      var a = Arena();
+      let base = Monster { unit = Unit { stats = Stats { hp = 20 } } } in a;
+      var c1 = clone base in a;
+      var c2 = clone c1 in a;
+      c1.unit.stats.hp = 100;
+      c1.unit.stats.take_damage(15);
+      c2.unit.stats.hp = 50;
+      let res = c1.unit.stats.hp * 10000 + c2.unit.stats.hp * 100 + base.unit.stats.hp;
+      print(String.from(res));
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("__ensure_cow", lua_code)
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+    if lua_bin:
+      with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False, encoding="utf-8") as f:
+        f.write(lua_code)
+        tmp_lua = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_lua], capture_output=True, text=True, check=True)
+        self.assertEqual(proc.stdout.strip(), "855020")
+      finally:
+        if os.path.exists(tmp_lua):
+          os.remove(tmp_lua)
+
+  def test_lambdas_and_struct_initializer_with_arena(self):
+    """Verifies single-expression and block lambdas, and struct initializers with arenas."""
+    code = """
+    struct Point {
+      var x: int;
+      var y: int;
+    }
+    func test_init() {
+      let pt = Point { x = 10, y = 20 };
+      let doubler = (x: int) -> int { return x * 2; };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("Point.init({x = 10, y = 20})", lua_code)
+    self.assertIn("(function(x)", lua_code)
+    self.assertIn("return (x * 2)", lua_code)
+
+  def test_export_annotation_lua(self):
+    """Verifies that @export("target.path") transpiles to function target.path(...)."""
+    code = """
+    @export("love.update")
+    func update(dt: float) {
+      let step = dt;
+    }
+
+    @export
+    func global_callback() {
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("function love.update(dt)", lua_code)
+    self.assertIn("function global_callback()", lua_code)
+    self.assertNotIn("local function update", lua_code)
+
+  def test_extern_annotations_lua(self):
+    """Verifies that @extern var omits runtime initialization code."""
+    code = """
+    trait Graphics {
+      func setColor(r: float);
+    }
+
+    struct LoveEngine {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: LoveEngine;
+    """
+    lua_code = self._transpile(code)
+    self.assertNotIn("local love =", lua_code)
+
+  def test_transpile_file_write_error_lua(self):
+    """Verifies transpile_file handles Lua target write failure by exiting."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+      sp_file = os.path.join(temp_dir, "test.sp")
+      with open(sp_file, "w", encoding="utf-8") as f:
+        f.write("let x: int = 1;\n")
+      with self.assertRaises(SystemExit) as cm:
+        transpile_file(sp_file, output_file="/invalid_dir_xyz/out.lua", target="lua", quiet=True, raise_on_error=False)
+      self.assertEqual(cm.exception.code, 1)
+
+  def test_trait_member_modifiers(self):
+    """Verifies parsing and building AST for var and static trait members."""
+    code = """
+    trait Printable {
+      static func create(): Printable;
+      var func display(): String;
+    }
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    self.assertEqual(ast.declarations[0].members[0].modifier, "static")
+    self.assertEqual(ast.declarations[0].members[1].modifier, "var")
+
+  def test_lua_execution_if_available(self):
+    """Executes transpiled Lua code using system Lua interpreter if present."""
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if not lua_bin:
+      self.skipTest("No Lua interpreter found in system PATH.")
+    try:
+      test_run = subprocess.run([lua_bin, "-v"], capture_output=True, timeout=2)
+      if test_run.returncode != 0:
+        self.skipTest("Lua interpreter is not executable in current environment.")
+    except Exception:
+      self.skipTest("Lua interpreter execution failed.")
+
+    code = """
+    func main(): int {
+      let x = 10;
+      let y = 20;
+      let sum = x + y;
+      if sum == 30 {
+        return 0;
+      }
+      return 1;
+    }
+    """
+    with tempfile.NamedTemporaryFile(suffix=".sp", mode="w", delete=False) as f:
+      f.write(code)
+      sp_path = f.name
+
+    lua_path = sp_path[:-3] + ".lua"
+    try:
+      transpile_file(sp_path, output_file=lua_path, target="lua", quiet=True)
+      result = subprocess.run([lua_bin, lua_path], capture_output=True, text=True)
+      self.assertEqual(result.returncode, 0)
+    finally:
+      if os.path.exists(sp_path):
+        os.remove(sp_path)
+      if os.path.exists(lua_path):
+        os.remove(lua_path)
+
+
+  def test_lua_multi_return_transpilation(self):
+    """Verifies Lua transpilation for multi-return functions, declarations, and assignments."""
+    code = """
+    func get_pos(): float, float {
+      return 10.0, 20.0;
+    }
+    func test() {
+      let x, y = get_pos();
+      var a, b = 1.0, 2.0;
+      a, b = get_pos();
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("local get_pos", output)
+    self.assertIn("function get_pos()", output)
+    self.assertIn("return 10.0, 20.0", output)
+    self.assertIn("local x, y = get_pos()", output)
+    self.assertIn("local a, b = 1.0, 2.0", output)
+    self.assertIn("a, b = get_pos()", output)
+
+  def test_lua_compound_assignment(self):
+    """Verifies Lua transpilation of compound assignment operators."""
+    code = """
+    func test() {
+      var x = 10;
+      x += 5;
+      var a = 1.0;
+      var b = 2.0;
+      a, b = 3.0, 4.0;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("x = x + 5", output)
+    self.assertIn("a, b = 3.0, 4.0", output)
+
+  def test_lua_string_enum_transpilation(self):
+    """Verifies Lua transpilation for string-backed enums."""
+    code = """
+    enum Mode {
+      Fill = "fill",
+      Line = "line",
+      Default,
+    }
+    """
+    out = self._transpile(code)
+    self.assertIn('local Mode = {', out)
+    self.assertIn('Fill = "fill"', out)
+    self.assertIn('Line = "line"', out)
+    self.assertIn('Default = "Default"', out)
+
+  def test_lua_resource_handle_method_transpilation(self):
+    """Verifies Lua transpilation for resource handles with colon vs dot calls."""
+    code = """
+    trait ImageHandle {
+      func draw(x: float, y: float);
+    }
+    trait Graphics {
+      static func rectangle(mode: String, x: float, y: float, w: float, h: float);
+    }
+
+    struct Love {
+      var graphics: Graphics;
+    }
+
+    @extern("love")
+    var love: Love;
+
+    @extern("hero")
+    var hero_img: ImageHandle;
+
+    func main() {
+      love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0);
+      hero_img.draw(10.0, 20.0);
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('love.graphics.rectangle("fill", 10.0, 20.0, 100.0, 50.0)', output)
+    self.assertIn('hero_img:draw(10.0, 20.0)', output)
+
+  def test_lua_export_method_alias_transpilation(self):
+    """Verifies Lua transpilation for trait methods with @export method aliases."""
+    code = """
+    trait Graphics {
+      @export("setColor")
+      static func setColorRGBA(r: float, g: float, b: float);
+    }
+    struct Love {
+      var graphics: Graphics;
+    }
+    @extern("love")
+    var love: Love;
+
+    func main() {
+      love.graphics.setColorRGBA(1.0, 0.0, 0.0);
+    }
+    """
+    out = self._transpile(code)
+    self.assertIn('love.graphics.setColor(1.0, 0.0, 0.0)', out)
+
+
+  def test_lua_module_import_and_export_transpilation(self):
+    """Verifies Lua 5.1 transpilation for module imports and export manifests."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics as gfx;
+
+    export {
+      Player,
+      create_player,
+      enums.DrawMode,
+    }
+
+    struct Player {
+      var name: String;
+    }
+
+    func create_player(name: String): Player {
+      return Player { name = name };
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('local enums = require("lib.love2d.enums")', output)
+    self.assertIn('local gfx = require("lib.love2d.graphics")', output)
+    self.assertIn('local _M = {}', output)
+    self.assertIn('_M.Player = Player', output)
+    self.assertIn('_M.create_player = create_player', output)
+    self.assertIn('_M.DrawMode = enums.DrawMode', output)
+    self.assertIn('return _M', output)
+
+  def test_lua_imported_module_function_call(self):
+    """Verifies that calling a function on an imported module uses dot syntax, not colon syntax."""
+    code = """
+    import std.math as math;
+
+    func test(): float {
+      return math.min(5.0, 10.0);
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("local math = require(\"std.math\")", output)
+    self.assertIn("math.min__float(5.0, 10.0)", output)
+    self.assertNotIn("math:min__float(", output)
+
+  def test_lua_preamble_contains_relative_loader(self):
+    """Verifies that the Lua preamble includes the dynamic relative module loader hook."""
+    output = self._transpile("let x: int = 10;")
+    self.assertIn("_sp_install_loader", output)
+    self.assertIn("package.searchers or package.loaders", output)
+    self.assertIn("relative_loader", output)
+
+  def test_coroutine_transpilation(self):
+    """Verifies that Coroutines transpile to Lua coroutine wrappers and execute correctly."""
+    code = """
+    func count_down(from_val: int): Coroutine<int> {
+      var curr = from_val;
+      while curr > 0 {
+        yield curr;
+        curr -= 1;
+      }
+    }
+
+    func main() {
+      var co = count_down(3);
+      let v1 = co.step();
+      let v2 = co.step();
+      let v3 = co.step();
+      let done1 = co.is_done();
+      let v4 = co.step();
+      let done2 = co.is_done();
+      co.reset();
+      let v_reset = co.step();
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("_Coroutine.create", output)
+    self.assertIn("coroutine.yield", output)
+    self.assertIn(":step()", output)
+    self.assertIn(":is_done()", output)
+    self.assertIn(":reset()", output)
+
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if lua_bin:
+      test_driver = output + """
+      local co = count_down(3)
+      assert(co:step() == 3)
+      assert(co:step() == 2)
+      assert(co:step() == 1)
+      assert(co:step() == nil)
+      assert(co:is_done() == true)
+      assert(co:step() == nil)
+      co:reset()
+      assert(co:is_done() == false)
+      assert(co:step() == 3)
+      """
+      with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+        f.write(test_driver)
+        tmp_path = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+      finally:
+        os.unlink(tmp_path)
+
+  def test_heap_smart_refs_lua_execution(self):
+    """Verifies Ref, SharedRef, and WeakRef execution in Lua backend."""
+    code = """
+    struct Node {
+      var val: int;
+    }
+    impl Node {
+      func double_val(): int {
+        return self.val * 2;
+      }
+    }
+
+    func test_ref(): int {
+      let r = Ref(Node { val = 21 });
+      return r.double_val();
+    }
+
+    func test_shared_ref(): int {
+      let s1 = SharedRef(Node { val = 42 });
+      let s2 = s1.share();
+      let w = s1.downgrade();
+      if let active ?= w.upgrade() {
+        return active.val;
+      }
+      return 0;
+    }
+
+    func test_shared_from_move(): int {
+      var r = Ref(Node { val = 99 });
+      let s = SharedRef(move r);
+      return s.val;
+    }
+    """
+    lua_code = self._transpile(code)
+    lua_bin = shutil.which("lua") or shutil.which("luajit")
+    if not lua_bin:
+      self.skipTest("Lua binary not found")
+    test_driver = f"""
+    {lua_code}
+    assert(test_ref() == 42, "test_ref failed")
+    assert(test_shared_ref() == 42, "test_shared_ref failed")
+    assert(test_shared_from_move() == 99, "test_shared_from_move failed")
+    """
+    with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+      f.write(test_driver)
+      tmp_path = f.name
+    try:
+      proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+      self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+    finally:
+      os.unlink(tmp_path)
+
+  def test_dev_mode_hot_reloading(self):
+    """Verifies that dev_mode emits reload-safe structs, @on_reload hooks, and watcher checks."""
+    code_v1 = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_speed(): int {
+        return 10;
+      }
+    }
+
+    @on_reload
+    func on_reload_hook() {
+      print("Reloaded!");
+    }
+
+    @export("love.update")
+    func update(dt: float) {
+      let s = 1;
+    }
+    """
+    input_stream = InputStream(code_v1)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = LuaTranspiler(dev_mode=True)
+    out_v1 = transpiler.transpile(ast)
+
+    self.assertIn("Player = Player or {}", out_v1)
+    self.assertIn("_SP_DEV_WATCHER", out_v1)
+    self.assertIn("if on_reload_hook then on_reload_hook() end", out_v1)
+    self.assertIn("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end", out_v1)
+
+    code_v2 = """
+    struct Player {
+      var name: String;
+    }
+    impl Player {
+      func get_speed(): int {
+        return 50;
+      }
+    }
+    """
+    input_stream2 = InputStream(code_v2)
+    lexer2 = SapphireLexer(input_stream2)
+    stream2 = CommonTokenStream(lexer2)
+    parser2 = SapphireParser(stream2)
+    tree2 = parser2.program()
+    builder2 = ASTBuilder()
+    ast2 = builder2.visit(tree2)
+    transpiler2 = LuaTranspiler(dev_mode=True)
+    out_v2 = transpiler2.transpile(ast2)
+
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if lua_bin:
+      # Test in-place method patching at Lua runtime
+      test_driver = f"""
+      love = {{}}
+      {out_v1}
+      local p = Player.init({{ name = "Hero" }})
+      assert(p:get_speed() == 10)
+
+      -- Simulate live hot reload chunk execution
+      local reload_chunk = assert(loadstring or load)({repr(out_v2)})
+      reload_chunk()
+
+      -- The existing living instance p now receives the updated method get_speed == 50
+      assert(p:get_speed() == 50)
+      """
+      with tempfile.NamedTemporaryFile(suffix=".lua", mode="w", delete=False) as f:
+        f.write(test_driver)
+        tmp_path = f.name
+      try:
+        proc = subprocess.run([lua_bin, tmp_path], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Lua execution failed: {proc.stderr}")
+      finally:
+        os.unlink(tmp_path)
+
+  def test_dev_mode_import_registration(self):
+    """Verifies that import statements in dev_mode register dependencies with _SP_DEV_WATCHER."""
+    code = """
+    import lib.love2d.graphics;
+    """
+    input_stream = InputStream(code)
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+    transpiler = LuaTranspiler(dev_mode=True)
+    out = transpiler.transpile(ast)
+    self.assertIn('_SP_DEV_WATCHER.register_file("lib/love2d/graphics.lua")', out)
+
+
+  def test_transpile_file_with_imports(self):
+    """Verifies that transpile_file recursively transpiles imported module dependencies."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sub_sp = os.path.join(tmpdir, "sub.sp")
+      with open(sub_sp, "w") as f:
+        f.write("import main;\nexport { item } let item = 42;\n")
+
+      main_sp = os.path.join(tmpdir, "main.sp")
+      with open(main_sp, "w") as f:
+        f.write("import sub;\n")
+
+      out_lua = os.path.join(tmpdir, "main.lua")
+      transpile_file(main_sp, output_file=out_lua, target="lua", quiet=True)
+      self.assertTrue(os.path.exists(out_lua))
+      sub_lua = os.path.join(tmpdir, "sub.lua")
+      self.assertTrue(os.path.exists(sub_lua))
+
+  def test_transpile_file_missing_file(self):
+    """Verifies SystemExit on missing file input when raise_on_error=False."""
+    with self.assertRaises(SystemExit):
+      transpile_file("/non_existent_path_xyz_123.sp", quiet=True, raise_on_error=False)
+
+
+  def test_lua_match_expression_transpilation(self):
+    """Verifies generated Lua code for match expressions."""
+    code = """
+    enum Status { Ok, NotFound, Error }
+
+    func get_code(s: Status): int {
+      let code = match s {
+        Status.Ok -> 200,
+        Status.NotFound -> {
+          yield 404;
+        },
+        ... -> 500,
+      };
+      return code;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("local _subj_", output)
+    self.assertIn("if _subj_", output)
+    self.assertIn("elseif _subj_", output)
+    self.assertIn("else", output)
+    self.assertIn("_match_res_", output)
+
+  def test_lua_multi_pattern_match(self):
+    """Verifies Lua transpilation for comma-separated multi-pattern match arms."""
+    code = """
+    func map_key(k: String): String {
+      return match k {
+        "up", "w" -> "up",
+        "down", "s" -> "down",
+        ... -> "other",
+      };
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn('or _subj_', output)
+    self.assertIn('== "w"', output)
+    self.assertIn('elseif _subj_', output)
+
+    # Match in assignment statement
+    assign_code = """
+    func test_assign(n: int): int {
+      var x = 0;
+      x = match n {
+        1 -> 10,
+        ... -> 20,
+      };
+      return x;
+    }
+    """
+    lua_out1 = self._transpile(assign_code)
+    self.assertIn("x = _match_res_", lua_out1)
+
+    # Match in return statement
+    ret_code = """
+    func test_ret(n: int): int {
+      return match n {
+        1 -> 100,
+        ... -> 200,
+      };
+    }
+    """
+    lua_out2 = self._transpile(ret_code)
+    self.assertIn("return _match_res_", lua_out2)
+
+    # Match in expression statement
+    stmt_code = """
+    func test_stmt(n: int) {
+      match n {
+        1 -> {},
+        ... -> {},
+      };
+    }
+    """
+    lua_out3 = self._transpile(stmt_code)
+    self.assertIn("if _subj_1 == 1 then", lua_out3)
+
+    # Multi-target assignment with match
+    multi_code = """
+    func test_multi(n: int): int {
+      var a = 0;
+      var b = 0;
+      a, b = match n { 1 -> 10, ... -> 20 }, 30;
+      return a + b;
+    }
+    """
+    lua_out4 = self._transpile(multi_code)
+    self.assertIn("_match_res_", lua_out4)
+
+    # Arena destruction inside match return
+    arena_ret = """
+    struct Item {}
+    func test_arena(): int {
+      var a = Arena();
+      let _item = Item {} in a;
+      return match 1 {
+        1 -> 10,
+        ... -> 20,
+      };
+    }
+    """
+    lua_out5 = self._transpile(arena_ret)
+    self.assertIn("a:destroy()", lua_out5)
+
+    # Wildcard ...
+    wild_code = "func test_w(n: int): int { return match n { ... -> 99 }; }"
+    lua_out6 = self._transpile(wild_code)
+    self.assertIn("if true then", lua_out6)
+
+    # Compound assignment with match
+    comp_code = """
+    func test_comp(n: int): int {
+      var x = 1;
+      x += match n { 1 -> 2, ... -> 3 };
+      return x;
+    }
+    """
+    lua_out7 = self._transpile(comp_code)
+    self.assertIn("x = x + _match_res_", lua_out7)
+
+    # Direct visitor calls
+    from sapphire.code_gen.lua_transpiler import LuaTranspiler
+    from sapphire.parser.ast import (
+      EllipsisPatternNode,
+      LiteralNode,
+      MatchCaseNode,
+      MatchExprNode,
+    )
+
+
+    lt = LuaTranspiler()
+    lt.visit(MatchExprNode(LiteralNode(1, "int"), [MatchCaseNode(EllipsisPatternNode(), LiteralNode(2, "int"))]))
+    lt.visit_EllipsisPatternNode(EllipsisPatternNode())
+    self.assertIn("_match_res_1", "".join(lt.code))
+
+  def test_lua_map_literal_transpilation(self):
+    """Verifies Lua transpilation for map literals and map indexing (without +1 offset)."""
+    code = """
+    func test() {
+      let scores = {"alice": 100, "bob": 95,};
+      let score = scores["alice"];
+      let arr = [10, 20];
+      let elem = arr[0];
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn('{["alice"] = 100, ["bob"] = 95}', lua_out)
+    self.assertIn('_SP_RT._sapphire_map_at(scores, "alice")', lua_out)
+    self.assertIn('_SP_RT._sapphire_array_at(arr, 0)', lua_out)
+
+  def test_lua_while_loop(self):
+    """Verifies that Lua transpilation emits while loops correctly."""
+    code = """
+    func test_while() {
+      var count = 5;
+      while count > 0 {
+        count = 0;
+      }
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("while (count > 0) do", lua_out)
+
+  def test_lua_map_for_loop(self):
+    """Verifies that Lua transpilation routes map for-loops through _SP_RT._sapphire_iter_map."""
+    code = """
+    func test_map_for() {
+      let m = {"a": 1, "b": 2};
+      for k, v in m {
+        print(k);
+      }
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("for k, v in _SP_RT._sapphire_iter_map(m) do", lua_out)
+
+
+  def test_lua_string_methods(self):
+    """Verifies Lua transpilation of String methods."""
+    code = """
+    func test_str() {
+      let s = "  hello world  ";
+      let sz = s.size();
+      let emp = s.empty();
+      let clean = s.strip();
+      let slashed = "///path///".strip("/");
+      let low = clean.lower();
+      let up = clean.upper();
+      let has = clean.contains("world");
+      let pos_fwd = clean.find("o");
+      let pos = clean.find("o", reverse = true);
+      let parts = clean.split(",");
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("local sz = _SP_RT._sapphire_string_size(s)", lua_out)
+    self.assertIn("local emp = (#s == 0)", lua_out)
+    self.assertIn("local clean = _SP_RT._sapphire_string_strip(s)", lua_out)
+    self.assertIn('local slashed = _SP_RT._sapphire_string_strip("///path///", "/")', lua_out)
+    self.assertIn("local low = string.lower(clean)", lua_out)
+    self.assertIn("local up = string.upper(clean)", lua_out)
+    self.assertIn('local has = (string.find(clean, "world", 1, true) ~= nil)', lua_out)
+    self.assertIn('local pos_fwd = _SP_RT._sapphire_string_find(clean, "o")', lua_out)
+    self.assertIn('local pos = _SP_RT._sapphire_string_find(clean, "o", nil, true)', lua_out)
+    self.assertIn('local parts = _SP_RT._sapphire_string_split(clean, ",")', lua_out)
+
+  def test_string_slice_and_assert_lua(self):
+    code = """
+    func main() {
+      let s = "hello world";
+      let a = s.slice(0, 5);
+      let b = s.slice(6);
+      assert(a == "hello");
+      assert(b == "world", "expected world");
+    }
+    """
+    lua_out = self._transpile(code)
+    self.assertIn("_SP_RT._sapphire_string_slice(s, 0, 5)", lua_out)
+    self.assertIn("_SP_RT._sapphire_string_slice(s, 6)", lua_out)
+    self.assertIn('assert((a == "hello"), "assertion failed")', lua_out)
+    self.assertIn('assert((b == "world"), "expected world")', lua_out)
+
+  def test_transpile_with_explicit_args(self):
+    """Verifies passing source_file and source_map_builder directly to transpile method."""
+    input_stream = InputStream("let x = 10;")
+    lexer = SapphireLexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    tree = parser.program()
+    builder = ASTBuilder()
+    ast = builder.visit(tree)
+
+    transpiler = LuaTranspiler()
+    sm_builder = SourceMapBuilder("direct.sp")
+    transpiler.transpile(ast, source_file="direct.sp", source_map_builder=sm_builder)
+    self.assertEqual(transpiler.source_file, "direct.sp")
+    self.assertEqual(transpiler.source_map_builder, sm_builder)
+
+  def test_casting_and_conversions_lua(self):
+    """Verifies Lua transpilation of casting (as) and String conversions."""
+    code = """
+    enum Status { Active = 1 }
+    enum LogLevel { Info = "INFO" }
+
+    struct Parent { var hp: int; }
+    struct Child: Parent { var mp: int; }
+
+    func test_conv() {
+      let f = 10 as float;
+      let i = 3.14 as int;
+      let b = 1 as bool;
+      let s0 = String.from(10);
+      let s1 = String.from(42);
+      let s2 = String.from(true);
+
+      let p_int = "123".to_int();
+      let p_hex = "FF".to_int(radix = 16);
+      let p_float = "3.14".to_float();
+      let p_bool = "true".to_bool();
+
+      let e1 = Status.from(1);
+      let l1 = LogLevel.from("INFO");
+
+      let c = Child { hp = 100, mp = 50 };
+      let hp = c.hp;
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("_SP_RT._sapphire_cast_float(10)", lua)
+    self.assertIn("_SP_RT._sapphire_cast_int(3.14)", lua)
+    self.assertIn("_SP_RT._sapphire_cast_bool(1)", lua)
+    self.assertIn("tostring(10)", lua)
+    self.assertIn("tostring(42)", lua)
+    self.assertIn("tostring(true)", lua)
+    self.assertIn("_SP_RT._sapphire_string_to_int(", lua)
+    self.assertIn("_SP_RT._sapphire_string_to_float(", lua)
+    self.assertIn("_SP_RT._sapphire_string_to_bool(", lua)
+    self.assertIn("_SP_RT._sapphire_enum_from(Status", lua)
+    self.assertIn("_SP_RT._sapphire_enum_from(LogLevel", lua)
+
+  def test_implicit_struct_field_and_var_defaults_lua(self):
+    """Verifies Lua transpilation of implicit struct field defaults (int=0, float=0.0, bool=false, T?=nil)."""
+    code = """
+    struct DefaultsTest {
+      var i: int;
+      var f: float;
+      var b: bool;
+      var opt: String?;
+    }
+
+    func test() {
+      var d = DefaultsTest {};
+      var local_i: int, local_s: String;
+      var local_f: float;
+      var local_b: bool;
+      var local_opt: String?;
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("self.i = 0", lua)
+    self.assertIn("self.f = 0.0", lua)
+    self.assertIn("self.b = false", lua)
+    self.assertIn("local local_i, local_s = 0, nil", lua)
+    self.assertIn("local local_f = 0.0", lua)
+    self.assertIn("local local_b = false", lua)
+
+  def test_array_methods_lua(self):
+    """Verifies transpilation of Array built-in methods to Lua."""
+    code = """
+    func test_array_ops() {
+      let nums = [1, 2, 3, 4, 5];
+      let sz = nums.size();
+      let is_empty = nums.empty();
+
+      let doubled = nums.map(x -> x * 2);
+      let evens = nums.filter(x -> x % 2 == 0);
+      let sum = nums.reduce(0, (acc, x) -> acc + x);
+      let sum_rev = nums.reduce(0, (acc, x) -> acc + x, reverse = true);
+      let named_red = nums.reduce(initial = 0, fn = (acc, x) -> acc + x);
+      let pos3_red = nums.reduce(0, (acc, x) -> acc + x, true);
+
+      let has_three = nums.contains(3);
+      let rev = nums.reverse();
+      let sorted_asc = [3, 1, 2].sort();
+      let sorted_pos = [3, 1, 2].sort((a, b) -> a - b, true);
+      let sorted_named = [3, 1, 2].sort(by = (a, b) -> a - b, reverse = true);
+      let got_val = nums.get(1);
+      let joined = ["a", "b"].join("-");
+
+      var mut_arr = [10, 20];
+      let p_val = mut_arr.push(30);
+      let i_val = mut_arr.insert(1, 15);
+      let i_named = mut_arr.insert(index = 0, element = 5);
+      let pop_val = mut_arr.pop();
+      let rem_val = mut_arr.remove(1);
+      mut_arr.clear();
+
+      mut_arr.map(x -> x * 2, in_place = true);
+      mut_arr.map(fn = x -> x * 2, false);
+      mut_arr.filter(x -> x > 4, in_place = true);
+      mut_arr.filter(fn = x -> x > 4, false);
+      mut_arr.reverse(in_place = true);
+      mut_arr.reverse(false);
+      mut_arr.sort(in_place = true);
+      mut_arr.sort((a, b) -> a - b, false, true);
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("_SP_RT._sapphire_array_size(nums)", lua)
+    self.assertIn("_SP_RT._sapphire_array_empty(nums)", lua)
+    self.assertIn("_SP_RT._sapphire_array_get(nums, 1)", lua)
+    self.assertIn("_SP_RT._sapphire_array_map(nums", lua)
+    self.assertIn("_SP_RT._sapphire_array_filter(nums", lua)
+    self.assertIn("_SP_RT._sapphire_array_reduce(nums, 0", lua)
+    self.assertIn("_SP_RT._sapphire_array_contains(nums, 3)", lua)
+    self.assertIn("_SP_RT._sapphire_array_reverse(nums)", lua)
+    self.assertIn("_SP_RT._sapphire_array_sort(", lua)
+    self.assertIn("_SP_RT._sapphire_array_join(", lua)
+    self.assertIn("_SP_RT._sapphire_array_push(mut_arr, 30)", lua)
+    self.assertIn("_SP_RT._sapphire_array_insert(mut_arr, 1, 15)", lua)
+    self.assertIn("_SP_RT._sapphire_array_pop(mut_arr)", lua)
+    self.assertIn("_SP_RT._sapphire_array_remove(mut_arr, 1)", lua)
+    self.assertIn("_SP_RT._sapphire_array_clear(mut_arr)", lua)
+
+  def test_map_methods_lua(self):
+    """Verifies Lua transpilation of map built-in methods."""
+    code = """
+    func main() {
+      let m = {"a": 10, "b": 20};
+      let sz = m.size();
+      let is_empty = m.empty();
+      let has_a = m.contains("a");
+      let got_a = m.get("a");
+      let k_list = m.keys();
+      let v_list = m.values();
+
+      var mut_m = {"x": 100};
+      let ins_val = mut_m.insert("y", 200);
+      let ins_named = mut_m.insert(key = "z", value = 300);
+      let rem_val = mut_m.remove("x");
+      mut_m.clear();
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("_sapphire_map_size(m)", lua)
+    self.assertIn("_sapphire_map_empty(m)", lua)
+    self.assertIn("_sapphire_map_contains(m, \"a\")", lua)
+    self.assertIn("_sapphire_map_get(m, \"a\")", lua)
+    self.assertIn("_sapphire_map_keys(m)", lua)
+    self.assertIn("_sapphire_map_values(m)", lua)
+    self.assertIn("_sapphire_map_insert(mut_m, \"y\", 200)", lua)
+    self.assertIn("_sapphire_map_insert(mut_m, \"z\", 300)", lua)
+    self.assertIn("_sapphire_map_remove(mut_m, \"x\")", lua)
+    self.assertIn("_sapphire_map_clear(mut_m)", lua)
+
+  def test_interpolated_string(self):
+    """Verifies transpilation of f-strings to Lua string concatenation."""
+    code = """
+    func main() {
+      let name = "Hero";
+      let count = 42;
+      let msg = f"Hello {name}, count: {count}!";
+      let empty_str = f"";
+      let single_lit = f"just text";
+      let single_expr = f"{count}";
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn('("Hello " .. tostring(name) .. ", count: " .. tostring(count) .. "!")', lua)
+    self.assertIn('local empty_str = ""', lua)
+    self.assertIn('local single_lit = "just text"', lua)
+    self.assertIn('local single_expr = tostring(count)', lua)
+
+  def test_interpolated_string_enum_and_nested_quotes_lua(self):
+    """Verifies Lua transpilation of enum and nested unescaped quotes in f-strings."""
+    code = """
+    enum Direction { North = 1, South = 2 }
+
+    func main() {
+      let d = Direction.South;
+      let s = f"Direction: {d}";
+      let m = {"key": 100};
+      let s_quote = f"Has key: {m.contains("key")}";
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn('("Direction: " .. tostring(d))', lua)
+    self.assertIn('("Has key: " .. tostring(_SP_RT._sapphire_map_contains(m, "key")))', lua)
+
+  def test_nested_match_expression_transpilation_lua(self):
+    """Verifies Lua transpilation of match expressions used inline within sub-expressions."""
+    code = """
+    func test_nested_match(val: int): int {
+      let x = (match val { 1 -> 10, ... -> 20 }) + 5;
+      return x;
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("local _match_res_1 = nil", lua)
+    self.assertIn("local x = (_match_res_1 + 5)", lua)
+
+  def test_generic_struct_optional_mangling_lua(self):
+    """Verifies that generic structs instantiated with optional types generate valid mangled Lua identifiers."""
+    code = """
+    struct Box<T> {
+      var item: T;
+    }
+    func test_opt_box() {
+      let b = Box<int?> { item = none };
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("Box__Opt_int", lua)
+
+  def test_proto_array_iteration_lua(self):
+    """Verifies Lua transpilation unwraps and lowers array iteration to numeric for."""
+    code = """
+    func test_proto_loop() {
+      let tags = ["a", "b"];
+      for t in tags {
+        let name = t;
+      }
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("local _for_arr_1 = _SP_RT._unwrap_read(tags)", lua)
+    self.assertIn("for _for_idx_1 = 1, #_for_arr_1 do", lua)
+    self.assertIn("local t = _SP_RT._unwrap_opt(_for_arr_1[_for_idx_1])", lua)
+
+  def test_lift_match_expressions_none_lua(self):
+    """Verifies _lift_match_expressions handles None gracefully in Lua transpiler."""
+    lt = LuaTranspiler()
+    lt._lift_match_expressions(None)
+
+  def test_lua_match_empty_and_multi_yield_inline(self):
+    """Verifies Lua transpilation of empty yield and multi-yield inline match expressions."""
+    code = """
+    func test_yields(val: int): int, int {
+      let opt_val: int? = (match val {
+        1 -> { yield 10; },
+        2 -> { yield; },
+        ... -> { yield 30; }
+      });
+      return match val {
+        1 -> { yield 10, 20; },
+        ... -> { yield 30, 40; }
+      };
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("table.unpack", lua)
+    self.assertIn("nil", lua)
+
+  def test_break_and_continue_lua(self):
+    """Verifies Lua transpilation of break and continue statements in while and for loops."""
+    code = """
+    func test_break_continue() {
+      var i = 0;
+      while i < 10 {
+        i += 1;
+        if i % 2 == 0 {
+          continue;
+        }
+        if i > 6 {
+          break;
+        }
+      }
+    }
+    """
+    lua = self._transpile(code)
+    self.assertIn("repeat", lua)
+    self.assertIn("local _break_outer = false", lua)
+    self.assertIn("if _break_outer then break end", lua)
+
+  def test_has_continue_node_nested_and_private_attr(self):
+    """Verifies _has_continue_node behavior for nested loops and private attributes."""
+    from sapphire.code_gen.lua_stmt_emitter import _has_continue_node
+    from sapphire.parser.ast import BlockNode
+
+
+    code_nested = """
+    func test_nested() {
+      while true {
+        while false {
+          continue;
+        }
+      }
+    }
+    """
+    lua = self._transpile(code_nested)
+    self.assertIn("while true do", lua)
+
+    b = BlockNode([])
+    b._private_attr = "private"
+    self.assertFalse(_has_continue_node(b))
+
+  def test_multi_parent_struct_lua(self):
+    """Verifies transpilation of multi-parent struct declarations in Lua."""
+    code = """
+    struct Position {
+      var x: int = 10;
+      var y: int = 20;
+    }
+    struct Health {
+      var hp: int = 100;
+    }
+    struct Player: Position, Health {
+      var name: String;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("setmetatable(Player, { __index = function(t, k) return Position[k] or Health[k] end })", lua_code)
+    self.assertIn("Position._init_fields(self)", lua_code)
+    self.assertIn("Health._init_fields(self)", lua_code)
+
+  def test_range_iteration_lua(self):
+    """Verifies transpilation of range() loops in Lua."""
+    code = """
+    func test_range() {
+      var sum = 0;
+      for i in range(0, 10, 2) {
+        sum += i;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("for i = (0), (10) - 1, 2 do", lua_code)
+    self.assertIn("_SP_RT._sapphire_range =", lua_code)
+
+  def test_guard_statement_lua(self):
+    """Verifies Lua transpilation of guard statements."""
+    code = """
+    func test_guard(opt: int?, flag: bool): int {
+      guard let x ?= opt; flag && x > 0 else {
+        return -1;
+      }
+      return x * 10;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _guard_val_1 = opt", lua_code)
+    self.assertIn("if _guard_val_1 == nil then", lua_code)
+    self.assertIn("return (-1)", lua_code)
+    self.assertIn("if not ((flag and (x > 0))) then", lua_code)
+
+  def test_guard_destructuring_and_clause_node_lua(self):
+    """Verifies Lua transpilation of multi-variable destructuring guard and GuardClauseNode visitor."""
+    code = """
+    func test_destruct(arr: [int]): int {
+      guard let a, b = arr else {
+        return 0;
+      }
+      return a + b;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local a = _guard_val_1[1]", lua_code)
+    self.assertIn("local b = _guard_val_1[2]", lua_code)
+
+    # Directly visit GuardClauseNode to cover visitor
+    clause1 = GuardClauseNode(binding=HeaderBindingNode(is_mutable=False, let_name="x", type_node=None, expr=LiteralNode(1, "int"), is_unwrap=False))
+    clause2 = GuardClauseNode(condition=LiteralNode(True, "bool"))
+    tr = LuaTranspiler()
+    tr.visit_GuardClauseNode(clause1)
+    tr.visit_GuardClauseNode(clause2)
+    self.assertIn("1", tr.get_output())
+
+  def test_multi_binding_if_statement_lua(self):
+    """Verifies Lua transpilation of multi-binding if statements."""
+    code = """
+    func test_multi_if(opt_a: int?, opt_b: int?, flag: bool): int {
+      if let a ?= opt_a; let b ?= opt_b; flag && (a + b > 10) {
+        return a + b;
+      } else {
+        return -1;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _val_a_1 = opt_a", lua_code)
+    self.assertIn("if _val_a_1 ~= nil then", lua_code)
+    self.assertIn("local a = _val_a_1", lua_code)
+    self.assertIn("local _val_b_1 = opt_b", lua_code)
+    self.assertIn("if _val_b_1 ~= nil then", lua_code)
+    self.assertIn("local b = _val_b_1", lua_code)
+    self.assertIn("if (flag and ((a + b) > 10)) then", lua_code)
+    self.assertIn("local _if_ok_1 = false", lua_code)
+    self.assertIn("_if_ok_1 = true", lua_code)
+    self.assertIn("if not _if_ok_1 then", lua_code)
+
+  def test_multi_binding_if_raii_lifo_cleanup_lua(self):
+    """Verifies that multi-binding if cleans up partially acquired resources on failure and all on block exit in Lua."""
+    code = """
+    struct Resource {
+      var name: String;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+
+    func get_res(name: String, ok: bool): Resource? {
+      if ok {
+        return Resource { name = name };
+      }
+      return none;
+    }
+
+    func run_test(ok_a: bool, ok_b: bool, cond: bool) {
+      if let a ?= get_res(name = "resA", ok = ok_a);
+         let b ?= get_res(name = "resB", ok = ok_b);
+         cond {
+        let x = 1;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+    self.assertIn("_sapphire_del(a)", lua_code)
+
+  def test_coroutine_transpilation_and_methods(self):
+    """Verifies Lua transpilation of top-level coroutines, struct method coroutines, and yields."""
+    code = """
+    func zero_param_coro(): Coroutine<void> {
+      yield;
+    }
+
+    struct GenHolder {
+      var val: int;
+    }
+
+    impl GenHolder {
+      func inst_gen(): Coroutine<int> {
+        yield self.val;
+      }
+
+      static func stat_gen(): Coroutine<int> {
+        yield 42;
+      }
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function zero_param_coro()", output)
+    self.assertIn("return _SP_RT._Coroutine.create(function()", output)
+    self.assertIn("coroutine.yield()", output)
+    self.assertIn("function GenHolder:inst_gen()", output)
+    self.assertIn("return _SP_RT._Coroutine.create(function(self)", output)
+    self.assertIn("end, self)", output)
+    self.assertIn("function GenHolder.stat_gen()", output)
+    self.assertIn("return _SP_RT._Coroutine.create(function()", output)
+
+    # Directly verify YieldNode with multiple expressions
+    transpiler = LuaTranspiler()
+    multi_yield = YieldNode(exprs=[LiteralNode(1, "int"), LiteralNode(2, "int")])
+    transpiler.visit(multi_yield)
+    self.assertIn("coroutine.yield(1, 2)", transpiler.get_output())
+
+  def test_lua_export_default_explicit(self):
+    """Verifies that an explicit 'as default' export emits the primary symbol directly with attached exports."""
+    code = """
+    export {
+      Combat as default,
+      CombatResult,
+    }
+
+    struct CombatResult {
+      var victory: bool;
+    }
+
+    struct Combat {
+      var turns: int;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("Combat.Combat = Combat", output)
+    self.assertIn("Combat.default = Combat", output)
+    self.assertIn("Combat.CombatResult = CombatResult", output)
+    self.assertIn("return Combat", output)
+    self.assertNotIn("local _M = {}", output)
+
+  def test_lua_export_single_struct_default(self):
+    """Verifies that exporting a single struct treats it as the default export."""
+    code = """
+    export {
+      Combat,
+    }
+
+    struct Combat {
+      var turns: int;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("Combat.Combat = Combat", output)
+    self.assertIn("Combat.default = Combat", output)
+    self.assertIn("return Combat", output)
+    self.assertNotIn("local _M = {}", output)
+
+  def test_lua_struct_init_positional_and_kwargs(self):
+    """Verifies flexible constructor invocation supporting multi-arg positional, single-arg positional, and kwargs."""
+    code = """
+    struct Combat {
+      var rounds: int;
+      var debug: bool;
+    }
+
+    impl Combat {
+      func __init__(rounds: int, debug: bool) {
+        self.rounds = rounds;
+        self.debug = debug;
+      }
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function Combat.init(...)", output)
+    self.assertIn("local _n_args = select(\"#\", ...)", output)
+    self.assertIn("if _n_args > 1 then", output)
+    self.assertIn("Combat._init_sapphire(self, ...)", output)
+    self.assertIn("elseif _n_args == 1 then", output)
+    self.assertIn("Combat._init_sapphire(self)", output)
+
+  def test_lua_plain_struct_positional_and_table(self):
+    """Verifies plain data structs support both positional and table initialization."""
+    code = """
+    struct Point {
+      var x: float;
+      var y: float;
+    }
+    """
+    output = self._transpile(code)
+    self.assertIn("function Point.init(...)", output)
+    self.assertIn("if _args[1] ~= nil then self.x = _args[1] end", output)
+    self.assertIn("if _args[2] ~= nil then self.y = _args[2] end", output)
+
+  def test_lua_interop_execution(self):
+    """Executes transpiled Lua code to verify drop-in require and positional constructor calls from Lua."""
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    if not lua_bin:
+      self.skipTest("No Lua interpreter found in system PATH.")
+    try:
+      test_run = subprocess.run([lua_bin, "-v"], capture_output=True, timeout=2)
+      if test_run.returncode != 0:
+        self.skipTest("Lua interpreter is not executable in current environment.")
+    except Exception:
+      self.skipTest("Lua interpreter execution failed.")
+
+    code = """
+    export {
+      Combat as default,
+      CombatResult,
+    }
+
+    struct CombatResult {
+      var victory: bool;
+    }
+
+    struct Combat {
+      var enemies: int;
+      var rounds: int;
+      var mode: String;
+    }
+
+    impl Combat {
+      func __init__(enemies: int, rounds: int, mode: String) {
+        self.enemies = enemies;
+        self.rounds = rounds;
+        self.mode = mode;
+      }
+
+      func get_summary(): String {
+        return f"{self.enemies}_{self.rounds}_{self.mode}";
+      }
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      sp_file = os.path.join(tmp_dir, "combat.sp")
+      lua_file = os.path.join(tmp_dir, "combat.lua")
+      with open(sp_file, "w") as f:
+        f.write(code)
+      transpile_file(sp_file, output_file=lua_file, target="lua", quiet=True)
+
+      test_lua = os.path.join(tmp_dir, "test_interop.lua")
+      with open(test_lua, "w") as f:
+        f.write("""
+        package.path = package.path .. ";./?.lua"
+        local Combat = require("combat")
+        assert(Combat ~= nil, "Combat module is nil")
+
+        local c1 = Combat.init(5, 10, "hard")
+        assert(c1.enemies == 5, "enemies mismatch")
+        assert(c1.rounds == 10, "rounds mismatch")
+        assert(c1.mode == "hard", "mode mismatch")
+        assert(c1:get_summary() == "5_10_hard", "method call failed")
+
+        assert(Combat.CombatResult ~= nil, "CombatResult missing")
+        local res = Combat.CombatResult.init({ victory = true })
+        assert(res.victory == true, "CombatResult init failed")
+
+        local mod = require("combat")
+        local c2 = mod.Combat.init({ enemies = 3, rounds = 7, mode = "easy" })
+        assert(c2:get_summary() == "3_7_easy", "kwargs call failed")
+
+        os.exit(0)
+        """)
+      res = subprocess.run([lua_bin, "test_interop.lua"], cwd=tmp_dir, capture_output=True, text=True)
+      self.assertEqual(res.returncode, 0, f"Lua error: {res.stderr}")
+
+  def test_destructor_block_exit_lifo(self):
+    """Verifies that destructors are called in reverse order of declaration (LIFO) at block exit."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let r1 = Resource { id = 1 };
+      let r2 = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r2)", lua_code)
+    self.assertIn("_sapphire_del(r1)", lua_code)
+    # Check LIFO order: r2 destroyed before r1
+    idx_r2 = lua_code.index("_sapphire_del(r2)")
+    idx_r1 = lua_code.index("_sapphire_del(r1)")
+    self.assertLess(idx_r2, idx_r1)
+
+  def test_destructor_return_rvo_elision(self):
+    """Verifies that returned identifiers are elided from local destructor calls upon function return."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func create_resource(): Resource {
+      let temp = Resource { id = 10 };
+      let keep = Resource { id = 20 };
+      return keep;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(temp)", lua_code)
+    self.assertNotIn("_sapphire_del(keep)", lua_code)
+
+  def test_destructor_loop_break(self):
+    """Verifies that destructors run before break statements in loops."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      while true {
+        let r = Resource { id = 1 };
+        break;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    func_idx = lua_code.index("loop_test")
+    del_idx = lua_code.index("_sapphire_del(r)", func_idx)
+    break_idx = lua_code.index("break\n", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_return_complex_expression(self):
+    """Verifies that non-trivial return expressions evaluate to temporaries before destructors run."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func calc(): int {
+      let r = Resource { id = 10 };
+      return r.id * 2;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("local _ret_val_1 = ", lua_code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    self.assertIn("return _ret_val_1", lua_code)
+    ret_calc_idx = lua_code.index("local _ret_val_1 = ")
+    del_idx = lua_code.index("_sapphire_del(r)", ret_calc_idx)
+    ret_idx = lua_code.index("return _ret_val_1", del_idx)
+    self.assertLess(ret_calc_idx, del_idx)
+    self.assertLess(del_idx, ret_idx)
+
+  def test_destructor_loop_continue(self):
+    """Verifies that destructors run before continue statements in loops."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func loop_test() {
+      for i in range(5) {
+        let r = Resource { id = i };
+        continue;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+    func_idx = lua_code.index("loop_test")
+    del_idx = lua_code.index("_sapphire_del(r)", func_idx)
+    break_idx = lua_code.index("break\n", func_idx)
+    self.assertLess(del_idx, break_idx)
+
+  def test_destructor_from_function_and_method_call(self):
+    """Verifies that variables receiving results from functions/methods returning destructible types are tracked."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      static func create(): Resource {
+        return Resource { id = 1 };
+      }
+    }
+    func make_res(): Resource {
+      return Resource { id = 2 };
+    }
+    func test() {
+      let r1 = make_res();
+      let r2 = Resource.create();
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r1)", lua_code)
+    self.assertIn("_sapphire_del(r2)", lua_code)
+
+  def test_destructor_from_variable_assignment(self):
+    """Verifies that variables moved from destructible variables are tracked and conditional moves emit drop-flag resets in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test(cond: bool) {
+      let a = Resource { id = 1 };
+      if cond {
+        let b = move a;
+        consume(move b);
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("a = nil", lua_code)
+    self.assertIn("_sapphire_del(a)", lua_code)
+
+  def test_destructor_live_var_reassignment(self):
+    """Verifies reassigning a live destructible var destroys the prior value first in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      var a = Resource { id = 1 };
+      a = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertGreaterEqual(test_body.count("_sapphire_del(a)"), 2)
+
+  def test_destructor_move_suppresses_source_destructor(self):
+    """Verifies moving a resource suppresses destructor on source in Lua."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func test() {
+      let a = Resource { id = 1 };
+      let b = move a;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(b)", lua_code)
+    self.assertNotIn("_sapphire_del(a)", lua_code)
+
+  def test_destructor_move_into_function_destroys_once_after_call(self):
+    """Verifies move into borrowed function destroys source once after call (no leak or double-drop)."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      let a = Resource { id = 1 };
+      consume(move a);
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertEqual(test_body.count("_sapphire_del(a)"), 1)
+    self.assertLess(test_body.index("consume(a)"), test_body.index("_sapphire_del(a)"))
+    self.assertLess(test_body.index("_sapphire_del(a)"), test_body.index("a = nil"))
+
+  def test_destructor_move_reinitialization(self):
+    """Verifies reinitializing a moved variable restores its destructor."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func consume(r: Resource) {}
+    func test() {
+      var a = Resource { id = 1 };
+      consume(move a);
+      a = Resource { id = 2 };
+    }
+    """
+    lua_code = self._transpile(code)
+    test_idx = lua_code.index("function test()")
+    test_body = lua_code[test_idx:]
+    self.assertIn("_sapphire_del(a)", test_body)
+
+  def test_destructor_inherited_from_parent(self):
+    """Verifies that child structs inherit parent destructor tracking."""
+    code = """
+    struct BaseResource {
+      var id: int;
+    }
+    impl BaseResource {
+      func __del__() {}
+    }
+    struct ChildResource: BaseResource {
+      var tag: String;
+    }
+    func test() {
+      let c = ChildResource { id = 1, tag = "test" };
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(c)", lua_code)
+
+  def test_destructor_optional_unwrapping(self):
+    """Verifies that variables unwrapped via `if let x ?= opt` have their destructors called at block exit."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func get_opt(ok: bool): Resource? {
+      if ok {
+        return Resource { id = 1 };
+      }
+      return none;
+    }
+    func test() {
+      if let r ?= get_opt(ok = true) {
+        let x = r.id;
+      }
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+
+  def test_destructor_multi_return_destructuring(self):
+    """Verifies that multi-return values are both elided on return, and tracked on destructuring assignment."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+    }
+    func make_pair(): Resource, Resource {
+      let a = Resource { id = 1 };
+      let b = Resource { id = 2 };
+      return a, b;
+    }
+    func test() {
+      let x, y = make_pair();
+    }
+    """
+    lua_code = self._transpile(code)
+    func_pair = lua_code.index("make_pair")
+    func_test = lua_code.index("function test()")
+    # In make_pair, neither a nor b should be destroyed (both elided by RVO)
+    make_pair_code = lua_code[func_pair:func_test]
+    self.assertNotIn("_sapphire_del(a)", make_pair_code)
+    self.assertNotIn("_sapphire_del(b)", make_pair_code)
+    # In test(), both x and y should be destroyed in LIFO order (y then x)
+    test_code = lua_code[func_test:]
+    self.assertIn("_sapphire_del(y)", test_code)
+    self.assertIn("_sapphire_del(x)", test_code)
+    self.assertLess(test_code.index("_sapphire_del(y)"), test_code.index("_sapphire_del(x)"))
+
+  def test_coroutine_yield_in_match_statement(self):
+    """Verifies Lua transpilation of coroutine yield inside a statement-level match block."""
+    code = """
+    enum Step { First, Second }
+
+    func gen(s: Step): Coroutine<int> {
+      match s {
+        Step.First -> {
+          yield 10;
+        },
+        Step.Second -> {
+          yield 20;
+        },
+      };
+      yield 30;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("coroutine.yield(10)", lua_code)
+    self.assertIn("coroutine.yield(20)", lua_code)
+    self.assertIn("coroutine.yield(30)", lua_code)
+
+  def test_transpile_file_with_shared_runtime_module_lua(self):
+    """Verifies that transpile_file(use_runtime_module=True) emits _sapphire_runtime.lua and executes cleanly."""
+    code = """
+    func main() {
+      var arr = [1, 2, 3];
+      arr.push(4);
+      let doubled = arr.map(x -> x * 2);
+      print(doubled.join(","));
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sp_path = os.path.join(tmpdir, "app.sp")
+      lua_path = os.path.join(tmpdir, "app.lua")
+      with open(sp_path, "w", encoding="utf-8") as f:
+        f.write(code)
+      transpile_file(sp_path, lua_path, target="lua", quiet=True, use_runtime_module=True)
+      rt_path = os.path.join(tmpdir, "_sapphire_runtime.lua")
+      self.assertTrue(os.path.exists(rt_path))
+      with open(lua_path, encoding="utf-8") as f:
+        lua_content = f.read()
+      self.assertIn("_sp_load_runtime()", lua_content)
+      self.assertNotIn("local function _create_proto_object", lua_content)
+      lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      if lua_bin:
+        proc = subprocess.run([lua_bin, lua_path], capture_output=True, text=True, check=True)
+        self.assertEqual(proc.stdout.strip(), "2,4,6,8")
+
+  def test_defaults_and_base_init_preserve_module_context_lua(self):
+    """Verifies _make_expr_transpiler preserves imported_modules, _identifier_map, and constants in defaults/base_inits."""
+    code = """
+    let STANDING_FRAME: int = 1;
+
+    struct Base {
+      var val: int;
+    }
+    impl Base {
+      func __init__(val: int) {
+        self.val = val;
+      }
+    }
+
+    struct Child: Base {
+      var frame: int = STANDING_FRAME;
+    }
+    impl Child {
+      func __init__(v: int): Base(val = v + STANDING_FRAME) {}
+      func reset(frame: int = STANDING_FRAME): int {
+        return self.val + self.frame + frame;
+      }
+    }
+
+    func global_fn(frame: int = STANDING_FRAME): int {
+      return frame * 10;
+    }
+
+    func main() {
+      let c = Child(v = 5);
+      print(f"{c.reset()},{global_fn()}");
+    }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+      dep_sp = os.path.join(tmpdir, "helpers.sp")
+      with open(dep_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export {\n"
+            "  STEP,\n"
+            "  bonus,\n"
+            "}\n"
+            "let STEP: int = 3;\n"
+            "func bonus(): int {\n"
+            "  return 4;\n"
+            "}\n"
+        )
+
+      main_code = (
+          "import helpers;\n"
+          + code.replace("func global_fn(frame: int = STANDING_FRAME): int {\n",
+                         "struct HelperUser {\n"
+                         "  var s: int = helpers.STEP;\n"
+                         "}\n"
+                         "func global_fn(frame: int = helpers.STEP + helpers.bonus()): int {\n")
+      )
+      main_sp = os.path.join(tmpdir, "main.sp")
+      dep_lua = os.path.join(tmpdir, "helpers.lua")
+      main_lua = os.path.join(tmpdir, "main.lua")
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(main_code)
+
+      transpile_file(dep_sp, dep_lua, target="lua", quiet=True)
+      transpile_file(main_sp, main_lua, target="lua", quiet=True)
+      with open(main_lua, encoding="utf-8") as f:
+        main_lua_text = f.read()
+
+      self.assertIn("helpers.STEP", main_lua_text)
+      self.assertIn("helpers.bonus()", main_lua_text)
+      self.assertNotIn("helpers:bonus()", main_lua_text)
+
+      lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1") or shutil.which("lua5.4")
+      if lua_bin:
+        env = os.environ.copy()
+        env["LUA_PATH"] = f"{tmpdir}/?.lua;;"
+        proc = subprocess.run([lua_bin, main_lua], capture_output=True, text=True, check=True, env=env)
+        self.assertEqual(proc.stdout.strip(), "8,70")
+
+  def test_scoped_buffer_preserves_identifier_map_lua(self):
+    """Verifies LuaTranspiler.capture_expr preserves _identifier_map and imported_modules."""
+    lt = LuaTranspiler()
+    lt.known_structs.add("MyStruct")
+    lt.imported_modules.add("mod")
+    lt._identifier_map["local_var"] = "_val_local_var"
+    lt.emit("root")
+    captured = lt.capture_expr(
+        CallNode(
+            MemberAccessNode(IdentifierNode("mod"), "fn", False),
+            [ArgumentNode(None, IdentifierNode("local_var"))],
+        )
+    )
+    self.assertEqual(captured, "mod.fn(_val_local_var)")
+    self.assertEqual(lt.get_output(), "root")
+    self.assertEqual(lt.current_column, 4)
+
+  def _run_lua_project(self, files: dict[str, str], entry: str = "main.sp") -> str:
+    """Transpiles and executes a multi-file Sapphire project via Lua."""
+    lua_bin = (
+        shutil.which("lua")
+        or shutil.which("luajit")
+        or shutil.which("lua5.1")
+        or shutil.which("lua5.4")
+    )
+    if not lua_bin:
+      self.skipTest("lua interpreter not found in PATH")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      tmp_path = pathlib.Path(tmp_dir)
+      for rel_path, content in files.items():
+        sp_file = tmp_path / rel_path
+        sp_file.parent.mkdir(parents=True, exist_ok=True)
+        sp_file.write_text(content, encoding="utf-8")
+      main_sp = tmp_path / entry
+      main_lua = main_sp.with_suffix(".lua")
+      for rel_path in files:
+        if rel_path != entry:
+          mod_sp = tmp_path / rel_path
+          transpile_file(
+              str(mod_sp),
+              output_file=str(mod_sp.with_suffix(".lua")),
+              target="lua",
+              quiet=True,
+          )
+      transpile_file(
+          str(main_sp),
+          output_file=str(main_lua),
+          target="lua",
+          quiet=True,
+      )
+      env = os.environ.copy()
+      env["LUA_PATH"] = f"{tmp_dir}/?.lua;{tmp_dir}/?/init.lua;" + env.get(
+          "LUA_PATH", ""
+      )
+      res = subprocess.run(
+          [lua_bin, str(main_lua)],
+          cwd=tmp_dir,
+          capture_output=True,
+          text=True,
+          check=True,
+          env=env,
+      )
+      return res.stdout.strip()
+
+  def test_named_args_skipped_middle_default_and_cross_module_private_lua(self):
+    """Verifies skipped middle defaults locally and across modules with private defaults."""
+    out = self._run_lua_project({
+        "defs.sp": """
+        let PRIVATE_DEFAULT_HP: int = 10;
+
+        func create_enemy(id: int, hp: int = PRIVATE_DEFAULT_HP, unit_hp: int = 5): int {
+          return id * 100 + hp + unit_hp;
+        }
+
+        struct Builder {
+          var prefix: int;
+        }
+
+        impl Builder {
+          func __init__(prefix: int = PRIVATE_DEFAULT_HP) {
+            self.prefix = prefix;
+          }
+
+          func make_score(a: int, b: int = PRIVATE_DEFAULT_HP, c: int = 1): int {
+            return self.prefix + a + b + c;
+          }
+        }
+
+        export {
+          create_enemy,
+          Builder,
+        }
+        """,
+        "main.sp": """
+        import defs;
+
+        func local_enemy(id: int, hp: int = 10, unit_hp: int = 5): int {
+          return id * 100 + hp + unit_hp;
+        }
+
+        func main() {
+          let r1 = local_enemy(id = 1, unit_hp = 19);
+          let r2 = defs.create_enemy(id = 1, unit_hp = 19);
+          let b = defs.Builder();
+          let r3 = b.make_score(c = 7, a = 2);
+          let r4 = defs.Builder(prefix = 3).make_score(a = 1);
+          print(f"{r1},{r2},{r3},{r4}");
+        }
+        """,
+    })
+    self.assertEqual(out, "129,129,29,15")
+
+  def test_cross_module_optional_sentinels_lua(self):
+    """Verifies _SP_UNSET and _SP_NONE sentinels match across compiled Lua modules."""
+    out = self._run_lua_project({
+        "defs.sp": """
+        struct Config {
+          var label: String = "default";
+          var opt: String? = "fallback";
+        }
+
+        func make_label(a: int, mid: String? = none, tail: String? = none): String {
+          let m = mid ?? "none";
+          let t = tail ?? "none";
+          return f"{a}:{m}:{t}";
+        }
+
+        func read_opt(c: Config): String {
+          return c.opt ?? "was_none";
+        }
+
+        export {
+          Config,
+          make_label,
+          read_opt,
+        }
+        """,
+        "main.sp": """
+        import defs;
+
+        func main() {
+          let s1 = defs.make_label(a = 7, tail = "end");
+          let cfg = defs.Config { label = "x", opt = none };
+          let s2 = defs.read_opt(cfg);
+          print(f"{s1}|{s2}");
+        }
+        """,
+    })
+    self.assertEqual(out, "7:none:end|was_none")
+
+  def test_love2d_new_font_sized_export_lua(self):
+    """Verifies love.graphics.newFontSized emits love.graphics.newFont(size[, hinting])."""
+    code = """
+    import lib.love2d.enums;
+    import lib.love2d.graphics;
+    import lib.love2d.love2d;
+
+    @extern
+    var love: love2d.LoveEngine;
+
+    func load_fonts(): graphics.Font, graphics.Font {
+      let f1 = love.graphics.newFontSized(16);
+      let f2 = love.graphics.newFontSized(8, enums.HintingMode.Mono);
+      return f1, f2;
+    }
+    """
+    lua_code = self._transpile(code)
+    self.assertIn("love.graphics.newFont(16)", lua_code)
+    self.assertIn("love.graphics.newFont(8, enums.HintingMode.Mono)", lua_code)
+
+  def test_reordered_named_args_preserve_left_to_right_eval_order_lua(self):
+    """Verifies left-to-right side effects across expr, multi-return, and stmt calls."""
+    out = self._run_lua_project({
+        "main.sp": """
+        var log: String = "";
+
+        func step(tag: String, val: int): int {
+          log = log + tag;
+          return val;
+        }
+
+        func pair_calc(a: int, b: int, c: int): int, int {
+          return a * 100 + b * 10 + c, a + b + c;
+        }
+
+        func record(a: int, b: int = 2, c: int = 3) {
+          log = f"{log}[{a},{b},{c}]";
+        }
+
+        func main() {
+          let x, y = pair_calc(c = step("C", 3), b = step("B", 2), a = step("A", 1));
+          record(c = step("Z", 9), a = step("X", 4));
+          print(f"{x},{y},{log}");
+        }
+        """,
+    })
+    self.assertEqual(out, "123,6,CBAZX[4,2,9]")
+
+  def test_optional_chaining_reordered_named_args_lua(self):
+    """Verifies obj?.compute(...) short-circuits on none and preserves eval order otherwise."""
+    out = self._run_lua_project({
+        "main.sp": """
+        var log: String = "";
+
+        func step(n: int): int {
+          log = f"{log}{n}";
+          return n;
+        }
+
+        struct Worker {
+          var base: int;
+        }
+
+        impl Worker {
+          func compute(a: int, b: int = 10, c: int = 20): int {
+            return self.base + a * 100 + b * 10 + c;
+          }
+        }
+
+        func run_none(w: Worker?): int? {
+          return w?.compute(c = step(1), a = step(2));
+        }
+
+        func main() {
+          let w1: Worker? = Worker { base = 1000 };
+          let w2: Worker? = none;
+          let r1 = w1?.compute(c = step(1), a = step(2));
+          w1?.compute(c = step(3), a = step(4));
+          let r2 = run_none(w2);
+          let has_r2 = r2 != none;
+          print(f"{r1 ?? -1},{has_r2},{log}");
+        }
+        """,
+    })
+    self.assertEqual(out, "1301,false,1234")
+
+  def test_constructors_base_init_cross_module_and_false_bool_lua(self):
+    """Verifies constructor skipped defaults, : Parent(...), cross-module, and false bool."""
+    out = self._run_lua_project({
+        "shapes.sp": """
+        struct Box {
+          var w: int;
+          var h: int;
+          var ok: bool;
+        }
+
+        impl Box {
+          func __init__(w: int, h: int = 10, ok: bool = true) {
+            self.w = w;
+            self.h = h;
+            self.ok = ok;
+          }
+        }
+
+        export {
+          Box,
+        }
+        """,
+        "main.sp": """
+        import shapes;
+
+        var log: String = "";
+
+        func step(tag: String, val: int): int {
+          log = log + tag;
+          return val;
+        }
+
+        struct Base {
+          var a: int;
+          var b: int;
+          var c: int;
+        }
+
+        impl Base {
+          func __init__(a: int, b: int = 10, c: int = 20) {
+            self.a = a;
+            self.b = b;
+            self.c = c;
+          }
+        }
+
+        struct Child: Base {
+          var d: int;
+        }
+
+        impl Child {
+          func __init__(x: int, z: int) : Base(c = step("C", z), a = step("A", x)) {
+            self.d = 1;
+          }
+        }
+
+        func main() {
+          let b = shapes.Box(ok = false, w = 5);
+          let c = Child(z = 7, x = 3);
+          print(f"{b.w},{b.h},{b.ok},{c.a},{c.b},{c.c},{log}");
+        }
+        """,
+    })
+    self.assertEqual(out, "5,10,false,3,10,7,CA")
+
+  def test_range_named_args_lua(self):
+    """Verifies range(stop = 10, step = 2) and range(start = 2, stop = 8) in Lua."""
+    out = self._run_lua_project({
+        "main.sp": """
+        func main() {
+          var s1 = "";
+          for i in range(stop = 10, step = 2) {
+            s1 = f"{s1}{i}";
+          }
+          var s2 = "";
+          for j in range(start = 2, stop = 8) {
+            s2 = f"{s2}{j}";
+          }
+          print(f"{s1}|{s2}");
+        }
+        """,
+    })
+    self.assertEqual(out, "02468|234567")
+
+  def test_qualified_ancestor_static_dispatch_cross_module_lua(self):
+    """Verifies 3-level cross-module, multi-parent, named-arg, and coroutine ancestor dispatch in Lua."""
+    out = self._run_lua_project({
+        "entity.sp": """
+        struct Entity {
+          var hp: int;
+        }
+
+        impl Entity {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            self.hp = self.hp + dt * mult + bonus;
+          }
+
+          func base_tag(): int {
+            return self.hp;
+          }
+        }
+
+        export {
+          Entity,
+        }
+        """,
+        "character.sp": """
+        import entity;
+
+        struct Character: entity.Entity {
+          var shield: int;
+        }
+
+        impl Character {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            entity.Entity.update(self, mult = mult, dt = dt);
+            self.shield = self.shield + 1;
+          }
+        }
+
+        export {
+          Character,
+        }
+        """,
+        "main.sp": """
+        import character;
+
+        struct Flyer {
+          var alt: int;
+        }
+
+        impl Flyer {
+          var func glide(d: int) {
+            self.alt = self.alt + d;
+          }
+        }
+
+        struct Enemy: character.Character, Flyer {
+          var rage: int;
+        }
+
+        impl Enemy {
+          var func update(dt: int, bonus: int = 10, mult: int = 2) {
+            character.Character.update(self, mult = mult, dt = dt);
+            Flyer.glide(self, 3);
+            self.rage = character.Character.base_tag(self);
+          }
+        }
+
+        func main() {
+          var e = Enemy { hp = 5, shield = 0, alt = 2, rage = 0 };
+          e.update(4, mult = 3);
+          print(f"{e.hp},{e.shield},{e.alt},{e.rage}");
+        }
+        """,
+    })
+    self.assertEqual(out, "27,1,5,27")
+
+  def test_cross_module_trait_inheritance_and_partial_override_lua(self):
+    """Verifies 3-level cross-module transitive trait inheritance and partial overrides in Lua."""
+    out = self._run_lua_project({
+        "base.sp": """
+        trait Greeter {
+          func prefix(): String;
+          func suffix(): String;
+        }
+
+        struct Base {
+          var name: String;
+        }
+
+        impl Greeter for Base {
+          func prefix(): String {
+            return "Hello";
+          }
+
+          func suffix(): String {
+            return self.name;
+          }
+        }
+
+        export {
+          Greeter,
+          Base,
+        }
+        """,
+        "mid.sp": """
+        import base;
+
+        struct Mid: base.Base {
+          var tag: String;
+        }
+
+        export {
+          Mid,
+        }
+        """,
+        "leaf.sp": """
+        import base;
+        import mid;
+
+        struct Leaf: mid.Mid {
+          var badge: String;
+        }
+
+        impl base.Greeter for Leaf {
+          func suffix(): String {
+            return f"{self.name}:{self.tag}:{self.badge}";
+          }
+        }
+
+        export {
+          Leaf,
+        }
+        """,
+        "main.sp": """
+        import base;
+        import mid;
+        import leaf;
+
+        func greet(g: base.Greeter): String {
+          return f"{g.prefix()}-{g.suffix()}";
+        }
+
+        func main() {
+          let m = mid.Mid { name = "A", tag = "M" };
+          let l = leaf.Leaf { name = "B", tag = "M", badge = "L" };
+          let s1 = greet(m);
+          let s2 = greet(l);
+          let s3 = f"{l.prefix()}-{l.suffix()}";
+          print(f"{s1}|{s2}|{s3}");
+        }
+        """,
+    })
+    self.assertEqual(out, "Hello-A|Hello-B:M:L|Hello-B:M:L")
+
+  def test_cross_module_trait_default_methods_lua(self):
+    """Verifies cross-module default trait methods, defining-module lexical scope, and overrides in Lua."""
+    out = self._run_lua_project({
+        "hooks.sp": """
+        let PRIVATE_PREFIX = "HOOK";
+
+        trait Lifecycle {
+          func id(): String;
+
+          func label(): String {
+            return f"{PRIVATE_PREFIX}:{self.id()}";
+          }
+
+          var func on_enter() {}
+        }
+
+        export {
+          Lifecycle,
+        }
+        """,
+        "main.sp": """
+        import hooks;
+
+        struct BaseState {
+          var name: String;
+          var entered: int = 0;
+        }
+
+        impl hooks.Lifecycle for BaseState {
+          func id(): String {
+            return self.name;
+          }
+        }
+
+        struct CustomState: BaseState {}
+
+        impl hooks.Lifecycle for CustomState {
+          var func on_enter() {
+            self.entered += 1;
+          }
+        }
+
+        func run_hook(var h: hooks.Lifecycle): String {
+          h.on_enter();
+          return h.label();
+        }
+
+        func main() {
+          var b = BaseState { name = "base" };
+          var c = CustomState { name = "custom" };
+          let s1 = run_hook(b);
+          let s2 = run_hook(c);
+          print(f"{s1}|{s2}|{b.entered},{c.entered}");
+        }
+        """,
+    })
+    self.assertEqual(out, "HOOK:base|HOOK:custom|0,1")
+
+  def _run_lua_code(self, lua_code: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Executes raw Lua code via the available Lua interpreter."""
+    lua_bin = shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
+    self.assertIsNotNone(lua_bin, "Lua interpreter required to run Lua runtime tests.")
+    with tempfile.NamedTemporaryFile(
+        suffix=".lua", mode="w", delete=False, encoding="utf-8"
+    ) as tmp:
+      tmp.write(lua_code)
+      tmp_path = tmp.name
+    try:
+      proc = subprocess.run(
+          [lua_bin, tmp_path],
+          capture_output=True, text=True, timeout=10,
+      )
+      if check and proc.returncode != 0:
+        self.fail(f"Lua execution failed:\n{proc.stderr}\nCode:\n{lua_code[-1000:]}")
+      return proc
+    finally:
+      os.unlink(tmp_path)
+
+  def test_lua_oob_array_and_missing_map_key_panic(self):
+    """Verifies dynamic OOB array access and missing map key access panic in Lua."""
+    arr_code = """
+    func main() {
+      let arr = [1, 2, 3];
+      var i = 5;
+      let v = arr[i];
+      print(String.from(v));
+    }
+    """
+    arr_lua = self._transpile(arr_code)
+    arr_proc = self._run_lua_code(arr_lua, check=False)
+    self.assertNotEqual(arr_proc.returncode, 0)
+    self.assertIn("out of bounds", arr_proc.stderr.lower())
+
+    map_code = """
+    func main() {
+      let m = {"a": 1};
+      let v = m["missing"];
+      print(String.from(v));
+    }
+    """
+    map_lua = self._transpile(map_code)
+    map_proc = self._run_lua_code(map_lua, check=False)
+    self.assertNotEqual(map_proc.returncode, 0)
+    self.assertIn("keyerror", map_proc.stderr.lower())
+
+  def test_lua_export_function_as_default_and_bijective_keyword_mangling(self):
+    """Verifies `export { fn as default }` does not index a function and `end` vs `end_` never collide."""
+    code = """
+    export {
+      helper as default,
+      end,
+      end_,
+    }
+
+    func helper(x: int): int {
+      return x * 2;
+    }
+
+    func end(end: int, end_: int): int {
+      return end + end_;
+    }
+
+    func end_(v: int): int {
+      return v + 100;
+    }
+    """
+    lua_mod = self._transpile(code)
+    driver = (
+        "local mod = (function()\n"
+        f"{lua_mod}\n"
+        "end)()\n"
+        "print(mod.default(5), mod.end_(2, 3), mod.end__(7))\n"
+    )
+    proc = self._run_lua_code(driver)
+    self.assertEqual(proc.stdout.strip().split(), ["10", "5", "107"])
+
+  def test_lua_dev_mode_preserves_false_global(self):
+    """Verifies dev_mode=True preserves pre-existing boolean `false` module globals across hot reload."""
+    code = """
+    var flag: bool = true;
+    """
+    lexer = SapphireLexer(InputStream(code))
+    stream = CommonTokenStream(lexer)
+    parser = SapphireParser(stream)
+    ast = ASTBuilder().visit(parser.program())
+    TypeChecker().check(ast)
+    lua_code = LuaTranspiler(dev_mode=True).transpile(ast)
+    driver = (
+        "flag = false\n"
+        f"{lua_code}\n"
+        "print(tostring(flag))\n"
+    )
+    proc = self._run_lua_code(driver)
+    self.assertEqual(proc.stdout.strip(), "false")
+
+  def test_lua_200_local_limit_stress(self):
+    """Verifies _SP_RT consolidation and @test filtering keep large modules under Lua 5.1's 200-local limit."""
+    lines = []
+    for i in range(175):
+      lines.append(f"func fn_{i}(): int {{ return {i}; }}")
+    for i in range(30):
+      lines.append(f"@test\nfunc test_fn_{i}() {{ let x = fn_{i}(); }}")
+    lines.append("func main() { print(String.from(fn_0() + fn_174())); }")
+    source = "\n".join(lines)
+    lua_code = self._transpile(source)
+    self.assertNotIn("test_fn_0", lua_code)
+    proc = self._run_lua_code(lua_code)
+    self.assertEqual(proc.stdout.strip(), "174")
+
+  def test_lua_sourcemap_demangler_percent_escaping(self):
+    """Verifies LUA_SOURCEMAP_DEMANGLER escapes `%` characters before gsub replacement."""
+    from sapphire.code_gen.lua_runtime import LUA_SOURCEMAP_DEMANGLER
+    driver = (
+        'local _SP_LINE_MAP = { [10] = { file = "app.sp", line = 42, text = "let s = 100% %1" } }\n'
+        f"{LUA_SOURCEMAP_DEMANGLER}\n"
+        'local msg = "app.lua:10: error 100% failed %s %1"\n'
+        'print(_sapphire_demangle_traceback(msg))\n'
+    )
+    proc = self._run_lua_code(driver)
+    self.assertIn("app.sp:42: (at app.lua:10) -> `let s = 100% %1`", proc.stdout.strip())
+    self.assertIn("error 100% failed %s %1", proc.stdout.strip())
+
+
+# ---------------------------------------------------------------------------
+# End-to-end integration tests
+# ---------------------------------------------------------------------------
+
+_E2E_DIR = pathlib.Path(__file__).parent.parent.parent / "testing" / "e2e"
+_FIXTURES_DIR = _E2E_DIR
+
+
+class TestSharedFixtures(unittest.TestCase):
+  """Transpiles each shared .sp e2e test with LuaTranspiler and verifies output.
+
+  Two levels of verification are performed:
+
+  1. **Transpilation succeeds** — the test file must produce Lua output without
+     raising `NotImplementedError` from `generic_visit`. This confirms
+     that the Lua backend covers every AST node used by the test file.
+
+  2. **Execution matches expectations** (optional) — if a Lua 5.1+ binary is
+     available in `PATH`, the generated Lua is executed and the return value
+     of each `@test` function is compared against the shared ground truth in
+     `testing/e2e/_expectations.py`. Skipped automatically when Lua is
+     not installed.
+
+  This class is structurally mirrored by `TestSharedFixtures` in
+  `python_transpiler_test.py`.
+  """
+
+  @classmethod
+  def _load_expectations(cls):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_expectations", _E2E_DIR / "_expectations.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.EXPECTATIONS
+
+  def _transpile_fixture(self, source: str) -> str:
+    """Parse *source* and return the generated Lua code string."""
+    from sapphire.parser.ast_builder import ASTBuilder as _Builder
+    from sapphire.parser.gen.SapphireLexer import SapphireLexer as _Lexer
+    from sapphire.parser.gen.SapphireParser import SapphireParser as _Parser
+    from sapphire.semantics.type_checker import TypeChecker as _Checker
+
+
+    input_stream = InputStream(source)
+    lexer = _Lexer(input_stream)
+    stream = CommonTokenStream(lexer)
+    parser = _Parser(stream)
+    tree = parser.program()
+    ast = _Builder().visit(tree)
+    checker = _Checker()
+    checker.check(ast)
+    if checker.errors:
+      raise AssertionError(f"Type errors in fixture:\n{source}\nErrors: {checker.errors}")
+    return LuaTranspiler(test_mode=True).transpile(ast)
+
+  def test_lua_if_let_destructuring_and_optional_method_args(self):
+    """Verifies multi-binding if-let tuple destructuring, RAII if-let bindings, and optional method arguments."""
+    code = """
+    struct Resource {
+      var id: int;
+    }
+    impl Resource {
+      func __del__() {}
+      func add(a: int, b: int): int {
+        return self.id + a + b;
+      }
+    }
+
+    func maybe_pair(ok: bool): [int]? {
+      if ok {
+        return [2, 3];
+      }
+      return none;
+    }
+
+    func test_edges(): int {
+      var opt_res: Resource? = Resource { id = 10 };
+      let sum_opt = opt_res?.add(4, 5) ?? 0;
+
+      var acc = sum_opt;
+      if let a, b ?= maybe_pair(true); a > 0 {
+        acc = acc + a + b;
+      }
+      if let r = Resource { id = 1 }; r.id > 0 {
+        acc = acc + r.id;
+      }
+      if let x = 5; let p1, p2 ?= maybe_pair(true) {
+        acc = acc + x + p1 + p2;
+      }
+      return acc;
+    }
+    """
+    lua_code = self._transpile_fixture(code)
+    self.assertIn("_val_a", lua_code)
+    self.assertIn(":add(4, 5)", lua_code)
+    self.assertIn("_sapphire_del(r)", lua_code)
+
+  def test_host_interop_extern_trait_export_and_on_reload(self):
+    """Verifies trait-typed @extern var, reassignment, @export in trait impl, and @on_reload."""
+    code = """
+    trait Bridge {
+      func compute(x: int): int;
+    }
+
+    @extern var ext_bridge: Bridge;
+    var reload_count: int = 0;
+
+    struct MockBridge {
+      var factor: int = 3;
+    }
+
+    impl Bridge for MockBridge {
+      @export("compute")
+      func compute(x: int): int {
+        return x * self.factor;
+      }
+
+      static func make_default(): MockBridge {
+        return MockBridge { factor = 4 };
+      }
+    }
+
+    @on_reload
+    func handle_reload() {
+      reload_count += 1;
+    }
+
+    func run_interop(): int {
+      let initial = ext_bridge.compute(5);
+      ext_bridge = MockBridge.make_default();
+      let swapped = ext_bridge.compute(5);
+      handle_reload();
+      return initial * 100 + swapped * 10 + reload_count;
+    }
+
+    export {
+      run_interop,
+    }
+    """
+    lua_code = self._transpile_fixture(code)
+    lua_bin = shutil.which("lua") or shutil.which("lua5.1") or shutil.which("lua5.4")
+    if not lua_bin:
+      self.skipTest("Lua interpreter not found on PATH")
+    driver = (
+        "ext_bridge = { compute = function(self, x) return x * 2 end }\n"
+        "local __mod = (function()\n"
+        f"{lua_code}\n"
+        "end)()\n"
+        "local fn = (__mod and __mod.run_interop) or run_interop\n"
+        "print(tostring(fn()))\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        suffix=".lua", mode="w", delete=False, encoding="utf-8"
+    ) as tmp:
+      tmp.write(driver)
+      tmp_path = tmp.name
+    try:
+      proc = subprocess.run(
+          [lua_bin, tmp_path],
+          capture_output=True, text=True, timeout=10,
+      )
+      if proc.returncode != 0:
+        self.fail(f"Lua execution failed: {proc.stderr.strip()}")
+      self.assertEqual(int(float(proc.stdout.strip())), 1202)
+    finally:
+      os.unlink(tmp_path)
+
+  def test_std_utf8_pure_lua_fallback_sub(self):
+    """Verifies std.utf8 pure-Lua fallback matches 0-based exclusive slicing."""
+    lua_bin = (
+        shutil.which("lua")
+        or shutil.which("luajit")
+        or shutil.which("lua5.1")
+        or shutil.which("lua5.4")
+    )
+    if not lua_bin:
+      self.skipTest("Lua interpreter not found on PATH")
+    lib_path = str(_E2E_DIR.parent.parent / "sapphire" / "lib")
+    driver = (
+        "_G.utf8 = nil\n"
+        "package.preload['utf8'] = nil\n"
+        "package.preload['lua-utf8'] = nil\n"
+        f"package.path = \"{lib_path}/?.lua;{lib_path}/?/init.lua;\"\n"
+        "local u = require('std.utf8')\n"
+        "assert(u.sub('hello', 1, 3) == 'el')\n"
+        "assert(u.sub('hello', 1, -1) == 'ell')\n"
+        "assert(u.sub('hello', 0, 0) == '')\n"
+        "assert(u.sub('a💡b', 1, 2) == '💡')\n"
+        "print('OK')\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        suffix=".lua", mode="w", delete=False, encoding="utf-8"
+    ) as tmp:
+      tmp.write(driver)
+      tmp_path = tmp.name
+    try:
+      proc = subprocess.run(
+          [lua_bin, tmp_path],
+          capture_output=True, text=True, timeout=10,
+      )
+      if proc.returncode != 0:
+        self.fail(f"Lua execution failed: {proc.stderr.strip()}")
+      self.assertEqual(proc.stdout.strip(), "OK")
+    finally:
+      os.unlink(tmp_path)
+
+  def _make_fixture_test(fixture_name: str):  # noqa: N805
+    """Factory producing a test method for *fixture_name*."""
+    def _test(self):
+      fixture_path = _FIXTURES_DIR / fixture_name
+      if not fixture_path.exists():
+        self.skipTest(f"Fixture not found: {fixture_path}")
+      source = fixture_path.read_text(encoding="utf-8")
+
+      # Level 1: transpilation must not raise
+      lua_code = self._transpile_fixture(source)
+      self.assertIsInstance(lua_code, str)
+      self.assertGreater(len(lua_code), 0)
+
+      # Level 2: optional execution via a Lua binary
+      lua_bin = (
+          shutil.which("lua")
+          or shutil.which("luajit")
+          or shutil.which("lua5.1")
+          or shutil.which("lua5.4")
+      )
+      if not lua_bin:
+        return  # Lua not available — transpilation check is sufficient
+
+      expectations = self._load_expectations().get(fixture_name, {})
+      if not expectations:
+        return  # Nothing to assert at runtime
+
+      repo_root = _E2E_DIR.parent.parent
+      lib_path = str(repo_root / "sapphire" / "lib")
+      extra_lua_path = ""
+      dep_tmp_ctx = None
+      if "import testing.e2e." in source:
+        dep_tmp_ctx = tempfile.TemporaryDirectory()
+        dep_root = pathlib.Path(dep_tmp_ctx.name)
+        for line in source.splitlines():
+          stripped = line.strip()
+          if stripped.startswith("import testing.e2e."):
+            mod_path = stripped.split()[1].rstrip(";")
+            parts = mod_path.split(".")
+            sp_path = repo_root.joinpath(*parts).with_suffix(".sp")
+            if sp_path.exists():
+              dep_lua = self._transpile_fixture(
+                  sp_path.read_text(encoding="utf-8")
+              )
+              out_file = dep_root.joinpath(*parts).with_suffix(".lua")
+              out_file.parent.mkdir(parents=True, exist_ok=True)
+              out_file.write_text(dep_lua, encoding="utf-8")
+        extra_lua_path = f"{dep_root}/?.lua;{dep_root}/?/init.lua;"
+      try:
+        for fn_name, expected in expectations.items():
+          with self.subTest(fixture=fixture_name, fn=fn_name):
+            # Wrap the fixture in a Lua driver that executes within an IIFE
+            # and has package.path configured for std and lib modules.
+            driver = (
+                f"package.path = \"{extra_lua_path}{lib_path}/?.lua;{lib_path}/?/init.lua;\" .. package.path\n"
+                "local __mod = (function()\n"
+                f"{lua_code}\n"
+                "end)()\n"
+                f"local fn = (__mod and __mod.{fn_name}) or {fn_name}\n"
+                f"print(tostring(fn()))\n"
+            )
+            with tempfile.NamedTemporaryFile(
+                suffix=".lua", mode="w", delete=False, encoding="utf-8"
+            ) as tmp:
+              tmp.write(driver)
+              tmp_path = tmp.name
+            try:
+              proc = subprocess.run(
+                  [lua_bin, tmp_path],
+                  capture_output=True, text=True, timeout=10,
+              )
+              if proc.returncode != 0:
+                self.fail(
+                    f"Lua execution failed for {fn_name}: {proc.stderr.strip()}"
+                )
+              raw = proc.stdout.strip()
+              # Coerce to the same Python type as the expected value
+              if isinstance(expected, bool):
+                actual = raw == "true"
+              elif isinstance(expected, int):
+                actual = int(float(raw))
+              elif isinstance(expected, float):
+                actual = float(raw)
+              else:
+                actual = raw
+              self.assertEqual(
+                  actual, expected,
+                  f"{fixture_name}::{fn_name} expected {expected!r}, Lua returned {raw!r}",
+              )
+            finally:
+              os.unlink(tmp_path)
+      finally:
+        if dep_tmp_ctx is not None:
+          dep_tmp_ctx.cleanup()
+
+    _test.__name__ = f"test_fixture_{fixture_name.removesuffix('.sp')}"
+    _test.__doc__ = f"Shared fixture: {fixture_name}"
+    return _test
+
+  # Dynamically generate one test method per fixture file
+  if _FIXTURES_DIR.exists():
+    for _fixture_file in sorted(_FIXTURES_DIR.glob("*_test.sp")):
+      _name = f"test_fixture_{_fixture_file.stem}"
+      locals()[_name] = _make_fixture_test(_fixture_file.name)
+
+
+if __name__ == "__main__":
+  unittest.main()

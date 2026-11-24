@@ -8,11 +8,11 @@ describe('Pyodide compiler bundle', () => {
     const bundle = buildCompilerBundle(repoRoot);
 
     expect(bundle.fileCount).toBeGreaterThan(20);
-    expect(bundle.files['src/code_gen/transpiler.py']).toBeDefined();
-    expect(bundle.files['src/semantics/type_checker.py']).toBeDefined();
-    expect(bundle.files['src/parser/gen/SapphireParser.py']).toBeDefined();
-    expect(bundle.files['src/code_gen/llvm_transpiler.py']).toBeUndefined();
-    expect(bundle.files['src/semantics/type_checker_test.py']).toBeUndefined();
-    expect(Object.keys(bundle.files).some((k) => k.startsWith('src/lsp/'))).toBe(false);
+    expect(bundle.files['sapphire/code_gen/transpiler.py']).toBeDefined();
+    expect(bundle.files['sapphire/semantics/type_checker.py']).toBeDefined();
+    expect(bundle.files['sapphire/parser/gen/SapphireParser.py']).toBeDefined();
+    expect(bundle.files['sapphire/code_gen/llvm_transpiler.py']).toBeUndefined();
+    expect(bundle.files['sapphire/semantics/type_checker_basics_test.py']).toBeUndefined();
+    expect(Object.keys(bundle.files).some((k) => k.startsWith('sapphire/lsp/'))).toBe(false);
   });
 });
