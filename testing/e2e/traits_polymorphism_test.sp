@@ -248,12 +248,6 @@ struct ArenaMapState {
   var ticks: int = 0;
 }
 
-impl ArenaMapState {
-  var func init_tag(bonus: int) {
-    self.tag = MapTag { bonus = bonus } in self.arena;
-  }
-}
-
 impl StackGameState for ArenaMapState {
   var func update(var pop_requests: [bool]) {
     self.ticks += 1;
@@ -290,7 +284,7 @@ impl StackStateFactory for MapStateFactory {
     var st = ArenaMapState {
       arena = Arena(),
     };
-    st.init_tag(12);
+    st.tag = MapTag { bonus = 12 } in st.arena;
     return move st;
   }
 }
