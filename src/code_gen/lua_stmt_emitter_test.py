@@ -305,6 +305,93 @@ class TestLuaStmtEmitter(unittest.TestCase):
     self.assertNotIn("NYI: bytecode UCLO", proc.stderr)
     self.assertNotIn("inner loop in root trace", proc.stderr)
 
+  def test_array_and_map_for_loops_native_and_stateless(self):
+    """Verifies array loops lower to FORL and handle [int?], for var, and continue."""
+    code = """
+    func run(): int {
+      var opts: [int?] = [10, none, 20, 30];
+      var sum = 0;
+      for v in opts {
+        if let n ?= v {
+          if n == 20 {
+            continue;
+          }
+          sum += n;
+        }
+      }
+      var nums = [1, 2, 3];
+      for var x in nums {
+        x = x * 10;
+      }
+      for x in nums {
+        sum += x;
+      }
+      var m: [String: int?] = {"a": 5, "b": none, "c": 7};
+      for k, v in m {
+        if let n ?= v {
+          sum += n;
+        }
+      }
+      return sum;
+    }
+    """
+    lua_code = self._transpile_lua(code)
+    user_code = lua_code.split("local run", 1)[1]
+    self.assertNotIn("_sapphire_iter_array", user_code)
+    self.assertIn("for _for_idx_", user_code)
+    # 10+30=40, 10+20+30=60, 5+7=12 => 112
+    out = self._transpile_and_run_lua(code, "print(run())")
+    self.assertEqual(out, "112")
+
+  def test_luajit_zero_fnew_nested_array_and_map_iteration(self):
+    """Verifies nested array + map iteration produces zero FNEW/UCLO/inner-loop aborts."""
+    luajit_bin = shutil.which("luajit")
+    if not luajit_bin:
+      self.skipTest("luajit not found on PATH")
+    code = """
+    func run(): int {
+      var rows: [[int]] = [];
+      for y in range(0, 20) {
+        var row: [int] = [];
+        for x in range(0, 20) {
+          row.push(x + y);
+        }
+        rows.push(row);
+      }
+      var m: [int: int] = {};
+      for i in range(0, 20) {
+        m[i] = i * 2;
+      }
+      var total = 0;
+      for rep in range(0, 10) {
+        for row in rows {
+          for v in row {
+            total += v;
+          }
+        }
+        for k, v in m {
+          total += k + v;
+        }
+      }
+      return total;
+    }
+    """
+    lua_code = self._transpile_lua(code) + "\nprint(run())\n"
+    proc = subprocess.run(
+        [luajit_bin, "-jv", "-"],
+        input=lua_code,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+      self.fail(f"LuaJIT execution failed:\n{proc.stderr}")
+    # sum(x+y for 0..19 x 0..19) = 20*20*19 = 7600; sum(3*i for 0..19) = 570
+    # 10 * (7600 + 570) = 81700
+    self.assertEqual(proc.stdout.strip(), "81700")
+    self.assertNotIn("NYI: bytecode FNEW", proc.stderr)
+    self.assertNotIn("NYI: bytecode UCLO", proc.stderr)
+    self.assertNotIn("inner loop in root trace", proc.stderr)
+
 
 if __name__ == "__main__":
   unittest.main()

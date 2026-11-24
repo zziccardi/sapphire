@@ -1373,6 +1373,7 @@ class LuaStmtMixin:
       is_mut = getattr(node, "is_mutable", False)
 
       close_guard_if = False
+      array_elem_binding: Optional[str] = None
       is_direct_range = (
           isinstance(node.iterable, CallNode)
           and isinstance(node.iterable.callee, IdentifierNode)
@@ -1461,21 +1462,41 @@ class LuaStmtMixin:
         self.emit(" do")
       elif is_mut:
         iter_tmp = self._next_temp_name("_for_iter")
+        arr_tmp = self._next_temp_name("_for_arr")
         idx_tmp = self._next_temp_name("_for_idx")
         self.newline()
         self.emit(f"local {iter_tmp} = ")
         self.visit(node.iterable)
         self.newline()
-        self.emit(f"for {idx_tmp}, {val_var} in _SP_RT._sapphire_iter_array({iter_tmp}) do")
+        self.emit(f"local {arr_tmp} = _SP_RT._unwrap_read({iter_tmp})")
+        self.newline()
+        self.emit(f"if type({arr_tmp}) == \"table\" then")
+        self.indent()
+        self.newline()
+        self.emit(f"for {idx_tmp} = 1, #{arr_tmp} do")
         if not hasattr(self, "_unwrap_writebacks"):
           self._unwrap_writebacks = {}
         self._unwrap_writebacks[val_var] = ("arr_index", iter_tmp, f"({idx_tmp} - 1)")
+        close_guard_if = True
+        array_elem_binding = f"local {val_var} = _SP_RT._unwrap_opt({arr_tmp}[{idx_tmp}])"
       else:
+        arr_tmp = self._next_temp_name("_for_arr")
+        idx_tmp = self._next_temp_name("_for_idx")
         self.newline()
-        self.emit(f"for _, {val_var} in _SP_RT._sapphire_iter_array(")
+        self.emit(f"local {arr_tmp} = _SP_RT._unwrap_read(")
         self.visit(node.iterable)
-        self.emit(") do")
+        self.emit(")")
+        self.newline()
+        self.emit(f"if type({arr_tmp}) == \"table\" then")
+        self.indent()
+        self.newline()
+        self.emit(f"for {idx_tmp} = 1, #{arr_tmp} do")
+        close_guard_if = True
+        array_elem_binding = f"local {val_var} = _SP_RT._unwrap_opt({arr_tmp}[{idx_tmp}])"
       self.indent()
+      if array_elem_binding:
+        self.newline()
+        self.emit(array_elem_binding)
       self._visit_loop_body(node.block, has_continue)
       self.dedent()
       self.newline()
