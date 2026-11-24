@@ -26,11 +26,11 @@ class TestLSPServer(unittest.TestCase):
   def setUp(self):
     import warnings
     warnings.filterwarnings("ignore", category=DeprecationWarning)
-    self.ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    self.ls = SapphireLanguageServer(
+        "test-lsp", "0.1.0", workspace=MagicMock()
+    )
     # Mock text_document_publish_diagnostics
     self.ls.text_document_publish_diagnostics = MagicMock()
-    # Mock workspace lookup method by setting protocol._workspace
-    self.ls.protocol._workspace = MagicMock()
 
   def test_validate_source_valid(self):
     doc_uri = "file:///test.sp"
@@ -2780,6 +2780,20 @@ func run_draw(x: float) {
       self.assertEqual(len(call_arg.diagnostics), 1)
       self.assertEqual(call_arg.diagnostics[0].severity, DiagnosticSeverity.Warning)
       self.assertEqual(call_arg.diagnostics[0].message, "Sample semantic warning")
+
+  def test_create_server_returns_isolated_instances(self):
+    from src.lsp.server import create_server
+    from testing.test_utils import FakeWorkspace
+
+    ws = FakeWorkspace({"file:///a.sp": "let x: int = 1;\n"})
+    s1 = create_server(workspace=ws)
+    s2 = create_server()
+    self.assertIsNot(s1, s2)
+    self.assertIs(s1.workspace, ws)
+    self.assertEqual(
+        s1.workspace.get_text_document("file:///a.sp").source,
+        "let x: int = 1;\n",
+    )
 
 
 if __name__ == "__main__":

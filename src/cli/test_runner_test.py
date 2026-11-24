@@ -563,7 +563,7 @@ func test_bare_fail() {
       shutil.rmtree(tmpdir, ignore_errors=True)
 
   def test_run_tests_python_with_local_lib_and_submodules(self):
-    """Verifies that run_tests_python invalidates sys.modules cache for local lib and nested packages."""
+    """Verifies run_tests_python isolates local lib/sub modules in a subprocess."""
     import sys
     tmpdir = tempfile.mkdtemp()
     try:
@@ -580,17 +580,20 @@ func test_bare_fail() {
       with open(test_sp, "w") as f:
         f.write("import std.testing;\n@test\nfunc test_simple() {\n  testing.assert_true(true);\n}\n")
 
-      # Populate sys.modules with matching names
+      # Pre-populate parent sys.modules with sentinel entries; subprocess must
+      # neither be affected by them nor mutate the parent process's sys.modules.
       sys.modules["lib.dummy"] = None
       sys.modules["sub.helper"] = None
-      sys.modules["helper"] = None
-
-      with suppress_output():
-        passed, failed, logs = run_tests_python(test_sp, ["test_simple"], {})
-      self.assertEqual(passed, 1)
-      self.assertEqual(failed, 0)
-      self.assertNotIn("lib.dummy", sys.modules)
-      self.assertNotIn("sub.helper", sys.modules)
+      try:
+        with suppress_output():
+          passed, failed, _ = run_tests_python(test_sp, ["test_simple"], {})
+        self.assertEqual(passed, 1)
+        self.assertEqual(failed, 0)
+        self.assertIn("lib.dummy", sys.modules)
+        self.assertIn("sub.helper", sys.modules)
+      finally:
+        sys.modules.pop("lib.dummy", None)
+        sys.modules.pop("sub.helper", None)
     finally:
       shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -752,23 +755,19 @@ func test_fail_case() {
     self.assertEqual(payload["failed"], 1)
     self.assertEqual(len(payload["tests"]), 2)
 
-  def test_prepare_python_test_paths_protects_stdlib_and_compiler_modules(self):
-    """Verifies running a test at repo root does not evict stdlib or src.* modules."""
+  def test_build_python_search_paths_ordering_without_mutating_sys_path(self):
+    """Verifies _build_python_search_paths prioritizes out_dir and leaves sys.path untouched."""
     import sys
 
-    from src.cli.test_runner import _prepare_python_test_paths
+    from src.cli.test_runner import _build_python_search_paths
 
-    repo_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "../..")
-    )
-    dummy_root_sp = os.path.join(repo_root, "dummy_root_test.sp")
     orig_path = list(sys.path)
-    try:
-      _prepare_python_test_paths(dummy_root_sp)
-      for mod_name in ("os", "math", "time", "src.parser.ast", "src.cli.test_runner"):
-        self.assertIn(mod_name, sys.modules)
-    finally:
-      sys.path[:] = orig_path
+    out_dir = os.path.join(self.temp_dir, "out")
+    paths = _build_python_search_paths(self.sample_sp, out_dir)
+    self.assertEqual(sys.path, orig_path)
+    self.assertEqual(paths[0], out_dir)
+    self.assertIn(os.path.dirname(os.path.abspath(self.sample_sp)), paths)
+    self.assertEqual(len(paths), len(set(paths)))
 
   def test_keyword_mangled_tests_execute_instead_of_false_pass(self):
     """Verifies Python-keyword-named @test methods and functions actually run."""
@@ -904,13 +903,9 @@ impl t.TestCase for TdSuite {
     self.assertIn("Message:  must be none", out)
     self.assertIn("tear_down failed", out)
 
-  def test_mangle_names_and_protected_module_helpers(self):
-    """Verifies _mangle_python_name, _mangle_lua_name, _is_path_under, and _is_protected_module."""
-    from types import SimpleNamespace
-
+  def test_mangle_names_helpers(self):
+    """Verifies _mangle_python_name and _mangle_lua_name."""
     from src.cli.test_runner import (
-      _is_path_under,
-      _is_protected_module,
       _mangle_lua_name,
       _mangle_python_name,
     )
@@ -922,61 +917,6 @@ impl t.TestCase for TdSuite {
     self.assertEqual(_mangle_lua_name("__init__"), "__init__")
     self.assertEqual(_mangle_lua_name("end"), "end_")
     self.assertEqual(_mangle_lua_name("normal"), "normal")
-
-    sp_dir = os.path.join(self.temp_dir, "proj")
-    out_dir = os.path.join(self.temp_dir, "out")
-    lib_dir = os.path.join(self.temp_dir, "lib")
-    self.assertTrue(_is_path_under(os.path.join(sp_dir, "a.py"), sp_dir))
-    self.assertFalse(_is_path_under(os.path.join(out_dir, "a.py"), sp_dir))
-
-    # Stdlib / compiler packages are protected
-    self.assertTrue(_is_protected_module("os", None, sp_dir, out_dir, lib_dir))
-    self.assertTrue(_is_protected_module("src.cli", None, sp_dir, out_dir, lib_dir))
-    # Missing module object for non-stdlib is not protected
-    self.assertFalse(_is_protected_module("custom_mod", None, sp_dir, out_dir, lib_dir))
-    # Module without __file__ is protected
-    self.assertTrue(
-        _is_protected_module("custom_mod", SimpleNamespace(), sp_dir, out_dir, lib_dir)
-    )
-    # Module inside compiler_lib_dir is protected
-    self.assertTrue(
-        _is_protected_module(
-            "custom_mod",
-            SimpleNamespace(__file__=os.path.join(lib_dir, "m.py")),
-            sp_dir,
-            out_dir,
-            lib_dir,
-        )
-    )
-    # Module inside sp_dir or out_dir is NOT protected (should be reloaded)
-    self.assertFalse(
-        _is_protected_module(
-            "custom_mod",
-            SimpleNamespace(__file__=os.path.join(sp_dir, "m.py")),
-            sp_dir,
-            out_dir,
-            lib_dir,
-        )
-    )
-    self.assertFalse(
-        _is_protected_module(
-            "custom_mod",
-            SimpleNamespace(__file__=os.path.join(out_dir, "m.py")),
-            sp_dir,
-            out_dir,
-            lib_dir,
-        )
-    )
-    # External third-party module outside sp_dir and out_dir is protected
-    self.assertTrue(
-        _is_protected_module(
-            "third_party",
-            SimpleNamespace(__file__="/opt/site-packages/third_party.py"),
-            sp_dir,
-            out_dir,
-            lib_dir,
-        )
-    )
 
 
 if __name__ == "__main__":

@@ -471,6 +471,10 @@ class TypeChecker(
     length = getattr(diag_node, "length", None) if diag_node else None
     if hint is None and code is None and severity == "error":
       code, hint = self._infer_diagnostic_metadata(message)
+    if code is None and severity == "error":
+      from src.common.error_codes import classify_error_code
+
+      code = str(classify_error_code(message))
     return Diagnostic(
       severity=severity,
       message=message,

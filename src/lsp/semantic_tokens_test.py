@@ -719,9 +719,10 @@ class TestSemanticTokens(unittest.TestCase):
     )
 
     # Invalid f-string interpolation must publish an LSP syntax diagnostic.
-    ls = SapphireLanguageServer("test", "0.1")
+    from testing.test_utils import FakeWorkspace
+
+    ls = SapphireLanguageServer("test", "0.1", workspace=FakeWorkspace())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     bad_uri = "file:///bad_fstring.sp"
     validate_source(ls, bad_uri, 'func main() { let x = f"bad {1 + }"; }\n')
     diags = ls.text_document_publish_diagnostics.call_args[0][0].diagnostics

@@ -71,8 +71,9 @@ from src.parser.gen.SapphireParser import SapphireParser
 class SapphireLanguageServer(LanguageServer):
   """Language Server instance for Sapphire."""
 
-  def __init__(self, *args, **kwargs):
+  def __init__(self, *args, workspace: Any | None = None, **kwargs):
     super().__init__(*args, **kwargs)
+    self._custom_workspace = workspace
     # Cache of delta-encoded semantic tokens: uri -> list of integers
     self.tokens_cache = {}
     self.ast_cache = {}
@@ -80,8 +81,11 @@ class SapphireLanguageServer(LanguageServer):
     self.symbol_table_cache = {}
     self.mtime_cache = {}
 
-
-server = SapphireLanguageServer("sapphire-lsp", "v0.1.0")
+  @property
+  def workspace(self):
+    if self._custom_workspace is not None:
+      return self._custom_workspace
+    return super().workspace
 
 
 class ANTLRDiagnosticListener(ErrorListener):
@@ -383,21 +387,18 @@ def validate_source(
   )
 
 
-@server.feature(TEXT_DOCUMENT_DID_OPEN)
 def did_open(ls: SapphireLanguageServer, params):
   """Triggered when a document is opened in the editor."""
   doc = ls.workspace.get_text_document(params.text_document.uri)
   validate_source(ls, doc.uri, doc.source)
 
 
-@server.feature(TEXT_DOCUMENT_DID_CHANGE)
 def did_change(ls: SapphireLanguageServer, params):
   """Triggered when a document is modified."""
   doc = ls.workspace.get_text_document(params.text_document.uri)
   validate_source(ls, doc.uri, doc.source)
 
 
-@server.feature(TEXT_DOCUMENT_DID_SAVE)
 def did_save(ls: SapphireLanguageServer, params):
   """Triggered when a document is saved."""
   doc = ls.workspace.get_text_document(params.text_document.uri)
@@ -405,19 +406,12 @@ def did_save(ls: SapphireLanguageServer, params):
   validate_source(ls, doc.uri, doc.source)
 
 
-@server.feature(WORKSPACE_DID_CHANGE_WATCHED_FILES)
 def did_change_watched_files(ls: SapphireLanguageServer, params):
   """No-op handler to silent log warnings from workspace/didChangeWatchedFiles.
   """
   pass
 
 
-@server.feature(
-  TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
-  SemanticTokensLegend(
-    token_types=TOKEN_TYPES, token_modifiers=TOKEN_MODIFIERS
-  ),
-)
 def semantic_tokens_full(
   ls: SapphireLanguageServer, params: SemanticTokensParams
 ) -> SemanticTokens:
@@ -433,7 +427,6 @@ def semantic_tokens_full(
   return SemanticTokens(data=tokens_data)
 
 
-@server.feature(TEXT_DOCUMENT_DOCUMENT_SYMBOL)
 def document_symbol(
   ls: SapphireLanguageServer, params: DocumentSymbolParams
 ) -> list:
@@ -455,7 +448,6 @@ def document_symbol(
   return extract_document_symbols(ast)
 
 
-@server.feature(TEXT_DOCUMENT_HOVER)
 def hover(ls: SapphireLanguageServer, params: HoverParams) -> Hover | None:
   """Triggered when user hovers over an identifier."""
   return HoverProvider.provide_hover(
@@ -463,7 +455,6 @@ def hover(ls: SapphireLanguageServer, params: HoverParams) -> Hover | None:
   )
 
 
-@server.feature(TEXT_DOCUMENT_DEFINITION)
 def definition(
   ls: SapphireLanguageServer, params: DefinitionParams
 ) -> Location | None:
@@ -476,10 +467,6 @@ def definition(
 SIGNATURE_HELP_TRIGGER_CHARACTERS = ["(", ","]
 
 
-@server.feature(
-  TEXT_DOCUMENT_SIGNATURE_HELP,
-  SignatureHelpOptions(trigger_characters=SIGNATURE_HELP_TRIGGER_CHARACTERS),
-)
 def signature_help(
   ls: SapphireLanguageServer, params: SignatureHelpParams
 ) -> SignatureHelp | None:
@@ -565,10 +552,6 @@ def _get_scope_completion_items(
   return get_scope_completion_items(ast, line, col, uri, ls, node_types)
 
 
-@server.feature(
-  TEXT_DOCUMENT_COMPLETION,
-  CompletionOptions(trigger_characters=TRIGGER_CHARACTERS),
-)
 def completion(
   ls: SapphireLanguageServer, params: CompletionParams
 ) -> CompletionList:
@@ -580,9 +563,47 @@ def completion(
   return CompletionProvider.provide_completion(ls, params)
 
 
+def register_features(ls: SapphireLanguageServer) -> None:
+  """Binds all Sapphire LSP feature handlers onto *ls*."""
+  ls.feature(TEXT_DOCUMENT_DID_OPEN)(did_open)
+  ls.feature(TEXT_DOCUMENT_DID_CHANGE)(did_change)
+  ls.feature(TEXT_DOCUMENT_DID_SAVE)(did_save)
+  ls.feature(WORKSPACE_DID_CHANGE_WATCHED_FILES)(did_change_watched_files)
+  ls.feature(
+    TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
+    SemanticTokensLegend(
+      token_types=TOKEN_TYPES, token_modifiers=TOKEN_MODIFIERS
+    ),
+  )(semantic_tokens_full)
+  ls.feature(TEXT_DOCUMENT_DOCUMENT_SYMBOL)(document_symbol)
+  ls.feature(TEXT_DOCUMENT_HOVER)(hover)
+  ls.feature(TEXT_DOCUMENT_DEFINITION)(definition)
+  ls.feature(
+    TEXT_DOCUMENT_SIGNATURE_HELP,
+    SignatureHelpOptions(trigger_characters=SIGNATURE_HELP_TRIGGER_CHARACTERS),
+  )(signature_help)
+  ls.feature(
+    TEXT_DOCUMENT_COMPLETION,
+    CompletionOptions(trigger_characters=TRIGGER_CHARACTERS),
+  )(completion)
+
+
+def create_server(
+  name: str = "sapphire-lsp",
+  version: str = "v0.1.0",
+  *,
+  workspace: Any | None = None,
+) -> SapphireLanguageServer:
+  """Creates a fresh SapphireLanguageServer with all LSP features registered.
+  """
+  ls = SapphireLanguageServer(name, version, workspace=workspace)
+  register_features(ls)
+  return ls
+
+
 def main():  # pragma: no cover
   # Start the language server over standard I/O (stdio)
-  server.start_io()
+  create_server().start_io()
 
 
 if __name__ == "__main__":  # pragma: no cover

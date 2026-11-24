@@ -45,17 +45,15 @@ _CORPUS_FILES = [
 
 
 def _make_server() -> SapphireLanguageServer:
-  ls = SapphireLanguageServer("sapphire-fuzz", "0.1.0")
+  from testing.test_utils import FakeWorkspace
+
+  ls = SapphireLanguageServer("sapphire-fuzz", "0.1.0", workspace=FakeWorkspace())
   ls.text_document_publish_diagnostics = MagicMock()
-  ls.protocol._workspace = MagicMock()
   return ls
 
 
 def _set_doc(ls: SapphireLanguageServer, uri: str, source: str) -> None:
-  doc = MagicMock()
-  doc.uri = uri
-  doc.source = source
-  ls.workspace.get_text_document.return_value = doc
+  ls.workspace.put_document(uri, source)
 
 
 def _mutate_source(rng: random.Random, source: str) -> str:

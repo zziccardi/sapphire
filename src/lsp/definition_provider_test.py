@@ -42,9 +42,8 @@ class TestDefinitionProvider(unittest.TestCase):
     self.assertIsNone(result)
 
   def test_definition_integration(self):
-    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    ls = SapphireLanguageServer("test-lsp", "0.1.0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///def_test.sp"
     code = """
     struct Item {
@@ -70,9 +69,8 @@ class TestDefinitionProvider(unittest.TestCase):
     self.assertEqual(res.range.start.line, 1)
 
   def test_definition_multi_binding_if_guard_and_shared_ref(self):
-    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    ls = SapphireLanguageServer("test-lsp", "0.1.0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///multi_bind_def.sp"
     code = "\n".join([
         "struct SharedDagNode {",
@@ -171,9 +169,8 @@ class TestDefinitionProvider(unittest.TestCase):
         "  }",
         "}",
     ])
-    ls = SapphireLanguageServer("sapphire", "v0")
+    ls = SapphireLanguageServer("sapphire", "v0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///tmp/test_cf_def.sp"
     doc = MagicMock()
     doc.source = code
@@ -227,9 +224,8 @@ class TestDefinitionProvider(unittest.TestCase):
         "  }",
         "}",
     ])
-    ls = SapphireLanguageServer("sapphire", "v0")
+    ls = SapphireLanguageServer("sapphire", "v0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///tmp/test_ancestor_def.sp"
     doc = MagicMock()
     doc.source = code
@@ -267,9 +263,8 @@ class TestDefinitionProvider(unittest.TestCase):
         "  let d = inner_only;",
         "}",
     ])
-    ls = SapphireLanguageServer("sapphire", "v0")
+    ls = SapphireLanguageServer("sapphire", "v0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///tmp/test_scope_def.sp"
     doc = MagicMock()
     doc.source = code
@@ -329,9 +324,8 @@ class TestDefinitionProvider(unittest.TestCase):
         "  take(move f);",
         "}",
     ])
-    ls = SapphireLanguageServer("sapphire", "v0")
+    ls = SapphireLanguageServer("sapphire", "v0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///tmp/test_extra_def.sp"
     doc = MagicMock()
     doc.source = code
@@ -390,9 +384,8 @@ class TestDefinitionProvider(unittest.TestCase):
   def test_definition_utf16_columns_with_emoji(self):
     """Verifies UTF-16 LSP columns map accurately across non-BMP characters."""
     code = 'func main() {\n  let s = "🚀"; let target = 1;\n  let r = target;\n}\n'
-    ls = SapphireLanguageServer("sapphire", "v0")
+    ls = SapphireLanguageServer("sapphire", "v0", workspace=MagicMock())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///tmp/test_utf16_def.sp"
     doc = MagicMock()
     doc.source = code
@@ -435,12 +428,13 @@ class TestDefinitionProvider(unittest.TestCase):
       dep_uri = from_fs_path(os.path.abspath(dep_path))
       main_uri = from_fs_path(os.path.abspath(main_path))
 
-      ls = SapphireLanguageServer("sapphire", "v0")
-      ls.text_document_publish_diagnostics = MagicMock()
-      ls.protocol._workspace = MagicMock()
+      from testing.test_utils import FakeWorkspace
 
       dirty_dep = "func unsaved_fn(): int { return 2; }\nexport { unsaved_fn, }\n"
-      ls.workspace.text_documents = {dep_uri: MagicMock(source=dirty_dep)}
+      ls = SapphireLanguageServer(
+          "sapphire", "v0", workspace=FakeWorkspace({dep_uri: dirty_dep})
+      )
+      ls.text_document_publish_diagnostics = MagicMock()
       validate_source(ls, dep_uri, dirty_dep)
       cached_ast_before = ls.ast_cache[dep_uri]
 
