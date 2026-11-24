@@ -274,7 +274,9 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("local numbers = {10, 20, 30}", lua_code)
     self.assertIn("local first = _SP_RT._sapphire_array_at(numbers, 0)", lua_code)
     self.assertIn("_SP_RT._sapphire_array_at(numbers, idx)", lua_code)
-    self.assertIn("for _, n in _SP_RT._sapphire_iter_array(numbers) do", lua_code)
+    self.assertIn("local _for_arr_1 = _SP_RT._unwrap_read(numbers)", lua_code)
+    self.assertIn("for _for_idx_1 = 1, #_for_arr_1 do", lua_code)
+    self.assertIn("local n = _SP_RT._unwrap_opt(_for_arr_1[_for_idx_1])", lua_code)
 
   def test_fixed_size_array_and_negative_indexing(self):
     """Verifies Lua code generation for fixed-size arrays and negative indices."""
@@ -1447,7 +1449,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("Box__Opt_int", lua)
 
   def test_proto_array_iteration_lua(self):
-    """Verifies Lua transpilation uses _SP_RT._sapphire_iter_array for prototypal object arrays."""
+    """Verifies Lua transpilation unwraps and lowers array iteration to numeric for."""
     code = """
     func test_proto_loop() {
       let tags = ["a", "b"];
@@ -1457,7 +1459,9 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua = self._transpile(code)
-    self.assertIn("for _, t in _SP_RT._sapphire_iter_array(tags) do", lua)
+    self.assertIn("local _for_arr_1 = _SP_RT._unwrap_read(tags)", lua)
+    self.assertIn("for _for_idx_1 = 1, #_for_arr_1 do", lua)
+    self.assertIn("local t = _SP_RT._unwrap_opt(_for_arr_1[_for_idx_1])", lua)
 
   def test_lift_match_expressions_none_lua(self):
     """Verifies _lift_match_expressions handles None gracefully in Lua transpiler."""

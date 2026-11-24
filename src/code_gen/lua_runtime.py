@@ -1023,30 +1023,33 @@ do
     end
   end
 
+  local _EMPTY_TBL = {}
+
+  local function _iter_array_next(arr, i)
+    i = i + 1
+    local v = arr[i]
+    if v ~= nil then
+      return i, _unwrap_opt(v)
+    end
+    return nil
+  end
+
   _SP_RT._sapphire_iter_array = function(arr)
     arr = _unwrap_read(arr)
-    if type(arr) ~= "table" then return ipairs({}) end
-    local len = #arr
-    local i = 0
-    return function()
-      i = i + 1
-      if i <= len then
-        return i, _unwrap_opt(arr[i])
-      end
-      return nil
-    end
+    if type(arr) ~= "table" then return _iter_array_next, _EMPTY_TBL, 0 end
+    return _iter_array_next, arr, 0
+  end
+
+  local function _iter_map_next(m, k)
+    local nk, v = next(m, k)
+    if nk == nil then return nil end
+    return nk, _unwrap_opt(v)
   end
 
   _SP_RT._sapphire_iter_map = function(m)
     m = _unwrap_read(m)
-    if type(m) ~= "table" then return pairs({}) end
-    local k = nil
-    return function()
-      local v
-      k, v = next(m, k)
-      if k == nil then return nil end
-      return k, _unwrap_opt(v)
-    end
+    if type(m) ~= "table" then return _iter_map_next, _EMPTY_TBL, nil end
+    return _iter_map_next, m, nil
   end
 
   _SP_RT._sapphire_range = function(a, b, c)
