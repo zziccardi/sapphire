@@ -153,7 +153,8 @@ class TestDifferentialParity(unittest.TestCase):
     )
     full_lua = lua_code + "\n" + lua_calls + "\n"
     proc = subprocess.run(
-        [self.lua_bin, "-e", full_lua],
+        [self.lua_bin, "-"],
+        input=full_lua,
         capture_output=True,
         text=True,
     )
