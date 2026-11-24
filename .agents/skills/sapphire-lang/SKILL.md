@@ -338,6 +338,16 @@ can implement behavioral `trait`s via `impl Trait for ProtoName`):
     fields first.
   - Arena-backed values obey lexical + same-scope LIFO declaration order and
     cannot escape via returns, outer `var` sinks, or `Ref()`/`SharedRef()`.
+  - **Move-only propagation**: Because `Arena` is move-only, place `var arena:
+    Arena;` on a single-owner struct (not a struct shared across multiple
+    subsystems) and construct child structs directly (`context = move ctx`)
+    rather than partial-moving fields off an intermediate base struct.
+  - **Closed-world trait heap-boxing (`Ref<T>` / `SharedRef<T>`)**: Structs
+    containing closed-world `trait` fields (including host resource handle
+    traits like `graphics.Image`/`graphics.Quad` and struct-only traits) may be
+    boxed in `Ref<T>`/`SharedRef<T>` as long as no known implementor of those
+    traits is a `proto` or transitively holds an arena reference. Traits with
+    `proto` implementors and unbounded generic type parameters remain rejected.
 
 ```sapphire
 var arena = Arena();
