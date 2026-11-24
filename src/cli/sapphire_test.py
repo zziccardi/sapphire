@@ -636,6 +636,19 @@ class SapphireCLITest(unittest.TestCase):
           mock_run.assert_called_once()
       self.assertEqual(sys.argv, orig_argv)
 
+  def test_version_flag(self):
+    import io
+    from contextlib import redirect_stdout
+
+    for flag in ("--version", "-V"):
+      buf = io.StringIO()
+      with patch.object(sys, "argv", ["sapphire", flag]):
+        with redirect_stdout(buf):
+          with self.assertRaises(SystemExit) as cm:
+            main()
+      self.assertEqual(cm.exception.code, 0)
+      self.assertRegex(buf.getvalue().strip(), r"^sapphire \d+\.\d+\.\d+")
+
 
 if __name__ == "__main__":
   unittest.main()

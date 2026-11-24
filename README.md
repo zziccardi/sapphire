@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/public/favicon.svg" alt="Sapphire logo" width="72" />
+  <img src="https://raw.githubusercontent.com/zziccardi/sapphire/main/web/public/favicon.svg" alt="Sapphire logo" width="72" />
 </p>
 
 <h1 align="center">Sapphire programming language</h1>
@@ -11,10 +11,10 @@
   <a href="https://github.com/zziccardi/sapphire/actions/workflows/deploy-website.yml">
     <img src="https://github.com/zziccardi/sapphire/actions/workflows/deploy-website.yml/badge.svg" alt="Deploy Website" />
   </a>
-  <a href="LICENSE">
+  <a href="https://github.com/zziccardi/sapphire/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0" />
   </a>
-  <a href="pyproject.toml">
+  <a href="https://github.com/zziccardi/sapphire/blob/main/pyproject.toml">
     <img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+" />
   </a>
 </p>
@@ -22,10 +22,10 @@
 <p align="center">
   <a href="https://zziccardi.github.io/sapphire/">Website</a> ·
   <a href="https://zziccardi.github.io/sapphire/playground/">Playground</a> ·
-  <a href="docs/quickstart.md">Quickstart</a> ·
-  <a href="docs/SPEC.md">Language spec</a> ·
-  <a href="samples/README.md">Examples</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="https://zziccardi.github.io/sapphire/docs/quickstart">Quickstart</a> ·
+  <a href="https://zziccardi.github.io/sapphire/docs/spec">Language spec</a> ·
+  <a href="https://github.com/zziccardi/sapphire/blob/main/samples/README.md">Examples</a> ·
+  <a href="https://github.com/zziccardi/sapphire/blob/main/CONTRIBUTING.md">Contributing</a>
 </p>
 
 Sapphire is a statically typed general-purpose programming language that

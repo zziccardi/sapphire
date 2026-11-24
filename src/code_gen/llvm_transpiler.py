@@ -75,7 +75,11 @@ from src.parser.ast import (
 )
 
 
-from llvmlite import ir
+try:
+  from llvmlite import ir
+except ImportError:  # pragma: no cover
+  ir = None  # type: ignore[assignment]
+
 try:
   import llvmlite.binding as llvm
   llvm.initialize_native_target()
@@ -94,17 +98,22 @@ class LLVMTranspiler(BaseTranspiler):
   """Transpiles a type-checked Sapphire AST into LLVM IR."""
 
   def __init__(self, module_name="sapphire_module", target_triple=None):
+    if ir is None:  # pragma: no cover
+      raise ImportError(
+          "The experimental LLVM backend requires 'llvmlite'. "
+          "Install it with: pip install 'sapphire-lang[llvm]'"
+      )
     # 1. Initialize an isolated LLVM context and module per transpiler instance
     self.context = ir.Context()
     self.module = ir.Module(name=module_name, context=self.context)
     self.module.triple = target_triple or DEFAULT_TRIPLE
 
     # 2. Type-mapping & symbol table cache
-    self.struct_types: Dict[str, ir.Type] = {}
+    self.struct_types: Dict[str, Any] = {}
     self.struct_field_types: Dict[str, list] = {}
     self.named_values: Dict[str, Any] = {}
-    self.builder: Optional[ir.IRBuilder] = None
-    self.current_function: Optional[ir.Function] = None
+    self.builder: Optional[Any] = None
+    self.current_function: Optional[Any] = None
 
     # Primitive type mapping
     self.int_type = ir.IntType(64)

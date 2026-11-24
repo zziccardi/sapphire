@@ -26,10 +26,12 @@ classifiers = [
     "Topic :: Software Development :: Interpreters",
 ]
 dependencies = [
-    "antlr4-python3-runtime",
+    "antlr4-python3-runtime>=4.13.0,<4.14.0",
     "pygls",
-    "llvmlite"
 ]
+
+[project.optional-dependencies]
+llvm = ["llvmlite"]
 
 [project.urls]
 Homepage = "https://zziccardi.github.io/sapphire/"
