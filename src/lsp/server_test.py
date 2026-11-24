@@ -1,22 +1,24 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from lsprotocol.types import SemanticTokensParams, DocumentSymbolParams, TextDocumentIdentifier
+
+from lsprotocol.types import (
+  DocumentSymbolParams,
+  SemanticTokensParams,
+  TextDocumentIdentifier,
+)
 
 # Import server components
 from src.lsp.server import (
-    SapphireLanguageServer,
-    ANTLRDiagnosticListener,
-    validate_source,
-    did_open,
-    did_change,
-    did_save,
-    semantic_tokens_full,
-    document_symbol,
-    definition,
-    signature_help,
-    main,
+  SapphireLanguageServer,
+  definition,
+  did_change,
+  did_open,
+  did_save,
+  document_symbol,
+  semantic_tokens_full,
+  signature_help,
+  validate_source,
 )
-
 
 
 class TestLSPServer(unittest.TestCase):
@@ -155,7 +157,12 @@ class TestLSPServer(unittest.TestCase):
     self.ls.workspace.get_text_document.assert_not_called()
 
   def test_hover_and_completion(self):
-    from lsprotocol.types import HoverParams, CompletionParams, Position, TextDocumentIdentifier
+    from lsprotocol.types import (
+      CompletionParams,
+      HoverParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     # 1. Setup a valid document that has fields, methods, parameters, etc.
     doc_uri = "file:///test.sp"
@@ -526,7 +533,7 @@ class TestLSPServer(unittest.TestCase):
 
     # Test Completion on optional type receiver
     from src.parser.ast import IdentifierNode
-    from src.semantics.symbol_table import OptionalType, StructType
+    from src.semantics.symbol_table import OptionalType
     mock_opt_node = IdentifierNode("opt_char_test")
     mock_opt_node.start_line = 38
     mock_opt_node.end_line = 38
@@ -589,7 +596,7 @@ class TestLSPServer(unittest.TestCase):
     self.ls.workspace.get_text_document.return_value = mock_doc_reset
 
     # Test VariableSymbol in symbol table scope for completion
-    from src.semantics.symbol_table import VariableSymbol, PrimitiveType
+    from src.semantics.symbol_table import PrimitiveType, VariableSymbol
     self.ls.symbol_table_cache[doc_uri].define("temp_var", VariableSymbol("temp_var", PrimitiveType("int"), is_mutable=False))
     res_sym_var = completion(self.ls, CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
@@ -633,11 +640,34 @@ class TestLSPServer(unittest.TestCase):
     self.assertIsNotNone(field_item_fallback)
 
   def test_hover_and_completion_edge_cases(self):
-    from lsprotocol.types import HoverParams, CompletionParams, Position, TextDocumentIdentifier
-    from src.parser.ast import ASTNode, IdentifierNode, ParameterNode, StructFieldNode, VarDeclNode, FuncDeclNode, BasicTypeNode
-    from src.semantics.symbol_table import SymbolTable, VariableSymbol, FunctionSymbol, StructSymbol, TraitSymbol, StructType, StructField, StructMethod, FunctionType
+    from lsprotocol.types import (
+      CompletionParams,
+      HoverParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     from src.lsp.semantic_tokens import find_node_at_position
+    from src.parser.ast import (
+      ASTNode,
+      BasicTypeNode,
+      FuncDeclNode,
+      IdentifierNode,
+      ParameterNode,
+      StructFieldNode,
+      VarDeclNode,
+    )
+    from src.semantics.symbol_table import (
+      FunctionSymbol,
+      FunctionType,
+      StructField,
+      StructMethod,
+      StructSymbol,
+      StructType,
+      SymbolTable,
+      TraitSymbol,
+      VariableSymbol,
+    )
 
     # 1. Test find_node_at_position edge cases
     # Node with no start_line
@@ -804,7 +834,7 @@ class TestLSPServer(unittest.TestCase):
       from src.semantics.symbol_table import PrimitiveType
 
       with patch.object(checker, "visit", return_value=PrimitiveType("int")):
-        with patch.object(checker, "symbol_table") as mock_st:
+        with patch.object(checker, "symbol_table"):
           checker.visit_IfNode(mock_if_node)
           self.assertEqual(checker.node_types[mock_if_node.init_binding], PrimitiveType("int"))
 
@@ -816,7 +846,7 @@ class TestLSPServer(unittest.TestCase):
       mock_for_node.loop_var_length = 5
       mock_for_node.iterable = MagicMock()
       with patch.object(checker, "visit", return_value=PrimitiveType("int")):
-        with patch.object(checker, "symbol_table") as mock_st:
+        with patch.object(checker, "symbol_table"):
           checker.visit_ForNode(mock_for_node)
           self.assertEqual(checker.node_types[mock_for_node], PrimitiveType("none"))
 
@@ -916,7 +946,11 @@ class TestLSPServer(unittest.TestCase):
     self.ls.workspace.get_text_document.return_value = mock_doc
 
     # Position on line 3 (LSP 0-based line 3, character 7 after 'c')
-    from lsprotocol.types import CompletionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      CompletionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
     params = CompletionParams(
         text_document=TextDocumentIdentifier(uri=doc_uri),
         position=Position(line=3, character=7)
@@ -943,8 +977,14 @@ class TestLSPServer(unittest.TestCase):
 
   def test_enum_lsp_hover_and_completion(self):
     """Verifies LSP hover and completion for enums and enum members."""
-    from lsprotocol.types import HoverParams, CompletionParams, TextDocumentIdentifier, Position
-    from src.lsp.server import hover, completion, validate_source
+    from lsprotocol.types import (
+      CompletionParams,
+      HoverParams,
+      Position,
+      TextDocumentIdentifier,
+    )
+
+    from src.lsp.server import completion, hover, validate_source
 
 
     doc_uri = "file:///enum_test.sp"
@@ -1053,8 +1093,13 @@ func test() {
     self.assertTrue(len(tokens) > 0)
 
     # 2. Hover on @extern
-    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position, CompletionParams
-    from src.lsp.server import hover, completion
+    from lsprotocol.types import (
+      HoverParams,
+      Position,
+      TextDocumentIdentifier,
+    )
+
+    from src.lsp.server import hover
 
 
     mock_doc = MagicMock()
@@ -1135,12 +1180,17 @@ func main() {
 
     mod_sym = self.ls.symbol_table_cache[doc_uri].lookup("e")
     if mod_sym and hasattr(mod_sym, "exports"):
-      from src.semantics.symbol_table import VariableSymbol, PrimitiveType
+      from src.semantics.symbol_table import PrimitiveType, VariableSymbol
       mod_sym.exports["DrawMode"] = VariableSymbol("DrawMode", PrimitiveType("int"), is_mutable=False)
 
     # 1. Semantic Tokens
-    from src.lsp.server import semantic_tokens_full, completion
-    from lsprotocol.types import SemanticTokensParams, CompletionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      CompletionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
+
+    from src.lsp.server import completion, semantic_tokens_full
 
     tokens_res = semantic_tokens_full(self.ls, SemanticTokensParams(text_document=TextDocumentIdentifier(uri=doc_uri)))
     self.assertIsNotNone(tokens_res)
@@ -1200,7 +1250,12 @@ func main() {
 
   def test_map_for_loop_lsp_completion(self):
     """Verifies LSP completion for key_var and val_var inside map for loops."""
-    from lsprotocol.types import CompletionParams, Position, TextDocumentIdentifier
+    from lsprotocol.types import (
+      CompletionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
+
     from src.lsp.server import completion
 
 
@@ -1246,7 +1301,8 @@ func main() {
 
   def test_impl_block_node_position_missing_fallback(self):
     """Verifies hover on ImplBlockNode gracefully handles missing position metadata."""
-    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import HoverParams, Position, TextDocumentIdentifier
+
     from src.lsp.server import hover
     from src.parser.ast import ImplBlockNode
 
@@ -1279,7 +1335,11 @@ func main() {
 
   def test_definition_variable_and_function(self):
     """Verifies Go to Definition for functions, parameters, and local variables."""
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///def_test1.sp"
     doc_text = """func add(x: int, y: int) -> int {
@@ -1315,7 +1375,11 @@ let total: int = add(10, 20);"""
 
   def test_definition_struct_field_and_inheritance(self):
     """Verifies Go to Definition for struct types, fields, and inheritance parents."""
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///def_test2.sp"
     doc_text = """struct Animal {
@@ -1360,7 +1424,11 @@ let a = d.age;"""
 
   def test_definition_enum_and_trait(self):
     """Verifies Go to Definition for enum types and enum variants."""
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///def_test3.sp"
     doc_text = """enum Color { Red, Green, Blue }
@@ -1391,7 +1459,11 @@ let c = Color.Green;"""
 
   def test_definition_none_for_missing(self):
     """Verifies definition returns None when symbol is unknown or position invalid."""
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///def_missing.sp"
     doc_text = "let x = 42;"
@@ -1413,7 +1485,11 @@ let c = Color.Green;"""
 
   def test_signature_help_function_call(self):
     """Verifies signature help for function calls and active parameter tracking."""
-    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///sig_test1.sp"
     doc_text = """func calculate(a: int, b: float, msg: String): bool {
@@ -1448,7 +1524,11 @@ let res = calculate(10, 3.14, "hello");"""
 
   def test_signature_help_method_call(self):
     """Verifies signature help for method calls with 'self' parameter excluded."""
-    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///sig_test2.sp"
     doc_text = """struct Point {
@@ -1483,7 +1563,11 @@ p.translate(5.0, 10.0);"""
 
   def test_signature_help_constructor_and_none(self):
     """Verifies signature help for struct constructors and fallback when not in a call."""
-    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///sig_test3.sp"
     doc_text = """struct Point {
@@ -1500,7 +1584,11 @@ let p = Point(1.0, 2.0);"""
     self.ls.workspace.get_text_document.return_value = mock_doc
 
     # Signature help for struct constructor 'Point(1.0,'
-    from src.semantics.symbol_table import StructType, StructField, PrimitiveType
+    from src.semantics.symbol_table import (
+      PrimitiveType,
+      StructField,
+      StructType,
+    )
     validate_source(self.ls, doc_uri, doc_text)
     custom_st = StructType("OnlyType")
     custom_st.fields["val"] = StructField("val", PrimitiveType("int"), False)
@@ -1522,7 +1610,11 @@ let p = Point(1.0, 2.0);"""
 
   def test_definition_additional_branches(self):
     """Cover additional definition branches (BasicTypeNode, ImplBlockNode, fallback positions, local declarations)."""
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///def_branches.sp"
     doc_text = """struct Item { var id: int; }
@@ -1618,7 +1710,11 @@ item_var.do_it();"""
 
   def test_signature_help_additional_branches(self):
     """Cover string methods, constructor lookup, string quotes, and nested parens/brackets."""
-    from lsprotocol.types import SignatureHelpParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///sig_branches.sp"
     doc_text = """struct Config {
@@ -1673,7 +1769,12 @@ func test() {
 
   def test_server_100_percent_coverage(self):
     """Hits all remaining lines in server.py to reach 100% test coverage."""
-    from lsprotocol.types import DefinitionParams, SignatureHelpParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
+    )
 
     doc_uri = "file:///cov100.sp"
     doc_text = """struct Point {
@@ -1822,8 +1923,8 @@ let field_ref = c_var.p.x;
     self.assertIsNotNone(res_p_param_impl)
 
     # 9. sym.symbol_type.ast_decl when sym has no ast_decl (line 596)
-    from src.semantics.symbol_table import VariableSymbol, StructType
     from src.parser.ast import StructDeclNode
+    from src.semantics.symbol_table import StructType, VariableSymbol
     mock_doc.source = "let use_no_ast = var_no_ast;"
     validate_source(self.ls, doc_uri, mock_doc.source)
 
@@ -1843,7 +1944,9 @@ let field_ref = c_var.p.x;
     self.assertIsNotNone(res_sym_type_ast)
 
     # 10. Direct _find_local_decl test for top-level VarDeclNode & missing variable (lines 551-553)
-    from src.lsp.server import _find_local_decl
+    from src.lsp.definition_provider import (
+        find_local_decl as _find_local_decl,
+    )
     from src.parser.ast import VarDeclNode
     top_var_decl = VarDeclNode(False, ["top_g1", "top_g2"], [], [])
     top_ast = self.ls.ast_cache[doc_uri]
@@ -1869,7 +1972,11 @@ let field_ref = c_var.p.x;
     self.assertIsNotNone(res_field_match)
 
     # 12. SignatureHelp constructor lookup by lookup_type (lines 836-841)
-    from src.semantics.symbol_table import StructType, StructField, PrimitiveType
+    from src.semantics.symbol_table import (
+      PrimitiveType,
+      StructField,
+      StructType,
+    )
     mock_doc.source = "OnlyType("
     validate_source(self.ls, doc_uri, mock_doc.source)
 
@@ -1884,7 +1991,11 @@ let field_ref = c_var.p.x;
     self.assertIsNotNone(res_ctor)
 
     # 9. SignatureHelp method lookup via receiver_type.methods without get_method (lines 813-814)
-    from src.semantics.symbol_table import VariableSymbol, FunctionType, PrimitiveType
+    from src.semantics.symbol_table import (
+      FunctionType,
+      PrimitiveType,
+      VariableSymbol,
+    )
     class SimpleObj:
       def __init__(self):
         fn_t = FunctionType([PrimitiveType("int")], PrimitiveType("none"), param_names=["x"])
@@ -1910,8 +2021,13 @@ let field_ref = c_var.p.x;
 
   def test_trait_method_completion(self):
     """Verifies that LSP completion suggests all methods defined on a trait receiver."""
+    from lsprotocol.types import (
+      CompletionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
+
     from src.lsp.server import completion, validate_source
-    from lsprotocol.types import CompletionParams, TextDocumentIdentifier, Position
 
     doc_uri = "file:///test_trait_completion.sp"
     code = """
@@ -1944,8 +2060,14 @@ let field_ref = c_var.p.x;
 
   def test_trait_method_signature_help_and_definition(self):
     """Verifies signature help and go to definition for trait methods on member access receivers."""
-    from src.lsp.server import signature_help, definition, validate_source
-    from lsprotocol.types import SignatureHelpParams, DefinitionParams, TextDocumentIdentifier, Position
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
+    )
+
+    from src.lsp.server import definition, signature_help, validate_source
 
     doc_uri = "file:///test_trait_sig_def.sp"
     code = """
@@ -1990,8 +2112,13 @@ let field_ref = c_var.p.x;
     """Verifies textDocument/definition for cross-file imports and module member navigation."""
     import os
     import tempfile
+
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
     from pygls.uris import from_fs_path
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
 
     with tempfile.TemporaryDirectory() as temp_dir:
       # Setup directory structure: temp_dir/lib/love2d/enums.sp
@@ -2057,7 +2184,6 @@ func calculate() -> int { return 42; }"""
       broken_file = os.path.join(temp_dir, "broken.sp")
       with open(broken_file, "w", encoding="utf-8") as f:
         f.write("struct Broken { invalid syntax !!!")
-      broken_uri = from_fs_path(broken_file)
 
       main_utils_code = """import utils as u;
 import broken;
@@ -2094,10 +2220,11 @@ func run() {
       # Ensure utils_uri is in ast_cache (it should be after validate_source preloads imports)
       if utils_uri not in self.ls.ast_cache:
         # Manually load it for the fallback test
-        from antlr4 import InputStream, CommonTokenStream
+        from antlr4 import CommonTokenStream, InputStream
+
+        from src.parser.ast_builder import ASTBuilder
         from src.parser.gen.SapphireLexer import SapphireLexer
         from src.parser.gen.SapphireParser import SapphireParser
-        from src.parser.ast_builder import ASTBuilder
         sub_stream = InputStream(utils_code)
         sub_lexer = SapphireLexer(sub_stream)
         sub_lexer.removeErrorListeners()
@@ -2114,7 +2241,11 @@ func run() {
         delattr(dummy_func, "file_uri")
 
       # Member access with target_ast lacking file_uri
-      from src.semantics.symbol_table import FunctionSymbol, FunctionType, PrimitiveType
+      from src.semantics.symbol_table import (
+        FunctionSymbol,
+        FunctionType,
+        PrimitiveType,
+      )
       fn_sym = FunctionSymbol("calculate", FunctionType([], PrimitiveType("int"), ast_decl=dummy_func))
       mod_u = self.ls.symbol_table_cache[main_uri].lookup("u")
       if mod_u:
@@ -2131,14 +2262,21 @@ func run() {
     """Hits remaining uncovered lines in server.py to achieve 100% test coverage."""
     import os
     import tempfile
-    from pygls.uris import from_fs_path
+
     from lsprotocol.types import (
-        DefinitionParams,
-        TextDocumentIdentifier,
-        Position,
-        SignatureHelpParams,
+      DefinitionParams,
+      Position,
+      SignatureHelpParams,
+      TextDocumentIdentifier,
     )
-    from src.lsp.server import _resolve_module_path, validate_source, definition, signature_help
+    from pygls.uris import from_fs_path
+
+    from src.lsp.server import (
+      _resolve_module_path,
+      definition,
+      signature_help,
+      validate_source,
+    )
 
     with tempfile.TemporaryDirectory() as temp_dir:
       ws_dir = os.path.join(temp_dir, "ws")
@@ -2192,7 +2330,6 @@ func test() {
 func helper_fn() {}"""
       with open(helper_file, "w", encoding="utf-8") as f:
         f.write(helper_code)
-      helper_uri = from_fs_path(helper_file)
 
       main_code = """import helper as h;
 func run() {
@@ -2219,8 +2356,13 @@ func run() {
   def test_love2d_demo_definition_navigation(self):
     """Verifies Go to Definition for love.graphics.setBackgroundColor in samples/love2d_demo.sp."""
     import os
+
+    from lsprotocol.types import (
+      DefinitionParams,
+      Position,
+      TextDocumentIdentifier,
+    )
     from pygls.uris import from_fs_path
-    from lsprotocol.types import DefinitionParams, TextDocumentIdentifier, Position
 
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     demo_file = os.path.join(repo_root, "samples", "love2d_demo.sp")
@@ -2281,11 +2423,13 @@ func run() {
 
   def test_hover_parameter_default_values(self):
     """Verifies that hover on functions/methods displays default values for parameters."""
-    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
-    from pygls.uris import from_fs_path
-    from src.lsp.server import hover, validate_source
-    import tempfile
     import os
+    import tempfile
+
+    from lsprotocol.types import HoverParams, Position, TextDocumentIdentifier
+    from pygls.uris import from_fs_path
+
+    from src.lsp.server import hover, validate_source
 
     with tempfile.TemporaryDirectory() as temp_dir:
       self.ls.workspace.root_uri = from_fs_path(os.getcwd())
@@ -2335,16 +2479,14 @@ func main() {
 
   def test_format_ast_expr(self):
     """Tests _format_ast_expr helper on various AST node types."""
-    from src.lsp.server import _format_ast_expr
+    from src.lsp.hover_provider import format_ast_expr as _format_ast_expr
     from src.parser.ast import (
-        LiteralNode,
-        IdentifierNode,
-        MemberAccessNode,
-        UnaryOpNode,
-        BinaryOpNode,
-        CallNode,
-        ArgumentNode,
-        BasicTypeNode,
+      ArgumentNode,
+      BasicTypeNode,
+      CallNode,
+      IdentifierNode,
+      LiteralNode,
+      MemberAccessNode,
     )
 
     self.assertEqual(_format_ast_expr(None), "")
@@ -2364,15 +2506,17 @@ func main() {
 
   def test_hover_nested_member_access_and_generics(self):
     """Verifies that hover works for nested member accesses and across generic monomorphized functions."""
-    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
-    from pygls.uris import from_fs_path
-    from src.lsp.server import hover, validate_source
-    import tempfile
     import os
+    import tempfile
+
+    from lsprotocol.types import HoverParams, Position, TextDocumentIdentifier
+    from pygls.uris import from_fs_path
+
+    from src.lsp.server import hover, validate_source
 
     with tempfile.TemporaryDirectory() as temp_dir:
       self.ls.workspace.root_uri = from_fs_path(temp_dir)
-      
+
       # 1. Create a module with struct/trait hierarchy
       mod_file = os.path.join(temp_dir, "graphics.sp")
       mod_code = """export { Graphics }
@@ -2448,11 +2592,13 @@ func run_draw(x: float) {
     self.assertTrue(any("cannot follow a parameter with a default value" in msg for msg in diag_messages))
 
   def test_lsp_hover_enum_member_and_symbol_category(self):
-    from src.lsp.server import validate_source, hover, _resolve_module_path
     import os
     import tempfile
-    from lsprotocol.types import HoverParams, TextDocumentIdentifier, Position
+
+    from lsprotocol.types import HoverParams, Position, TextDocumentIdentifier
     from pygls.uris import from_fs_path
+
+    from src.lsp.server import _resolve_module_path, hover, validate_source
 
     with tempfile.TemporaryDirectory() as tmp_dir:
       self.ls.workspace.root_uri = from_fs_path(tmp_dir)
@@ -2569,7 +2715,9 @@ func run_draw(x: float) {
     """Verifies DeclarationPass and LSP server cache imported modules and invalidate on file change."""
     import os
     import tempfile
+
     from pygls.uris import from_fs_path
+
     from src.semantics.declaration_pass import DeclarationPass
 
     DeclarationPass.clear_cache()
@@ -2613,6 +2761,7 @@ func run_draw(x: float) {
 
   def test_lsp_publishes_semantic_warnings(self):
     from lsprotocol.types import DiagnosticSeverity
+
     from src.lsp.semantic_tokens import SemanticTokensTypeChecker
 
     code = "func main() {}\n"

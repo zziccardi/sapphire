@@ -1,5 +1,6 @@
 tools/vscode-extension/coverage/
 tools/vscode-extension/node_modules/
+tools/vscode-extension/out/
 tools/vscode-extension/sapphire-*.vsix
 
 .DS_Store

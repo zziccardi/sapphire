@@ -5,59 +5,61 @@ from typing import Any, Callable, List, Optional
 
 from lsprotocol.types import CompletionItem, CompletionList, CompletionParams
 
-from src.parser.ast import (
-    BlockNode,
-    ForNode,
-    FuncDeclNode,
-    ImplBlockNode,
-    VarDeclNode,
-    WhileNode,
-)
 from src.lsp.definition_provider import (
-    _line_in_node_span,
-    find_local_decl,
+  _line_in_node_span,
+  find_local_decl,
 )
 from src.lsp.semantic_tokens import utf16_to_codepoint
+from src.parser.ast import (
+  BlockNode,
+  ForNode,
+  FuncDeclNode,
+  ImplBlockNode,
+  VarDeclNode,
+  WhileNode,
+)
 
 _KEYWORDS = [
-    "let",
-    "var",
-    "func",
-    "struct",
-    "proto",
-    "enum",
-    "trait",
-    "impl",
-    "if",
-    "else",
-    "guard",
-    "for",
-    "in",
-    "while",
-    "break",
-    "continue",
-    "return",
-    "match",
-    "yield",
-    "true",
-    "false",
-    "none",
-    "static",
-    "clone",
-    "arena",
-    "import",
-    "export",
-    "as",
+  "let",
+  "var",
+  "func",
+  "struct",
+  "proto",
+  "enum",
+  "trait",
+  "impl",
+  "if",
+  "else",
+  "guard",
+  "for",
+  "in",
+  "while",
+  "break",
+  "continue",
+  "return",
+  "match",
+  "yield",
+  "true",
+  "false",
+  "none",
+  "static",
+  "clone",
+  "arena",
+  "import",
+  "export",
+  "as",
 ]
 
 
 def _collect_block_stmt_locals(
-    stmts: List[Any],
-    line: int,
-    node_types: dict,
-    add_item: Callable[[str, int, str], None],
+  stmts: List[Any],
+  line: int,
+  node_types: dict,
+  add_item: Callable[[str, int, str], None],
 ) -> None:
-  """Adds local variables, unwrap bindings, and loop variables visible at *line*."""
+  """Adds local variables, unwrap bindings, and loop variables visible at
+  *line*.
+  """
   for stmt in stmts:
     st_start = getattr(stmt, "start_line", None)
     if st_start is not None and st_start > line:
@@ -65,11 +67,11 @@ def _collect_block_stmt_locals(
     if isinstance(stmt, VarDeclNode):
       binding_types = getattr(stmt, "binding_types", {}) or {}
       names = getattr(stmt, "names", None) or (
-          [stmt.name] if getattr(stmt, "name", None) else []
+        [stmt.name] if getattr(stmt, "name", None) else []
       )
       for idx, v_name in enumerate(names):
         vtype = binding_types.get(v_name) or (
-            node_types.get(stmt) if idx == 0 else None
+          node_types.get(stmt) if idx == 0 else None
         )
         type_str = f": {vtype}" if vtype else ""
         add_item(v_name, 6, f"(variable) {v_name}{type_str}")
@@ -77,18 +79,18 @@ def _collect_block_stmt_locals(
       else_block = getattr(stmt, "else_block", None)
       if else_block is not None and _line_in_node_span(else_block, line):
         _collect_block_stmt_locals(
-            getattr(else_block, "statements", []), line, node_types, add_item
+          getattr(else_block, "statements", []), line, node_types, add_item
         )
         if line > getattr(else_block, "start_line", line):
           continue
       bindings = getattr(
-          stmt,
-          "bindings",
-          [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
+        stmt,
+        "bindings",
+        [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
       )
       for b in bindings:
         names = getattr(
-            b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []
+          b, "let_names", [b.let_name] if getattr(b, "let_name", None) else []
         )
         for b_name in names:
           add_item(b_name, 6, f"(variable) {b_name}")
@@ -100,28 +102,28 @@ def _collect_block_stmt_locals(
       in_else = else_block is not None and _line_in_node_span(else_block, line)
       if in_else:
         else_stmts = (
-            [else_block]
-            if type(else_block).__name__ == "IfNode"
-            else getattr(else_block, "statements", [])
+          [else_block]
+          if type(else_block).__name__ == "IfNode"
+          else getattr(else_block, "statements", [])
         )
         _collect_block_stmt_locals(else_stmts, line, node_types, add_item)
       else:
         bindings = getattr(
-            stmt,
-            "bindings",
-            [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
+          stmt,
+          "bindings",
+          [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
         )
         for b in bindings:
           names = getattr(
-              b,
-              "let_names",
-              [b.let_name] if getattr(b, "let_name", None) else [],
+            b,
+            "let_names",
+            [b.let_name] if getattr(b, "let_name", None) else [],
           )
           for b_name in names:
             add_item(b_name, 6, f"(variable) {b_name}")
         if then_block is not None and _line_in_node_span(then_block, line):
           _collect_block_stmt_locals(
-              getattr(then_block, "statements", []), line, node_types, add_item
+            getattr(then_block, "statements", []), line, node_types, add_item
           )
     elif isinstance(stmt, ForNode):
       if not _line_in_node_span(stmt, line):
@@ -133,26 +135,26 @@ def _collect_block_stmt_locals(
       block = getattr(stmt, "block", None)
       if block is not None and _line_in_node_span(block, line):
         _collect_block_stmt_locals(
-            getattr(block, "statements", []), line, node_types, add_item
+          getattr(block, "statements", []), line, node_types, add_item
         )
     elif isinstance(stmt, (WhileNode, BlockNode)):
       if not _line_in_node_span(stmt, line):
         continue
       nested = (
-          getattr(stmt, "statements", [])
-          if isinstance(stmt, BlockNode)
-          else getattr(getattr(stmt, "block", None), "statements", [])
+        getattr(stmt, "statements", [])
+        if isinstance(stmt, BlockNode)
+        else getattr(getattr(stmt, "block", None), "statements", [])
       )
       _collect_block_stmt_locals(nested, line, node_types, add_item)
 
 
 def get_scope_completion_items(
-    ast: Any,
-    line: int,
-    col: int,
-    uri: str,
-    ls: Any,
-    node_types: dict,
+  ast: Any,
+  line: int,
+  col: int,
+  uri: str,
+  ls: Any,
+  node_types: dict,
 ) -> List[CompletionItem]:
   """Collects scope-visible locals, symbols, keywords, and document words."""
   items: List[CompletionItem] = []
@@ -162,16 +164,16 @@ def get_scope_completion_items(
     if label and label not in seen:
       seen.add(label)
       items.append(
-          CompletionItem(
-              label=label, kind=kind, detail=detail, insert_text=label
-          )
+        CompletionItem(label=label, kind=kind, detail=detail, insert_text=label)
       )
 
   # 1. Local Scope AST Traversal
   for decl in getattr(ast, "declarations", []):
     s_start = getattr(decl, "start_line", None)
     s_end = getattr(decl, "end_line", None)
-    if s_start is None or s_start > line or (s_end is not None and line > s_end):
+    if (
+      s_start is None or s_start > line or (s_end is not None and line > s_end)
+    ):
       continue
 
     if isinstance(decl, FuncDeclNode):
@@ -180,7 +182,7 @@ def get_scope_completion_items(
         type_str = f": {ptype}" if ptype else ""
         add_item(p.name, 6, f"(parameter) {p.name}{type_str}")
       stmts = (
-          getattr(decl.body, "statements", []) if hasattr(decl, "body") else []
+        getattr(decl.body, "statements", []) if hasattr(decl, "body") else []
       )
       _collect_block_stmt_locals(stmts, line, node_types, add_item)
     elif isinstance(decl, ImplBlockNode):
@@ -191,9 +193,9 @@ def get_scope_completion_items(
         f_start = getattr(func_decl, "start_line", None)
         f_end = getattr(func_decl, "end_line", None)
         if (
-            f_start is not None
-            and f_start <= line
-            and (f_end is None or line <= f_end)
+          f_start is not None
+          and f_start <= line
+          and (f_end is None or line <= f_end)
         ):
           if getattr(member, "modifier", None) != "static":
             add_item("self", 6, f"(variable) self: {decl.struct_name}")
@@ -202,9 +204,9 @@ def get_scope_completion_items(
             type_str = f": {ptype}" if ptype else ""
             add_item(p.name, 6, f"(parameter) {p.name}{type_str}")
           stmts = (
-              getattr(func_decl.body, "statements", [])
-              if hasattr(func_decl, "body")
-              else []
+            getattr(func_decl.body, "statements", [])
+            if hasattr(func_decl, "body")
+            else []
           )
           _collect_block_stmt_locals(stmts, line, node_types, add_item)
 
@@ -220,18 +222,18 @@ def get_scope_completion_items(
         if sym_kind == "VariableSymbol":
           is_param = getattr(sym, "is_parameter", False)
           detail = (
-              f"(parameter) {sym_name}: {sym.symbol_type}"
-              if is_param
-              else f"(variable) {sym_name}: {sym.symbol_type}"
+            f"(parameter) {sym_name}: {sym.symbol_type}"
+            if is_param
+            else f"(variable) {sym_name}: {sym.symbol_type}"
           )
           add_item(sym_name, 6, detail)
         elif sym_kind == "FunctionSymbol":
           add_item(sym_name, 3, f"(function) {sym_name}{sym.symbol_type}")
         elif sym_kind == "StructSymbol":
           kind_name = (
-              "proto"
-              if getattr(sym.symbol_type, "is_prototype", False)
-              else "struct"
+            "proto"
+            if getattr(sym.symbol_type, "is_prototype", False)
+            else "struct"
           )
           add_item(sym_name, 22, f"({kind_name}) {sym_name}")
         elif sym_kind == "EnumSymbol":
@@ -268,7 +270,7 @@ def get_scope_completion_items(
 
 
 def _find_enclosing_impl_struct(
-    ast: Any, sym_table: Any, line: int
+  ast: Any, sym_table: Any, line: int
 ) -> Optional[Any]:
   """Returns the StructType of the ImplBlockNode enclosing *line*, if any."""
   if not ast or not sym_table:
@@ -284,11 +286,11 @@ class CompletionProvider:
 
   @staticmethod
   def _get_dot_completions(
-      ls: Any,
-      uri: str,
-      receiver_name: str,
-      line: int,
-      node_types: dict,
+    ls: Any,
+    uri: str,
+    receiver_name: str,
+    line: int,
+    node_types: dict,
   ) -> Optional[CompletionList]:
     """Resolves member completions for `<receiver_name>.`."""
     ast = ls.ast_cache.get(uri)
@@ -326,13 +328,13 @@ class CompletionProvider:
             receiver_type = binding_types[receiver_name]
           continue
         n_name = (
-            getattr(node, "name", None)
-            or getattr(node, "member", None)
-            or getattr(node, "alias", None)
-            or getattr(node, "let_name", None)
-            or getattr(node, "key_var", None)
-            or getattr(node, "val_var", None)
-            or getattr(node, "loop_var", None)
+          getattr(node, "name", None)
+          or getattr(node, "member", None)
+          or getattr(node, "alias", None)
+          or getattr(node, "let_name", None)
+          or getattr(node, "key_var", None)
+          or getattr(node, "val_var", None)
+          or getattr(node, "loop_var", None)
         )
         if n_name == receiver_name:
           s_line = getattr(node, "start_line", getattr(node, "name_line", None))
@@ -349,68 +351,68 @@ class CompletionProvider:
 
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(
-          receiver_type, "base_type", receiver_type
+        receiver_type, "base_type", receiver_type
       )  # pragma: no cover
     if type(receiver_type).__name__ in ("SharedRefType", "RefType"):
       receiver_type = getattr(
-          receiver_type, "inner_type", receiver_type
+        receiver_type, "inner_type", receiver_type
       )  # pragma: no cover
 
     if (
-        type(receiver_type).__name__ in ("StringType", "PrimitiveType")
-        and getattr(receiver_type, "name", "") == "String"
+      type(receiver_type).__name__ in ("StringType", "PrimitiveType")
+      and getattr(receiver_type, "name", "") == "String"
     ):
       from src.semantics.symbol_table import STRING_METHODS
 
       items = [
-          CompletionItem(
-              label=m_name,
-              kind=2,
-              detail=f"(string method) {m_name}{sig}",
-              insert_text=m_name,
-          )
-          for m_name, sig in STRING_METHODS.items()
+        CompletionItem(
+          label=m_name,
+          kind=2,
+          detail=f"(string method) {m_name}{sig}",
+          insert_text=m_name,
+        )
+        for m_name, sig in STRING_METHODS.items()
       ]
       return CompletionList(is_incomplete=False, items=items)
 
     if type(receiver_type).__name__ == "ModuleType" or (
-        not best_node
-        and sym_table is not None
-        and type(sym_table.lookup(receiver_name)).__name__ == "ModuleSymbol"
+      not best_node
+      and sym_table is not None
+      and type(sym_table.lookup(receiver_name)).__name__ == "ModuleSymbol"
     ):
-      mod_sym = sym_table.lookup(receiver_name) if sym_table is not None else None
+      mod_sym = (
+        sym_table.lookup(receiver_name) if sym_table is not None else None
+      )
       exports = (
-          mod_sym.exports if mod_sym and hasattr(mod_sym, "exports") else {}
+        mod_sym.exports if mod_sym and hasattr(mod_sym, "exports") else {}
       )
       items = []
       for exp_name, exp_val in exports.items():
         type_str = (
-            str(exp_val.symbol_type)
-            if hasattr(exp_val, "symbol_type")
-            else str(exp_val)
+          str(exp_val.symbol_type)
+          if hasattr(exp_val, "symbol_type")
+          else str(exp_val)
         )
         items.append(
-            CompletionItem(
-                label=exp_name,
-                kind=6,
-                detail=f"(module export) {receiver_name}.{exp_name}: {type_str}",
-                insert_text=exp_name,
-            )
+          CompletionItem(
+            label=exp_name,
+            kind=6,
+            detail=f"(module export) {receiver_name}.{exp_name}: {type_str}",
+            insert_text=exp_name,
+          )
         )
       return CompletionList(is_incomplete=False, items=items)
 
     if hasattr(receiver_type, "variants"):
       enum_name = getattr(receiver_type, "name", receiver_name)
       items = [
-          CompletionItem(
-              label=variant_name,
-              kind=20,
-              detail=f"(enum member) {enum_name}.{variant_name} = {val}",
-              insert_text=variant_name,
-          )
-          for variant_name, val in getattr(
-              receiver_type, "variants", {}
-          ).items()
+        CompletionItem(
+          label=variant_name,
+          kind=20,
+          detail=f"(enum member) {enum_name}.{variant_name} = {val}",
+          insert_text=variant_name,
+        )
+        for variant_name, val in getattr(receiver_type, "variants", {}).items()
       ]
       return CompletionList(is_incomplete=True, items=items)
 
@@ -431,25 +433,28 @@ class CompletionProvider:
             continue
           seen_fields.add(field_name)
           items.append(
-              CompletionItem(
-                  label=field_name,
-                  kind=10,
-                  detail=f"(property) {field_name}: {str(field.field_type)}",
-                  insert_text=field_name,
-              )
+            CompletionItem(
+              label=field_name,
+              kind=10,
+              detail=f"(property) {field_name}: {str(field.field_type)}",
+              insert_text=field_name,
+            )
           )
         for method_name, method in getattr(cur_type, "methods", {}).items():
-          if method_name in ("__init__", "__del__") or method_name in seen_methods:
+          if (
+            method_name in ("__init__", "__del__")
+            or method_name in seen_methods
+          ):
             continue
           seen_methods.add(method_name)
           m_type = str(getattr(method, "method_type", method))
           items.append(
-              CompletionItem(
-                  label=method_name,
-                  kind=2,
-                  detail=f"(method) {method_name}{m_type}",
-                  insert_text=method_name,
-              )
+            CompletionItem(
+              label=method_name,
+              kind=2,
+              detail=f"(method) {method_name}{m_type}",
+              insert_text=method_name,
+            )
           )
         if sym_table is not None:
           for p_name in getattr(cur_type, "parent_names", []) or []:
@@ -462,7 +467,7 @@ class CompletionProvider:
 
   @classmethod
   def provide_completion(
-      cls, ls: Any, params: CompletionParams
+    cls, ls: Any, params: CompletionParams
   ) -> CompletionList:
     """Computes CompletionList for dot-access or scope-level identifiers."""
     uri = params.text_document.uri
@@ -483,20 +488,25 @@ class CompletionProvider:
         if 0 <= line - 1 < len(lines):
           line_text = lines[line - 1]
           col = utf16_to_codepoint(line_text, col)
-    except (AttributeError, KeyError, IndexError, TypeError):  # pragma: no cover
+    except (
+      AttributeError,
+      KeyError,
+      IndexError,
+      TypeError,
+    ):  # pragma: no cover
       pass
 
     dot_match = re.search(
-        r"([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z0-9_]*)$", line_text[:col]
+      r"([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z0-9_]*)$", line_text[:col]
     )
     if dot_match:
       dot_result = cls._get_dot_completions(
-          ls, uri, dot_match.group(1), line, node_types
+        ls, uri, dot_match.group(1), line, node_types
       )
       if dot_result is not None:
         return dot_result
 
     scope_items = get_scope_completion_items(
-        ast, line, col, uri, ls, node_types
+      ast, line, col, uri, ls, node_types
     )
     return CompletionList(is_incomplete=True, items=scope_items)

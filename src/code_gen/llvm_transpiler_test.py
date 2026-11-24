@@ -5,23 +5,21 @@ to LLVM IR specification (instruction selection, stack allocations, returns).
 """
 
 import unittest
+
 from antlr4 import CommonTokenStream, InputStream
 
 from src.code_gen.base_transpiler import BaseTranspiler
 from src.code_gen.llvm_transpiler import LLVMTranspiler
 from src.parser.ast import (
-    BasicTypeNode,
-    FuncDeclNode,
-    IdentifierNode,
-    LiteralNode,
-    ProgramNode,
-    ReturnNode,
+  BasicTypeNode,
+  IdentifierNode,
+  LiteralNode,
+  ProgramNode,
 )
 from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.semantics.type_checker import TypeChecker
-
 
 
 class TestLLVMTranspiler(unittest.TestCase):
@@ -217,6 +215,7 @@ class TestLLVMTranspiler(unittest.TestCase):
 
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
+
     from src.parser.ast import AssignmentNode, LiteralNode
 
 
@@ -296,6 +295,7 @@ class TestLLVMTranspiler(unittest.TestCase):
 
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
+
     from src.parser.ast import BinaryOpNode, LiteralNode
 
 
@@ -315,7 +315,8 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_var_decl_type_fallbacks(self):
     transpiler = LLVMTranspiler()
     import llvmlite.ir as ir
-    from src.parser.ast import VarDeclNode, BasicTypeNode
+
+    from src.parser.ast import BasicTypeNode, VarDeclNode
 
 
     func_type = ir.FunctionType(transpiler.void_type, [])
@@ -361,6 +362,7 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_compound_assignments_and_block_scoping_mcjit(self):
     """Verifies compound assignments (+=, -=, *=, /=, %=) and lexical block scoping via MCJIT."""
     import ctypes
+
     import llvmlite.binding as llvm_binding
 
     code = """
@@ -432,6 +434,7 @@ class TestLLVMTranspiler(unittest.TestCase):
   def test_mcjit_execution(self):
     """Verifies that generated LLVM IR can be JIT-compiled and executed natively."""
     import ctypes
+
     import llvmlite.binding as llvm_binding
 
     llvm_binding.initialize_native_target()

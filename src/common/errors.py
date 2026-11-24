@@ -7,11 +7,11 @@ class SapphireError(Exception):
   """Base exception class for all Sapphire compiler and tooling errors."""
 
   def __init__(
-      self,
-      message: str,
-      file_path: Optional[str] = None,
-      line: Optional[int] = None,
-      column: Optional[int] = None,
+    self,
+    message: str,
+    file_path: Optional[str] = None,
+    line: Optional[int] = None,
+    column: Optional[int] = None,
   ):
     super().__init__(message)
     self.message = message
@@ -52,6 +52,8 @@ class SapphireTranspileError(SapphireError):
 
 
 class SapphireLSPError(SapphireError):
-  """Raised during Language Server Protocol message handling or document processing."""
+  """Raised during Language Server Protocol message handling or document
+  processing.
+  """
 
   pass

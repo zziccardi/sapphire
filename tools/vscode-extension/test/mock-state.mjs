@@ -8,6 +8,8 @@ export const mockState = {
   startCalled: false,
   stopCalled: false,
   startShouldFail: false,
+  outputChannel: null,
+  outputLines: [],
   reset() {
     this.workspaceFolders = undefined;
     this.config = {
@@ -18,5 +20,7 @@ export const mockState = {
     this.startCalled = false;
     this.stopCalled = false;
     this.startShouldFail = false;
+    this.outputChannel = null;
+    this.outputLines = [];
   }
 };

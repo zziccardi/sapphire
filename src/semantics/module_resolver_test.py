@@ -4,11 +4,11 @@ import os
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.semantics.module_resolver import (
-    find_sapphire_lib_dir,
-    resolve_module_path,
+  find_sapphire_lib_dir,
+  resolve_module_path,
 )
 
 

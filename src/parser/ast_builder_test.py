@@ -5,32 +5,32 @@ ASTBuilder visitor, verifying the correctness of the translation.
 """
 
 import unittest
-from antlr4 import InputStream, CommonTokenStream
 
+from antlr4 import CommonTokenStream, InputStream
+
+from src.parser.ast import (
+  ArrayTypeNode,
+  BasicTypeNode,
+  BinaryOpNode,
+  BreakNode,
+  CallNode,
+  CastExprNode,
+  CloneNode,
+  ContinueNode,
+  IdentifierNode,
+  IfNode,
+  InterpolatedStringNode,
+  LiteralNode,
+  MapTypeNode,
+  MoveNode,
+  ProgramNode,
+  StructDeclNode,
+  StructInitializerNode,
+  VarDeclNode,
+)
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.parser.ast import (
-    ProgramNode,
-    VarDeclNode,
-    LiteralNode,
-    BasicTypeNode,
-    BinaryOpNode,
-    CastExprNode,
-    IfNode,
-    StructDeclNode,
-    StructInitializerNode,
-    CloneNode,
-    MoveNode,
-    CallNode,
-    InterpolatedStringNode,
-    IdentifierNode,
-    ArrayTypeNode,
-    MapTypeNode,
-    BreakNode,
-    ContinueNode,
-)
-
 
 
 class TestASTBuilder(unittest.TestCase):
@@ -60,11 +60,11 @@ class TestASTBuilder(unittest.TestCase):
     self.assertIsInstance(decl, VarDeclNode)
     self.assertFalse(decl.is_mutable)
     self.assertEqual(decl.name, "x")
-    
+
     # Check type
     self.assertIsInstance(decl.val_type, BasicTypeNode)
     self.assertEqual(decl.val_type.name, "int")
-    
+
     # Check expression value
     self.assertIsInstance(decl.expr, LiteralNode)
     self.assertEqual(decl.expr.value, 42)
@@ -205,7 +205,7 @@ class TestASTBuilder(unittest.TestCase):
     self.assertEqual(len(ast.declarations), 1)
     decl = ast.declarations[0]
     self.assertIsInstance(decl, VarDeclNode)
-    
+
     struct_init = decl.expr
     self.assertIsInstance(struct_init, StructInitializerNode)
     self.assertEqual(struct_init.struct_name, "Weapon")
@@ -234,11 +234,11 @@ class TestASTBuilder(unittest.TestCase):
     let z = Enemy(hp = 100) in third_arena;
     """)
     self.assertEqual(len(ast.declarations), 3)
-    
+
     decl1 = ast.declarations[0]
     self.assertIsInstance(decl1.expr, StructInitializerNode)
     self.assertEqual(decl1.expr.arena_expr.name, "my_arena")
-    
+
     decl2 = ast.declarations[1]
     self.assertIsInstance(decl2.expr, CloneNode)
     self.assertEqual(decl2.expr.arena_expr.name, "other_arena")
@@ -460,7 +460,12 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_match_expression_ast(self):
     """Verifies AST construction for match expressions, match cases, yield statements, and ellipsis patterns."""
-    from src.parser.ast import MatchExprNode, MatchCaseNode, YieldNode, EllipsisPatternNode
+    from src.parser.ast import (
+      EllipsisPatternNode,
+      MatchCaseNode,
+      MatchExprNode,
+      YieldNode,
+    )
 
 
     ast = self._get_ast("""
@@ -504,7 +509,7 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_map_literal_parsing(self):
     """Verifies AST construction for map literals with colons, commas, and trailing commas."""
-    from src.parser.ast import MapLiteralNode, MapEntryNode, LiteralNode
+    from src.parser.ast import MapEntryNode, MapLiteralNode
 
 
     ast = self._get_ast("""
@@ -693,7 +698,7 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_guard_statement_ast(self):
     """Verifies AST construction for guard statements with semicolon clause separation and multi-variable binding."""
-    from src.parser.ast import GuardStmtNode, GuardClauseNode, HeaderBindingNode
+    from src.parser.ast import GuardStmtNode
 
     code = """
     func test() {
@@ -739,7 +744,7 @@ class TestASTBuilder(unittest.TestCase):
 
 
   def test_yield_node_variants_and_to_dict(self):
-    from src.parser.ast import YieldNode, LiteralNode
+    from src.parser.ast import LiteralNode, YieldNode
     lit1 = LiteralNode(1, "int")
     node_single = YieldNode(expr=lit1)
     self.assertEqual(node_single.expr, lit1)
@@ -757,7 +762,6 @@ class TestASTBuilder(unittest.TestCase):
 
   def test_multi_binding_if_statement_ast(self):
     """Verifies AST construction for multi-binding if statements with and without conditions."""
-    from src.parser.ast import IfNode, HeaderBindingNode
 
     code = """
     func test() {

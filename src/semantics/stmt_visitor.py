@@ -1,53 +1,58 @@
 """Statement AST visitor methods for TypeChecker."""
 
 import os
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from src.parser.ast import (
-    ASTNode,
-    AssignmentNode,
-    BinaryOpNode,
-    CloneNode,
-    ExprStmtNode,
-    IdentifierNode,
-    IndexExprNode,
-    LambdaNode,
-    MemberAccessNode,
-    MoveNode,
-    ReturnNode,
-    TernaryExprNode,
-    VarDeclNode,
-    YieldNode,
+  AssignmentNode,
+  ASTNode,
+  BinaryOpNode,
+  CloneNode,
+  ExprStmtNode,
+  IdentifierNode,
+  IndexExprNode,
+  LambdaNode,
+  MemberAccessNode,
+  MoveNode,
+  ReturnNode,
+  TernaryExprNode,
+  VarDeclNode,
+  YieldNode,
 )
 from src.semantics.arena_checker import ArenaChecker
 from src.semantics.control_flow_visitor import ControlFlowVisitorMixin
 from src.semantics.declaration_pass import DeclarationPass
 from src.semantics.symbol_table import (
-    ArenaType,
-    ArrayType,
-    CoroutineType,
-    MapType,
-    MultiReturnType,
-    NoneType,
-    OptionalType,
-    PrimitiveType,
-    RefType,
-    StructType,
-    Type,
-    VariableSymbol,
+  ArenaType,
+  ArrayType,
+  CoroutineType,
+  MapType,
+  MultiReturnType,
+  NoneType,
+  OptionalType,
+  PrimitiveType,
+  RefType,
+  StructType,
+  Type,
+  VariableSymbol,
 )
 
 
 class StmtVisitorMixin(ControlFlowVisitorMixin):
-  """Provides AST visitor methods for declarations, assignments, returns, and control flow."""
+  """Provides AST visitor methods for declarations, assignments, returns, and
+  control flow.
+  """
 
   def _define_uninitialized_vars(self, node: VarDeclNode) -> None:
-    """Defines uninitialized variable declarations with explicit type annotations."""
-    for name, val_type_node in zip(node.names, node.val_types):
+    """Defines uninitialized variable declarations with explicit type
+    annotations.
+    """
+    for name, val_type_node in zip(node.names, node.val_types, strict=False):
       if not val_type_node:
         self.error(
-            f"Variable '{name}' requires an explicit type annotation or an initial value.",
-            node=node,
+          f"Variable '{name}' requires an explicit type annotation or an "
+          "initial value.",
+          node=node,
         )
         v_type: Type = PrimitiveType("none")
       else:
@@ -55,19 +60,21 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       sym = VariableSymbol(name, v_type, node.is_mutable)
       self.symbol_table.define(name, sym)
       if (
-          self.current_function is not None
-          and not self._has_implicit_default_value(v_type)
-          and not (isinstance(v_type, PrimitiveType) and v_type.name == "none")
+        self.current_function is not None
+        and not self._has_implicit_default_value(v_type)
+        and not (isinstance(v_type, PrimitiveType) and v_type.name == "none")
       ):
         self.uninitialized_symbols.add(sym)
 
   def _is_void_call_result(self, expr_node: ASTNode, expr_type: Type) -> bool:
     """Returns True if *expr_node* is a call returning void/none."""
     from src.parser.ast import CallNode
+
     if not isinstance(expr_node, CallNode):
       return False
     return isinstance(expr_type, NoneType) or (
-        isinstance(expr_type, PrimitiveType) and expr_type.name in ("none", "void")
+      isinstance(expr_type, PrimitiveType)
+      and expr_type.name in ("none", "void")
     )
 
   def _check_module_level_const_init(self, node: VarDeclNode) -> None:
@@ -77,17 +84,19 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     for i, name in enumerate(node.names):
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       is_const, err_reason = is_constant_expression(
-          expr_node, self.symbol_table
+        expr_node, self.symbol_table
       )
       if not is_const:
         self.error(
-            f"Module-level variable '{name}' must be initialized with a "
-            f"compile-time constant expression. {err_reason}",
-            node=node,
+          f"Module-level variable '{name}' must be initialized with a "
+          f"compile-time constant expression. {err_reason}",
+          node=node,
         )
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
-    """Type-checks `let` and `var` declarations (including multi-value unpacking)."""
+    """Type-checks `let` and `var` declarations (including multi-value
+    unpacking).
+    """
     if hasattr(node, "annotations") and node.annotations:
       DeclarationPass.validate_annotations(self, node.annotations, node=node)
     if any(a.name == "extern" for a in node.annotations):
@@ -116,9 +125,9 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       if len(node.exprs) == 1:
         single_type = self.visit(node.exprs[0])
         rhs_types = (
-            single_type.types
-            if isinstance(single_type, MultiReturnType)
-            else [single_type]
+          single_type.types
+          if isinstance(single_type, MultiReturnType)
+          else [single_type]
         )
       else:
         rhs_types = []
@@ -133,49 +142,52 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     if len(rhs_types) != len(node.names):
       self.error(
-          f"Cannot unpack {len(rhs_types)} value(s) into {len(node.names)} variable(s).",
-          node=node,
+        f"Cannot unpack {len(rhs_types)} value(s) into {len(node.names)} "
+        "variable(s).",
+        node=node,
       )
       return
 
     rhs_had_errors = len(self.errors) > pre_rhs_errors
 
     for i, (name, val_type_node, expr_type) in enumerate(
-        zip(node.names, node.val_types, rhs_types)
+      zip(node.names, node.val_types, rhs_types, strict=False)
     ):
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       if not rhs_had_errors and self._is_void_call_result(expr_node, expr_type):
         self.error(
-            f"Cannot assign void result of function call to variable '{name}'.",
-            node=node,
+          f"Cannot assign void result of function call to variable '{name}'.",
+          node=node,
         )
         var_type: Type = (
-            self._resolve_type_node(val_type_node)
-            if val_type_node
-            else PrimitiveType("none")
+          self._resolve_type_node(val_type_node)
+          if val_type_node
+          else PrimitiveType("none")
         )
       elif val_type_node:
         val_type = self._resolve_type_node(val_type_node)
         if not expr_type.is_compatible(val_type):
           self.error(
-              f"Cannot assign expression of type '{expr_type}' to variable '{name}' of type '{val_type}'.",
-              node=node,
+            f"Cannot assign expression of type '{expr_type}' to variable "
+            f"'{name}' of type '{val_type}'.",
+            node=node,
           )
         var_type = val_type
         if (
-            isinstance(var_type, ArrayType)
-            and isinstance(expr_type, ArrayType)
-            and expr_type.size is not None
-            and var_type.size is None
+          isinstance(var_type, ArrayType)
+          and isinstance(expr_type, ArrayType)
+          and expr_type.size is not None
+          and var_type.size is None
         ):
           var_type = ArrayType(
-              var_type.element_type, size=expr_type.size, is_fixed_size=False
+            var_type.element_type, size=expr_type.size, is_fixed_size=False
           )
       else:
         if isinstance(expr_type, NoneType):
           self.error(
-              f"Cannot infer type of '{name}' from 'none' alone. Specify an optional type annotation.",
-              node=node,
+            f"Cannot infer type of '{name}' from 'none' alone. Specify an "
+            "optional type annotation.",
+            node=node,
           )
           var_type = OptionalType(PrimitiveType("none"))
         else:
@@ -189,18 +201,18 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       self._propagate_binding_metadata(sym, expr_node, replace=False)
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       ArenaChecker.validate_arena_escape(
-          self.symbol_table,
-          sym,
-          expr_node,
-          lambda msg: self.error(msg, node=node),
-          checker=self,
+        self.symbol_table,
+        sym,
+        expr_node,
+        lambda msg: self.error(msg, node=node),
+        checker=self,
       )
       ArenaChecker.validate_stack_borrow_escape(
-          self.symbol_table,
-          sym,
-          expr_node,
-          lambda msg: self.error(msg, node=node),
-          checker=self,
+        self.symbol_table,
+        sym,
+        expr_node,
+        lambda msg: self.error(msg, node=node),
+        checker=self,
       )
 
   def _collect_expr_proto_ancestors(self, expr_node: Optional[ASTNode]) -> set:
@@ -220,24 +232,23 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         return set(src_sym.proto_ancestors)
       return set()
     if isinstance(expr_node, TernaryExprNode):
-      return (
-          self._collect_expr_proto_ancestors(expr_node.true_expr)
-          | self._collect_expr_proto_ancestors(expr_node.false_expr)
-      )
+      return self._collect_expr_proto_ancestors(
+        expr_node.true_expr
+      ) | self._collect_expr_proto_ancestors(expr_node.false_expr)
     if isinstance(expr_node, BinaryOpNode) and expr_node.op == "??":
-      return (
-          self._collect_expr_proto_ancestors(expr_node.left)
-          | self._collect_expr_proto_ancestors(expr_node.right)
-      )
+      return self._collect_expr_proto_ancestors(
+        expr_node.left
+      ) | self._collect_expr_proto_ancestors(expr_node.right)
     return set()
 
   def _propagate_binding_metadata(
-      self,
-      target_sym: VariableSymbol,
-      expr_node: Optional[ASTNode],
-      replace: bool,
+    self,
+    target_sym: VariableSymbol,
+    expr_node: Optional[ASTNode],
+    replace: bool,
   ) -> None:
-    """Propagates prototype ancestry and closure capture modes to *target_sym*."""
+    """Propagates prototype ancestry and closure capture modes to *target_sym*.
+    """
     ancestors = self._collect_expr_proto_ancestors(expr_node)
     if replace:
       target_sym.proto_ancestors = ancestors
@@ -262,87 +273,92 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       target_sym.closure_read_captures.update(read_caps)
 
   def _update_assignment_target(
-      self,
-      target: ASTNode,
-      target_type: Type,
-      expr_node: ASTNode,
-      node: AssignmentNode,
+    self,
+    target: ASTNode,
+    target_type: Type,
+    expr_node: ASTNode,
+    node: AssignmentNode,
   ) -> None:
-    """Updates prototype ancestry, arena escape/generation, and container mutation state."""
+    """Updates prototype ancestry, arena escape/generation, and container
+    mutation
+    state.
+    """
     if isinstance(target, IdentifierNode):
       target_sym = self._get_target_symbol(target)
       if target_sym:
         self._propagate_binding_metadata(target_sym, expr_node, replace=True)
         ArenaChecker.validate_arena_escape(
-            self.symbol_table,
-            target_sym,
-            expr_node,
-            lambda msg: self.error(msg, node=node),
-            checker=self,
+          self.symbol_table,
+          target_sym,
+          expr_node,
+          lambda msg: self.error(msg, node=node),
+          checker=self,
         )
         ArenaChecker.validate_stack_borrow_escape(
-            self.symbol_table,
-            target_sym,
-            expr_node,
-            lambda msg: self.error(msg, node=node),
-            checker=self,
+          self.symbol_table,
+          target_sym,
+          expr_node,
+          lambda msg: self.error(msg, node=node),
+          checker=self,
         )
-        # Reassigning an Arena bumps its generation, invalidating prior local deps.
+        # Reassigning an Arena bumps its generation, invalidating prior local
+        # deps.
         if isinstance(target_sym.symbol_type, ArenaType):
           target_sym.arena_generation += 1
           target_sym.is_moved = False
     elif isinstance(target, MemberAccessNode):
       if isinstance(target_type, ArenaType):
         is_self_target = (
-            isinstance(target.receiver, IdentifierNode)
-            and target.receiver.name == "self"
+          isinstance(target.receiver, IdentifierNode)
+          and target.receiver.name == "self"
         )
         recv_struct = self.node_types.get(target.receiver)
         field_obj = (
-            recv_struct.fields.get(target.member)
-            if isinstance(recv_struct, StructType)
-            else None
+          recv_struct.fields.get(target.member)
+          if isinstance(recv_struct, StructType)
+          else None
         )
         has_default = bool(field_obj and field_obj.has_explicit_default)
         if not (self.is_in_init and is_self_target) or has_default:
           self.error(
-              f"Cannot reassign Arena field '{target.member}' outside "
-              "initial '__init__' assignment.",
-              node=node,
+            f"Cannot reassign Arena field '{target.member}' outside "
+            "initial '__init__' assignment.",
+            node=node,
           )
         elif target.member in self._init_assigned_arena_fields:
           self.error(
-              f"Cannot reassign Arena field 'self.{target.member}' inside "
-              "'__init__' after initial assignment.",
-              node=node,
+            f"Cannot reassign Arena field 'self.{target.member}' inside "
+            "'__init__' after initial assignment.",
+            node=node,
           )
         elif target.member in self._init_used_arena_fields:
           self.error(
-              f"Cannot assign Arena field 'self.{target.member}' after "
-              "allocating into it.",
-              node=node,
+            f"Cannot assign Arena field 'self.{target.member}' after "
+            "allocating into it.",
+            node=node,
           )
         else:
           self._init_assigned_arena_fields.add(target.member)
       ArenaChecker.validate_container_mutation(
-          self, target.receiver, [expr_node], error_node=node
+        self, target.receiver, [expr_node], error_node=node
       )
     elif isinstance(target, IndexExprNode):
       ArenaChecker.validate_container_mutation(
-          self, target.array, [expr_node], error_node=node
+        self, target.array, [expr_node], error_node=node
       )
 
     if self.is_in_init and isinstance(target, MemberAccessNode):
       if (
-          isinstance(target.receiver, IdentifierNode)
-          and target.receiver.name == "self"
+        isinstance(target.receiver, IdentifierNode)
+        and target.receiver.name == "self"
       ):
         self.initialized_fields.add(target.member)
 
     if isinstance(target, IdentifierNode):
       target_sym = self.symbol_table.lookup(target.name)
       if isinstance(target_sym, VariableSymbol):
-        # Re-initializing a previously moved or uninitialized `var` makes it live.
+        # Re-initializing a previously moved or uninitialized `var` makes it
+        # live.
         target_sym.is_moved = False
         self.moved_symbols.discard(target_sym)
         self.uninitialized_symbols.discard(target_sym)
@@ -362,40 +378,44 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         self.expected_type = target_types[0] if len(target_types) == 1 else None
         single_type = self.visit(node.exprs[0])
         rhs_types = (
-            single_type.types
-            if isinstance(single_type, MultiReturnType)
-            else [single_type]
+          single_type.types
+          if isinstance(single_type, MultiReturnType)
+          else [single_type]
         )
       else:
         rhs_types = []
         for idx, e in enumerate(node.exprs):
-          self.expected_type = target_types[idx] if idx < len(target_types) else None
+          self.expected_type = (
+            target_types[idx] if idx < len(target_types) else None
+          )
           rhs_types.append(self.visit(e))
     finally:
       self.expected_type = old_expected
 
     if len(rhs_types) != len(target_types):
       self.error(
-          f"Cannot assign {len(rhs_types)} value(s) to {len(target_types)} target(s).",
-          node=node,
+        f"Cannot assign {len(rhs_types)} value(s) to {len(target_types)} "
+        "target(s).",
+        node=node,
       )
       return
 
     rhs_had_errors = len(self.errors) > pre_rhs_errors
 
     for i, (target, target_type, expr_type) in enumerate(
-        zip(node.targets, target_types, rhs_types)
+      zip(node.targets, target_types, rhs_types, strict=False)
     ):
       expr_node = node.exprs[0] if len(node.exprs) == 1 else node.exprs[i]
       if not rhs_had_errors and self._is_void_call_result(expr_node, expr_type):
         self.error(
-            "Cannot assign void result of function call to target.",
-            node=node,
+          "Cannot assign void result of function call to target.",
+          node=node,
         )
       elif not expr_type.is_compatible(target_type):
         self.error(
-            f"Cannot assign type '{expr_type}' to target of type '{target_type}'.",
-            node=node,
+          f"Cannot assign type '{expr_type}' to target of type "
+          f"'{target_type}'.",
+          node=node,
         )
       self._check_value_ownership_transfer(expr_node, expr_type, node=node)
       self._update_assignment_target(target, target_type, expr_node, node)
@@ -404,15 +424,16 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     """Validates mutability and encapsulation for a struct field lvalue."""
     if isinstance(node.receiver, MoveNode):
       self.error(
-          f"Cannot access member '{node.member}' on moved variable '{node.receiver.name}'.",
-          node=node,
+        f"Cannot access member '{node.member}' on moved variable "
+        f"'{node.receiver.name}'.",
+        node=node,
       )
       return PrimitiveType("none")
 
     receiver_type = self.visit(node.receiver)
     if self.has_shared_ref_base(node.receiver):
       self.error(
-          "Cannot mutate through deeply immutable 'SharedRef'.", node=node
+        "Cannot mutate through deeply immutable 'SharedRef'.", node=node
       )
       return PrimitiveType("none")
     if node.is_optional and isinstance(receiver_type, OptionalType):
@@ -427,57 +448,61 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     field = receiver_type.fields.get(node.member)
     if not field:
       self.error(
-          f"Struct '{receiver_type.name}' has no field '{node.member}'.",
-          node=node,
+        f"Struct '{receiver_type.name}' has no field '{node.member}'.",
+        node=node,
       )
       return PrimitiveType("none")
 
-    # Imported structs with `__init__` enforce encapsulation outside their module.
+    # Imported structs with `__init__` enforce encapsulation outside their
+    # module.
     if (
-        getattr(receiver_type, "is_imported", False)
-        and "__init__" in receiver_type.methods
+      getattr(receiver_type, "is_imported", False)
+      and "__init__" in receiver_type.methods
     ):
       is_same_module = False
       if (
-          getattr(receiver_type, "defining_module", None)
-          and self.source_file_path
+        getattr(receiver_type, "defining_module", None)
+        and self.source_file_path
       ):
         if os.path.abspath(receiver_type.defining_module) == os.path.abspath(
-            self.source_file_path
+          self.source_file_path
         ):
           is_same_module = True
       if not is_same_module:
         self.error(
-            f"Cannot mutate field '{node.member}' of encapsulated struct '{receiver_type.name}' outside its defining module; mutate via methods instead.",
-            node=node,
-            code="E_ENCAPSULATED_FIELD_MUTATION",
-            hint=(
-                "Structs with '__init__' lock fields from external mutation. "
-                "Add a 'var func' mutator method or omit '__init__' and use "
-                "a plain data struct with a factory function."
-            ),
+          f"Cannot mutate field '{node.member}' of encapsulated struct "
+          f"'{receiver_type.name}' outside its defining module; mutate via "
+          "methods instead.",
+          node=node,
+          code="E_ENCAPSULATED_FIELD_MUTATION",
+          hint=(
+            "Structs with '__init__' lock fields from external mutation. "
+            "Add a 'var func' mutator method or omit '__init__' and use "
+            "a plain data struct with a factory function."
+          ),
         )
         return field.field_type
 
-    # Inside `__init__` or `clone` blocks, `self` fields are assignable even if `let`.
+    # Inside `__init__` or `clone` blocks, `self` fields are assignable even if
+    # `let`.
     is_direct_self = (
-        isinstance(node.receiver, IdentifierNode)
-        and node.receiver.name == "self"
+      isinstance(node.receiver, IdentifierNode) and node.receiver.name == "self"
     )
     if not field.is_mutable:
       if not ((self.is_in_init or self.is_in_clone_init) and is_direct_self):
         self.error(
-            f"Cannot assign to constant field '{node.member}' of '{receiver_type.name}'.",
-            node=node,
+          f"Cannot assign to constant field '{node.member}' of "
+          f"'{receiver_type.name}'.",
+          node=node,
         )
 
     immut = self._find_immutable_field_in_chain(node.receiver)
     if immut is not None:
       immut_field, immut_struct = immut
       self.error(
-          f"Cannot assign to field '{node.member}' through constant field "
-          f"'{immut_field}' of '{immut_struct}'.",
-          node=node,
+        f"Cannot assign to field '{node.member}' through constant field "
+        f"'{immut_field}' of '{immut_struct}'.",
+        node=node,
       )
 
     root = ArenaChecker.get_root_identifier(node.receiver)
@@ -486,30 +511,32 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         self_sym = self.symbol_table.lookup("self")
         if self_sym and not self_sym.is_mutable:
           self.error(
-              f"Cannot mutate field '{node.member}' within an immutable method. "
-              "Declare the method with 'var func' to allow mutation of 'self'.",
-              node=node,
+            f"Cannot mutate field '{node.member}' within an immutable method. "
+            "Declare the method with 'var func' to allow mutation of 'self'.",
+            node=node,
           )
       else:
         root_sym = self.symbol_table.lookup(root.name)
         if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
           kind = (
-              "Ref " if isinstance(root_sym.symbol_type, RefType) else "struct "
+            "Ref " if isinstance(root_sym.symbol_type, RefType) else "struct "
           )
           self.error(
-              f"Cannot mutate field '{node.member}' of constant {kind}"
-              f"variable '{root.name}'.",
-              node=node,
+            f"Cannot mutate field '{node.member}' of constant {kind}"
+            f"variable '{root.name}'.",
+            node=node,
           )
 
     return field.field_type
 
   def _check_index_lvalue(self, node: IndexExprNode) -> Type:
-    """Validates mutability and index types for an Array or Map subscript lvalue."""
+    """Validates mutability and index types for an Array or Map subscript
+    lvalue.
+    """
     container_type = self.visit(node.array)
     if self.has_shared_ref_base(node.array):
       self.error(
-          "Cannot mutate through deeply immutable 'SharedRef'.", node=node
+        "Cannot mutate through deeply immutable 'SharedRef'.", node=node
       )
       return PrimitiveType("none")
     if isinstance(container_type, RefType):
@@ -522,9 +549,9 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         immut_field, immut_struct = immut
         noun = "index" if is_array else "key"
         self.error(
-            f"Cannot assign to {noun} through constant field "
-            f"'{immut_field}' of '{immut_struct}'.",
-            node=node,
+          f"Cannot assign to {noun} through constant field "
+          f"'{immut_field}' of '{immut_struct}'.",
+          node=node,
         )
       root = ArenaChecker.get_root_identifier(node.array)
       if root is not None:
@@ -532,21 +559,21 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         if isinstance(root_sym, VariableSymbol) and not root_sym.is_mutable:
           if root.name == "self":
             self.error(
-                "Cannot mutate collection element within an immutable method. "
-                "Declare the method with 'var func' to allow mutation of 'self'.",
-                node=node,
+              "Cannot mutate collection element within an immutable method. "
+              "Declare the method with 'var func' to allow mutation of 'self'.",
+              node=node,
             )
           else:
             noun = "index" if is_array else "key"
             default_kind = "array " if is_array else "map "
             kind = (
-                "Ref "
-                if isinstance(root_sym.symbol_type, RefType)
-                else default_kind
+              "Ref "
+              if isinstance(root_sym.symbol_type, RefType)
+              else default_kind
             )
             self.error(
-                f"Cannot assign to {noun} of constant {kind}'{root_sym.name}'.",
-                node=node,
+              f"Cannot assign to {noun} of constant {kind}'{root_sym.name}'.",
+              node=node,
             )
 
       index_type = self.visit(node.index)
@@ -557,9 +584,9 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         return container_type.element_type
       if not index_type.is_compatible(container_type.key_type):
         self.error(
-            f"Map index type '{index_type}' is not compatible with key type "
-            f"'{container_type.key_type}'.",
-            node=node.index,
+          f"Map index type '{index_type}' is not compatible with key type "
+          f"'{container_type.key_type}'.",
+          node=node.index,
         )
       return container_type.value_type
 
@@ -567,29 +594,31 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     return PrimitiveType("none")
 
   def _check_lvalue(self, node: ASTNode) -> Type:
-    """Checks that an AST node is a mutable lvalue and returns its resolved type."""
+    """Checks that an AST node is a mutable lvalue and returns its resolved
+    type.
+    """
     res = ArenaChecker.get_lvalue_path(self.symbol_table, node)
     if res:
       root_name, field_path = res
       reason = self.get_frozen_lvalue_reason(root_name, field_path)
       if reason:
         self.error(
-            f"Cannot mutate or reassign '{root_name}' while it is frozen "
-            f"({reason}).",
-            node=node,
-            code="E_FROZEN_LVALUE",
-            hint=(
-                "Capture any needed state before the last use of the "
-                "unwrapped/iterated binding, or mutate after the unwrap/loop "
-                "block ends."
-            ),
+          f"Cannot mutate or reassign '{root_name}' while it is frozen "
+          f"({reason}).",
+          node=node,
+          code="E_FROZEN_LVALUE",
+          hint=(
+            "Capture any needed state before the last use of the "
+            "unwrapped/iterated binding, or mutate after the unwrap/loop "
+            "block ends."
+          ),
         )
 
     if isinstance(node, IdentifierNode):
       if node.name == "self":
         self.error(
-            "Cannot reassign 'self' directly; mutate fields on 'self' instead.",
-            node=node,
+          "Cannot reassign 'self' directly; mutate fields on 'self' instead.",
+          node=node,
         )
         sym = self.symbol_table.lookup("self")
         return sym.symbol_type if sym else PrimitiveType("none")
@@ -599,12 +628,12 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         return PrimitiveType("none")
       if not isinstance(sym, VariableSymbol):
         self.error(
-            f"Identifier '{node.name}' is not a mutable variable.", node=node
+          f"Identifier '{node.name}' is not a mutable variable.", node=node
         )
         return sym.symbol_type
       if not sym.is_mutable:
         self.error(
-            f"Cannot assign to constant variable '{node.name}'.", node=node
+          f"Cannot assign to constant variable '{node.name}'.", node=node
         )
       return sym.symbol_type
 
@@ -621,14 +650,16 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     self.visit(node.expr)
 
   def _mark_rvo_return_moved(
-      self, expr_node: Optional[ASTNode], expr_type: Type
+    self, expr_node: Optional[ASTNode], expr_type: Type
   ) -> None:
-    """Marks local move-only/SharedRef RVO bindings moved between multi-return siblings."""
+    """Marks local move-only/SharedRef RVO bindings moved between multi-return
+    siblings.
+    """
     if expr_node is None:
       return
     if not (
-        expr_type.is_move_only_type(self.symbol_table)
-        or expr_type.is_shared_ref_lvalue_type()
+      expr_type.is_move_only_type(self.symbol_table)
+      or expr_type.is_shared_ref_lvalue_type()
     ):
       return
     if isinstance(expr_node, TernaryExprNode):
@@ -640,7 +671,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       self._mark_rvo_return_moved(expr_node.right, expr_type)
       return
     if isinstance(expr_node, IdentifierNode) and not isinstance(
-        expr_node, MoveNode
+      expr_node, MoveNode
     ):
       sym = self.symbol_table.lookup(expr_node.name)
       if isinstance(sym, VariableSymbol):
@@ -648,19 +679,21 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         self.moved_symbols.add(sym)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
-    """Type-checks `return` statements, ownership transfers, and escape rules."""
+    """Type-checks `return` statements, ownership transfers, and escape rules.
+    """
     if not self.current_function:
       self.error("Return statement outside function context.", node=node)
       return
 
     expected_ret_types = self.current_function.return_types
     if expected_ret_types and any(
-        isinstance(t, CoroutineType) for t in expected_ret_types
+      isinstance(t, CoroutineType) for t in expected_ret_types
     ):
       if node.expressions:
         self.error(
-            "Cannot return a value from a coroutine; use 'yield' or bare 'return;'.",
-            node=node,
+          "Cannot return a value from a coroutine; use 'yield' or bare "
+          "'return;'.",
+          node=node,
         )
       return
 
@@ -670,7 +703,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       try:
         if len(node.expressions) == 1:
           self.expected_type = (
-              expected_ret_types[0] if len(expected_ret_types) == 1 else None
+            expected_ret_types[0] if len(expected_ret_types) == 1 else None
           )
           single_type = self.visit(node.expressions[0])
           if isinstance(single_type, MultiReturnType):
@@ -680,7 +713,7 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
         else:
           for idx, e in enumerate(node.expressions):
             self.expected_type = (
-                expected_ret_types[idx] if idx < len(expected_ret_types) else None
+              expected_ret_types[idx] if idx < len(expected_ret_types) else None
             )
             et = self.visit(e)
             actual_ret_types.append(et)
@@ -691,52 +724,57 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     if len(actual_ret_types) != len(expected_ret_types):
       if len(expected_ret_types) == 0:
         self.error(
-            f"Function with no return type cannot return {len(actual_ret_types)} values.",
-            node=node,
+          "Function with no return type cannot return "
+          f"{len(actual_ret_types)} values.",
+          node=node,
         )
       else:
         self.error(
-            f"Function expected {len(expected_ret_types)} return value(s), but return statement provided {len(actual_ret_types)} value(s).",
-            node=node,
+          f"Function expected {len(expected_ret_types)} return value(s), but "
+          f"return statement provided {len(actual_ret_types)} value(s).",
+          node=node,
         )
       return
 
-    for idx, (act, exp) in enumerate(zip(actual_ret_types, expected_ret_types)):
+    for idx, (act, exp) in enumerate(
+      zip(actual_ret_types, expected_ret_types, strict=False)
+    ):
       if not act.is_compatible(exp):
         self.error(
-            f"Cannot return value of type '{act}' for return value #{idx + 1} (expected '{exp}')."
+          f"Cannot return value of type '{act}' for return value #{idx + 1} "
+          f"(expected '{exp}')."
         )
       ret_expr_node = (
-          node.expressions[0]
-          if len(node.expressions) == 1
-          else node.expressions[idx]
+        node.expressions[0]
+        if len(node.expressions) == 1
+        else node.expressions[idx]
       )
       self._check_return_ownership_transfer(ret_expr_node, act, node=node)
 
     for ret_expr in node.expressions:
       ArenaChecker.validate_return_escape(
-          self.symbol_table,
-          self.current_function_scope,
-          ret_expr,
-          lambda msg, n: self.error(msg, node=n),
-          checker=self,
+        self.symbol_table,
+        self.current_function_scope,
+        ret_expr,
+        lambda msg, n: self.error(msg, node=n),
+        checker=self,
       )
       ArenaChecker.validate_stack_borrow_return_escape(
-          self.symbol_table,
-          self.current_function_scope,
-          ret_expr,
-          lambda msg, n: self.error(msg, node=n),
-          checker=self,
+        self.symbol_table,
+        self.current_function_scope,
+        ret_expr,
+        lambda msg, n: self.error(msg, node=n),
+        checker=self,
       )
 
   def visit_YieldNode(self, node: YieldNode) -> None:
     """Type-checks `yield` inside `match` blocks or `Coroutine<T>` functions."""
     if self._match_stack:
       expr_nodes = getattr(node, "expressions", None) or (
-          [node.expr] if getattr(node, "expr", None) else []
+        [node.expr] if getattr(node, "expr", None) else []
       )
       actual_types = [self.visit(e) for e in expr_nodes]
-      for e_node, a_type in zip(expr_nodes, actual_types):
+      for e_node, a_type in zip(expr_nodes, actual_types, strict=False):
         self._check_value_ownership_transfer(e_node, a_type, node=node)
 
       if len(actual_types) == 1:
@@ -749,19 +787,20 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     if not self.current_function:
       self.error(
-          "Yield statement outside coroutine or match context.", node=node
+        "Yield statement outside coroutine or match context.", node=node
       )
       return
 
     expected_ret_types = self.current_function.return_types
     coro_type = next(
-        (t for t in expected_ret_types if isinstance(t, CoroutineType)), None
+      (t for t in expected_ret_types if isinstance(t, CoroutineType)), None
     )
     if not coro_type:
       ret_desc = expected_ret_types[0] if expected_ret_types else "void"
       self.error(
-          f"Cannot yield in a function with return type '{ret_desc}' (expected Coroutine).",
-          node=node,
+        f"Cannot yield in a function with return type '{ret_desc}' (expected "
+        "Coroutine).",
+        node=node,
       )
       return
 
@@ -771,17 +810,17 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
     while curr_scope is not None:
       for sym in curr_scope.symbols.values():
         if (
-            isinstance(sym, VariableSymbol)
-            and not sym.is_moved
-            and sym not in self.moved_symbols
+          isinstance(sym, VariableSymbol)
+          and not sym.is_moved
+          and sym not in self.moved_symbols
         ):
           if sym.symbol_type and sym.symbol_type.is_move_only_type(
-              self.symbol_table
+            self.symbol_table
           ):
             self.error(
-                f"Variable '{sym.name}' of move-only RAII type "
-                f"'{sym.symbol_type}' cannot remain live across 'yield'.",
-                node=node,
+              f"Variable '{sym.name}' of move-only RAII type "
+              f"'{sym.symbol_type}' cannot remain live across 'yield'.",
+              node=node,
             )
       if curr_scope is self.current_function_scope:
         break
@@ -789,42 +828,46 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
 
     expected_yield = coro_type.yield_type
     expr_nodes = getattr(node, "expressions", None) or (
-        [node.expr] if getattr(node, "expr", None) else []
+      [node.expr] if getattr(node, "expr", None) else []
     )
     actual_types = [self.visit(e) for e in expr_nodes]
-    for e_node, a_type in zip(expr_nodes, actual_types):
+    for e_node, a_type in zip(expr_nodes, actual_types, strict=False):
       self._check_value_ownership_transfer(e_node, a_type, node=node)
 
     if isinstance(expected_yield, NoneType):
       if len(actual_types) > 1:
         self.error(
-            f"Cannot yield {len(actual_types)} values in Coroutine<void>; use bare 'yield;'.",
-            node=node,
+          f"Cannot yield {len(actual_types)} values in Coroutine<void>; use "
+          "bare 'yield;'.",
+          node=node,
         )
       elif len(actual_types) == 1:
         act = actual_types[0]
         if not isinstance(act, NoneType) and not (
-            isinstance(act, PrimitiveType) and act.name in ("none", "void")
+          isinstance(act, PrimitiveType) and act.name in ("none", "void")
         ):
           self.error(
-              f"Cannot yield value of type '{act}' in Coroutine<void>; use bare 'yield;'.",
-              node=node,
+            f"Cannot yield value of type '{act}' in Coroutine<void>; use bare "
+            "'yield;'.",
+            node=node,
           )
     else:
       if not actual_types:
         self.error(
-            f"Must yield a value of type '{expected_yield}' in Coroutine<{expected_yield}>.",
-            node=node,
+          f"Must yield a value of type '{expected_yield}' in "
+          f"Coroutine<{expected_yield}>.",
+          node=node,
         )
       elif len(actual_types) == 1:
         act = actual_types[0]
         if not act.is_compatible(expected_yield):
           self.error(
-              f"Cannot yield value of type '{act}' in Coroutine<{expected_yield}> (expected '{expected_yield}').",
-              node=node,
+            f"Cannot yield value of type '{act}' in "
+            f"Coroutine<{expected_yield}> (expected '{expected_yield}').",
+            node=node,
           )
       else:
         self.error(
-            f"Cannot yield multiple values in Coroutine<{expected_yield}>.",
-            node=node,
+          f"Cannot yield multiple values in Coroutine<{expected_yield}>.",
+          node=node,
         )

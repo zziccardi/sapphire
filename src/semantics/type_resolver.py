@@ -2,53 +2,60 @@
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from src.parser.ast import *
-from src.semantics.symbol_table import (
-    SymbolTable,
-    Type,
-    PrimitiveType,
-    StringType,
-    OptionalType,
-    FunctionType,
-    MultiReturnType,
-    StructMethod,
-    StructType,
-    TraitType,
-    EnumType,
-    NoneType,
-    InferredType,
-    ArrayType,
-    MapType,
-    ArenaType,
-    RangeType,
-    ModuleType,
-    GenericTypeParameter,
-    VariableSymbol,
-    FunctionSymbol,
-    EnumSymbol,
-    ModuleSymbol,
-    CoroutineType,
-    RefType,
-    SharedRefType,
-    WeakRefType,
-    COROUTINE_METHODS,
-    STRING_METHODS,
+from src.parser.ast import (
+  ArrayTypeNode,
+  AssignmentNode,
+  ASTNode,
+  BasicTypeNode,
+  BlockNode,
+  CallNode,
+  ForNode,
+  FuncDeclNode,
+  FunctionTypeNode,
+  IdentifierNode,
+  IfNode,
+  ImplBlockNode,
+  LambdaNode,
+  MapTypeNode,
+  MemberAccessNode,
+  MoveNode,
+  OptionalTypeNode,
+  ProgramNode,
+  StructDeclNode,
+  StructFieldNode,
+  TypeNode,
+  VarDeclNode,
 )
-from src.cli.diagnostics import format_diagnostic
-from src.common.errors import SemanticError
 from src.semantics.arena_checker import ArenaChecker
-from src.semantics.collection_checker import CollectionChecker
-from src.semantics.declaration_pass import DeclarationPass
-from src.semantics.generics_checker import GenericsChecker
-from src.semantics.semantic_context import SemanticContext
-from src.semantics.struct_layout_pass import StructLayoutPass
+from src.semantics.symbol_table import (
+  ArrayType,
+  CoroutineType,
+  FunctionType,
+  GenericTypeParameter,
+  MapType,
+  ModuleSymbol,
+  MultiReturnType,
+  NoneType,
+  OptionalType,
+  PrimitiveType,
+  RefType,
+  SharedRefType,
+  StructMethod,
+  StructType,
+  TraitType,
+  Type,
+  VariableSymbol,
+  WeakRefType,
+)
 
 
 class TypeResolverMixin:
   """Provides type-node resolution and global/lambda static analysis helpers."""
 
   def _resolve_field_type(self, f: StructFieldNode, struct_name: str) -> Type:
-    """Resolves struct field type from explicit annotation or infers it from default expression."""
+    """Resolves struct field type from explicit annotation or infers it from
+    default expression.
+    """
     if f.field_type:
       ftype = self._resolve_type_node(f.field_type)
       if f.default_expr:
@@ -60,30 +67,37 @@ class TypeResolverMixin:
           self.expected_type = old_expected
         if not expr_type.is_compatible(ftype):
           self.error(
-              f"Default expression of type '{expr_type}' is not compatible with field '{f.name}' of type '{ftype}'.",
-              node=f,
+            f"Default expression of type '{expr_type}' is not compatible with "
+            f"field '{f.name}' of type '{ftype}'.",
+            node=f,
           )
       return ftype
     elif f.default_expr:
       ftype = self.visit(f.default_expr)
       if isinstance(ftype, NoneType):
         self.error(
-            f"Cannot infer type of struct field '{f.name}' from 'none' alone. Specify an explicit type annotation.",
-            node=f,
+          f"Cannot infer type of struct field '{f.name}' from 'none' alone. "
+          "Specify an explicit type annotation.",
+          node=f,
         )
         return PrimitiveType("none")
       return ftype
     else:
       self.error(
-          f"Struct field '{f.name}' in struct '{struct_name}' requires an explicit type annotation or a default value.",
-          node=f,
+        f"Struct field '{f.name}' in struct '{struct_name}' requires an "
+        "explicit type annotation or a default value.",
+        node=f,
       )
       return PrimitiveType("none")
 
   def _has_implicit_default_value(self, ftype: Type) -> bool:
     if isinstance(ftype, OptionalType):
       return True
-    if isinstance(ftype, PrimitiveType) and ftype.name in ("int", "float", "bool"):
+    if isinstance(ftype, PrimitiveType) and ftype.name in (
+      "int",
+      "float",
+      "bool",
+    ):
       return True
     return False
 
@@ -91,38 +105,58 @@ class TypeResolverMixin:
     type_params = list(decl.type_params) if decl.type_params else []
     struct_type = self.symbol_table.lookup_type(decl.struct_name)
     trait_type = (
-        self.symbol_table.lookup_type(decl.trait_name)
-        if getattr(decl, "trait_name", None)
-        else None
+      self.symbol_table.lookup_type(decl.trait_name)
+      if getattr(decl, "trait_name", None)
+      else None
     )
     struct_is_generic = isinstance(struct_type, StructType) and bool(
-        struct_type.type_params
+      struct_type.type_params
     )
     trait_tparams = (
-        set(trait_type.type_params)
-        if isinstance(trait_type, TraitType) and trait_type.type_params
-        else set()
+      set(trait_type.type_params)
+      if isinstance(trait_type, TraitType) and trait_type.type_params
+      else set()
     )
     builtin_type_names = {
-        "int", "float", "String", "bool", "none", "void",
-        "Array", "Map", "Coroutine", "Ref", "SharedRef", "WeakRef", "Arena", "Range",
+      "int",
+      "float",
+      "String",
+      "bool",
+      "none",
+      "void",
+      "Array",
+      "Map",
+      "Coroutine",
+      "Ref",
+      "SharedRef",
+      "WeakRef",
+      "Arena",
+      "Range",
     }
     if struct_is_generic:
-      for arg in getattr(decl, "struct_type_args", []) + getattr(decl, "trait_type_args", []):
-        if isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names:
-          if "." not in arg.name and self.symbol_table.lookup_type(arg.name) is None:
+      for arg in getattr(decl, "struct_type_args", []) + getattr(
+        decl, "trait_type_args", []
+      ):
+        if (
+          isinstance(arg, BasicTypeNode) and arg.name not in builtin_type_names
+        ):
+          if (
+            "." not in arg.name
+            and self.symbol_table.lookup_type(arg.name) is None
+          ):
             if arg.name not in type_params:
               type_params.append(arg.name)
     elif trait_tparams:
-      # For concrete structs implementing a generic trait (`impl Trait<T> for S`),
+      # For concrete structs implementing a generic trait (`impl Trait<T> for
+      # S`),
       # only treat unresolved type args that match the trait's declared type
       # parameter names as generic; typos like `impl Trait<Typo> for S` remain
       # undefined-type errors.
       for arg in getattr(decl, "trait_type_args", []):
         if (
-            isinstance(arg, BasicTypeNode)
-            and arg.name in trait_tparams
-            and self.symbol_table.lookup_type(arg.name) is None
+          isinstance(arg, BasicTypeNode)
+          and arg.name in trait_tparams
+          and self.symbol_table.lookup_type(arg.name) is None
         ):
           if arg.name not in type_params:
             type_params.append(arg.name)
@@ -136,14 +170,14 @@ class TypeResolverMixin:
       return OptionalType(self._substitute_type_params(t.base_type, type_map))
     if isinstance(t, ArrayType):
       return ArrayType(
-          self._substitute_type_params(t.element_type, type_map),
-          size=t.size,
-          is_fixed_size=t.is_fixed_size,
+        self._substitute_type_params(t.element_type, type_map),
+        size=t.size,
+        is_fixed_size=t.is_fixed_size,
       )
     if isinstance(t, MapType):
       return MapType(
-          self._substitute_type_params(t.key_type, type_map),
-          self._substitute_type_params(t.value_type, type_map),
+        self._substitute_type_params(t.key_type, type_map),
+        self._substitute_type_params(t.value_type, type_map),
       )
     if isinstance(t, RefType):
       return RefType(self._substitute_type_params(t.inner_type, type_map))
@@ -154,25 +188,29 @@ class TypeResolverMixin:
     if isinstance(t, CoroutineType):
       return CoroutineType(self._substitute_type_params(t.yield_type, type_map))
     if isinstance(t, MultiReturnType):
-      return MultiReturnType([self._substitute_type_params(sub, type_map) for sub in t.types])
+      return MultiReturnType(
+        [self._substitute_type_params(sub, type_map) for sub in t.types]
+      )
     if isinstance(t, FunctionType):
       return FunctionType(
-          [self._substitute_type_params(p, type_map) for p in t.param_types],
-          self._substitute_type_params(t.return_type, type_map),
-          param_mutabilities=t.param_mutabilities,
-          param_names=(
-              t.param_names if getattr(t, "has_named_params", True) else None
-          ),
-          has_self=t.has_self,
-          extern_name=t.extern_name,
-          num_defaults=t.num_defaults,
-          param_defaults=t.param_defaults,
-          ast_decl=t.ast_decl,
+        [self._substitute_type_params(p, type_map) for p in t.param_types],
+        self._substitute_type_params(t.return_type, type_map),
+        param_mutabilities=t.param_mutabilities,
+        param_names=(
+          t.param_names if getattr(t, "has_named_params", True) else None
+        ),
+        has_self=t.has_self,
+        extern_name=t.extern_name,
+        num_defaults=t.num_defaults,
+        param_defaults=t.param_defaults,
+        ast_decl=t.ast_decl,
       )
     return t
 
   def _register_impl_signatures(self, program: ProgramNode) -> None:
-    """Pre-pass to register methods defined inside impl blocks onto struct types."""
+    """Pre-pass to register methods defined inside impl blocks onto struct
+    types.
+    """
     for decl in program.declarations:
       if isinstance(decl, ImplBlockNode):
         for member in decl.members:
@@ -181,7 +219,10 @@ class TypeResolverMixin:
           continue
         struct_type = self.symbol_table.lookup_type(decl.struct_name)
         if not struct_type or not isinstance(struct_type, StructType):
-          self.error(f"Cannot implement members for undefined struct '{decl.struct_name}'.")
+          self.error(
+            "Cannot implement members for undefined struct "
+            f"'{decl.struct_name}'."
+          )
           continue
 
         # If implementing a trait
@@ -199,8 +240,8 @@ class TypeResolverMixin:
           if trait_type and member.func_decl.name in trait_type.methods:
             trait_method = trait_type.methods[member.func_decl.name]
             if (
-                member.modifier is None
-                and getattr(trait_method.ast_decl, "modifier", None) == "static"
+              member.modifier is None
+              and getattr(trait_method.ast_decl, "modifier", None) == "static"
             ):
               member.modifier = "static"
           func_decl = member.func_decl
@@ -215,23 +256,29 @@ class TypeResolverMixin:
             param_types.append(ptype)
             param_mutabilities.append(p.is_mutable)
           ret_type = self._resolve_return_types(func_decl)
-          num_defaults = sum(1 for p in func_decl.parameters if getattr(p, "default_expr", None) is not None)
-          param_defaults = [getattr(p, "default_expr", None) for p in func_decl.parameters]
+          num_defaults = sum(
+            1
+            for p in func_decl.parameters
+            if getattr(p, "default_expr", None) is not None
+          )
+          param_defaults = [
+            getattr(p, "default_expr", None) for p in func_decl.parameters
+          ]
           signature = FunctionType(
-              param_types,
-              ret_type,
-              param_mutabilities,
-              param_names=[p.name for p in func_decl.parameters],
-              num_defaults=num_defaults,
-              param_defaults=param_defaults,
-              ast_decl=func_decl,
+            param_types,
+            ret_type,
+            param_mutabilities,
+            param_names=[p.name for p in func_decl.parameters],
+            num_defaults=num_defaults,
+            param_defaults=param_defaults,
+            ast_decl=func_decl,
           )
 
           method = StructMethod(
-              func_decl.name,
-              signature,
-              member.modifier,
-              impl_trait_name=trait_type.name if trait_type else None,
+            func_decl.name,
+            signature,
+            member.modifier,
+            impl_trait_name=trait_type.name if trait_type else None,
           )
 
           # Validate __del__ destructor and __init__ constructor
@@ -239,44 +286,48 @@ class TypeResolverMixin:
             if member.modifier == "static":
               self.error("Destructor '__del__' cannot be static.")
             if len(func_decl.parameters) > 0:
-              self.error("Destructor '__del__' must take 0 parameters; 'self' is implicitly available.")
-            is_void = (
-                len(ret_type) == 0
+              self.error(
+                "Destructor '__del__' must take 0 parameters; 'self' is "
+                "implicitly available."
+              )
+            is_void = len(ret_type) == 0 or (
+              len(ret_type) == 1
+              and (
+                isinstance(ret_type[0], NoneType)
                 or (
-                    len(ret_type) == 1
-                    and (
-                        isinstance(ret_type[0], NoneType)
-                        or (
-                            isinstance(ret_type[0], PrimitiveType)
-                            and ret_type[0].name in ("none", "void")
-                        )
-                    )
+                  isinstance(ret_type[0], PrimitiveType)
+                  and ret_type[0].name in ("none", "void")
                 )
+              )
             )
             if not is_void:
               self.error("Destructor '__del__' must return void.")
           elif func_decl.name == "__init__":
             if member.modifier == "static":
-              self.error("Constructor '__init__' cannot be static.", node=func_decl)
-            is_void = (
-                len(ret_type) == 0
+              self.error(
+                "Constructor '__init__' cannot be static.", node=func_decl
+              )
+            is_void = len(ret_type) == 0 or (
+              len(ret_type) == 1
+              and (
+                isinstance(ret_type[0], NoneType)
                 or (
-                    len(ret_type) == 1
-                    and (
-                        isinstance(ret_type[0], NoneType)
-                        or (
-                            isinstance(ret_type[0], PrimitiveType)
-                            and ret_type[0].name in ("none", "void")
-                        )
-                    )
+                  isinstance(ret_type[0], PrimitiveType)
+                  and ret_type[0].name in ("none", "void")
                 )
+              )
             )
             if not is_void:
-              self.error("Constructor '__init__' must return void.", node=func_decl)
+              self.error(
+                "Constructor '__init__' must return void.", node=func_decl
+              )
 
           # Check for duplicate definitions
           if func_decl.name in struct_type.methods:
-            self.error(f"Method '{func_decl.name}' redefined in struct '{decl.struct_name}'.")
+            self.error(
+              f"Method '{func_decl.name}' redefined in struct "
+              f"'{decl.struct_name}'."
+            )
           struct_type.methods[func_decl.name] = method
 
           # Register on trait if needed
@@ -323,44 +374,53 @@ class TypeResolverMixin:
         continue
       struct_type = self.symbol_table.lookup_type(decl.struct_name)
       trait_type = self.symbol_table.lookup_type(decl.trait_name)
-      if not isinstance(struct_type, StructType) or not isinstance(trait_type, TraitType):
+      if not isinstance(struct_type, StructType) or not isinstance(
+        trait_type, TraitType
+      ):
         continue
       if not trait_type.default_methods:
         continue
       decl.default_trait_members = []
       trait_type_map: Dict[str, Type] = {}
       if trait_type.type_params and getattr(decl, "trait_type_args", None):
-        resolved_args = [self._resolve_type_node(t) for t in decl.trait_type_args]
-        trait_type_map = dict(zip(trait_type.type_params, resolved_args))
+        resolved_args = [
+          self._resolve_type_node(t) for t in decl.trait_type_args
+        ]
+        trait_type_map = dict(
+          zip(trait_type.type_params, resolved_args, strict=False)
+        )
       for m_name, trait_member in trait_type.default_methods.items():
         own_method = struct_type.methods.get(m_name)
         if own_method is not None:
           if own_method.impl_trait_name is None:
             self.error(
-                f"Method '{m_name}' in struct '{decl.struct_name}' conflicts with "
-                f"default method of trait '{decl.trait_name}'; override it inside "
-                f"'impl {decl.trait_name} for {decl.struct_name}'.",
-                node=decl,
+              f"Method '{m_name}' in struct '{decl.struct_name}' conflicts "
+              "with "
+              f"default method of trait '{decl.trait_name}'; override it "
+              "inside "
+              f"'impl {decl.trait_name} for {decl.struct_name}'.",
+              node=decl,
             )
           continue
         if struct_type.get_method(m_name, self.symbol_table) is not None:
-          # Inherited from an ancestor struct (Parent impl Trait > Trait default)
+          # Inherited from an ancestor struct (Parent impl Trait > Trait
+          # default)
           continue
         trait_sig = trait_type.methods[m_name]
         expected_sig = (
-            self._substitute_type_params(trait_sig, trait_type_map)
-            if trait_type_map
-            else trait_sig
+          self._substitute_type_params(trait_sig, trait_type_map)
+          if trait_type_map
+          else trait_sig
         )
         struct_type.methods[m_name] = StructMethod(
-            m_name,
-            expected_sig,
-            trait_member.modifier,
-            is_trait_default=True,
-            impl_trait_name=trait_type.name,
+          m_name,
+          expected_sig,
+          trait_member.modifier,
+          is_trait_default=True,
+          impl_trait_name=trait_type.name,
         )
         decl.default_trait_members.append(
-            (decl.trait_name, m_name, trait_member.modifier, trait_member)
+          (decl.trait_name, m_name, trait_member.modifier, trait_member)
         )
 
   def _resolve_return_types(self, node: Any) -> List[Type]:
@@ -387,7 +447,10 @@ class TypeResolverMixin:
       if node.name == "Array" and node.type_args:
         return ArrayType(self._resolve_type_node(node.type_args[0]))
       if node.name == "Map" and len(node.type_args) >= 2:
-        return MapType(self._resolve_type_node(node.type_args[0]), self._resolve_type_node(node.type_args[1]))
+        return MapType(
+          self._resolve_type_node(node.type_args[0]),
+          self._resolve_type_node(node.type_args[1]),
+        )
       if node.name == "Coroutine":
         if node.type_args:
           return CoroutineType(self._resolve_type_node(node.type_args[0]))
@@ -410,13 +473,29 @@ class TypeResolverMixin:
         if isinstance(mod_sym, ModuleSymbol):
           exp_sym = mod_sym.lookup_export(parts[1])
           if exp_sym:
-            resolved = exp_sym.symbol_type if hasattr(exp_sym, "symbol_type") else exp_sym
-            if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
-              resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
-              if not any(isinstance(t, GenericTypeParameter) for t in resolved_type_args):
-                return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
+            resolved = (
+              exp_sym.symbol_type
+              if hasattr(exp_sym, "symbol_type")
+              else exp_sym
+            )
+            if (
+              node.type_args
+              and isinstance(resolved, StructType)
+              and resolved.type_params
+            ):
+              resolved_type_args = [
+                self._resolve_type_node(t) for t in node.type_args
+              ]
+              if not any(
+                isinstance(t, GenericTypeParameter) for t in resolved_type_args
+              ):
+                return self._monomorphize_struct(
+                  resolved, node.type_args, resolved_type_args
+                )
             return resolved
-          self.error(f"Module '{parts[0]}' does not export type '{parts[1]}'.", node=node)
+          self.error(
+            f"Module '{parts[0]}' does not export type '{parts[1]}'.", node=node
+          )
           return PrimitiveType("none")
       resolved = self.symbol_table.lookup_type(node.name)
       if isinstance(resolved, GenericTypeParameter):
@@ -424,10 +503,20 @@ class TypeResolverMixin:
       if not resolved:
         self.error(f"Undefined type '{node.name}'.", node=node)
         return PrimitiveType("none")
-      if node.type_args and isinstance(resolved, StructType) and resolved.type_params:
-        resolved_type_args = [self._resolve_type_node(t) for t in node.type_args]
-        if not any(isinstance(t, GenericTypeParameter) for t in resolved_type_args):
-          return self._monomorphize_struct(resolved, node.type_args, resolved_type_args)
+      if (
+        node.type_args
+        and isinstance(resolved, StructType)
+        and resolved.type_params
+      ):
+        resolved_type_args = [
+          self._resolve_type_node(t) for t in node.type_args
+        ]
+        if not any(
+          isinstance(t, GenericTypeParameter) for t in resolved_type_args
+        ):
+          return self._monomorphize_struct(
+            resolved, node.type_args, resolved_type_args
+          )
       return resolved
     if isinstance(node, OptionalTypeNode):
       return OptionalType(self._resolve_type_node(node.base_type))
@@ -437,7 +526,10 @@ class TypeResolverMixin:
         return ArrayType(elem_type, size=node.size, is_fixed_size=True)
       return ArrayType(elem_type)
     if isinstance(node, MapTypeNode):
-      return MapType(self._resolve_type_node(node.key_type), self._resolve_type_node(node.val_type))
+      return MapType(
+        self._resolve_type_node(node.key_type),
+        self._resolve_type_node(node.val_type),
+      )
     if isinstance(node, FunctionTypeNode):
       param_types = [self._resolve_type_node(t) for t in node.param_types]
       ret_types = self._resolve_return_types(node)
@@ -454,18 +546,16 @@ class TypeResolverMixin:
     self.exported_symbols: Set[str] = set()
     for decl in program.declarations:
       if (
-          isinstance(decl, VarDeclNode)
-          and decl.is_mutable
-          and not getattr(decl, "is_extern", False)
+        isinstance(decl, VarDeclNode)
+        and decl.is_mutable
+        and not getattr(decl, "is_extern", False)
       ):
         for name in decl.names:
           self.module_var_globals.add(name)
     if getattr(program, "export_block", None):
       for spec in program.export_block.specifiers:
         self.exported_symbols.add(spec.symbol)
-    self.exported_var_globals = (
-        self.module_var_globals & self.exported_symbols
-    )
+    self.exported_var_globals = self.module_var_globals & self.exported_symbols
 
     self.func_direct_globals: Dict[str, Set[str]] = {}
     self.func_direct_calls: Dict[str, Set[str]] = {}
@@ -480,11 +570,11 @@ class TypeResolverMixin:
           if isinstance(fdecl, FuncDeclNode):
             func_id = f"{decl.struct_name}.{fdecl.name}"
             self._scan_func_global_accesses(
-                func_id, fdecl, struct_name=decl.struct_name
+              func_id, fdecl, struct_name=decl.struct_name
             )
 
     self.func_transitive_globals = {
-        k: set(v) for k, v in self.func_direct_globals.items()
+      k: set(v) for k, v in self.func_direct_globals.items()
     }
     self.func_transitive_dynamic = set(self.func_has_dynamic)
     changed = True
@@ -493,20 +583,20 @@ class TypeResolverMixin:
       for f_id, called_set in self.func_direct_calls.items():
         for callee in called_set:
           matching = [
-              k
-              for k in self.func_direct_globals
-              if k == callee or k.endswith(f".{callee}")
+            k
+            for k in self.func_direct_globals
+            if k == callee or k.endswith(f".{callee}")
           ]
           for m in matching:
             before_len = len(self.func_transitive_globals[f_id])
             self.func_transitive_globals[f_id].update(
-                self.func_transitive_globals[m]
+              self.func_transitive_globals[m]
             )
             if len(self.func_transitive_globals[f_id]) > before_len:
               changed = True
             if (
-                m in self.func_transitive_dynamic
-                and f_id not in self.func_transitive_dynamic
+              m in self.func_transitive_dynamic
+              and f_id not in self.func_transitive_dynamic
             ):
               self.func_transitive_dynamic.add(f_id)
               changed = True
@@ -514,7 +604,7 @@ class TypeResolverMixin:
   def _analyze_method_self_fields(self, program: ProgramNode) -> None:
     """Computes bounded self.<field> access sets for struct methods."""
     self._method_self_field_accesses: Dict[
-        Tuple[str, str], Optional[Set[str]]
+      Tuple[str, str], Optional[Set[str]]
     ] = {}
     direct_calls: Dict[Tuple[str, str], Set[str]] = {}
 
@@ -534,8 +624,8 @@ class TypeResolverMixin:
           return
         if isinstance(node, MemberAccessNode):
           if (
-              isinstance(node.receiver, IdentifierNode)
-              and node.receiver.name == "self"
+            isinstance(node.receiver, IdentifierNode)
+            and node.receiver.name == "self"
           ):
             if isinstance(parent, CallNode) and parent.callee is node:
               calls.add(node.member)
@@ -593,10 +683,10 @@ class TypeResolverMixin:
             changed = True
 
   def _scan_func_global_accesses(
-      self,
-      func_id: str,
-      decl: FuncDeclNode,
-      struct_name: Optional[str] = None,
+    self,
+    func_id: str,
+    decl: FuncDeclNode,
+    struct_name: Optional[str] = None,
   ) -> None:
     direct_globals: Set[str] = set()
     direct_calls: Set[str] = set()
@@ -642,7 +732,7 @@ class TypeResolverMixin:
         return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
-            [node.expr] if getattr(node, "expr", None) else []
+          [node.expr] if getattr(node, "expr", None) else []
         )
         for e in expr_list:
           walk(e)
@@ -659,8 +749,7 @@ class TypeResolverMixin:
         return
       if isinstance(node, IdentifierNode):
         if (
-            node.name in self.module_var_globals
-            and node.name not in local_names
+          node.name in self.module_var_globals and node.name not in local_names
         ):
           direct_globals.add(node.name)
         return
@@ -677,13 +766,15 @@ class TypeResolverMixin:
         elif isinstance(node.callee, MemberAccessNode):
           walk(node.callee.receiver)
           if (
-              isinstance(node.callee.receiver, IdentifierNode)
-              and node.callee.receiver.name == "self"
-              and struct_name
+            isinstance(node.callee.receiver, IdentifierNode)
+            and node.callee.receiver.name == "self"
+            and struct_name
           ):
             direct_calls.add(f"{struct_name}.{node.callee.member}")
           elif isinstance(node.callee.receiver, IdentifierNode):
-            direct_calls.add(f"{node.callee.receiver.name}.{node.callee.member}")
+            direct_calls.add(
+              f"{node.callee.receiver.name}.{node.callee.member}"
+            )
             direct_calls.add(node.callee.member)
           else:
             direct_calls.add(node.callee.member)
@@ -745,7 +836,7 @@ class TypeResolverMixin:
         return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
-            [node.expr] if getattr(node, "expr", None) else []
+          [node.expr] if getattr(node, "expr", None) else []
         )
         for e in expr_list:
           walk(e)
@@ -765,22 +856,16 @@ class TypeResolverMixin:
           sym = self.symbol_table.lookup(node.name)
           if isinstance(sym, VariableSymbol):
             if (
-                sym.scope_defined is not None
-                and sym.scope_defined.parent is not None
+              sym.scope_defined is not None
+              and sym.scope_defined.parent is not None
             ):
               is_ref = ArenaChecker.is_reference_type(sym.symbol_type)
               is_plain_stack = (
-                  is_ref
-                  and not sym.arena_dep_records
-                  and not isinstance(
-                      sym.symbol_type, (SharedRefType, RefType)
-                  )
+                is_ref
+                and not sym.arena_dep_records
+                and not isinstance(sym.symbol_type, (SharedRefType, RefType))
               )
-              if (
-                  sym.is_mutable
-                  or is_plain_stack
-                  or sym.stack_borrow_symbols
-              ):
+              if sym.is_mutable or is_plain_stack or sym.stack_borrow_symbols:
                 borrows.add(sym.name)
                 borrows.update(sym.stack_borrow_symbols)
         return
@@ -793,14 +878,23 @@ class TypeResolverMixin:
     return borrows
 
   def _scan_lambda_capture_modes(
-      self, lambda_node: LambdaNode
+    self, lambda_node: LambdaNode
   ) -> Tuple[Set[str], Set[str]]:
-    """Returns `(mutated_captures, read_captures)` for outer variables in *lambda_node*."""
+    """Returns `(mutated_captures, read_captures)` for outer variables in
+    *lambda_node*.
+    """
     local_names: Set[str] = {p.name for p in lambda_node.parameters}
     mutated: Set[str] = set()
     read: Set[str] = set()
     collection_mutators = {
-        "push", "pop", "insert", "remove", "clear", "swap", "reverse", "sort",
+      "push",
+      "pop",
+      "insert",
+      "remove",
+      "clear",
+      "swap",
+      "reverse",
+      "sort",
     }
 
     def record_mutated(expr: ASTNode) -> None:
@@ -850,7 +944,7 @@ class TypeResolverMixin:
         return
       if isinstance(node, VarDeclNode):
         expr_list = getattr(node, "exprs", None) or (
-            [node.expr] if getattr(node, "expr", None) else []
+          [node.expr] if getattr(node, "expr", None) else []
         )
         for e in expr_list:
           walk(e)
@@ -879,13 +973,13 @@ class TypeResolverMixin:
           elif isinstance(recv_type, TraitType):
             fn = recv_type.methods.get(node.callee.member)
             is_mut_method = bool(
-                fn and getattr(fn.ast_decl, "modifier", None) == "var"
+              fn and getattr(fn.ast_decl, "modifier", None) == "var"
             )
           elif isinstance(recv_type, (ArrayType, MapType)):
             if node.callee.member in collection_mutators:
               is_mut_method = True
             elif node.callee.member in ("map", "filter") and any(
-                a.name == "in_place" for a in node.arguments
+              a.name == "in_place" for a in node.arguments
             ):
               is_mut_method = True
           if is_mut_method:
@@ -897,9 +991,8 @@ class TypeResolverMixin:
         if isinstance(callee_type, FunctionType):
           param_muts = callee_type.param_mutabilities or []
           param_names = callee_type.param_names or []
-          if (
-              getattr(callee_type, "has_self", False)
-              and isinstance(node.callee, MemberAccessNode)
+          if getattr(callee_type, "has_self", False) and isinstance(
+            node.callee, MemberAccessNode
           ):
             param_muts = param_muts[1:]
             param_names = param_names[1:] if param_names else []
@@ -937,4 +1030,3 @@ class TypeResolverMixin:
     walk(lambda_node.body)
     read -= mutated
     return (mutated, read)
-

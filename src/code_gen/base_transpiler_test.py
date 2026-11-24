@@ -1,8 +1,17 @@
 """Unit tests for base_transpiler.py helper functions."""
 
 import unittest
-from src.parser.ast import BasicTypeNode, OptionalTypeNode, FuncDeclNode, BlockNode
-from src.code_gen.base_transpiler import get_default_value_for_type_node, is_coroutine_func
+
+from src.code_gen.base_transpiler import (
+  get_default_value_for_type_node,
+  is_coroutine_func,
+)
+from src.parser.ast import (
+  BasicTypeNode,
+  BlockNode,
+  FuncDeclNode,
+  OptionalTypeNode,
+)
 
 
 class TestBaseTranspilerHelpers(unittest.TestCase):
@@ -75,7 +84,10 @@ class TestBaseTranspilerHelpers(unittest.TestCase):
 
   def test_extract_type_name_and_return_type_names(self):
     """Verifies extract_type_name and get_return_type_names helpers."""
-    from src.code_gen.base_transpiler import extract_type_name, get_return_type_names
+    from src.code_gen.base_transpiler import (
+      extract_type_name,
+      get_return_type_names,
+    )
     from src.code_gen.python_transpiler import PythonTranspiler
     from src.parser.ast import LiteralNode
     from src.semantics.symbol_table import StructType
@@ -358,6 +370,35 @@ class TestBaseTranspilerHelpers(unittest.TestCase):
     self.assertEqual(block3._block_destructibles, ["a", "b"])
     self.assertEqual(transpiler.variable_types["a"], "Res")
     self.assertEqual(transpiler.variable_types["b"], "Res")
+
+  def test_init_subclass_enforces_abstract_methods_at_definition_time(self):
+    """Concrete BaseTranspiler subclasses fail at definition time if incomplete."""
+    from abc import ABC, abstractmethod
+
+    from src.code_gen.base_transpiler import BaseTranspiler
+
+    with self.assertRaises(TypeError) as ctx:
+      class IncompleteTranspiler(BaseTranspiler):
+        pass
+
+    self.assertIn("IncompleteTranspiler", str(ctx.exception))
+    self.assertIn("transpile", str(ctx.exception))
+
+    # Intermediate abstract bases can opt out via allow_abstract=True or ABC.
+    class AbstractHelperA(BaseTranspiler, allow_abstract=True):
+      @abstractmethod
+      def extra_hook(self):
+        pass
+
+    class AbstractHelperB(BaseTranspiler, ABC):
+      pass
+
+    with self.assertRaises(TypeError) as ctx2:
+      class MissingExtraHook(AbstractHelperA):
+        pass
+
+    self.assertIn("extra_hook", str(ctx2.exception))
+    self.assertTrue(issubclass(AbstractHelperB, BaseTranspiler))
 
 
 if __name__ == "__main__":

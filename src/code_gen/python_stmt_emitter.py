@@ -2,54 +2,93 @@
 
 from typing import Any, Dict, List, Optional, Set
 
-from src.parser.ast import *
-from src.code_gen.base_transpiler import extract_type_name, get_default_value_for_type_node, is_coroutine_func
-from src.code_gen.intrinsics import IntrinsicRegistry
+from src.code_gen.base_transpiler import (
+  extract_type_name,
+  get_default_value_for_type_node,
+)
+from src.parser.ast import (
+  ArrayLiteralNode,
+  AssignmentNode,
+  ASTNode,
+  BinaryOpNode,
+  BlockNode,
+  BreakNode,
+  CallNode,
+  CastExprNode,
+  CloneNode,
+  ContinueNode,
+  EllipsisPatternNode,
+  ExprStmtNode,
+  ForNode,
+  FuncDeclNode,
+  GuardClauseNode,
+  GuardStmtNode,
+  IdentifierNode,
+  IfNode,
+  IndexExprNode,
+  InterpolatedStringNode,
+  LambdaNode,
+  LiteralNode,
+  MapLiteralNode,
+  MatchExprNode,
+  MemberAccessNode,
+  MoveNode,
+  ReturnNode,
+  StructInitializerNode,
+  TernaryExprNode,
+  UnaryOpNode,
+  VarDeclNode,
+  WhileNode,
+  YieldNode,
+)
 
 
 class PythonStmtMixin:
   """Provides statement and control-flow AST emission for Python."""
 
   def _needs_value_copy(self, expr: Any) -> bool:
-    """Returns True if *expr* may alias a value-type struct/array/map and needs shallow copy."""
+    """Returns True if *expr* may alias a value-type struct/array/map and needs
+    shallow copy.
+    """
     if expr is None:
       return False
     if isinstance(
-        expr,
-        (
-            LiteralNode,
-            InterpolatedStringNode,
-            ArrayLiteralNode,
-            MapLiteralNode,
-            StructInitializerNode,
-            MoveNode,
-            CloneNode,
-            LambdaNode,
-            BinaryOpNode,
-            UnaryOpNode,
-            CastExprNode,
-        ),
+      expr,
+      (
+        LiteralNode,
+        InterpolatedStringNode,
+        ArrayLiteralNode,
+        MapLiteralNode,
+        StructInitializerNode,
+        MoveNode,
+        CloneNode,
+        LambdaNode,
+        BinaryOpNode,
+        UnaryOpNode,
+        CastExprNode,
+      ),
     ):
       return False
     if isinstance(expr, CallNode):
       if not (
-          isinstance(expr.callee, MemberAccessNode)
-          and expr.callee.member == "get"
-          and (
-              getattr(expr.callee, "is_array_method", False)
-              or getattr(expr.callee, "is_map_method", False)
-          )
+        isinstance(expr.callee, MemberAccessNode)
+        and expr.callee.member == "get"
+        and (
+          getattr(expr.callee, "is_array_method", False)
+          or getattr(expr.callee, "is_map_method", False)
+        )
       ):
         return False
     inferred = getattr(expr, "inferred_type", None)
     if inferred is None:
       return False
     from src.semantics.types import (
-        ArrayType,
-        MapType,
-        OptionalType,
-        StructType,
+      ArrayType,
+      MapType,
+      OptionalType,
+      StructType,
     )
+
     t = inferred.base_type if isinstance(inferred, OptionalType) else inferred
     if isinstance(t, (ArrayType, MapType)):
       return True
@@ -62,7 +101,9 @@ class PythonStmtMixin:
     return False
 
   def _emit_value_expr(self, expr: Any) -> None:
-    """Emits *expr*, wrapping in `_sapphire_copy(...)` when value semantics apply."""
+    """Emits *expr*, wrapping in `_sapphire_copy(...)` when value semantics
+    apply.
+    """
     if self._needs_value_copy(expr):
       self.emit("_sapphire_copy(")
       self.visit(expr)
@@ -70,8 +111,12 @@ class PythonStmtMixin:
     else:
       self.visit(expr)
 
-  def _contains_liftable_expr(self, node: Any, include_moves: bool = False) -> bool:
-    """Returns True if *node* contains a match, block lambda, complex clone, or (optionally) move."""
+  def _contains_liftable_expr(
+    self, node: Any, include_moves: bool = False
+  ) -> bool:
+    """Returns True if *node* contains a match, block lambda, complex clone, or
+    (optionally) move.
+    """
     if node is None:
       return False
     if isinstance(node, MatchExprNode):
@@ -87,7 +132,10 @@ class PythonStmtMixin:
     if isinstance(node, FuncDeclNode):
       return False
     if isinstance(node, list):
-      return any(self._contains_liftable_expr(item, include_moves=include_moves) for item in node)
+      return any(
+        self._contains_liftable_expr(item, include_moves=include_moves)
+        for item in node
+      )
     if isinstance(node, ASTNode):
       for k, v in node.__dict__.items():
         if k.startswith("_"):
@@ -98,7 +146,9 @@ class PythonStmtMixin:
     return False
 
   def _stmt_contains_match_yield(self, node: Any) -> bool:
-    """Returns True if *node* contains a YieldNode targeting the current match arm."""
+    """Returns True if *node* contains a YieldNode targeting the current match
+    arm.
+    """
     if node is None:
       return False
     if isinstance(node, YieldNode):
@@ -121,16 +171,21 @@ class PythonStmtMixin:
     if not isinstance(body, BlockNode) or not body.statements:
       return False
     for idx, stmt in enumerate(body.statements):
-      if idx < len(body.statements) - 1 and self._stmt_contains_match_yield(stmt):
+      if idx < len(body.statements) - 1 and self._stmt_contains_match_yield(
+        stmt
+      ):
         return True
-      if not isinstance(stmt, YieldNode) and self._stmt_contains_match_yield(stmt):
+      if not isinstance(stmt, YieldNode) and self._stmt_contains_match_yield(
+        stmt
+      ):
         return True
     return False
 
   def _find_assigned_nonlocals(
-      self, node: Any, local_params: Optional[Set[str]] = None
+    self, node: Any, local_params: Optional[Set[str]] = None
   ) -> Set[str]:
-    """Finds enclosing function-local Python var names assigned within *node*."""
+    """Finds enclosing function-local Python var names assigned within *node*.
+    """
     if not self._lexical_scopes:
       return set()
     outer_raws: Set[str] = set()
@@ -159,16 +214,16 @@ class PythonStmtMixin:
           _walk(s, blk)
         return
       if isinstance(n, VarDeclNode):
-        for e in (n.exprs or []):
+        for e in n.exprs or []:
           _walk(e, inner_locals)
         for name in n.names:
           inner_locals.add(name)
         return
       if isinstance(n, IfNode):
         bindings = getattr(
-            n,
-            "bindings",
-            [n.init_binding] if getattr(n, "init_binding", None) else [],
+          n,
+          "bindings",
+          [n.init_binding] if getattr(n, "init_binding", None) else [],
         )
         br = set(inner_locals)
         for b in bindings:
@@ -212,7 +267,11 @@ class PythonStmtMixin:
           targets = [n.target]
         for t in targets:
           if isinstance(t, IdentifierNode):
-            if t.name in outer_raws and t.name not in inner_locals and t.name not in param_raws:
+            if (
+              t.name in outer_raws
+              and t.name not in inner_locals
+              and t.name not in param_raws
+            ):
               py_n = self._resolve_var_name(t.name)
               if py_n not in self._current_func_globals:
                 assigned_py.add(py_n)
@@ -230,7 +289,7 @@ class PythonStmtMixin:
     return assigned_py
 
   def _find_captured_loop_vars(
-      self, node: Any, local_params: Optional[Set[str]] = None
+    self, node: Any, local_params: Optional[Set[str]] = None
   ) -> List[str]:
     """Finds loop-local Python var names referenced inside a lambda body."""
     if not self._loop_vars_stack:
@@ -266,7 +325,7 @@ class PythonStmtMixin:
           _walk(s, blk)
         return
       if isinstance(n, VarDeclNode):
-        for e in (n.exprs or []):
+        for e in n.exprs or []:
           _walk(e, inner_locals)
         for name in n.names:
           inner_locals.add(name)
@@ -286,24 +345,29 @@ class PythonStmtMixin:
             _walk(v, inner_locals)
 
     _walk(node, set(param_raws))
-    return [v for v in all_loop_vars if v in referenced_pys and v not in param_pys]
+    return [
+      v for v in all_loop_vars if v in referenced_pys and v not in param_pys
+    ]
 
   def _visit_block(
-      self,
-      node: BlockNode,
-      extra_destructibles: Optional[List[str]] = None,
+    self,
+    node: BlockNode,
+    extra_destructibles: Optional[List[str]] = None,
   ) -> None:
-    """Visits a BlockNode with lexical scope isolation and LIFO RAII teardown."""
+    """Visits a BlockNode with lexical scope isolation and LIFO RAII teardown.
+    """
     prev_wb = getattr(self, "_unwrap_writebacks", {}).copy()
     self._unwrap_writebacks = dict(prev_wb)
     prev_id_map = self._identifier_map.copy()
     pushed_scope = bool(self._lexical_scopes)
     if pushed_scope:
       self._lexical_scopes.append(set())
-    loop_frame_len = len(self._loop_vars_stack[-1]) if self._loop_vars_stack else None
+    loop_frame_len = (
+      len(self._loop_vars_stack[-1]) if self._loop_vars_stack else None
+    )
 
     self.destructor_stack.append([])
-    for d_var in (extra_destructibles or []):
+    for d_var in extra_destructibles or []:
       self.destructor_stack[-1].append(d_var)
       self._var_branch_depth[d_var] = self._branch_depth
     if getattr(node, "_block_destructibles", None):
@@ -319,7 +383,9 @@ class PythonStmtMixin:
       else:
         self._visit_statements(node.statements)
       current_destructors = self.destructor_stack.pop()
-      has_returned = bool(node.statements and isinstance(node.statements[-1], ReturnNode))
+      has_returned = bool(
+        node.statements and isinstance(node.statements[-1], ReturnNode)
+      )
       if not has_returned:
         for var_name in reversed(current_destructors):
           if var_name not in self.moved_vars:
@@ -345,26 +411,31 @@ class PythonStmtMixin:
     param_raw_names = {p.name for p in node.parameters}
 
     caps = self._find_captured_loop_vars(node.body, param_raw_names)
-    assigned_nonlocals = self._find_assigned_nonlocals(node.body, param_raw_names)
-    assigned_globals = self._find_assigned_globals(node.body, local_params=set(params))
-    # Any outer local that is NOT a global uses nonlocal; globals that are not shadowed use global.
+    assigned_nonlocals = self._find_assigned_nonlocals(
+      node.body, param_raw_names
+    )
+    assigned_globals = self._find_assigned_globals(
+      node.body, local_params=set(params)
+    )
+    # Any outer local that is NOT a global uses nonlocal; globals that are not
+    # shadowed use global.
     assigned_globals = assigned_globals - assigned_nonlocals
 
     # Save and isolate outer RAII / control-flow / match state.
     saved_state = (
-        self.destructor_stack,
-        self.loop_destructor_depth,
-        self.moved_vars,
-        self._var_branch_depth,
-        self._pending_null_vars,
-        self._pending_unconditional_null_vars,
-        self._branch_depth,
-        self._current_match_target,
-        self._current_match_done_flag,
-        self._match_loop_depth,
-        getattr(self, "_unwrap_writebacks", {}),
-        self._current_func_globals,
-        self._loop_vars_stack,
+      self.destructor_stack,
+      self.loop_destructor_depth,
+      self.moved_vars,
+      self._var_branch_depth,
+      self._pending_null_vars,
+      self._pending_unconditional_null_vars,
+      self._branch_depth,
+      self._current_match_target,
+      self._current_match_done_flag,
+      self._match_loop_depth,
+      getattr(self, "_unwrap_writebacks", {}),
+      self._current_func_globals,
+      self._loop_vars_stack,
     )
     prev_id_map = self._identifier_map.copy()
     for p in node.parameters:
@@ -424,33 +495,6 @@ class PythonStmtMixin:
       self._lexical_scopes.pop()
       self._identifier_map = prev_id_map
       (
-          self.destructor_stack,
-          self.loop_destructor_depth,
-          self.moved_vars,
-          self._var_branch_depth,
-          self._pending_null_vars,
-          self._pending_unconditional_null_vars,
-          self._branch_depth,
-          self._current_match_target,
-          self._current_match_done_flag,
-          self._match_loop_depth,
-          self._unwrap_writebacks,
-          self._current_func_globals,
-          self._loop_vars_stack,
-      ) = saved_state
-
-    return fn_name
-
-  def _emit_lifted_clone_init(self, node: CloneNode) -> str:
-    """Emits a helper function `def _clone_init_N(self):` for a CloneNode initializer block."""
-    fn_name = self._next_temp_name("_clone_init")
-    init_block = BlockNode(node.initializer_block)
-    param_raw_names = {"self"}
-    assigned_nonlocals = self._find_assigned_nonlocals(init_block, param_raw_names)
-    assigned_globals = self._find_assigned_globals(init_block, local_params={"self"})
-    assigned_globals = assigned_globals - assigned_nonlocals
-
-    saved_state = (
         self.destructor_stack,
         self.loop_destructor_depth,
         self.moved_vars,
@@ -461,9 +505,42 @@ class PythonStmtMixin:
         self._current_match_target,
         self._current_match_done_flag,
         self._match_loop_depth,
-        getattr(self, "_unwrap_writebacks", {}),
+        self._unwrap_writebacks,
         self._current_func_globals,
         self._loop_vars_stack,
+      ) = saved_state
+
+    return fn_name
+
+  def _emit_lifted_clone_init(self, node: CloneNode) -> str:
+    """Emits a helper function `def _clone_init_N(self):` for a CloneNode
+    initializer block.
+    """
+    fn_name = self._next_temp_name("_clone_init")
+    init_block = BlockNode(node.initializer_block)
+    param_raw_names = {"self"}
+    assigned_nonlocals = self._find_assigned_nonlocals(
+      init_block, param_raw_names
+    )
+    assigned_globals = self._find_assigned_globals(
+      init_block, local_params={"self"}
+    )
+    assigned_globals = assigned_globals - assigned_nonlocals
+
+    saved_state = (
+      self.destructor_stack,
+      self.loop_destructor_depth,
+      self.moved_vars,
+      self._var_branch_depth,
+      self._pending_null_vars,
+      self._pending_unconditional_null_vars,
+      self._branch_depth,
+      self._current_match_target,
+      self._current_match_done_flag,
+      self._match_loop_depth,
+      getattr(self, "_unwrap_writebacks", {}),
+      self._current_func_globals,
+      self._loop_vars_stack,
     )
     prev_id_map = self._identifier_map.copy()
     self._identifier_map.pop("self", None)
@@ -499,32 +576,34 @@ class PythonStmtMixin:
       self._lexical_scopes.pop()
       self._identifier_map = prev_id_map
       (
-          self.destructor_stack,
-          self.loop_destructor_depth,
-          self.moved_vars,
-          self._var_branch_depth,
-          self._pending_null_vars,
-          self._pending_unconditional_null_vars,
-          self._branch_depth,
-          self._current_match_target,
-          self._current_match_done_flag,
-          self._match_loop_depth,
-          self._unwrap_writebacks,
-          self._current_func_globals,
-          self._loop_vars_stack,
+        self.destructor_stack,
+        self.loop_destructor_depth,
+        self.moved_vars,
+        self._var_branch_depth,
+        self._pending_null_vars,
+        self._pending_unconditional_null_vars,
+        self._branch_depth,
+        self._current_match_target,
+        self._current_match_done_flag,
+        self._match_loop_depth,
+        self._unwrap_writebacks,
+        self._current_func_globals,
+        self._loop_vars_stack,
       ) = saved_state
 
     return fn_name
 
   def _lift_match_expressions(self, node: Any) -> None:
-    """Lifts MatchExprNode, block/complex LambdaNode, CloneNode init, and short-circuiting exprs."""
+    """Lifts MatchExprNode, block/complex LambdaNode, CloneNode init, and
+    short-circuiting exprs.
+    """
     if node is None:
       return
 
     if isinstance(node, TernaryExprNode):
-      if self._contains_liftable_expr(node.true_expr, include_moves=True) or self._contains_liftable_expr(
-          node.false_expr, include_moves=True
-      ):
+      if self._contains_liftable_expr(
+        node.true_expr, include_moves=True
+      ) or self._contains_liftable_expr(node.false_expr, include_moves=True):
         if id(node) not in self._lifted_short_circuits:
           self._lift_match_expressions(node.condition)
           res_var = self._next_temp_name("_cond_res")
@@ -596,13 +675,13 @@ class PythonStmtMixin:
       return
 
     if (
-        isinstance(node, CallNode)
-        and isinstance(node.callee, MemberAccessNode)
-        and node.callee.is_optional
+      isinstance(node, CallNode)
+      and isinstance(node.callee, MemberAccessNode)
+      and node.callee.is_optional
     ):
       if any(
-          self._contains_liftable_expr(arg.expr, include_moves=True)
-          for arg in node.arguments
+        self._contains_liftable_expr(arg.expr, include_moves=True)
+        for arg in node.arguments
       ):
         if id(node) not in self._lifted_short_circuits:
           self._lift_match_expressions(node.callee.receiver)
@@ -641,7 +720,9 @@ class PythonStmtMixin:
         return
 
     if isinstance(node, LambdaNode):
-      if isinstance(node.body, BlockNode) or self._contains_liftable_expr(node.body):
+      if isinstance(node.body, BlockNode) or self._contains_liftable_expr(
+        node.body
+      ):
         if id(node) not in self._lifted_lambdas:
           self._lifted_lambdas[id(node)] = self._emit_lifted_lambda(node)
       return
@@ -672,7 +753,10 @@ class PythonStmtMixin:
           self._lift_match_expressions(v)
 
   def _emit_writebacks(self, targets: List[Any]) -> None:
-    """Emits writeback statements for any `if var`/`guard var`/`for var` bindings in *targets*."""
+    """Emits writeback statements for any `if var`/`guard var`/`for var`
+    bindings
+    in *targets*.
+    """
     wb_map = getattr(self, "_unwrap_writebacks", {})
     if not wb_map:
       return
@@ -698,9 +782,11 @@ class PythonStmtMixin:
         self.emit(f"{target_var} = {py_name}")
 
   def _emit_binding_rhs_and_writeback(
-      self, binding: Any, val_var: str
+    self, binding: Any, val_var: str
   ) -> Optional[tuple]:
-    """Emits evaluation of a header/guard binding into `val_var` and returns writeback metadata."""
+    """Emits evaluation of a header/guard binding into `val_var` and returns
+    writeback metadata.
+    """
     if hasattr(binding, "_writeback_container"):
       recv_expr, key_expr, is_arr = binding._writeback_container
       wb_recv = self._next_temp_name("_wb_recv")
@@ -712,9 +798,9 @@ class PythonStmtMixin:
       self.visit(key_expr)
       self.newline()
       slot_expr = (
-          f"_sapphire_array_get({wb_recv}, {wb_key})"
-          if is_arr
-          else f"_sapphire_map_get({wb_recv}, {wb_key})"
+        f"_sapphire_array_get({wb_recv}, {wb_key})"
+        if is_arr
+        else f"_sapphire_map_get({wb_recv}, {wb_key})"
       )
       self.emit(f"{val_var} = {slot_expr}")
       return ("index", wb_recv, wb_key)
@@ -727,7 +813,9 @@ class PythonStmtMixin:
         return ("var", target_var)
       if isinstance(expr, MemberAccessNode) and not expr.is_optional:
         wb_recv = self._next_temp_name("_wb_recv")
-        member_name = getattr(expr, "target_name", None) or self._mangle_name(expr.member)
+        member_name = getattr(expr, "target_name", None) or self._mangle_name(
+          expr.member
+        )
         self.emit(f"{wb_recv} = ")
         self.visit(expr.receiver)
         self.newline()
@@ -750,9 +838,12 @@ class PythonStmtMixin:
     return None
 
   def visit_VarDeclNode(self, node: VarDeclNode) -> None:
-    extern_ann = next((a for a in getattr(node, "annotations", []) if a.name == "extern"), None)
+    extern_ann = next(
+      (a for a in getattr(node, "annotations", []) if a.name == "extern"), None
+    )
     if extern_ann:
-      # @extern variables represent ambient host symbols (e.g. Love2D engine `love`
+      # @extern variables represent ambient host symbols (e.g. Love2D engine
+      # `love`
       # or Python standard library / host modules).
       for name in node.names:
         m_name = self._mangle_name(name)
@@ -773,17 +864,21 @@ class PythonStmtMixin:
           self.dedent()
       return
 
-    # Lift any match / block-lambda / clone expressions in RHS BEFORE declaring new locals
+    # Lift any match / block-lambda / clone expressions in RHS BEFORE declaring
+    # new locals
     # so `var x = match x { ... };` resolves RHS `x` to the outer binding!
     self._lift_match_expressions(node.exprs)
 
-    # Pre-emit RHS into a buffer? No — emit RHS directly via sub-transpiler ONLY if needed,
+    # Pre-emit RHS into a buffer? No — emit RHS directly via sub-transpiler ONLY
+    # if needed,
     # OR simply compute target Python names BEFORE mutating `_identifier_map`!
     planned_decls: List[tuple] = []
     for idx, name in enumerate(node.names):
       mangled = self._mangle_name(name)
       if self._lexical_scopes:
-        enclosing_has = any(name in scope for scope in self._lexical_scopes[:-1])
+        enclosing_has = any(
+          name in scope for scope in self._lexical_scopes[:-1]
+        )
         clashes_global = mangled in self._current_func_globals
         if enclosing_has or clashes_global:
           py_name = self._next_temp_name(f"_{mangled}_s")
@@ -805,7 +900,7 @@ class PythonStmtMixin:
         self._emit_value_expr(expr)
     else:
       defaults = []
-      for idx, name in enumerate(node.names):
+      for idx, _name in enumerate(node.names):
         val_type = node.val_types[idx] if idx < len(node.val_types) else None
         default_expr = get_default_value_for_type_node(val_type)
         if default_expr:
@@ -816,7 +911,8 @@ class PythonStmtMixin:
           defaults.append("None")
       self.emit(" = " + ", ".join(defaults))
 
-    # Now commit the newly declared names into lexical scope, shadowing map, and destructor_stack.
+    # Now commit the newly declared names into lexical scope, shadowing map, and
+    # destructor_stack.
     for idx, name, py_name in planned_decls:
       if self._lexical_scopes:
         self._lexical_scopes[-1].add(name)
@@ -837,7 +933,9 @@ class PythonStmtMixin:
       elif node.exprs and idx < len(node.exprs):
         st_name = self._expr_destructible_struct(node.exprs[idx])
       elif node.exprs and len(node.exprs) == 1:
-        st_name = self._expr_destructible_struct(node.exprs[0], return_index=idx)
+        st_name = self._expr_destructible_struct(
+          node.exprs[0], return_index=idx
+        )
       elif node.expr:
         st_name = self._expr_destructible_struct(node.expr, return_index=idx)
 
@@ -852,13 +950,14 @@ class PythonStmtMixin:
     if node.op != "/=":
       return False
     from src.semantics.types import PrimitiveType
+
     tt = getattr(node.target, "inferred_type", None)
     et = getattr(node.expr, "inferred_type", None)
     return (
-        isinstance(tt, PrimitiveType)
-        and tt.name == "int"
-        and isinstance(et, PrimitiveType)
-        and et.name == "int"
+      isinstance(tt, PrimitiveType)
+      and tt.name == "int"
+      and isinstance(et, PrimitiveType)
+      and et.name == "int"
     )
 
   def visit_AssignmentNode(self, node: AssignmentNode) -> None:
@@ -867,11 +966,11 @@ class PythonStmtMixin:
 
     if node.op == "=":
       live_destructible_targets = [
-          self._resolve_var_name(t.name)
-          for t in node.targets
-          if isinstance(t, IdentifierNode)
-          and self._is_active_destructible_var(self._resolve_var_name(t.name))
-          and self._resolve_var_name(t.name) not in self.moved_vars
+        self._resolve_var_name(t.name)
+        for t in node.targets
+        if isinstance(t, IdentifierNode)
+        and self._is_active_destructible_var(self._resolve_var_name(t.name))
+        and self._resolve_var_name(t.name) not in self.moved_vars
       ]
       if live_destructible_targets:
         tmp_base = self._next_temp_name("_reassign")
@@ -885,16 +984,16 @@ class PythonStmtMixin:
           self._emit_value_expr(expr)
         for py_t in live_destructible_targets:
           if (
-              py_t not in self.moved_vars
-              and py_t not in self._pending_null_vars
-              and py_t not in self._pending_unconditional_null_vars
+            py_t not in self.moved_vars
+            and py_t not in self._pending_null_vars
+            and py_t not in self._pending_unconditional_null_vars
           ):
             self.newline()
             self.emit(f"_sapphire_del({py_t})")
         assigned_id_names = {
-            self._resolve_var_name(t.name)
-            for t in node.targets
-            if isinstance(t, IdentifierNode)
+          self._resolve_var_name(t.name)
+          for t in node.targets
+          if isinstance(t, IdentifierNode)
         }
         self._drain_pending_null_vars("None", exclude=assigned_id_names)
         self.newline()
@@ -903,7 +1002,10 @@ class PythonStmtMixin:
             self.moved_vars.discard(self._resolve_var_name(target.name))
           if idx > 0:
             self.emit(", ")
-          if isinstance(target, IdentifierNode) and target.name in self.extern_vars:
+          if (
+            isinstance(target, IdentifierNode)
+            and target.name in self.extern_vars
+          ):
             ext_name = self.extern_vars[target.name]
             self.emit(f"__import__('builtins').{ext_name}")
           else:
@@ -919,7 +1021,9 @@ class PythonStmtMixin:
           self.moved_vars.discard(self._resolve_var_name(target.name))
         if idx > 0:
           self.emit(", ")
-        if isinstance(target, IdentifierNode) and target.name in self.extern_vars:
+        if (
+          isinstance(target, IdentifierNode) and target.name in self.extern_vars
+        ):
           ext_name = self.extern_vars[target.name]
           self.emit(f"__import__('builtins').{ext_name}")
         else:
@@ -940,7 +1044,9 @@ class PythonStmtMixin:
         py_t = self._resolve_var_name(node.target.name)
         self.moved_vars.discard(py_t)
         if node.target.name in self.extern_vars:
-          ext_lhs = f"__import__('builtins').{self.extern_vars[node.target.name]}"
+          ext_lhs = (
+            f"__import__('builtins').{self.extern_vars[node.target.name]}"
+          )
           self.emit(f"{ext_lhs} = _sapphire_div({ext_lhs}, ")
           self.visit(node.expr)
           self.emit(")")
@@ -950,13 +1056,15 @@ class PythonStmtMixin:
           self.emit(")")
       elif isinstance(node.target, MemberAccessNode):
         obj_tmp = self._next_temp_name("_div_obj")
-        member_name = getattr(node.target, "target_name", None) or self._mangle_name(
-            node.target.member
-        )
+        member_name = getattr(
+          node.target, "target_name", None
+        ) or self._mangle_name(node.target.member)
         self.emit(f"{obj_tmp} = ")
         self.visit(node.target.receiver)
         self.newline()
-        self.emit(f"{obj_tmp}.{member_name} = _sapphire_div({obj_tmp}.{member_name}, ")
+        self.emit(
+          f"{obj_tmp}.{member_name} = _sapphire_div({obj_tmp}.{member_name}, "
+        )
         self.visit(node.expr)
         self.emit(")")
       elif isinstance(node.target, IndexExprNode):
@@ -968,7 +1076,9 @@ class PythonStmtMixin:
         self.emit(f"{idx_tmp} = ")
         self.visit(node.target.index)
         self.newline()
-        self.emit(f"{arr_tmp}[{idx_tmp}] = _sapphire_div({arr_tmp}[{idx_tmp}], ")
+        self.emit(
+          f"{arr_tmp}[{idx_tmp}] = _sapphire_div({arr_tmp}[{idx_tmp}], "
+        )
         self.visit(node.expr)
         self.emit(")")
       else:
@@ -1008,23 +1118,28 @@ class PythonStmtMixin:
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     self._lift_match_expressions(node.expressions)
     all_active_destructors = [
-        d for frame in reversed(self.destructor_stack) for d in reversed(frame)
+      d for frame in reversed(self.destructor_stack) for d in reversed(frame)
     ]
     returned_ids = {
-        self._resolve_var_name(expr.name)
-        for expr in node.expressions
-        if isinstance(expr, (IdentifierNode, MoveNode))
+      self._resolve_var_name(expr.name)
+      for expr in node.expressions
+      if isinstance(expr, (IdentifierNode, MoveNode))
     }
     destructors_to_run = [
-        d for d in all_active_destructors
-        if d not in returned_ids
-        and d not in self.moved_vars
-        and d not in self._pending_null_vars
-        and d not in self._pending_unconditional_null_vars
+      d
+      for d in all_active_destructors
+      if d not in returned_ids
+      and d not in self.moved_vars
+      and d not in self._pending_null_vars
+      and d not in self._pending_unconditional_null_vars
     ]
 
-    if node.expressions and destructors_to_run and not all(
+    if (
+      node.expressions
+      and destructors_to_run
+      and not all(
         isinstance(e, (LiteralNode, IdentifierNode)) for e in node.expressions
+      )
     ):
       ret_tmps = []
       for idx, expr in enumerate(node.expressions):
@@ -1037,9 +1152,9 @@ class PythonStmtMixin:
       self._drain_pending_destroy_moved_vars()
       for var_name in destructors_to_run:
         if (
-            var_name not in self.moved_vars
-            and var_name not in self._pending_null_vars
-            and var_name not in self._pending_unconditional_null_vars
+          var_name not in self.moved_vars
+          and var_name not in self._pending_null_vars
+          and var_name not in self._pending_unconditional_null_vars
         ):
           self.newline()
           self.emit(f"_sapphire_del({var_name})")
@@ -1053,9 +1168,9 @@ class PythonStmtMixin:
 
     for var_name in destructors_to_run:
       if (
-          var_name not in self.moved_vars
-          and var_name not in self._pending_null_vars
-          and var_name not in self._pending_unconditional_null_vars
+        var_name not in self.moved_vars
+        and var_name not in self._pending_null_vars
+        and var_name not in self._pending_unconditional_null_vars
       ):
         self.newline()
         self.emit(f"_sapphire_del({var_name})")
@@ -1073,7 +1188,9 @@ class PythonStmtMixin:
     self._pending_unconditional_null_vars.clear()
     self._pending_destroy_moved_vars.clear()
 
-  def _emit_match_statement(self, node: MatchExprNode, target_var: Optional[str] = "") -> str:
+  def _emit_match_statement(
+    self, node: MatchExprNode, target_var: Optional[str] = ""
+  ) -> str:
     self._lift_match_expressions(node.subject)
 
     if target_var == "":
@@ -1087,7 +1204,9 @@ class PythonStmtMixin:
     self.visit(node.subject)
 
     done_flag: Optional[str] = None
-    if target_var and any(self._arm_needs_done_flag(c.body) for c in node.cases):
+    if target_var and any(
+      self._arm_needs_done_flag(c.body) for c in node.cases
+    ):
       done_flag = self._next_temp_name("_match_done")
       self.newline()
       self.emit(f"{done_flag} = False")
@@ -1101,7 +1220,9 @@ class PythonStmtMixin:
 
     try:
       for c_idx, case in enumerate(node.cases):
-        has_ellipsis = any(isinstance(p, EllipsisPatternNode) for p in case.patterns)
+        has_ellipsis = any(
+          isinstance(p, EllipsisPatternNode) for p in case.patterns
+        )
         self.newline()
         if has_ellipsis:
           if c_idx == 0:
@@ -1153,7 +1274,9 @@ class PythonStmtMixin:
     return target_var or ""
 
   def visit_YieldNode(self, node: YieldNode) -> None:
-    exprs = getattr(node, "expressions", None) or ([node.expr] if node.expr else [])
+    exprs = getattr(node, "expressions", None) or (
+      [node.expr] if node.expr else []
+    )
     self._lift_match_expressions(exprs)
     target = getattr(self, "_current_match_target", None)
     done_flag = getattr(self, "_current_match_done_flag", None)
@@ -1220,11 +1343,16 @@ class PythonStmtMixin:
 
     st_name = self._expr_destructible_struct(binding.expr)
     is_owned_destructible = bool(
-        st_name and (not binding.is_unwrap or self._is_owned_unwrap_expr(binding.expr))
+      st_name
+      and (not binding.is_unwrap or self._is_owned_unwrap_expr(binding.expr))
     )
-    cond_has_liftable = bool(node.condition and self._contains_liftable_expr(node.condition, include_moves=True))
+    cond_has_liftable = bool(
+      node.condition
+      and self._contains_liftable_expr(node.condition, include_moves=True)
+    )
 
-    # Use sequential flag form when a condition exists with either liftable expressions or owned destructibles.
+    # Use sequential flag form when a condition exists with either liftable
+    # expressions or owned destructibles.
     if node.condition and (cond_has_liftable or is_owned_destructible):
       self._emit_multi_binding_if(node, [binding])
       return
@@ -1283,7 +1411,9 @@ class PythonStmtMixin:
 
         self._branch_depth += 1
         try:
-          self._visit_block(node.then_block, extra_destructibles=extra_destructibles)
+          self._visit_block(
+            node.then_block, extra_destructibles=extra_destructibles
+          )
         finally:
           self._branch_depth -= 1
       finally:
@@ -1314,7 +1444,9 @@ class PythonStmtMixin:
         self.indent()
         self._branch_depth += 1
         try:
-          self._visit_block(node.then_block, extra_destructibles=extra_destructibles)
+          self._visit_block(
+            node.then_block, extra_destructibles=extra_destructibles
+          )
         finally:
           self._branch_depth -= 1
         self.dedent()
@@ -1331,16 +1463,18 @@ class PythonStmtMixin:
       self.dedent()
 
   def _emit_multi_binding_if(self, node: IfNode, bindings: List[Any]) -> None:
-    """Emits multi-binding `if` with sequential short-circuiting and LIFO cleanup."""
+    """Emits multi-binding `if` with sequential short-circuiting and LIFO
+    cleanup.
+    """
     cond_flag = self._next_temp_name("_if_ok")
 
     self.newline()
     self.emit(f"{cond_flag} = False")
 
     def emit_binding_level(
-        idx: int,
-        prior_destructibles: List[str],
-        wb_entries: Dict[str, tuple],
+      idx: int,
+      prior_destructibles: List[str],
+      wb_entries: Dict[str, tuple],
     ) -> None:
       if idx < len(bindings):
         b = bindings[idx]
@@ -1348,7 +1482,9 @@ class PythonStmtMixin:
         let_name = b.let_name
         self._lift_match_expressions(b.expr)
         st_name = self._expr_destructible_struct(b.expr)
-        is_owned = bool(st_name and (not b.is_unwrap or self._is_owned_unwrap_expr(b.expr)))
+        is_owned = bool(
+          st_name and (not b.is_unwrap or self._is_owned_unwrap_expr(b.expr))
+        )
 
         if b.is_unwrap:
           val_var = self._next_temp_name(f"_val_{self._mangle_name(let_name)}")
@@ -1437,7 +1573,9 @@ class PythonStmtMixin:
             self.emit(f"{cond_flag} = True")
             self._branch_depth += 1
             try:
-              self._visit_block(node.then_block, extra_destructibles=prior_destructibles)
+              self._visit_block(
+                node.then_block, extra_destructibles=prior_destructibles
+              )
             finally:
               self._branch_depth -= 1
             self.dedent()
@@ -1454,7 +1592,9 @@ class PythonStmtMixin:
             self.emit(f"{cond_flag} = True")
             self._branch_depth += 1
             try:
-              self._visit_block(node.then_block, extra_destructibles=prior_destructibles)
+              self._visit_block(
+                node.then_block, extra_destructibles=prior_destructibles
+              )
             finally:
               self._branch_depth -= 1
         finally:
@@ -1471,9 +1611,9 @@ class PythonStmtMixin:
 
   def visit_IfNode(self, node: IfNode) -> None:
     bindings = getattr(
-        node,
-        "bindings",
-        [node.init_binding] if getattr(node, "init_binding", None) else [],
+      node,
+      "bindings",
+      [node.init_binding] if getattr(node, "init_binding", None) else [],
     )
     if not bindings:
       self._emit_simple_if(node)
@@ -1488,7 +1628,8 @@ class PythonStmtMixin:
     self._match_loop_depth += 1
     try:
       cond_liftable = bool(
-          node.condition and self._contains_liftable_expr(node.condition, include_moves=True)
+        node.condition
+        and self._contains_liftable_expr(node.condition, include_moves=True)
       )
       if cond_liftable:
         self.newline()
@@ -1549,9 +1690,9 @@ class PythonStmtMixin:
       self._lift_match_expressions(node.iterable)
       is_mut = getattr(node, "is_mutable", False)
       is_range_call = (
-          isinstance(node.iterable, CallNode)
-          and isinstance(node.iterable.callee, IdentifierNode)
-          and node.iterable.callee.name == "range"
+        isinstance(node.iterable, CallNode)
+        and isinstance(node.iterable.callee, IdentifierNode)
+        and node.iterable.callee.name == "range"
       )
 
       if node.key_var is not None:
@@ -1563,7 +1704,9 @@ class PythonStmtMixin:
           k_py = self._declare_local_var(node.key_var)
           v_py = self._declare_local_var(node.val_var)
           self.newline()
-          self.emit(f"for {k_py}, {v_py} in _sapphire_unwrap_read({iter_tmp}).items():")
+          self.emit(
+            f"for {k_py}, {v_py} in _sapphire_unwrap_read({iter_tmp}).items():"
+          )
           if not hasattr(self, "_unwrap_writebacks"):
             self._unwrap_writebacks = {}
           self._unwrap_writebacks[v_py] = ("index", iter_tmp, k_py)
@@ -1573,7 +1716,10 @@ class PythonStmtMixin:
           k_py = self._declare_local_var(node.key_var)
           v_py = self._declare_local_var(node.val_var)
           self.newline()
-          self.emit(f"for {k_py}, {v_py} in _sapphire_unwrap_read({iter_code.get_output()}).items():")
+          self.emit(
+            f"for {k_py}, {v_py} in "
+            f"_sapphire_unwrap_read({iter_code.get_output()}).items():"
+          )
       else:
         if is_mut and not is_range_call:
           iter_tmp = self._next_temp_name("_for_iter")
@@ -1663,7 +1809,9 @@ class PythonStmtMixin:
           self.emit(f"{py_n} = {tmp_var}")
 
         st_name = self._expr_destructible_struct(binding.expr)
-        if st_name and (not binding.is_unwrap or self._is_owned_unwrap_expr(binding.expr)):
+        if st_name and (
+          not binding.is_unwrap or self._is_owned_unwrap_expr(binding.expr)
+        ):
           for py_n in py_let_names:
             self.variable_types[py_n] = st_name
             if self.destructor_stack:
@@ -1683,4 +1831,3 @@ class PythonStmtMixin:
         self.indent()
         self._visit_in_branch(node.else_block)
         self.dedent()
-

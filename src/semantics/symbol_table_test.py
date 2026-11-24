@@ -7,21 +7,20 @@ shadowing, and error handling for the Sapphire symbol table.
 import unittest
 
 from src.semantics.symbol_table import (
-    SymbolTable,
-    PrimitiveType,
-    StringType,
-    OptionalType,
-    ArrayType,
-    NoneType,
-    VariableSymbol,
-    FunctionType,
-    StructType,
-    TraitType,
-    EnumType,
-    Type,
-    CoroutineType,
+  ArrayType,
+  CoroutineType,
+  EnumType,
+  FunctionType,
+  NoneType,
+  OptionalType,
+  PrimitiveType,
+  StringType,
+  StructType,
+  SymbolTable,
+  TraitType,
+  Type,
+  VariableSymbol,
 )
-
 
 
 class TestSymbolTable(unittest.TestCase):
@@ -131,7 +130,7 @@ class TestSymbolTable(unittest.TestCase):
     # FunctionType non-equality
     func_type = FunctionType([self.int_type], self.float_type)
     self.assertFalse(func_type == self.int_type)
-    
+
     # FunctionType repr with var parameter
     func_type_var = FunctionType([self.int_type], self.float_type, [True])
     self.assertEqual(repr(func_type_var), "(var int) -> float")
@@ -175,7 +174,11 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_multi_return_type_methods(self):
     """Verifies MultiReturnType repr, equality, and FunctionType.return_types property."""
-    from src.semantics.symbol_table import MultiReturnType, FunctionType, PrimitiveType
+    from src.semantics.symbol_table import (
+      FunctionType,
+      MultiReturnType,
+      PrimitiveType,
+    )
 
 
     m1 = MultiReturnType([PrimitiveType("float"), PrimitiveType("float")])
@@ -198,7 +201,12 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_module_symbol_and_type(self):
     """Verifies ModuleType repr and ModuleSymbol lookup_export."""
-    from src.semantics.symbol_table import ModuleType, ModuleSymbol, PrimitiveType, VariableSymbol
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      ModuleType,
+      PrimitiveType,
+      VariableSymbol,
+    )
 
 
     mod_t = ModuleType("lib.love2d.enums")
@@ -211,7 +219,12 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_lookup_type_dotted_wrapped_symbol(self):
     """Verifies that lookup_type unwraps exp.symbol_type when exported item is a StructSymbol."""
-    from src.semantics.symbol_table import SymbolTable, ModuleSymbol, StructSymbol, StructType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      StructSymbol,
+      StructType,
+      SymbolTable,
+    )
     st = SymbolTable()
     s_type = StructType("Entity")
     s_sym = StructSymbol("Entity", s_type)
@@ -222,7 +235,14 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_map_type_methods(self):
     """Verifies MapType __eq__, __repr__, and is_compatible methods."""
-    from src.semantics.symbol_table import MapType, ArrayType, PrimitiveType, StringType, OptionalType, NoneType
+    from src.semantics.symbol_table import (
+      ArrayType,
+      MapType,
+      NoneType,
+      OptionalType,
+      PrimitiveType,
+      StringType,
+    )
 
 
     m1 = MapType(StringType(), PrimitiveType("int"))
@@ -248,7 +268,13 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_struct_implements_trait(self):
     """Verifies StructType.implements_trait explicit nominal and inherited trait checks."""
-    from src.semantics.symbol_table import StructType, TraitType, FunctionType, PrimitiveType, SymbolTable
+    from src.semantics.symbol_table import (
+      FunctionType,
+      PrimitiveType,
+      StructType,
+      SymbolTable,
+      TraitType,
+    )
 
     st = StructType("MyStruct")
     tr = TraitType("MyTrait")
@@ -278,7 +304,13 @@ class TestSymbolTable(unittest.TestCase):
 
   def test_struct_type_parent_name_and_get_method(self):
     """Verifies StructType parent_name getter/setter and recursive get_method with parent lookup."""
-    from src.semantics.symbol_table import StructType, StructMethod, FunctionType, PrimitiveType, SymbolTable
+    from src.semantics.symbol_table import (
+      FunctionType,
+      PrimitiveType,
+      StructMethod,
+      StructType,
+      SymbolTable,
+    )
 
 
     st1 = StructType("Child", parent_name="Parent1")
@@ -338,11 +370,11 @@ class TestSymbolTable(unittest.TestCase):
   def test_smart_ref_and_generic_types(self):
     """Verifies RefType, SharedRefType, WeakRefType, GenericTypeParameter, and StructField methods."""
     from src.semantics.symbol_table import (
-        RefType,
-        SharedRefType,
-        WeakRefType,
-        GenericTypeParameter,
-        StructField,
+      GenericTypeParameter,
+      RefType,
+      SharedRefType,
+      StructField,
+      WeakRefType,
     )
 
     ref_int = RefType(self.int_type)

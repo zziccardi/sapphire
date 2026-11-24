@@ -1,8 +1,9 @@
 """Intrinsic code generation handlers for Sapphire Array and Map methods."""
 
 from typing import Any, List
-from src.parser.ast import CallNode
+
 from src.code_gen.intrinsics import IntrinsicRegistry, emit_in_call_order
+from src.parser.ast import CallNode
 
 # ==============================================================================
 # Array Methods (Python & Lua)
@@ -75,7 +76,9 @@ def _emit_arr_map_py(transpiler: Any, node: CallNode) -> None:
       transpiler.visit(exprs[1])
     transpiler.emit(")")
 
-  emit_in_call_order("python", transpiler, node, [fn_expr, in_place_expr], _emit)
+  emit_in_call_order(
+    "python", transpiler, node, [fn_expr, in_place_expr], _emit
+  )
 
 
 @IntrinsicRegistry.register("Array", "map", "lua")
@@ -121,7 +124,9 @@ def _emit_arr_filter_py(transpiler: Any, node: CallNode) -> None:
       transpiler.visit(exprs[1])
     transpiler.emit(")")
 
-  emit_in_call_order("python", transpiler, node, [fn_expr, in_place_expr], _emit)
+  emit_in_call_order(
+    "python", transpiler, node, [fn_expr, in_place_expr], _emit
+  )
 
 
 @IntrinsicRegistry.register("Array", "filter", "lua")
@@ -173,7 +178,7 @@ def _emit_arr_reduce_py(transpiler: Any, node: CallNode) -> None:
     transpiler.emit(")")
 
   emit_in_call_order(
-      "python", transpiler, node, [initial_expr, fn_expr, reverse_expr], _emit
+    "python", transpiler, node, [initial_expr, fn_expr, reverse_expr], _emit
   )
 
 
@@ -203,7 +208,7 @@ def _emit_arr_reduce_lua(transpiler: Any, node: CallNode) -> None:
     transpiler.emit(")")
 
   emit_in_call_order(
-      "lua", transpiler, node, [initial_expr, fn_expr, reverse_expr], _emit
+    "lua", transpiler, node, [initial_expr, fn_expr, reverse_expr], _emit
   )
 
 
@@ -277,7 +282,7 @@ def _emit_arr_sort_py(transpiler: Any, node: CallNode) -> None:
     transpiler.emit(")")
 
   emit_in_call_order(
-      "python", transpiler, node, [by_expr, reverse_expr, in_place_expr], _emit
+    "python", transpiler, node, [by_expr, reverse_expr, in_place_expr], _emit
   )
 
 
@@ -313,7 +318,7 @@ def _emit_arr_sort_lua(transpiler: Any, node: CallNode) -> None:
     transpiler.emit(")")
 
   emit_in_call_order(
-      "lua", transpiler, node, [by_expr, reverse_expr, in_place_expr], _emit
+    "lua", transpiler, node, [by_expr, reverse_expr, in_place_expr], _emit
   )
 
 
@@ -388,7 +393,9 @@ def _emit_arr_insert_py(transpiler: Any, node: CallNode) -> None:
     transpiler.visit(exprs[1])
     transpiler.emit(")")
 
-  emit_in_call_order("python", transpiler, node, [index_expr, element_expr], _emit)
+  emit_in_call_order(
+    "python", transpiler, node, [index_expr, element_expr], _emit
+  )
 
 
 @IntrinsicRegistry.register("Array", "insert", "lua")

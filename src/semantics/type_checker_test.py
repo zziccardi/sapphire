@@ -5,17 +5,30 @@ rules, struct constructor initialization, and inheritance casting restrictions.
 """
 
 import unittest
-from testing.test_utils import suppress_output
-from antlr4 import InputStream, CommonTokenStream
 
+from antlr4 import CommonTokenStream, InputStream
+
+from src.parser.ast import (
+  ArgumentNode,
+  BasicTypeNode,
+  CallNode,
+  IdentifierNode,
+  LiteralNode,
+  MemberAccessNode,
+  YieldNode,
+)
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.parser.ast import CallNode, MemberAccessNode, IdentifierNode, ArgumentNode, LiteralNode, YieldNode, BasicTypeNode
-from src.semantics.type_checker import TypeChecker, SemanticError
 from src.semantics.struct_layout_pass import StructLayoutPass
-from src.semantics.symbol_table import VariableSymbol, ArrayType, PrimitiveType, StructType, StructField
-
+from src.semantics.symbol_table import (
+  ArrayType,
+  PrimitiveType,
+  StructField,
+  StructType,
+  VariableSymbol,
+)
+from src.semantics.type_checker import SemanticError, TypeChecker
 
 
 class TestTypeChecker(unittest.TestCase):
@@ -775,12 +788,19 @@ class TestTypeChecker(unittest.TestCase):
     # 12. Direct AST-level calls to _infer_lambda_param_type to cover the
     #     BlockNode, ReturnNode, VarDeclNode, ExprStmtNode, CallNode,
     #     TernaryExprNode, and None-node guard paths.
-    from src.semantics.type_checker import TypeChecker
     from src.parser.ast import (
-        BlockNode, ReturnNode, VarDeclNode, ExprStmtNode,
-        CallNode, ArgumentNode, TernaryExprNode,
-        BinaryOpNode, IdentifierNode, LiteralNode,
+      ArgumentNode,
+      BinaryOpNode,
+      BlockNode,
+      CallNode,
+      ExprStmtNode,
+      IdentifierNode,
+      LiteralNode,
+      ReturnNode,
+      TernaryExprNode,
+      VarDeclNode,
     )
+    from src.semantics.type_checker import TypeChecker
 
 
     tc = TypeChecker()
@@ -951,8 +971,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_clone_check_proto_cycle_coverage(self):
     """Directly tests check_proto cycle protection in visit_CloneNode."""
-    from src.semantics.symbol_table import StructType, VariableSymbol
     from src.parser.ast import CloneNode, IdentifierNode
+    from src.semantics.symbol_table import StructType, VariableSymbol
 
 
     checker = TypeChecker()
@@ -1235,8 +1255,8 @@ class TestTypeChecker(unittest.TestCase):
       """)
 
     # 35. Direct _resolve_type_node calls
-    from src.semantics.symbol_table import PrimitiveType, FunctionType
     from src.parser.ast import TypeNode
+    from src.semantics.symbol_table import FunctionType, PrimitiveType
 
     checker = TypeChecker()
     self.assertEqual(checker._resolve_type_node(None), PrimitiveType("none"))
@@ -1290,7 +1310,12 @@ class TestTypeChecker(unittest.TestCase):
     """)
 
     # 42. Lambda with explicit return type and block body
-    from src.parser.ast import LambdaNode, BlockNode, LambdaParamNode, BasicTypeNode
+    from src.parser.ast import (
+      BasicTypeNode,
+      BlockNode,
+      LambdaNode,
+      LambdaParamNode,
+    )
 
     lnode = LambdaNode(
         parameters=[LambdaParamNode("x", None)],
@@ -1497,8 +1522,15 @@ class TestTypeChecker(unittest.TestCase):
 
     # 12. Direct test for _is_reference_type with all types
     from src.semantics.symbol_table import (
-        PrimitiveType, StringType, ArrayType, MapType, ArenaType, RangeType,
-        StructType, OptionalType, NoneType
+      ArenaType,
+      ArrayType,
+      MapType,
+      NoneType,
+      OptionalType,
+      PrimitiveType,
+      RangeType,
+      StringType,
+      StructType,
     )
 
     checker = TypeChecker()
@@ -1625,7 +1657,7 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_struct_initializer_positional_arg_error(self):
     """Verifies that positional arguments in struct initializers (constructed programmatically) trigger a semantic error."""
-    from src.parser.ast import StructInitializerNode, ArgumentNode, LiteralNode
+    from src.parser.ast import ArgumentNode, LiteralNode, StructInitializerNode
     from src.semantics.symbol_table import StructType
 
 
@@ -1906,8 +1938,12 @@ class TestTypeChecker(unittest.TestCase):
     self.assertIn("Variable 'out' in outer scope cannot hold a reference to an object allocated in nested arena 'local_arena'", str(context.exception))
 
     # 8. Programmatic test for VarDeclNode arena escape (covers type_checker.py line 418)
-    from src.parser.ast import VarDeclNode, IdentifierNode, StructInitializerNode
-    from src.semantics.symbol_table import VariableSymbol, StructType, ArenaType
+    from src.parser.ast import (
+      IdentifierNode,
+      StructInitializerNode,
+      VarDeclNode,
+    )
+    from src.semantics.symbol_table import ArenaType, StructType, VariableSymbol
 
 
     checker = TypeChecker()
@@ -2225,9 +2261,9 @@ class TestTypeChecker(unittest.TestCase):
     self._check(uninit_block)
 
     # _resolve_type_node(None) test
-    from src.semantics.type_checker import TypeChecker
-    from src.semantics.symbol_table import PrimitiveType
     from src.parser.ast import BasicTypeNode
+    from src.semantics.symbol_table import PrimitiveType
+    from src.semantics.type_checker import TypeChecker
 
 
     tc = TypeChecker()
@@ -2388,7 +2424,11 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_module_export_errors_and_type_resolution(self):
     """Verifies module type resolution and export error branches."""
-    from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      PrimitiveType,
+      VariableSymbol,
+    )
 
 
     # 1. Export from non-imported module
@@ -2426,7 +2466,10 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_module_qualified_type_and_member_access(self):
     """Verifies type resolution for dot-qualified types (enums.DrawMode) and member access."""
-    from src.semantics.symbol_table import ModuleSymbol, PrimitiveType, VariableSymbol, StructType, EnumType
+    from src.semantics.symbol_table import (
+      EnumType,
+      ModuleSymbol,
+    )
 
 
     code = """
@@ -2515,13 +2558,14 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_reexport_module_specifier(self):
     """Verifies re-exporting a symbol from an imported module."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
       mod_a = os.path.join(tmpdir, "mod_a.sp")
       with open(mod_a, "w") as f:
         f.write("import lib.love2d.enums as e;\nexport {\n  e.DrawMode,\n}\n")
 
-      code = f"import mod_a;\n"
+      code = "import mod_a;\n"
       input_stream = InputStream(code)
       lexer = SapphireLexer(input_stream)
       stream = CommonTokenStream(lexer)
@@ -2556,7 +2600,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_module_import_with_error(self):
     """Verifies imported module syntax and semantic errors propagate to importer."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
       invalid_sp = os.path.join(tmpdir, "invalid.sp")
       with open(invalid_sp, "w") as f:
@@ -2596,7 +2641,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_import_module_without_export_block(self):
     """Verifies importing a module without explicit export manifest exports all top-level types and symbols."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
       no_exp = os.path.join(tmpdir, "no_exp.sp")
       with open(no_exp, "w") as f:
@@ -3147,7 +3193,13 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_array_type_node_resolution_and_none_inference(self):
     """Verifies ArrayTypeNode resolution and error when inferring type from none alone."""
-    from src.parser.ast import ArrayTypeNode, BasicTypeNode, VarDeclNode, ArrayLiteralNode, LiteralNode
+    from src.parser.ast import (
+      ArrayLiteralNode,
+      ArrayTypeNode,
+      BasicTypeNode,
+      LiteralNode,
+      VarDeclNode,
+    )
     from src.semantics.symbol_table import ArrayType, PrimitiveType
 
 
@@ -3165,7 +3217,7 @@ class TestTypeChecker(unittest.TestCase):
     sym = checker.symbol_table.lookup("arr")
     self.assertEqual(sym.symbol_type, ArrayType(PrimitiveType("int"), size=2, is_fixed_size=False))
 
-    with self.assertRaises(SemanticError) as ctx:
+    with self.assertRaises(SemanticError):
       self._check("""
       func test() {
         let x = none;
@@ -4602,11 +4654,17 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_imported_parent_struct_inheritance(self):
     """Verifies that structs statically inheriting from imported module structs (e.g. struct Character: entity.Entity) inherit fields properly."""
-    from antlr4 import InputStream, CommonTokenStream
+    from antlr4 import CommonTokenStream, InputStream
+
+    from src.parser.ast_builder import ASTBuilder
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
-    from src.parser.ast_builder import ASTBuilder
-    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      PrimitiveType,
+      StructField,
+      StructType,
+    )
 
     code = """
     struct Character: entity.Entity {
@@ -4654,7 +4712,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_invalid_prefix_import_error(self):
     """Regression test: verifies that importing with invalid path prefix (e.g. game.entities.character when only character.sp exists) fails with a compiler error."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
       char_sp = os.path.join(tmpdir, "character.sp")
       with open(char_sp, "w") as f:
@@ -4683,7 +4742,12 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_imported_module_struct_initializer(self):
     """Verifies type checking of struct initializers using dotted imported module struct names (e.g. character.Unit { name = name })."""
-    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StringType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      StringType,
+      StructField,
+      StructType,
+    )
 
     code = """
     func test_init() {
@@ -4706,7 +4770,13 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_top_level_let_type_alias_resolution(self):
     """Verifies type checking of top-level let type aliases (e.g. let Unit = mod.Unit, let Local = Unit)."""
-    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StructSymbol, StringType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      StringType,
+      StructField,
+      StructSymbol,
+      StructType,
+    )
 
     code = """
     let Unit = mod.Unit;
@@ -4904,7 +4974,7 @@ class TestTypeChecker(unittest.TestCase):
     # Mock node with expr attribute when expressions is None
     checker2 = TypeChecker()
     checker2._check_code = lambda code: None
-    from src.semantics.symbol_table import CoroutineType, FunctionType, NoneType
+    from src.semantics.symbol_table import CoroutineType, FunctionType
     checker2.current_function = FunctionType([], CoroutineType(PrimitiveType("int")))
     class MockYieldNode:
       expr = LiteralNode(42, "int")
@@ -5215,11 +5285,19 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_encapsulation_invariant_struct_cross_module(self):
     """Verifies that direct field mutations on imported structs with __init__ are rejected."""
-    from antlr4 import InputStream, CommonTokenStream
+    from antlr4 import CommonTokenStream, InputStream
+
+    from src.parser.ast_builder import ASTBuilder
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
-    from src.parser.ast_builder import ASTBuilder
-    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, StructMethod, FunctionType, PrimitiveType
+    from src.semantics.symbol_table import (
+      FunctionType,
+      ModuleSymbol,
+      PrimitiveType,
+      StructField,
+      StructMethod,
+      StructType,
+    )
 
     code = """
     func test() {
@@ -5247,11 +5325,17 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_encapsulation_pod_struct_cross_module_allowed(self):
     """Verifies that POD structs (no __init__) allow cross-module field mutation on var bindings."""
-    from antlr4 import InputStream, CommonTokenStream
+    from antlr4 import CommonTokenStream, InputStream
+
+    from src.parser.ast_builder import ASTBuilder
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
-    from src.parser.ast_builder import ASTBuilder
-    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      PrimitiveType,
+      StructField,
+      StructType,
+    )
 
     code = """
     func test() {
@@ -5275,11 +5359,17 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_encapsulation_pod_struct_on_let_binding_rejected(self):
     """Verifies that field mutation on a let-bound struct is rejected."""
-    from antlr4 import InputStream, CommonTokenStream
+    from antlr4 import CommonTokenStream, InputStream
+
+    from src.parser.ast_builder import ASTBuilder
     from src.parser.gen.SapphireLexer import SapphireLexer
     from src.parser.gen.SapphireParser import SapphireParser
-    from src.parser.ast_builder import ASTBuilder
-    from src.semantics.symbol_table import ModuleSymbol, StructType, StructField, PrimitiveType
+    from src.semantics.symbol_table import (
+      ModuleSymbol,
+      PrimitiveType,
+      StructField,
+      StructType,
+    )
 
     code = """
     func test() {
@@ -5841,15 +5931,15 @@ class TestTypeChecker(unittest.TestCase):
   def test_substitute_type_params_and_bare_smart_ref_type_nodes(self):
     """Verifies _substitute_type_params for composite types and bare Ref/SharedRef/WeakRef type resolution."""
     from src.semantics.symbol_table import (
-        GenericTypeParameter,
-        OptionalType,
-        ArrayType,
-        MapType,
-        MultiReturnType,
-        FunctionType,
-        RefType,
-        SharedRefType,
-        WeakRefType,
+      ArrayType,
+      FunctionType,
+      GenericTypeParameter,
+      MapType,
+      MultiReturnType,
+      OptionalType,
+      RefType,
+      SharedRefType,
+      WeakRefType,
     )
 
     checker = TypeChecker()
@@ -7269,8 +7359,8 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_imported_let_constants_in_struct_and_param_defaults(self):
     """Verifies imported module let constants in struct field and parameter defaults."""
-    import tempfile
     import os
+    import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
       consts_sp = os.path.join(tmpdir, "consts.sp")
@@ -7767,7 +7857,7 @@ class TestTypeChecker(unittest.TestCase):
 
   def test_module_exported_struct_constant_field_access(self):
     """Verifies chained field access on exported module struct values."""
-    from src.semantics.symbol_table import ModuleSymbol, Symbol, StructSymbol
+    from src.semantics.symbol_table import ModuleSymbol, StructSymbol, Symbol
 
     stats_struct = StructType("Stats")
     stats_struct.fields["hp"] = StructField(

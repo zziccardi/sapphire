@@ -1,14 +1,15 @@
 """Unit tests for the std.math standard library module in Sapphire."""
 
 import unittest
-from antlr4 import InputStream, CommonTokenStream
 
+from antlr4 import CommonTokenStream, InputStream
+
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
 from src.semantics.type_checker import TypeChecker
-from src.code_gen.python_transpiler import PythonTranspiler
-from src.code_gen.lua_transpiler import LuaTranspiler
 
 
 class TestMathModule(unittest.TestCase):
@@ -91,7 +92,8 @@ class TestMathModule(unittest.TestCase):
     }
     """
     ast = self._parse_and_check(code)
-    import sys, os
+    import os
+    import sys
     lib_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "lib"))
     if lib_dir not in sys.path:
       sys.path.insert(0, lib_dir)

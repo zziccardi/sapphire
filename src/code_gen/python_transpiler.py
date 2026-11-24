@@ -7,24 +7,54 @@ for prototypal inheritance delegation.
 
 from typing import Any, Dict, List, Optional, Set
 
-from src.parser.ast import *
-from src.code_gen.base_transpiler import BaseTranspiler, extract_type_name, get_default_value_for_type_node, is_coroutine_func
-from src.code_gen.intrinsics import IntrinsicRegistry
-from src.code_gen.transpiler_registry import TranspilerRegistry
-
+from src.code_gen.base_transpiler import (
+  BaseTranspiler,
+  get_default_value_for_type_node,
+  is_coroutine_func,
+)
+from src.code_gen.python_expr_emitter import PythonExprMixin
 from src.code_gen.python_runtime import (
-    PYTHON_RUNTIME_PREAMBLE,
-    RUNTIME_PREAMBLE,
-    PYTHON_RUNTIME_MODULE_IMPORT,
-    PYTHON_RESERVED_WORDS,
+  PYTHON_RESERVED_WORDS,
+  PYTHON_RUNTIME_MODULE_IMPORT,
+  PYTHON_RUNTIME_PREAMBLE,
+)
+from src.code_gen.python_runtime import (
+  RUNTIME_PREAMBLE as RUNTIME_PREAMBLE,
 )
 from src.code_gen.python_stmt_emitter import PythonStmtMixin
-from src.code_gen.python_expr_emitter import PythonExprMixin
+from src.code_gen.transpiler_registry import TranspilerRegistry
+from src.parser.ast import (
+  AssignmentNode,
+  ASTNode,
+  BlockNode,
+  EnumDeclNode,
+  ExportStmtNode,
+  ForNode,
+  FuncDeclNode,
+  GuardStmtNode,
+  IdentifierNode,
+  IfNode,
+  ImplBlockNode,
+  ImplMemberNode,
+  ImportStmtNode,
+  LambdaNode,
+  LiteralNode,
+  ProgramNode,
+  ReturnNode,
+  StmtNode,
+  StructDeclNode,
+  StructFieldNode,
+  TraitDeclNode,
+  UnaryOpNode,
+  VarDeclNode,
+  WhileNode,
+)
 
 
-@TranspilerRegistry.register(aliases=["python", "py"], display_name="Python", default_extension=".py")
+@TranspilerRegistry.register(
+  aliases=["python", "py"], display_name="Python", default_extension=".py"
+)
 class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
-
   """AST visitor to transpile Sapphire code to Python."""
 
   def _mangle_name(self, name: str) -> str:
@@ -43,7 +73,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     return name
 
   def _mangle_dotted(self, name: str) -> str:
-    """Mangles each segment of a dotted identifier (e.g. `mod.class` -> `mod.class_`)."""
+    """Mangles each segment of a dotted identifier (e.g. `mod.class` ->
+    `mod.class_`).
+    """
     if not name:
       return name
     if "." in name:
@@ -51,17 +83,23 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     return self._mangle_name(name)
 
   def _resolve_var_name(self, raw_name: str) -> str:
-    """Resolves a Sapphire variable name through lexical shadowing and keyword mangling."""
+    """Resolves a Sapphire variable name through lexical shadowing and keyword
+    mangling.
+    """
     if raw_name in self._identifier_map:
       return self._identifier_map[raw_name]
     return self._mangle_name(raw_name)
 
   def _declare_local_var(self, raw_name: str) -> str:
-    """Declares a local variable in the current lexical scope, alpha-renaming if shadowed."""
+    """Declares a local variable in the current lexical scope, alpha-renaming if
+    shadowed.
+    """
     mangled = self._mangle_name(raw_name)
     if not self._lexical_scopes:
       return mangled
-    enclosing_has = any(raw_name in scope for scope in self._lexical_scopes[:-1])
+    enclosing_has = any(
+      raw_name in scope for scope in self._lexical_scopes[:-1]
+    )
     clashes_func_global = mangled in self._current_func_globals
     if enclosing_has or clashes_func_global:
       py_name = self._next_temp_name(f"_{mangled}_s")
@@ -122,8 +160,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
   def _make_expr_transpiler(self) -> "PythonTranspiler":
     """Creates a sub-transpiler inheriting module, struct, and rename state."""
     temp = type(self)(
-        test_mode=self.test_mode,
-        use_runtime_module=self.use_runtime_module,
+      test_mode=self.test_mode,
+      use_runtime_module=self.use_runtime_module,
     )
     temp.struct_methods = self.struct_methods
     temp.struct_traits = self.struct_traits
@@ -144,7 +182,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     temp._lifted_short_circuits = self._lifted_short_circuits
     temp._temp_name_counters = self._temp_name_counters
     temp._pending_null_vars = self._pending_null_vars
-    temp._pending_unconditional_null_vars = self._pending_unconditional_null_vars
+    temp._pending_unconditional_null_vars = (
+      self._pending_unconditional_null_vars
+    )
     temp._pending_destroy_moved_vars = self._pending_destroy_moved_vars
     temp._branch_depth = self._branch_depth
     temp._var_branch_depth = self._var_branch_depth
@@ -160,13 +200,18 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self.code.append("\n" + "  " * self.indent_level)
 
   def record_line(self, sp_line: int) -> None:
-    """Records a mapping from the current Python output line to a Sapphire source line."""
+    """Records a mapping from the current Python output line to a Sapphire
+    source
+    line.
+    """
     if sp_line and sp_line > 0:
       self._line_map[self._py_lineno] = sp_line
 
   @staticmethod
   def _is_const_default_expr(expr: Any) -> bool:
-    """Returns True if *expr* is an immutable literal safe as a Python def default."""
+    """Returns True if *expr* is an immutable literal safe as a Python def
+    default.
+    """
     if isinstance(expr, LiteralNode):
       return True
     if isinstance(expr, UnaryOpNode) and isinstance(expr.expr, LiteralNode):
@@ -184,7 +229,10 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     return pname
 
   def _emit_deferred_default_inits(self, parameters: List[Any]) -> None:
-    """Emits runtime initialization for non-literal default parameters inside the body."""
+    """Emits runtime initialization for non-literal default parameters inside
+    the
+    body.
+    """
     for p in parameters:
       if p.name == "self" or not p.default_expr:
         continue
@@ -202,7 +250,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.dedent()
 
   def transpile(self, program: ProgramNode) -> str:
-    """Entry point to transpile a ProgramNode AST into Python source code string."""
+    """Entry point to transpile a ProgramNode AST into Python source code
+    string.
+    """
     self.code = []
     self._py_lineno = 1
     self._line_map = {}
@@ -217,7 +267,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._loop_vars_stack = []
 
     # 1. Output runtime preamble or shared runtime module import
-    preamble = PYTHON_RUNTIME_MODULE_IMPORT if self.use_runtime_module else PYTHON_RUNTIME_PREAMBLE
+    preamble = (
+      PYTHON_RUNTIME_MODULE_IMPORT
+      if self.use_runtime_module
+      else PYTHON_RUNTIME_PREAMBLE
+    )
     self.emit(preamble)
     self._py_lineno += preamble.count("\n")
     self.newline()
@@ -253,10 +307,13 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         if decl.name == "main":
           has_main = True
         top_level_decls.append(decl)
-      elif isinstance(decl, (StructDeclNode, EnumDeclNode, TraitDeclNode, VarDeclNode)):
+      elif isinstance(
+        decl, (StructDeclNode, EnumDeclNode, TraitDeclNode, VarDeclNode)
+      ):
         top_level_decls.append(decl)
 
-    # 3. Transpile all top-level declarations (types, functions, global variables)
+    # 3. Transpile all top-level declarations (types, functions, global
+    # variables)
     for decl in top_level_decls:
       self.visit(decl)
       self.newline()
@@ -269,7 +326,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         m_method = self._mangle_name(m_name)
         self.newline()
         if modifier == "static":
-          self.emit(f"{m_struct}.{m_method} = staticmethod({m_trait}.{m_method})")
+          self.emit(
+            f"{m_struct}.{m_method} = staticmethod({m_trait}.{m_method})"
+          )
         else:
           self.emit(f"{m_struct}.{m_method} = {m_trait}.{m_method}")
       self.newline()
@@ -305,8 +364,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
 
   def generic_visit(self, node: ASTNode) -> None:
     raise NotImplementedError(
-        f"Transpilation for visitor visit_{node.__class__.__name__} is not"
-        " implemented."
+      f"Transpilation for visitor visit_{node.__class__.__name__} is not"
+      " implemented."
     )
 
   # ==========================================
@@ -355,7 +414,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       exp_name = self._mangle_name(spec.exported_name)
       exported_names.append(f'"{exp_name}"')
       if spec.module_prefix:
-        src_expr = f"{self._mangle_dotted(spec.module_prefix)}.{self._mangle_name(spec.symbol)}"
+        mod_prefix = self._mangle_dotted(spec.module_prefix)
+        sym_name = self._mangle_name(spec.symbol)
+        src_expr = f"{mod_prefix}.{sym_name}"
         self.newline()
         self.emit(f"{exp_name} = {src_expr}")
       elif spec.alias:
@@ -374,12 +435,20 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     test_base = f"{getattr(self, 'testing_alias', 'testing')}.TestCase"
     cls_name = self._mangle_name(node.name)
 
-    parents: List[str] = [self._mangle_dotted(p) for p in (node.parent_names or [])]
-    if is_proto and not any(p in self.proto_structs for p in (node.parent_names or [])):
+    parents: List[str] = [
+      self._mangle_dotted(p) for p in (node.parent_names or [])
+    ]
+    if is_proto and not any(
+      p in self.proto_structs for p in (node.parent_names or [])
+    ):
       parents.append("SapphireObject")
     if is_test_case and test_base not in parents:
       parents.append(test_base)
-    parent_class = ", ".join(parents) if parents else ("SapphireObject" if is_proto else "object")
+    parent_class = (
+      ", ".join(parents)
+      if parents
+      else ("SapphireObject" if is_proto else "object")
+    )
 
     self.newline()
     self.emit(f"class {cls_name}({parent_class}):")
@@ -406,7 +475,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           else:
             self.emit(f"{p_m}.__init__(self, *args, **kwargs)")
       for f in node.fields:
-        default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+        default_expr = f.default_expr or get_default_value_for_type_node(
+          f.field_type
+        )
         if default_expr:
           self.newline()
           temp = self._make_expr_transpiler()
@@ -443,7 +514,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           else:
             self.emit(f"{p_m}.__init__(self, *args, **kwargs)")
       for f in node.fields:
-        default_expr = f.default_expr or get_default_value_for_type_node(f.field_type)
+        default_expr = f.default_expr or get_default_value_for_type_node(
+          f.field_type
+        )
         if default_expr:
           self.newline()
           temp = self._make_expr_transpiler()
@@ -466,20 +539,20 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.dedent()
 
     has_explicit_del = any(
-        getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
-        for m in methods
+      getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
+      for m in methods
     )
     destructible_parents = [
-        p for p in (node.parent_names or []) if p in self.structs_with_destructor
+      p for p in (node.parent_names or []) if p in self.structs_with_destructor
     ]
     needs_synth_del = (
-        not is_proto
-        and not has_explicit_del
-        and node.name in self.structs_with_destructor
-        and bool(
-            self.struct_destructible_fields.get(node.name)
-            or len(destructible_parents) > 1
-        )
+      not is_proto
+      and not has_explicit_del
+      and node.name in self.structs_with_destructor
+      and bool(
+        self.struct_destructible_fields.get(node.name)
+        or len(destructible_parents) > 1
+      )
     )
 
     old_struct_name = getattr(self, "_current_struct_name", None)
@@ -497,7 +570,10 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           self.emit("def __del__(self):")
           self.indent()
           self.newline()
-          self.emit("_sp_destroyed = object.__getattribute__(self, '__dict__').setdefault('_sapphire_destroyed_classes_', set())")
+          self.emit(
+            "_sp_destroyed = object.__getattribute__(self, "
+            "'__dict__').setdefault('_sapphire_destroyed_classes_', set())"
+          )
           self.newline()
           self.emit(f"if '{cls_name}' in _sp_destroyed:")
           self.indent()
@@ -529,13 +605,17 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self.newline()
 
   def _emit_struct_auto_teardown(
-      self, struct_name: str, call_parents: bool = True
+    self, struct_name: str, call_parents: bool = True
   ) -> None:
     """Emits LIFO `_sapphire_del` calls for destructible fields and parents."""
     emitted = False
-    for f_name in reversed(self.struct_destructible_fields.get(struct_name, [])):
+    for f_name in reversed(
+      self.struct_destructible_fields.get(struct_name, [])
+    ):
       self.newline()
-      self.emit(f"_sapphire_del(getattr(self, '{self._mangle_name(f_name)}', None))")
+      self.emit(
+        f"_sapphire_del(getattr(self, '{self._mangle_name(f_name)}', None))"
+      )
       emitted = True
     if call_parents:
       for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
@@ -548,14 +628,14 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.emit("pass")
 
   def visit_StructFieldNode(self, node: StructFieldNode) -> None:
-    # Fields are dynamically initialized in __init__, so we do not declare them at class level.
+    # Fields are dynamically initialized in __init__, so we do not declare them
+    # at class level.
     pass
 
   def visit_ImplMemberNode(self, node: ImplMemberNode) -> None:
     func = node.func_decl
     is_test_func = any(
-        getattr(a, "name", "") == "test"
-        for a in getattr(func, "annotations", [])
+      getattr(a, "name", "") == "test" for a in getattr(func, "annotations", [])
     )
     if is_test_func and not self.test_mode:
       return
@@ -566,8 +646,13 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.emit("@staticmethod")
       self.newline()
 
-    # Rename __init__ constructor to _init_sapphire to separate from boilerplate __init__
-    func_name = "_init_sapphire" if func.name == "__init__" else self._mangle_name(func.name)
+    # Rename __init__ constructor to _init_sapphire to separate from boilerplate
+    # __init__
+    func_name = (
+      "_init_sapphire"
+      if func.name == "__init__"
+      else self._mangle_name(func.name)
+    )
 
     # Python parameter formatting
     params = []
@@ -587,7 +672,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     prev_id_map = self._identifier_map
     prev_func_globals = self._current_func_globals
     prev_loop_vars = self._loop_vars_stack
-    assigned_globals = self._find_assigned_globals(func.body, local_params=set(raw_params))
+    assigned_globals = self._find_assigned_globals(
+      func.body, local_params=set(raw_params)
+    )
     self._lexical_scopes = [set(param_raw_names)]
     self._identifier_map = {}
     self._current_func_globals = set(assigned_globals)
@@ -609,7 +696,10 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.dedent()
         self.newline()
         if raw_params:
-          self.emit(f"return _SapphireCoroutine(_gen_{func_name}, {', '.join(raw_params)})")
+          self.emit(
+            f"return _SapphireCoroutine(_gen_{func_name}, "
+            f"{', '.join(raw_params)})"
+          )
         else:
           self.emit(f"return _SapphireCoroutine(_gen_{func_name})")
         self.dedent()
@@ -620,7 +710,10 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         cur_cls = self._mangle_name(cur_struct) if cur_struct else ""
         if func.name == "__del__":
           self.newline()
-          self.emit("_sp_destroyed = object.__getattribute__(self, '__dict__').setdefault('_sapphire_destroyed_classes_', set())")
+          self.emit(
+            "_sp_destroyed = object.__getattribute__(self, "
+            "'__dict__').setdefault('_sapphire_destroyed_classes_', set())"
+          )
           self.newline()
           self.emit(f"if '{cur_cls}' in _sp_destroyed:")
           self.indent()
@@ -645,18 +738,20 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
                 args_list.append(f"{self._mangle_name(arg.name)}={val}")
               else:
                 args_list.append(val)
-            self.emit(f"{self._mangle_dotted(base_init.callee.name)}._init_sapphire({', '.join(args_list)})")
+            base_name = self._mangle_dotted(base_init.callee.name)
+            args_str = ", ".join(args_list)
+            self.emit(f"{base_name}._init_sapphire({args_str})")
         has_auto_teardown = (
-            func.name == "__del__"
-            and cur_struct
-            and cur_struct not in self.proto_structs
-            and bool(
-                self.struct_destructible_fields.get(cur_struct)
-                or any(
-                    p in self.structs_with_destructor
-                    for p in self.struct_parent_names.get(cur_struct, [])
-                )
+          func.name == "__del__"
+          and cur_struct
+          and cur_struct not in self.proto_structs
+          and bool(
+            self.struct_destructible_fields.get(cur_struct)
+            or any(
+              p in self.structs_with_destructor
+              for p in self.struct_parent_names.get(cur_struct, [])
             )
+          )
         )
         if func.name == "__del__":
           self.newline()
@@ -689,8 +784,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self._loop_vars_stack = prev_loop_vars
 
     export_ann = next(
-        (a for a in getattr(func, "annotations", []) if a.name == "export"),
-        None,
+      (a for a in getattr(func, "annotations", []) if a.name == "export"),
+      None,
     )
     if export_ann and export_ann.arg:
       alias_name = self._mangle_name(export_ann.arg)
@@ -699,16 +794,20 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.emit(f"{alias_name} = {func_name}")
 
   def _find_assigned_globals(
-      self, node: Any, local_params: Optional[Set[str]] = None
+    self, node: Any, local_params: Optional[Set[str]] = None
   ) -> Set[str]:
-    """Finds all global variables assigned within *node* without lexical local shadowing."""
+    """Finds all global variables assigned within *node* without lexical local
+    shadowing.
+    """
     if not self.global_vars:
       return set()
 
     local_vars = set(local_params) if local_params else set()
     assigned: Set[str] = set()
 
-    def _collect_locals_and_assignments(n: Any, current_locals: Set[str]) -> None:
+    def _collect_locals_and_assignments(
+      n: Any, current_locals: Set[str]
+    ) -> None:
       if n is None:
         return
       if isinstance(n, (FuncDeclNode, LambdaNode)):
@@ -722,9 +821,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
 
       if isinstance(n, IfNode):
         bindings = getattr(
-            n,
-            "bindings",
-            [n.init_binding] if getattr(n, "init_binding", None) else [],
+          n,
+          "bindings",
+          [n.init_binding] if getattr(n, "init_binding", None) else [],
         )
         branch_locals = set(current_locals)
         for b in bindings:
@@ -758,7 +857,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         return
 
       if isinstance(n, VarDeclNode):
-        for expr in (n.exprs or []):
+        for expr in n.exprs or []:
           _collect_locals_and_assignments(expr, current_locals)
         for name in n.names:
           current_locals.add(name)
@@ -769,7 +868,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         for clause in n.clauses:
           if clause.binding:
             _collect_locals_and_assignments(clause.binding.expr, current_locals)
-            for name in getattr(clause.binding, "let_names", [clause.binding.let_name]):
+            for name in getattr(
+              clause.binding, "let_names", [clause.binding.let_name]
+            ):
               if name:
                 current_locals.add(name)
                 current_locals.add(self._mangle_name(name))
@@ -785,7 +886,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         for t in targets:
           if isinstance(t, IdentifierNode):
             m_name = self._mangle_name(t.name)
-            if m_name in self.global_vars and m_name not in current_locals and t.name not in current_locals:
+            if (
+              m_name in self.global_vars
+              and m_name not in current_locals
+              and t.name not in current_locals
+            ):
               assigned.add(m_name)
 
       if isinstance(n, ASTNode):
@@ -803,7 +908,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
     default_members = [
-        m for m in node.members if getattr(m, "body", None) is not None
+      m for m in node.members if getattr(m, "body", None) is not None
     ]
     cls_name = self._mangle_name(node.name)
     self.newline()
@@ -821,11 +926,11 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     else:
       for member in default_members:
         synth_func = FuncDeclNode(
-            member.name,
-            member.parameters,
-            member.return_types,
-            member.body,
-            annotations=member.annotations,
+          member.name,
+          member.parameters,
+          member.return_types,
+          member.body,
+          annotations=member.annotations,
         )
         synth_member = ImplMemberNode(member.modifier, synth_func)
         self.visit_ImplMemberNode(synth_member)
@@ -833,7 +938,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self.newline()
 
   def visit_FuncDeclNode(self, node: FuncDeclNode) -> None:
-    is_test_func = any(getattr(a, "name", "") == "test" for a in getattr(node, "annotations", []))
+    is_test_func = any(
+      getattr(a, "name", "") == "test" for a in getattr(node, "annotations", [])
+    )
     if is_test_func and not self.test_mode:
       return
 
@@ -847,7 +954,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     prev_id_map = self._identifier_map
     prev_func_globals = self._current_func_globals
     prev_loop_vars = self._loop_vars_stack
-    assigned_globals = self._find_assigned_globals(node.body, local_params=set(raw_params))
+    assigned_globals = self._find_assigned_globals(
+      node.body, local_params=set(raw_params)
+    )
     self._lexical_scopes = [set(param_raw_names)]
     self._identifier_map = {}
     self._current_func_globals = set(assigned_globals)
@@ -869,7 +978,10 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.dedent()
         self.newline()
         if raw_params:
-          self.emit(f"return _SapphireCoroutine(_gen_{fn_name}, {', '.join(raw_params)})")
+          self.emit(
+            f"return _SapphireCoroutine(_gen_{fn_name}, "
+            f"{', '.join(raw_params)})"
+          )
         else:
           self.emit(f"return _SapphireCoroutine(_gen_{fn_name})")
         self.dedent()
@@ -888,7 +1000,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self._current_func_globals = prev_func_globals
       self._loop_vars_stack = prev_loop_vars
 
-    export_ann = next((a for a in getattr(node, "annotations", []) if a.name == "export"), None)
+    export_ann = next(
+      (a for a in getattr(node, "annotations", []) if a.name == "export"), None
+    )
     if export_ann:
       target_path = export_ann.arg if export_ann.arg else fn_name
       if "." in target_path:
@@ -916,9 +1030,9 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       if not isinstance(stmt, ReturnNode):
         self._drain_pending_null_vars("None")
       if (
-          done_flag
-          and idx < len(statements) - 1
-          and self._stmt_contains_match_yield(stmt)
+        done_flag
+        and idx < len(statements) - 1
+        and self._stmt_contains_match_yield(stmt)
       ):
         self.newline()
         self.emit(f"if not {done_flag}:")

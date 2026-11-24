@@ -97,13 +97,6 @@ class TestCollectionChecker(unittest.TestCase):
     errs = self._check_error(src_alias_val)
     self.assertIn("Aliasing conflict", errs)
 
-    src_alias_key = """
-    func test(): void {
-      var m: [[int]: int] = {[1]: 2};
-      var k: [int] = [1];
-      m.insert(m.keys()[0], 3);
-    }
-    """
     # Also test key aliasing with direct subscript on a nested map
     src_alias_key2 = """
     func test(): void {

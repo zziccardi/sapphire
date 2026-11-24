@@ -30,7 +30,6 @@ from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
 from src.semantics.type_checker import TypeChecker
 
-
 _DEFAULT_SEED = 20261122
 
 
@@ -187,7 +186,7 @@ class TestDifferentialParity(unittest.TestCase):
   ) -> None:
     names = [name for name, _ in cases]
     py_out, lua_out = self._run_both_backends(code, names, seed)
-    for (name, src), py_v, lua_v in zip(cases, py_out, lua_out):
+    for (name, src), py_v, lua_v in zip(cases, py_out, lua_out, strict=False):
       if py_v != lua_v:
         self.fail(
             f"Python/Lua parity mismatch in {name} (seed={seed}):\n"

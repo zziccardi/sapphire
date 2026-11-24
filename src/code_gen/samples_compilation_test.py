@@ -77,6 +77,7 @@ class TestSamplesCompilation(unittest.TestCase):
     import argparse
     import subprocess
     from unittest.mock import patch
+
     from src.cli.sapphire import run_command
     from testing.test_utils import suppress_output
 

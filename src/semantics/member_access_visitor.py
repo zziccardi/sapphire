@@ -3,51 +3,51 @@
 from typing import Any, List, Optional
 
 from src.parser.ast import (
-    ASTNode,
-    IdentifierNode,
-    MemberAccessNode,
-    MoveNode,
+  ASTNode,
+  IdentifierNode,
+  MemberAccessNode,
+  MoveNode,
 )
 from src.semantics.collection_checker import CollectionChecker
 from src.semantics.symbol_table import (
-    ArrayType,
-    COROUTINE_METHODS,
-    CoroutineType,
-    EnumType,
-    FunctionType,
-    MapType,
-    ModuleSymbol,
-    ModuleType,
-    NoneType,
-    OptionalType,
-    PrimitiveType,
-    RefType,
-    STRING_METHODS,
-    SharedRefType,
-    StringType,
-    StructSymbol,
-    StructType,
-    TraitType,
-    Type,
-    VariableSymbol,
-    WeakRefType,
+  COROUTINE_METHODS,
+  STRING_METHODS,
+  ArrayType,
+  CoroutineType,
+  EnumType,
+  FunctionType,
+  MapType,
+  ModuleSymbol,
+  ModuleType,
+  NoneType,
+  OptionalType,
+  PrimitiveType,
+  RefType,
+  SharedRefType,
+  StringType,
+  StructSymbol,
+  StructType,
+  TraitType,
+  Type,
+  VariableSymbol,
+  WeakRefType,
 )
 
 _ASSERTION_NAMES = (
-    "assert_true",
-    "assert_false",
-    "assert_eq",
-    "assert_ne",
-    "assert_almost_eq",
-    "assert_none",
-    "assert_not_none",
-    "expect_true",
-    "expect_false",
-    "expect_eq",
-    "expect_ne",
-    "expect_almost_eq",
-    "expect_none",
-    "expect_not_none",
+  "assert_true",
+  "assert_false",
+  "assert_eq",
+  "assert_ne",
+  "assert_almost_eq",
+  "assert_none",
+  "assert_not_none",
+  "expect_true",
+  "expect_false",
+  "expect_eq",
+  "expect_ne",
+  "expect_almost_eq",
+  "expect_none",
+  "expect_not_none",
 )
 
 
@@ -75,7 +75,7 @@ class MemberAccessVisitorMixin:
     return None
 
   def _find_imported_modules_with_prefix(
-      self, prefix: str
+    self, prefix: str
   ) -> List[ModuleSymbol]:
     """Returns all imported ModuleSymbols starting with prefix."""
     root_scope = self.symbol_table.current_scope
@@ -84,24 +84,25 @@ class MemberAccessVisitorMixin:
     res: List[ModuleSymbol] = []
     prefix_dot = prefix + "."
     for sym in root_scope.symbols.values():
-      if (
-          isinstance(sym, ModuleSymbol)
-          and sym.module_path.startswith(prefix_dot)
+      if isinstance(sym, ModuleSymbol) and sym.module_path.startswith(
+        prefix_dot
       ):
         res.append(sym)
     return res
 
   def _diagnose_unaliased_module_access(
-      self, node: MemberAccessNode
+    self, node: MemberAccessNode
   ) -> Optional[Type]:
-    """Detects unaliased dotted module paths (e.g. `std.os.args`) and suggests alias."""
+    """Detects unaliased dotted module paths (e.g. `std.os.args`) and suggests
+    alias.
+    """
     # Check receiver first (e.g. `std.os.args` where `std.os` is the module).
     dotted_recv = self._get_dotted_path(node.receiver)
     if dotted_recv and len(dotted_recv) >= 2:
       root_ident = dotted_recv[0]
       if (
-          self.symbol_table.lookup(root_ident) is None
-          and self.symbol_table.lookup_type(root_ident) is None
+        self.symbol_table.lookup(root_ident) is None
+        and self.symbol_table.lookup_type(root_ident) is None
       ):
         for i in range(len(dotted_recv), 1, -1):
           sub_path = ".".join(dotted_recv[:i])
@@ -111,28 +112,28 @@ class MemberAccessVisitorMixin:
             call_suffix = "()" if getattr(node, "is_call", False) else ""
             if remaining:
               sug = (
-                  f"{mod_sym.name}.{'.'.join(remaining)}.{node.member}"
-                  f"{call_suffix}"
+                f"{mod_sym.name}.{'.'.join(remaining)}.{node.member}"
+                f"{call_suffix}"
               )
             else:
               sug = f"{mod_sym.name}.{node.member}{call_suffix}"
             self.error(
-                f"Undefined identifier '{root_ident}'. Module "
-                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
-                f"Did you mean '{sug}'?",
-                node=node.receiver,
+              f"Undefined identifier '{root_ident}'. Module "
+              f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
+              f"Did you mean '{sug}'?",
+              node=node.receiver,
             )
             node.receiver.has_diagnosed_module_import = True
             node.receiver.diagnosed_module_type = ModuleType(
-                mod_sym.module_path
+              mod_sym.module_path
             )
             if not remaining:
               exp_sym = mod_sym.lookup_export(node.member)
               if exp_sym:
                 return (
-                    exp_sym.symbol_type
-                    if hasattr(exp_sym, "symbol_type")
-                    else exp_sym
+                  exp_sym.symbol_type
+                  if hasattr(exp_sym, "symbol_type")
+                  else exp_sym
                 )
             return PrimitiveType("none")
 
@@ -141,8 +142,8 @@ class MemberAccessVisitorMixin:
     if dotted_self and len(dotted_self) >= 2:
       root_ident = dotted_self[0]
       if (
-          self.symbol_table.lookup(root_ident) is None
-          and self.symbol_table.lookup_type(root_ident) is None
+        self.symbol_table.lookup(root_ident) is None
+        and self.symbol_table.lookup_type(root_ident) is None
       ):
         for i in range(len(dotted_self), 1, -1):
           sub_path = ".".join(dotted_self[:i])
@@ -150,15 +151,15 @@ class MemberAccessVisitorMixin:
           if mod_sym:
             remaining = dotted_self[i:]
             sug = (
-                f"{mod_sym.name}.{'.'.join(remaining)}"
-                if remaining
-                else mod_sym.name
+              f"{mod_sym.name}.{'.'.join(remaining)}"
+              if remaining
+              else mod_sym.name
             )
             self.error(
-                f"Undefined identifier '{root_ident}'. Module "
-                f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
-                f"Did you mean '{sug}'?",
-                node=node,
+              f"Undefined identifier '{root_ident}'. Module "
+              f"'{mod_sym.module_path}' was imported as '{mod_sym.name}'. "
+              f"Did you mean '{sug}'?",
+              node=node,
             )
             node.has_diagnosed_module_import = True
             node.diagnosed_module_type = ModuleType(mod_sym.module_path)
@@ -167,25 +168,25 @@ class MemberAccessVisitorMixin:
     return None
 
   def _widen_array_size_on_mutation(
-      self, node: MemberAccessNode, receiver_type: ArrayType
+    self, node: MemberAccessNode, receiver_type: ArrayType
   ) -> None:
     """Clears inferred static size when a dynamic array is mutated."""
     if (
-        node.member in ("push", "pop", "insert", "remove", "clear")
-        and not receiver_type.is_fixed_size
-        and receiver_type.size is not None
-        and isinstance(node.receiver, IdentifierNode)
+      node.member in ("push", "pop", "insert", "remove", "clear")
+      and not receiver_type.is_fixed_size
+      and receiver_type.size is not None
+      and isinstance(node.receiver, IdentifierNode)
     ):
       sym = self.symbol_table.lookup(node.receiver.name)
       if isinstance(sym, VariableSymbol) and isinstance(
-          sym.symbol_type, ArrayType
+        sym.symbol_type, ArrayType
       ):
         sym.symbol_type = ArrayType(
-            sym.symbol_type.element_type, size=None, is_fixed_size=False
+          sym.symbol_type.element_type, size=None, is_fixed_size=False
         )
 
   def _resolve_builtin_receiver_member(
-      self, node: MemberAccessNode, receiver_type: Type
+    self, node: MemberAccessNode, receiver_type: Type
   ) -> Optional[Type]:
     """Resolves member access on builtin, module, enum, and trait types."""
     if isinstance(receiver_type, StringType):
@@ -214,24 +215,24 @@ class MemberAccessVisitorMixin:
         y_type = receiver_type.yield_type
         if node.member == "step":
           ret_t = (
-              NoneType() if isinstance(y_type, NoneType) else OptionalType(y_type)
+            NoneType() if isinstance(y_type, NoneType) else OptionalType(y_type)
           )
           return FunctionType(
-              [receiver_type], ret_t, param_names=["self"], has_self=True
+            [receiver_type], ret_t, param_names=["self"], has_self=True
           )
         if node.member == "is_done":
           return FunctionType(
-              [receiver_type],
-              PrimitiveType("bool"),
-              param_names=["self"],
-              has_self=True,
+            [receiver_type],
+            PrimitiveType("bool"),
+            param_names=["self"],
+            has_self=True,
           )
         if node.member == "reset":
           return FunctionType(
-              [receiver_type],
-              PrimitiveType("none"),
-              param_names=["self"],
-              has_self=True,
+            [receiver_type],
+            PrimitiveType("none"),
+            param_names=["self"],
+            has_self=True,
           )
       self.error(f"Coroutine has no method '{node.member}'.")
       return PrimitiveType("none")
@@ -243,23 +244,24 @@ class MemberAccessVisitorMixin:
           exp_sym = mod_sym.lookup_export(node.member)
           if exp_sym:
             return (
-                exp_sym.symbol_type
-                if hasattr(exp_sym, "symbol_type")
-                else exp_sym
+              exp_sym.symbol_type
+              if hasattr(exp_sym, "symbol_type")
+              else exp_sym
             )
           mod_path = mod_sym.module_path or ""
           if node.member in _ASSERTION_NAMES and (
-              mod_path == "std.testing"
-              or mod_path == "testing"
-              or mod_path.endswith(".testing")
+            mod_path == "std.testing"
+            or mod_path == "testing"
+            or mod_path.endswith(".testing")
           ):
             fn_t = FunctionType([], PrimitiveType("none"))
             fn_t.is_testing_assertion = True
             return fn_t
           if mod_sym.exports or getattr(mod_sym, "file_path", None):
             self.error(
-                f"Module '{mod_sym.name}' has no exported member '{node.member}'.",
-                node=node,
+              f"Module '{mod_sym.name}' has no exported member "
+              f"'{node.member}'.",
+              node=node,
             )
       return PrimitiveType("none")
 
@@ -283,8 +285,8 @@ class MemberAccessVisitorMixin:
         node.is_instance_method = not is_static
         return method
       if node.member in _ASSERTION_NAMES and (
-          receiver_type is self.symbol_table.testcase_trait
-          or receiver_type.name == "TestCase"
+        receiver_type is self.symbol_table.testcase_trait
+        or receiver_type.name == "TestCase"
       ):
         node.is_instance_method = True
         fn_t = FunctionType([], PrimitiveType("none"))
@@ -294,14 +296,14 @@ class MemberAccessVisitorMixin:
       return PrimitiveType("none")
 
     if (
-        node.member in _ASSERTION_NAMES
-        and isinstance(receiver_type, StructType)
-        and (
-            receiver_type.name == "TestContext"
-            or receiver_type.implements_trait(
-                self.symbol_table.testcase_trait, self.symbol_table
-            )
+      node.member in _ASSERTION_NAMES
+      and isinstance(receiver_type, StructType)
+      and (
+        receiver_type.name == "TestContext"
+        or receiver_type.implements_trait(
+          self.symbol_table.testcase_trait, self.symbol_table
         )
+      )
     ):
       node.is_instance_method = True
       fn_t = FunctionType([], PrimitiveType("none"))
@@ -314,9 +316,9 @@ class MemberAccessVisitorMixin:
     """Resolves field, method, enum variant, and module member accesses."""
     if isinstance(node.receiver, MoveNode):
       self.error(
-          f"Cannot access member '{node.member}' on moved variable "
-          f"'{node.receiver.name}'.",
-          node=node,
+        f"Cannot access member '{node.member}' on moved variable "
+        f"'{node.receiver.name}'.",
+        node=node,
       )
       return PrimitiveType("none")
 
@@ -337,7 +339,8 @@ class MemberAccessVisitorMixin:
       receiver_type = receiver_type.base_type
     elif isinstance(receiver_type, OptionalType):
       self.error(
-          "Must use optional chaining '?.' to access properties on an optional receiver."
+        "Must use optional chaining '?.' to access properties on an optional "
+        "receiver."
       )
       return PrimitiveType("none")
 
@@ -345,22 +348,23 @@ class MemberAccessVisitorMixin:
     if builtin_res is not None:
       return builtin_res
 
-    # Handle smart-pointer methods (.share, .downgrade, .upgrade) and auto-deref.
+    # Handle smart-pointer methods (.share, .downgrade, .upgrade) and
+    # auto-deref.
     if isinstance(receiver_type, SharedRefType):
       if node.member == "share":
         node.is_shared_ref_share = True
         node.is_instance_method = True
         return FunctionType(
-            [receiver_type], receiver_type, param_names=["self"], has_self=True
+          [receiver_type], receiver_type, param_names=["self"], has_self=True
         )
       if node.member == "downgrade":
         node.is_shared_ref_downgrade = True
         node.is_instance_method = True
         return FunctionType(
-            [receiver_type],
-            WeakRefType(receiver_type.inner_type),
-            param_names=["self"],
-            has_self=True,
+          [receiver_type],
+          WeakRefType(receiver_type.inner_type),
+          param_names=["self"],
+          has_self=True,
         )
       receiver_type = receiver_type.inner_type
       node.is_auto_deref = True
@@ -372,15 +376,15 @@ class MemberAccessVisitorMixin:
         node.is_weak_ref_upgrade = True
         node.is_instance_method = True
         return FunctionType(
-            [receiver_type],
-            OptionalType(SharedRefType(receiver_type.inner_type)),
-            param_names=["self"],
-            has_self=True,
+          [receiver_type],
+          OptionalType(SharedRefType(receiver_type.inner_type)),
+          param_names=["self"],
+          has_self=True,
         )
       self.error(
-          f"WeakRef has no member '{node.member}'; call '.upgrade()' to "
-          "access the underlying value.",
-          node=node,
+        f"WeakRef has no member '{node.member}'; call '.upgrade()' to "
+        "access the underlying value.",
+        node=node,
       )
       return PrimitiveType("none")
 
@@ -398,10 +402,10 @@ class MemberAccessVisitorMixin:
     if node.member == "__proto__":
       if not receiver_type.is_prototype:
         self.error(
-            f"Cannot access '__proto__' on standard struct "
-            f"'{receiver_type.name}'; '__proto__' is only available on "
-            "'proto' instances.",
-            node=node,
+          f"Cannot access '__proto__' on standard struct "
+          f"'{receiver_type.name}'; '__proto__' is only available on "
+          "'proto' instances.",
+          node=node,
         )
         return PrimitiveType("none")
       return OptionalType(receiver_type)
@@ -426,9 +430,10 @@ class MemberAccessVisitorMixin:
     if method:
       if method.modifier == "static":
         self.error(
-            f"Cannot call static method '{node.member}' on an instance of "
-            f"'{receiver_type.name}'; call '{receiver_type.name}.{node.member}(...)' instead.",
-            node=node,
+          f"Cannot call static method '{node.member}' on an instance of "
+          f"'{receiver_type.name}'; call "
+          f"'{receiver_type.name}.{node.member}(...)' instead.",
+          node=node,
         )
         return method.method_type
       node.is_static_method = False
@@ -446,9 +451,9 @@ class MemberAccessVisitorMixin:
         return isinstance(sym, StructSymbol)
       return isinstance(self.symbol_table.lookup_type(expr.name), StructType)
     if (
-        isinstance(expr, MemberAccessNode)
-        and isinstance(expr.receiver, IdentifierNode)
-        and not expr.is_optional
+      isinstance(expr, MemberAccessNode)
+      and isinstance(expr.receiver, IdentifierNode)
+      and not expr.is_optional
     ):
       mod_sym = self.symbol_table.lookup(expr.receiver.name)
       if isinstance(mod_sym, ModuleSymbol):
@@ -457,29 +462,31 @@ class MemberAccessVisitorMixin:
     return False
 
   def _resolve_struct_type_member_access(
-      self, node: MemberAccessNode, receiver_type: StructType
+    self, node: MemberAccessNode, receiver_type: StructType
   ) -> Type:
     """Resolves `StructType.member` for static methods or ancestor dispatch."""
     if node.member == "__init__":
       self.error(
-          f"Cannot call '__init__' directly on '{receiver_type.name}'; "
-          f"use ': {receiver_type.name}(...)' in a subclass '__init__' or "
-          f"'{receiver_type.name}(...)' to construct.",
-          node=node,
+        f"Cannot call '__init__' directly on '{receiver_type.name}'; "
+        f"use ': {receiver_type.name}(...)' in a subclass '__init__' or "
+        f"'{receiver_type.name}(...)' to construct.",
+        node=node,
       )
       return PrimitiveType("none")
 
     if node.member in receiver_type.fields:
       self.error(
-          f"Cannot access instance field '{node.member}' on type "
-          f"'{receiver_type.name}'.",
-          node=node,
+        f"Cannot access instance field '{node.member}' on type "
+        f"'{receiver_type.name}'.",
+        node=node,
       )
       return PrimitiveType("none")
 
     method = receiver_type.get_method(node.member, self.symbol_table)
     if not method:
-      self.error(f"Struct '{receiver_type.name}' has no member '{node.member}'.")
+      self.error(
+        f"Struct '{receiver_type.name}' has no member '{node.member}'."
+      )
       return PrimitiveType("none")
 
     if method.modifier == "static":
@@ -489,44 +496,46 @@ class MemberAccessVisitorMixin:
 
     if not getattr(node, "is_call", False):
       self.error(
-          f"Cannot reference unbound instance method "
-          f"'{receiver_type.name}.{node.member}' as a value; call it with "
-          "'(self, ...)' inside a subclass method.",
-          node=node,
+        f"Cannot reference unbound instance method "
+        f"'{receiver_type.name}.{node.member}' as a value; call it with "
+        "'(self, ...)' inside a subclass method.",
+        node=node,
       )
       return PrimitiveType("none")
 
     self_sym = self.symbol_table.lookup("self")
     if not self.current_struct or not isinstance(self_sym, VariableSymbol):
       self.error(
-          f"Qualified method call '{receiver_type.name}.{node.member}(self, ...)' "
-          "is only allowed inside an instance method of a subclass.",
-          node=node,
+        f"Qualified method call '{receiver_type.name}.{node.member}(self, "
+        "...)' "
+        "is only allowed inside an instance method of a subclass.",
+        node=node,
       )
       return PrimitiveType("none")
 
     if not self.current_struct.has_ancestor(receiver_type, self.symbol_table):
       if self.current_struct == receiver_type:
         self.error(
-            f"Cannot use qualified ancestor dispatch "
-            f"'{receiver_type.name}.{node.member}(self, ...)' on own struct "
-            f"'{self.current_struct.name}'; use 'self.{node.member}(...)' instead.",
-            node=node,
+          f"Cannot use qualified ancestor dispatch "
+          f"'{receiver_type.name}.{node.member}(self, ...)' on own struct "
+          f"'{self.current_struct.name}'; use 'self.{node.member}(...)' "
+          "instead.",
+          node=node,
         )
       else:
         self.error(
-            f"Struct '{receiver_type.name}' is not an ancestor of "
-            f"'{self.current_struct.name}'.",
-            node=node,
+          f"Struct '{receiver_type.name}' is not an ancestor of "
+          f"'{self.current_struct.name}'.",
+          node=node,
         )
       return PrimitiveType("none")
 
     if method.modifier == "var" and not self_sym.is_mutable:
       self.error(
-          f"Cannot call mutating ancestor method "
-          f"'{receiver_type.name}.{node.member}' from immutable method; "
-          "declare the enclosing method as 'var func'.",
-          node=node,
+        f"Cannot call mutating ancestor method "
+        f"'{receiver_type.name}.{node.member}' from immutable method; "
+        "declare the enclosing method as 'var func'.",
+        node=node,
       )
       return PrimitiveType("none")
 
@@ -539,14 +548,14 @@ class MemberAccessVisitorMixin:
     mt = method.method_type
     self_mut = method.modifier == "var"
     fn_t = FunctionType(
-        param_types=[self.current_struct] + list(mt.param_types),
-        return_type=mt.return_type,
-        param_names=["self"] + list(mt.param_names),
-        param_mutabilities=[self_mut] + list(mt.param_mutabilities),
-        has_self=False,
-        num_defaults=mt.num_defaults,
-        param_defaults=[None] + list(getattr(mt, "param_defaults", [])),
-        ast_decl=mt.ast_decl,
+      param_types=[self.current_struct] + list(mt.param_types),
+      return_type=mt.return_type,
+      param_names=["self"] + list(mt.param_names),
+      param_mutabilities=[self_mut] + list(mt.param_mutabilities),
+      has_self=False,
+      num_defaults=mt.num_defaults,
+      param_defaults=[None] + list(getattr(mt, "param_defaults", [])),
+      ast_decl=mt.ast_decl,
     )
     # Explicit `self` is passed as argument 0, so disable implicit-self slicing.
     fn_t.has_self = False

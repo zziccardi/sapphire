@@ -1,7 +1,11 @@
 """Unit tests for StructLayoutPass in src/semantics/struct_layout_pass.py."""
 
 import unittest
-from src.parser.ast import ProgramNode, StructDeclNode, StructFieldNode, BasicTypeNode
+
+from src.parser.ast import (
+  ProgramNode,
+  StructDeclNode,
+)
 from src.semantics.struct_layout_pass import StructLayoutPass
 from src.semantics.type_checker import TypeChecker
 

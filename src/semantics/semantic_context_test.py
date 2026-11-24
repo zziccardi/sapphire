@@ -1,9 +1,10 @@
 """Unit tests for SemanticContext in Sapphire."""
 
 import unittest
-from src.parser.ast import IdentifierNode, CallNode
+
+from src.parser.ast import IdentifierNode
 from src.semantics.semantic_context import SemanticContext
-from src.semantics.symbol_table import SymbolTable, PrimitiveType
+from src.semantics.symbol_table import PrimitiveType, SymbolTable
 
 
 class TestSemanticContext(unittest.TestCase):

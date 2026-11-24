@@ -14,5 +14,16 @@ export const workspace = {
 export const window = {
   showErrorMessage: (msg) => {
     mockState.lastErrorMessage = msg;
+  },
+  createOutputChannel: (name) => {
+    const channel = {
+      name,
+      appendLine: (line) => {
+        mockState.outputLines.push(line);
+      },
+      dispose: () => {}
+    };
+    mockState.outputChannel = channel;
+    return channel;
   }
 };

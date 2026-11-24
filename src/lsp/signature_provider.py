@@ -4,22 +4,22 @@ import re
 from typing import Any, Optional, Tuple
 
 from lsprotocol.types import (
-    MarkupContent,
-    MarkupKind,
-    ParameterInformation,
-    SignatureHelp,
-    SignatureHelpParams,
-    SignatureInformation,
+  MarkupContent,
+  MarkupKind,
+  ParameterInformation,
+  SignatureHelp,
+  SignatureHelpParams,
+  SignatureInformation,
 )
 
 from src.lsp.completion_provider import _find_enclosing_impl_struct
 from src.lsp.definition_provider import find_local_decl as _find_local_decl
 from src.lsp.semantic_tokens import utf16_to_codepoint
 from src.semantics.symbol_table import (
-    FunctionSymbol,
-    FunctionType,
-    ModuleSymbol,
-    StructSymbol,
+  FunctionSymbol,
+  FunctionType,
+  ModuleSymbol,
+  StructSymbol,
 )
 
 
@@ -41,7 +41,9 @@ def _strip_trailing_type_args(text: str) -> str:
 
 
 def _struct_constructor_signature(st: Any) -> Optional[FunctionType]:
-  """Builds a constructor FunctionType from `__init__` if defined, else struct fields."""
+  """Builds a constructor FunctionType from `__init__` if defined, else struct
+  fields.
+  """
   methods = getattr(st, "methods", None) or {}
   if "__init__" in methods:
     init_method = methods["__init__"]
@@ -59,23 +61,23 @@ def _struct_constructor_signature(st: Any) -> Optional[FunctionType]:
         if param_defaults:
           param_defaults = param_defaults[1:]
       ctor_sig = FunctionType(
-          param_types,
-          st,
-          param_mutabilities=param_mutabilities,
-          param_names=param_names,
-          num_defaults=getattr(m_type, "num_defaults", 0),
-          param_defaults=param_defaults,
-          ast_decl=getattr(m_type, "ast_decl", None),
+        param_types,
+        st,
+        param_mutabilities=param_mutabilities,
+        param_names=param_names,
+        num_defaults=getattr(m_type, "num_defaults", 0),
+        param_defaults=param_defaults,
+        ast_decl=getattr(m_type, "ast_decl", None),
       )
-      ctor_sig.comments = (
-          getattr(m_type, "comments", "") or getattr(st, "comments", "")
+      ctor_sig.comments = getattr(m_type, "comments", "") or getattr(
+        st, "comments", ""
       )
       return ctor_sig
 
   if hasattr(st, "fields"):
     param_names = list(getattr(st, "fields", {}).keys())
     param_types = [
-        f_obj.field_type for f_obj in getattr(st, "fields", {}).values()
+      f_obj.field_type for f_obj in getattr(st, "fields", {}).values()
     ]
     ctor_sig = FunctionType(param_types, st, param_names=param_names)
     ctor_sig.comments = getattr(st, "comments", "")
@@ -88,7 +90,8 @@ class SignatureProvider:
 
   @staticmethod
   def _parse_active_call(text_before_cursor: str) -> Optional[Tuple[str, int]]:
-    """Scans forward to cursor to find active `(callee_name, active_param_idx)`."""
+    """Scans forward to cursor to find active `(callee_name, active_param_idx)`.
+    """
     stack: list = []  # Each entry: [open_char, index, comma_count]
     matching = {")": "(", "]": "[", "}": "{"}
     n = len(text_before_cursor)
@@ -158,8 +161,8 @@ class SignatureProvider:
 
     callee_text = _strip_trailing_type_args(text_before_cursor[:call_end_index])
     match = re.search(
-        r"([a-zA-Z_][a-zA-Z0-9_]*(?:\s*\.\s*[a-zA-Z_][a-zA-Z0-9_]*)*)$",
-        callee_text,
+      r"([a-zA-Z_][a-zA-Z0-9_]*(?:\s*\.\s*[a-zA-Z_][a-zA-Z0-9_]*)*)$",
+      callee_text,
     )
     if not match:
       return None
@@ -168,9 +171,11 @@ class SignatureProvider:
 
   @staticmethod
   def _resolve_module_export_callable(
-      mod_sym: Any, member_name: str
+    mod_sym: Any, member_name: str
   ) -> Optional[FunctionType]:
-    """Resolves a callable function or struct constructor exported from a module."""
+    """Resolves a callable function or struct constructor exported from a
+    module.
+    """
     exp = mod_sym.lookup_export(member_name)
     if exp is None:
       return None
@@ -189,15 +194,17 @@ class SignatureProvider:
 
   @classmethod
   def _resolve_member_callee(
-      cls,
-      ls: Any,
-      uri: str,
-      callee_name: str,
-      line: int,
-      sym_table: Any,
-      node_types: dict,
+    cls,
+    ls: Any,
+    uri: str,
+    callee_name: str,
+    line: int,
+    sym_table: Any,
+    node_types: dict,
   ) -> Tuple[Optional[FunctionType], str]:
-    """Resolves a dotted `obj.method` or `mod.func` call to its FunctionType and display name."""
+    """Resolves a dotted `obj.method` or `mod.func` call to its FunctionType and
+    display name.
+    """
     parts = callee_name.split(".")
     obj_name = parts[-2]
     method_name = parts[-1]
@@ -205,7 +212,10 @@ class SignatureProvider:
 
     # Check imported module exports first (`math.sqrt(`, `mod.Struct(`).
     mod_sym = sym_table.lookup(obj_name)
-    if isinstance(mod_sym, ModuleSymbol) or type(mod_sym).__name__ == "ModuleSymbol":
+    if (
+      isinstance(mod_sym, ModuleSymbol)
+      or type(mod_sym).__name__ == "ModuleSymbol"
+    ):
       func_type = cls._resolve_module_export_callable(mod_sym, method_name)
       return func_type, method_name
 
@@ -223,7 +233,6 @@ class SignatureProvider:
           receiver_type = node_types.get(decl_node)
 
     if receiver_type is None and node_types:
-      best_node = None
       min_dist = float("inf")
       for node in node_types.keys():
         binding_types = getattr(node, "binding_types", None)
@@ -232,24 +241,22 @@ class SignatureProvider:
           dist = abs(s_line - line) if s_line else 0
           if dist < min_dist:
             min_dist = dist
-            best_node = node
             receiver_type = binding_types[obj_name]
           continue
         n_name = (
-            getattr(node, "name", None)
-            or getattr(node, "member", None)
-            or getattr(node, "alias", None)
-            or getattr(node, "let_name", None)
-            or getattr(node, "key_var", None)
-            or getattr(node, "val_var", None)
-            or getattr(node, "loop_var", None)
+          getattr(node, "name", None)
+          or getattr(node, "member", None)
+          or getattr(node, "alias", None)
+          or getattr(node, "let_name", None)
+          or getattr(node, "key_var", None)
+          or getattr(node, "val_var", None)
+          or getattr(node, "loop_var", None)
         )
         if n_name == obj_name:
           s_line = getattr(node, "start_line", getattr(node, "name_line", None))
           dist = abs(s_line - line) if s_line else 0
           if dist < min_dist:
             min_dist = dist
-            best_node = node
             receiver_type = node_types.get(node)
 
     if not receiver_type:
@@ -265,8 +272,8 @@ class SignatureProvider:
     if type(receiver_type).__name__ == "OptionalType":
       receiver_type = getattr(receiver_type, "base_type", receiver_type)
     if type(receiver_type).__name__ in ("SharedRefType", "RefType") and not (
-        type(receiver_type).__name__ == "SharedRefType"
-        and method_name in ("share", "downgrade")
+      type(receiver_type).__name__ == "SharedRefType"
+      and method_name in ("share", "downgrade")
     ):
       receiver_type = getattr(receiver_type, "inner_type", receiver_type)
 
@@ -276,14 +283,13 @@ class SignatureProvider:
       if method_obj:
         func_type = getattr(method_obj, "method_type", None)
     elif (
-        hasattr(receiver_type, "methods")
-        and method_name in receiver_type.methods
+      hasattr(receiver_type, "methods") and method_name in receiver_type.methods
     ):
       method_obj = receiver_type.methods[method_name]
       func_type = getattr(method_obj, "method_type", method_obj)
     elif (
-        type(receiver_type).__name__ in ("StringType", "PrimitiveType")
-        and getattr(receiver_type, "name", "") == "String"
+      type(receiver_type).__name__ in ("StringType", "PrimitiveType")
+      and getattr(receiver_type, "name", "") == "String"
     ):
       from src.semantics.symbol_table import STRING_METHODS
 
@@ -293,7 +299,7 @@ class SignatureProvider:
 
   @staticmethod
   def _resolve_direct_callee(
-      callee_name: str, sym_table: Any
+    callee_name: str, sym_table: Any
   ) -> Optional[FunctionType]:
     """Resolves a direct function call or struct constructor signature."""
     sym = sym_table.lookup(callee_name)
@@ -311,7 +317,7 @@ class SignatureProvider:
 
   @classmethod
   def provide_signature_help(
-      cls, ls: Any, params: SignatureHelpParams
+    cls, ls: Any, params: SignatureHelpParams
   ) -> Optional[SignatureHelp]:
     """Computes SignatureHelp for the call expression at the cursor."""
     uri = params.text_document.uri
@@ -346,7 +352,7 @@ class SignatureProvider:
 
     if "." in callee_name:
       func_type, fn_display_name = cls._resolve_member_callee(
-          ls, uri, callee_name, line, sym_table, node_types
+        ls, uri, callee_name, line, sym_table, node_types
       )
     else:
       func_type = cls._resolve_direct_callee(callee_name, sym_table)
@@ -360,10 +366,10 @@ class SignatureProvider:
     param_mutabilities = list(getattr(func_type, "param_mutabilities", []))
 
     if (
-        func_type.has_self
-        and param_names
-        and param_names[0] == "self"
-        and "." in callee_name
+      func_type.has_self
+      and param_names
+      and param_names[0] == "self"
+      and "." in callee_name
     ):
       param_names = param_names[1:]
       param_types = param_types[1:]
@@ -375,34 +381,36 @@ class SignatureProvider:
     for idx, p_name in enumerate(param_names):
       p_type = param_types[idx] if idx < len(param_types) else "Any"
       is_mut = (
-          param_mutabilities[idx] if idx < len(param_mutabilities) else False
+        param_mutabilities[idx] if idx < len(param_mutabilities) else False
       )
       mut_str = "var " if is_mut else ""
       p_label = f"{mut_str}{p_name}: {p_type}"
       param_strs.append(p_label)
       param_infos.append(ParameterInformation(label=p_label))
 
-    sig_label = f"{fn_display_name}({', '.join(param_strs)}) -> {func_type.return_type}"
+    sig_label = (
+      f"{fn_display_name}({', '.join(param_strs)}) -> {func_type.return_type}"
+    )
     doc_comments = getattr(func_type, "comments", "")
     doc_content = (
-        MarkupContent(kind=MarkupKind.Markdown, value=doc_comments)
-        if doc_comments
-        else None
+      MarkupContent(kind=MarkupKind.Markdown, value=doc_comments)
+      if doc_comments
+      else None
     )
 
     sig_info = SignatureInformation(
-        label=sig_label,
-        documentation=doc_content,
-        parameters=param_infos,
-        active_parameter=(
-            active_param_idx
-            if active_param_idx < len(param_infos)
-            else (len(param_infos) - 1 if param_infos else 0)
-        ),
+      label=sig_label,
+      documentation=doc_content,
+      parameters=param_infos,
+      active_parameter=(
+        active_param_idx
+        if active_param_idx < len(param_infos)
+        else (len(param_infos) - 1 if param_infos else 0)
+      ),
     )
 
     return SignatureHelp(
-        signatures=[sig_info],
-        active_signature=0,
-        active_parameter=active_param_idx,
+      signatures=[sig_info],
+      active_signature=0,
+      active_parameter=active_param_idx,
     )

@@ -4,13 +4,75 @@ This module defines Symbol subclasses, Scope, and SymbolTable, and
 re-exports type definitions from src.semantics.types for compatibility.
 """
 
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from src.semantics.types import *  # noqa: F401, F403
+from src.semantics.types import (
+  ARRAY_METHODS,
+  COROUTINE_METHODS,
+  MAP_METHODS,
+  STRING_METHODS,
+  ArenaType,
+  ArrayType,
+  CoroutineType,
+  EnumType,
+  FunctionType,
+  GenericTypeParameter,
+  InferredType,
+  MapType,
+  MultiReturnType,
+  NoneType,
+  OptionalType,
+  PrimitiveType,
+  RangeType,
+  RefType,
+  SharedRefType,
+  StringType,
+  StructField,
+  StructMethod,
+  StructType,
+  TraitType,
+  Type,
+  WeakRefType,
+)
+
+__all__ = [
+  "ARRAY_METHODS",
+  "COROUTINE_METHODS",
+  "MAP_METHODS",
+  "STRING_METHODS",
+  "ArenaType",
+  "ArrayType",
+  "CoroutineType",
+  "EnumType",
+  "FunctionSymbol",
+  "FunctionType",
+  "GenericTypeParameter",
+  "InferredType",
+  "MapType",
+  "MultiReturnType",
+  "NoneType",
+  "OptionalType",
+  "PrimitiveType",
+  "RangeType",
+  "RefType",
+  "Scope",
+  "SharedRefType",
+  "StringType",
+  "StructField",
+  "StructMethod",
+  "StructType",
+  "Symbol",
+  "SymbolTable",
+  "TraitType",
+  "Type",
+  "VariableSymbol",
+  "WeakRefType",
+]
 
 # ==========================================
 # Symbol Representations
 # ==========================================
+
 
 class Symbol:
   """Base class for all symbols in the symbol table."""
@@ -26,8 +88,12 @@ class VariableSymbol(Symbol):
   """Represents variables and parameters."""
 
   def __init__(
-      self, name: str, symbol_type: Type, is_mutable: bool,
-      is_parameter: bool = False):
+    self,
+    name: str,
+    symbol_type: Type,
+    is_mutable: bool,
+    is_parameter: bool = False,
+  ):
     super().__init__(name, symbol_type)
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
@@ -45,9 +111,13 @@ class VariableSymbol(Symbol):
 class FunctionSymbol(Symbol):
   """Represents functions and methods."""
 
-  def __init__(self, name: str, signature: FunctionType,
-               type_params: Optional[List[str]] = None,
-               ast_decl: Optional[Any] = None):
+  def __init__(
+    self,
+    name: str,
+    signature: FunctionType,
+    type_params: Optional[List[str]] = None,
+    ast_decl: Optional[Any] = None,
+  ):
     super().__init__(name, signature)
     self.type_params = type_params or []
     self.ast_decl = ast_decl
@@ -87,7 +157,12 @@ class ModuleType(Type):
 class ModuleSymbol(Symbol):
   """Represents an imported module symbol (e.g. 'graphics' or 'enums')."""
 
-  def __init__(self, name: str, module_path: str, exports: Optional[Dict[str, Symbol]] = None):
+  def __init__(
+    self,
+    name: str,
+    module_path: str,
+    exports: Optional[Dict[str, Symbol]] = None,
+  ):
     super().__init__(name, ModuleType(module_path))
     self.module_path = module_path
     self.exports: Dict[str, Symbol] = exports or {}
@@ -99,6 +174,7 @@ class ModuleSymbol(Symbol):
 # ==========================================
 # Scope & Symbol Table
 # ==========================================
+
 
 class Scope:
   """Represents a single lexical scope in the program."""
@@ -176,63 +252,79 @@ class SymbolTable:
     self.current_scope.define_type("SharedRef", SharedRefType(NoneType()))
     self.current_scope.define_type("WeakRef", WeakRefType(NoneType()))
     self.current_scope.define(
-        "Ref",
-        FunctionSymbol("Ref", FunctionType([NoneType()], RefType(NoneType()))),
+      "Ref",
+      FunctionSymbol("Ref", FunctionType([NoneType()], RefType(NoneType()))),
     )
     self.current_scope.define(
+      "SharedRef",
+      FunctionSymbol(
         "SharedRef",
-        FunctionSymbol(
-            "SharedRef",
-            FunctionType([NoneType()], SharedRefType(NoneType())),
-        ),
+        FunctionType([NoneType()], SharedRefType(NoneType())),
+      ),
     )
     arena_t = ArenaType()
     self.current_scope.define_type("Arena", arena_t)
     self.current_scope.define(
-        "Arena",
-        FunctionSymbol("Arena", FunctionType([], arena_t)))
+      "Arena", FunctionSymbol("Arena", FunctionType([], arena_t))
+    )
     self.current_scope.define(
-        "print",
-        FunctionSymbol("print", FunctionType([StringType()],
-                                             NoneType())))
+      "print", FunctionSymbol("print", FunctionType([StringType()], NoneType()))
+    )
     self.current_scope.define(
+      "assert",
+      FunctionSymbol(
         "assert",
-        FunctionSymbol(
-            "assert",
-            FunctionType(
-                param_types=[PrimitiveType("bool"), StringType()],
-                return_type=NoneType(),
-                param_names=["cond", "msg"],
-                num_defaults=1,
-            ),
+        FunctionType(
+          param_types=[PrimitiveType("bool"), StringType()],
+          return_type=NoneType(),
+          param_names=["cond", "msg"],
+          num_defaults=1,
         ),
+      ),
     )
     range_t = RangeType()
     self.current_scope.define_type("Range", range_t)
     self.current_scope.define(
+      "range",
+      FunctionSymbol(
         "range",
-        FunctionSymbol(
-            "range",
-            FunctionType(
-                param_types=[PrimitiveType("int"), PrimitiveType("int"),
-                             PrimitiveType("int")],
-                return_type=range_t,
-                param_names=["start", "stop", "step"],
-                num_defaults=2,
-            ),
+        FunctionType(
+          param_types=[
+            PrimitiveType("int"),
+            PrimitiveType("int"),
+            PrimitiveType("int"),
+          ],
+          return_type=range_t,
+          param_names=["start", "stop", "step"],
+          num_defaults=2,
         ),
+      ),
     )
     # Register TestCase trait for std.testing framework
     testcase_trait = TraitType("TestCase")
     # Register default assertion and expectation method signatures
     assertion_names = [
-        "assert_true", "assert_false", "assert_eq", "assert_ne",
-        "assert_almost_eq", "assert_none", "assert_not_none",
-        "expect_true", "expect_false", "expect_eq", "expect_ne",
-        "expect_almost_eq", "expect_none", "expect_not_none"
+      "assert_true",
+      "assert_false",
+      "assert_eq",
+      "assert_ne",
+      "assert_almost_eq",
+      "assert_none",
+      "assert_not_none",
+      "expect_true",
+      "expect_false",
+      "expect_eq",
+      "expect_ne",
+      "expect_almost_eq",
+      "expect_none",
+      "expect_not_none",
     ]
     for name in assertion_names:
-      fn_t = FunctionType([NoneType(), NoneType(), StringType(), StringType()], NoneType(), num_defaults=4)
+      fn_t = FunctionType(
+        [NoneType(), NoneType(), StringType(), StringType()],
+        NoneType(),
+        num_defaults=4,
+      )
       fn_t.is_testing_assertion = True
       testcase_trait.methods[name] = fn_t
     self.testcase_trait = testcase_trait

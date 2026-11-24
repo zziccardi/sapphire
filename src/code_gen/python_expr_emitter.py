@@ -1,10 +1,29 @@
-"""Expression, literal, and initializer code generation mixin for PythonTranspiler."""
+"""Expression, literal, and initializer code generation mixin for
+PythonTranspiler.
+"""
 
-from typing import Any, Dict, List, Optional, Set
-
-from src.parser.ast import *
-from src.code_gen.base_transpiler import extract_type_name, get_default_value_for_type_node, is_coroutine_func
 from src.code_gen.intrinsics import IntrinsicRegistry
+from src.parser.ast import (
+  ArrayLiteralNode,
+  AssignmentNode,
+  BinaryOpNode,
+  BlockNode,
+  CallNode,
+  CastExprNode,
+  CloneNode,
+  IdentifierNode,
+  IndexExprNode,
+  InterpolatedStringNode,
+  LambdaNode,
+  LiteralNode,
+  MapLiteralNode,
+  MemberAccessNode,
+  MoveNode,
+  OptionalTypeNode,
+  StructInitializerNode,
+  TernaryExprNode,
+  UnaryOpNode,
+)
 
 
 class PythonExprMixin:
@@ -29,10 +48,10 @@ class PythonExprMixin:
     def _emit_part_str(part):
       if isinstance(part, LiteralNode) and part.lit_type == "string":
         escaped_val = (
-            part.value.replace('\\', '\\\\')
-            .replace('"', '\\"')
-            .replace('\r', '\\r')
-            .replace('\n', '\\n')
+          part.value.replace("\\", "\\\\")
+          .replace('"', '\\"')
+          .replace("\r", "\\r")
+          .replace("\n", "\\n")
         )
         self.emit(f'"{escaped_val}"')
       else:
@@ -69,18 +88,16 @@ class PythonExprMixin:
 
     if node.op == "/":
       from src.semantics.types import PrimitiveType
+
       lt = getattr(node.left, "inferred_type", None)
       rt = getattr(node.right, "inferred_type", None)
       it = getattr(node, "inferred_type", None)
       if (
-          (
-              isinstance(lt, PrimitiveType)
-              and lt.name == "int"
-              and isinstance(rt, PrimitiveType)
-              and rt.name == "int"
-          )
-          or (isinstance(it, PrimitiveType) and it.name == "int")
-      ):
+        isinstance(lt, PrimitiveType)
+        and lt.name == "int"
+        and isinstance(rt, PrimitiveType)
+        and rt.name == "int"
+      ) or (isinstance(it, PrimitiveType) and it.name == "int"):
         self.emit("_sapphire_div(")
         self.visit(node.left)
         self.emit(", ")
@@ -129,16 +146,19 @@ class PythonExprMixin:
     inner_type = node.target_type.base_type if is_opt else node.target_type
     target = inner_type.name if hasattr(inner_type, "name") else str(inner_type)
     conv_map = {
-        "float": "float",
-        "int": "int",
-        "bool": "bool",
-        "String": "_sapphire_string_from",
+      "float": "float",
+      "int": "int",
+      "bool": "bool",
+      "String": "_sapphire_string_from",
     }
     conv = conv_map.get(target)
     if conv:
       if is_opt:
         c_tmp = self._next_temp_name("_c")
-        self.emit(f"((lambda {c_tmp}: {conv}({c_tmp}) if {c_tmp} is not None else None)(")
+        self.emit(
+          f"((lambda {c_tmp}: {conv}({c_tmp}) if {c_tmp} is not None else "
+          "None)("
+        )
         self.visit(node.expr)
         self.emit("))")
       else:
@@ -158,7 +178,9 @@ class PythonExprMixin:
 
     if isinstance(node.callee, MemberAccessNode) and node.callee.is_optional:
       self._record_consumed_call_moves(node.arguments)
-      member_name = getattr(node.callee, "target_name", None) or self._mangle_name(node.callee.member)
+      member_name = getattr(
+        node.callee, "target_name", None
+      ) or self._mangle_name(node.callee.member)
       r_tmp = self._next_temp_name("_r")
       self.emit(f"((lambda {r_tmp}: {r_tmp}.")
       self.emit(member_name)
@@ -200,7 +222,9 @@ class PythonExprMixin:
       self.emit(")")
 
   def visit_MemberAccessNode(self, node: MemberAccessNode) -> None:
-    member_name = getattr(node, "target_name", None) or self._mangle_name(node.member)
+    member_name = getattr(node, "target_name", None) or self._mangle_name(
+      node.member
+    )
     if node.is_optional:
       r_tmp = self._next_temp_name("_r")
       self.emit(f"((lambda {r_tmp}: {r_tmp}.")
@@ -224,18 +248,20 @@ class PythonExprMixin:
         assignments = []
         for stmt in node.initializer_block:
           if isinstance(stmt, AssignmentNode) and isinstance(
-              stmt.target, MemberAccessNode
+            stmt.target, MemberAccessNode
           ):
             if (
-                isinstance(stmt.target.receiver, IdentifierNode)
-                and stmt.target.receiver.name == "self"
+              isinstance(stmt.target.receiver, IdentifierNode)
+              and stmt.target.receiver.name == "self"
             ):
               assignments.append(stmt)
 
         for idx, assign in enumerate(assignments):
           if idx > 0:
             self.emit(", ")
-          self.emit(f"setattr(self, '{self._mangle_name(assign.target.member)}', ")
+          self.emit(
+            f"setattr(self, '{self._mangle_name(assign.target.member)}', "
+          )
           self.visit(assign.expr)
           self.emit(")")
         self.emit("]")
@@ -258,7 +284,9 @@ class PythonExprMixin:
     if id(node) in self._lifted_lambdas:
       self.emit(self._lifted_lambdas[id(node)])
       return
-    if isinstance(node.body, BlockNode) or self._contains_liftable_expr(node.body):
+    if isinstance(node.body, BlockNode) or self._contains_liftable_expr(
+      node.body
+    ):
       fn_name = self._emit_lifted_lambda(node)
       self._lifted_lambdas[id(node)] = fn_name
       self.emit(fn_name)
@@ -321,4 +349,3 @@ class PythonExprMixin:
     self.emit(")")
     if node.arena_expr:
       self.emit(")")
-

@@ -60,11 +60,15 @@ describe('extension.ts', () => {
     assert.equal(mockState.clientInstance.serverOptions.run.command, 'sapphire');
     assert.deepEqual(mockState.clientInstance.serverOptions.run.args, ['lsp']);
     assert.equal(mockState.startCalled, true);
-    assert.equal(context.subscriptions.length, 1);
+    assert.equal(context.subscriptions.length, 2);
     assert.equal(
       context.subscriptions[0],
       mockState.clientInstance.clientOptions.synchronize.fileEvents
     );
+    assert.equal(context.subscriptions[1], mockState.outputChannel);
+    assert.deepEqual(mockState.outputLines, [
+      'Sapphire Language Support extension is now active!'
+    ]);
   });
 
   it('should activate successfully with custom executable path', () => {

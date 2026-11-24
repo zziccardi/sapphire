@@ -61,6 +61,9 @@ jobs:
       - name: Run linter
         run: pipenv run lint
 
+      - name: Run type checker
+        run: pipenv run typecheck
+
       - name: Run Python unit tests
         run: pipenv run test
 

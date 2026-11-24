@@ -1,13 +1,14 @@
 """Unit tests for Sapphire exception hierarchy in src/common/errors.py."""
 
 import unittest
+
 from src.common.errors import (
-    SapphireError,
-    SapphireSyntaxError,
-    SapphireTypeError,
-    SapphireTranspileError,
-    SapphireLSPError,
-    SemanticError,
+  SapphireError,
+  SapphireLSPError,
+  SapphireSyntaxError,
+  SapphireTranspileError,
+  SapphireTypeError,
+  SemanticError,
 )
 
 

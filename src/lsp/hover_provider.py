@@ -5,48 +5,48 @@ rich hover tooltips, signatures, documentation, and parameter information.
 """
 
 from typing import Any, Optional
+
 from lsprotocol.types import Hover, HoverParams, MarkupContent, MarkupKind
 
-from src.parser.ast import (
-    ASTNode,
-    BasicTypeNode,
-    BinaryOpNode,
-    CallNode,
-    EnumDeclNode,
-    EnumMemberNode,
-    ForNode,
-    FuncDeclNode,
-    HeaderBindingNode,
-    IdentifierNode,
-    IfNode,
-    ImplBlockNode,
-    LiteralNode,
-    MemberAccessNode,
-    ParameterNode,
-    StructDeclNode,
-    StructFieldNode,
-    TraitDeclNode,
-    TraitMemberNode,
-    UnaryOpNode,
-    VarDeclNode,
-)
-from src.semantics.symbol_table import (
-    EnumType,
-    EnumSymbol,
-    FunctionType,
-    FunctionSymbol,
-    ModuleType,
-    StructType,
-    StructSymbol,
-    TraitType,
-    TraitSymbol,
-    VariableSymbol,
-)
 from src.lsp.definition_provider import find_local_decl
 from src.lsp.semantic_tokens import (
-    find_node_at_position,
-    get_doc_line,
-    utf16_to_codepoint,
+  find_node_at_position,
+  get_doc_line,
+  utf16_to_codepoint,
+)
+from src.parser.ast import (
+  ASTNode,
+  BasicTypeNode,
+  BinaryOpNode,
+  CallNode,
+  EnumDeclNode,
+  EnumMemberNode,
+  ForNode,
+  FuncDeclNode,
+  HeaderBindingNode,
+  IdentifierNode,
+  ImplBlockNode,
+  LiteralNode,
+  MemberAccessNode,
+  ParameterNode,
+  StructDeclNode,
+  StructFieldNode,
+  TraitDeclNode,
+  TraitMemberNode,
+  UnaryOpNode,
+  VarDeclNode,
+)
+from src.semantics.symbol_table import (
+  EnumSymbol,
+  EnumType,
+  FunctionSymbol,
+  FunctionType,
+  ModuleType,
+  StructSymbol,
+  StructType,
+  TraitSymbol,
+  TraitType,
+  VariableSymbol,
 )
 
 
@@ -59,9 +59,9 @@ def format_ast_expr(expr: Any) -> str:
       return f'"{expr.value}"'
     elif expr.lit_type == "bool":
       return (
-          "true"
-          if expr.value is True or str(expr.value).lower() == "true"
-          else "false"
+        "true"
+        if expr.value is True or str(expr.value).lower() == "true"
+        else "false"
       )
     elif expr.lit_type == "none":
       return "none"
@@ -75,14 +75,16 @@ def format_ast_expr(expr: Any) -> str:
   elif isinstance(expr, UnaryOpNode):
     return f"{expr.op}{format_ast_expr(expr.expr)}"
   elif isinstance(expr, BinaryOpNode):
-    return f"{format_ast_expr(expr.left)} {expr.op} {format_ast_expr(expr.right)}"
+    return (
+      f"{format_ast_expr(expr.left)} {expr.op} {format_ast_expr(expr.right)}"
+    )
   elif isinstance(expr, CallNode):
     callee_str = format_ast_expr(expr.callee)
     args_str = ", ".join(
-        f"{arg.name} = {format_ast_expr(arg.expr)}"
-        if getattr(arg, "name", None)
-        else format_ast_expr(arg.expr)
-        for arg in getattr(expr, "arguments", [])
+      f"{arg.name} = {format_ast_expr(arg.expr)}"
+      if getattr(arg, "name", None)
+      else format_ast_expr(arg.expr)
+      for arg in getattr(expr, "arguments", [])
     )
     return f"{callee_str}({args_str})"
   elif isinstance(expr, BasicTypeNode):
@@ -95,7 +97,8 @@ class HoverProvider:
 
   @staticmethod
   def _match_binding_name(node: Any, line: int, col: int) -> Optional[str]:
-    """Finds the specific binding name under `(line, col)` in a multi-var node."""
+    """Finds the specific binding name under `(line, col)` in a multi-var node.
+    """
     for info in getattr(node, "bindings_info", []) or []:
       b_line = info.get("line")
       b_col = info.get("column")
@@ -106,25 +109,30 @@ class HoverProvider:
 
   @classmethod
   def _resolve_hover_node_and_type(
-      cls, ls: Any, uri: str, node: Any, line: int, col: int, node_types: Any
+    cls, ls: Any, uri: str, node: Any, line: int, col: int, node_types: Any
   ) -> tuple[Any, Any]:
-    """Resolves the effective AST node and semantic Type for hover inspection."""
+    """Resolves the effective AST node and semantic Type for hover inspection.
+    """
     node_type = None
     if (
-        isinstance(node, CallNode)
-        and isinstance(node.callee, IdentifierNode)
-        and uri in ls.symbol_table_cache
+      isinstance(node, CallNode)
+      and isinstance(node.callee, IdentifierNode)
+      and uri in ls.symbol_table_cache
     ):  # pragma: no cover
       c_sym = ls.symbol_table_cache[uri].lookup(node.callee.name)
       if c_sym and hasattr(c_sym, "symbol_type"):
         node = node.callee
         node_type = c_sym.symbol_type
     elif (
-        isinstance(node, CallNode)
-        and isinstance(node.callee, MemberAccessNode)
-        and uri in ls.symbol_table_cache
+      isinstance(node, CallNode)
+      and isinstance(node.callee, MemberAccessNode)
+      and uri in ls.symbol_table_cache
     ):  # pragma: no cover
-      from src.semantics.symbol_table import OptionalType, RefType, SharedRefType
+      from src.semantics.symbol_table import (
+        OptionalType,
+        RefType,
+        SharedRefType,
+      )
 
       rec_type = node_types.get(node.callee.receiver)
       if isinstance(rec_type, OptionalType):
@@ -136,9 +144,9 @@ class HoverProvider:
       if rec_type and hasattr(rec_type, "get_method"):
         method_obj = rec_type.get_method(node.callee.member, sym_table)
       elif (
-          rec_type
-          and hasattr(rec_type, "methods")
-          and node.callee.member in rec_type.methods
+        rec_type
+        and hasattr(rec_type, "methods")
+        and node.callee.member in rec_type.methods
       ):
         method_obj = rec_type.methods[node.callee.member]
       if method_obj is not None:
@@ -149,9 +157,9 @@ class HoverProvider:
       matched_name = cls._match_binding_name(node, line, col)
       binding_types = getattr(node, "binding_types", None)
       if (
-          matched_name
-          and isinstance(binding_types, dict)
-          and matched_name in binding_types
+        matched_name
+        and isinstance(binding_types, dict)
+        and matched_name in binding_types
       ):
         node_type = binding_types[matched_name]
 
@@ -179,19 +187,19 @@ class HoverProvider:
       t_col = getattr(node, "trait_name_column", None)
       t_len = getattr(node, "trait_name_length", None)
       if (
-          node.trait_name
-          and t_line is not None
-          and t_col is not None
-          and t_len is not None
-          and t_line == line
-          and t_col <= col < t_col + t_len
+        node.trait_name
+        and t_line is not None
+        and t_col is not None
+        and t_len is not None
+        and t_line == line
+        and t_col <= col < t_col + t_len
       ):
         node_type = sym_table.lookup_type(node.trait_name)
       elif s_line is None or (
-          s_col is not None
-          and s_len is not None
-          and s_line == line
-          and s_col <= col < s_col + s_len
+        s_col is not None
+        and s_len is not None
+        and s_line == line
+        and s_col <= col < s_col + s_len
       ):
         node_type = sym_table.lookup_type(node.struct_name)
 
@@ -199,14 +207,14 @@ class HoverProvider:
 
   @classmethod
   def _classify_hover_node(
-      cls,
-      ls: Any,
-      uri: str,
-      node: Any,
-      node_type: Any,
-      line: int,
-      col: int,
-      node_types: Any,
+    cls,
+    ls: Any,
+    uri: str,
+    node: Any,
+    node_type: Any,
+    line: int,
+    col: int,
+    node_types: Any,
   ) -> tuple[str, str]:
     """Determines the display name and category label for a hovered AST node."""
     node_name = ""
@@ -217,7 +225,9 @@ class HoverProvider:
       # Check local declarations first so locals/params shadowing globals are
       # not misclassified as global functions, structs, or enums.
       ast = ls.ast_cache.get(uri)
-      local_decl = find_local_decl(ast, node.name, line) if ast is not None else None
+      local_decl = (
+        find_local_decl(ast, node.name, line) if ast is not None else None
+      )
       if isinstance(local_decl, ParameterNode):
         category = "parameter"
       elif local_decl is not None:
@@ -274,20 +284,20 @@ class HoverProvider:
       t_col = getattr(node, "trait_name_column", None)
       t_len = getattr(node, "trait_name_length", None)
       if (
-          node.trait_name
-          and t_line is not None
-          and t_col is not None
-          and t_len is not None
-          and t_line == line
-          and t_col <= col < t_col + t_len
+        node.trait_name
+        and t_line is not None
+        and t_col is not None
+        and t_len is not None
+        and t_line == line
+        and t_col <= col < t_col + t_len
       ):
         node_name = node.trait_name
         category = "trait"
       elif s_line is None or (
-          s_col is not None
-          and s_len is not None
-          and s_line == line
-          and s_col <= col < s_col + s_len
+        s_col is not None
+        and s_len is not None
+        and s_line == line
+        and s_col <= col < s_col + s_len
       ):
         node_name = node.struct_name
         st = ls.symbol_table_cache[uri].lookup_type(node.struct_name)
@@ -300,13 +310,13 @@ class HoverProvider:
       category, node_name = "method", node.name
     elif isinstance(node, VarDeclNode):
       is_extern = any(
-          a.name == "extern" for a in getattr(node, "annotations", [])
+        a.name == "extern" for a in getattr(node, "annotations", [])
       )
       category = "extern variable" if is_extern else "variable"
       node_name = cls._match_binding_name(node, line, col) or node.name
     elif isinstance(node, FuncDeclNode):
       is_export = any(
-          a.name == "export" for a in getattr(node, "annotations", [])
+        a.name == "export" for a in getattr(node, "annotations", [])
       )
       category = "exported function" if is_export else "function"
       node_name = node.name
@@ -332,13 +342,13 @@ class HoverProvider:
 
   @classmethod
   def _format_function_hover(
-      cls,
-      ls: Any,
-      uri: str,
-      node: Any,
-      node_type: FunctionType,
-      node_name: str,
-      category: str,
+    cls,
+    ls: Any,
+    uri: str,
+    node: Any,
+    node_type: FunctionType,
+    node_name: str,
+    category: str,
   ) -> str:
     """Formats markdown hover text for a function or method signature."""
     params_lines = []
@@ -355,14 +365,14 @@ class HoverProvider:
 
     for idx, p_type in enumerate(node_type.param_types):
       p_name = (
-          node_type.param_names[idx]
-          if idx < len(node_type.param_names)
-          else f"p{idx}"
+        node_type.param_names[idx]
+        if idx < len(node_type.param_names)
+        else f"p{idx}"
       )
       is_mut = (
-          node_type.param_mutabilities[idx]
-          if idx < len(node_type.param_mutabilities)
-          else False
+        node_type.param_mutabilities[idx]
+        if idx < len(node_type.param_mutabilities)
+        else False
       )
       mut_str = "var " if is_mut else ""
 
@@ -372,21 +382,22 @@ class HoverProvider:
         if d_expr is not None:
           default_str = f" = {format_ast_expr(d_expr)}"
       if (
-          not default_str
-          and p_defaults
-          and idx < len(p_defaults)
-          and p_defaults[idx] is not None
+        not default_str
+        and p_defaults
+        and idx < len(p_defaults)
+        and p_defaults[idx] is not None
       ):  # pragma: no cover
         val = p_defaults[idx]
-        default_str = (
-            f" = {format_ast_expr(val) if hasattr(val, 'node_type') or isinstance(val, ASTNode) else str(val)}"
-        )
+        if hasattr(val, "node_type") or isinstance(val, ASTNode):
+          default_str = f" = {format_ast_expr(val)}"
+        else:
+          default_str = f" = {val}"
 
       if p_name == "self":  # pragma: no cover
         params_lines.append("- `self`")
       else:
         params_lines.append(
-            f"- `{mut_str}{p_name}: {str(p_type)}{default_str}`"
+          f"- `{mut_str}{p_name}: {str(p_type)}{default_str}`"
         )
 
     params_section = "\n".join(params_lines)
@@ -402,10 +413,10 @@ class HoverProvider:
 
   @classmethod
   def provide_hover(
-      cls,
-      ls: Any,
-      params: HoverParams,
-      find_node_fn: Optional[Any] = None,
+    cls,
+    ls: Any,
+    params: HoverParams,
+    find_node_fn: Optional[Any] = None,
   ) -> Optional[Hover]:
     """Triggered when user hovers over an identifier in the document."""
     uri = params.text_document.uri
@@ -415,13 +426,14 @@ class HoverProvider:
     ast = ls.ast_cache[uri]
     node_types = ls.node_types_cache[uri]
 
-    # LSP is 0-based UTF-16; parser/type checker line numbers are 1-based code points.
+    # LSP is 0-based UTF-16; parser/type checker line numbers are 1-based code
+    # points.
     line = params.position.line + 1
     line_text = get_doc_line(ls, uri, line)
     col = (
-        utf16_to_codepoint(line_text, params.position.character)
-        if line_text is not None
-        else params.position.character
+      utf16_to_codepoint(line_text, params.position.character)
+      if line_text is not None
+      else params.position.character
     )
 
     if find_node_fn is None:
@@ -431,7 +443,7 @@ class HoverProvider:
       return None
 
     node, node_type = cls._resolve_hover_node_and_type(
-        ls, uri, node, line, col, node_types
+      ls, uri, node, line, col, node_types
     )
     if not node_type and type(node).__name__ != "AnnotationNode":
       return None
@@ -442,62 +454,64 @@ class HoverProvider:
       ann_display = f"@{ann_name}" + (f'("{ann_arg}")' if ann_arg else "")
       if ann_name == "extern":
         markdown_text = (
-            f"**(annotation)** `{ann_display}`\n\n"
-            "Declares an external variable provided by the host runtime "
-            "environment.\n\n"
-            "If no argument is given, uses the Sapphire variable name as the "
-            "external name. Otherwise, uses the argument string as the external "
-            "name."
+          f"**(annotation)** `{ann_display}`\n\n"
+          "Declares an external variable provided by the host runtime "
+          "environment.\n\n"
+          "If no argument is given, uses the Sapphire variable name as the "
+          "external name. Otherwise, uses the argument string as the external "
+          "name."
         )
       elif ann_name == "export":
         markdown_text = (
-            f"**(annotation)** `{ann_display}`\n\n"
-            "Exposes a function to the host runtime environment under the name "
-            "given as the argument."
+          f"**(annotation)** `{ann_display}`\n\n"
+          "Exposes a function to the host runtime environment under the name "
+          "given as the argument."
         )
       else:
         markdown_text = f"**(annotation)** `{ann_display}`"
       return Hover(
-          contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text)
+        contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text)
       )
 
     node_name, category = cls._classify_hover_node(
-        ls, uri, node, node_type, line, col, node_types
+      ls, uri, node, node_type, line, col, node_types
     )
 
     if isinstance(node_type, FunctionType):
       markdown_text = cls._format_function_hover(
-          ls, uri, node, node_type, node_name, category
+        ls, uri, node, node_type, node_name, category
       )
     elif isinstance(node_type, StructType) and category in ("struct", "proto"):
       kind = "proto" if node_type.is_prototype else "struct"
       inheritance = (
-          f" : {', '.join(node_type.parent_names)}"
-          if getattr(node_type, "parent_names", None)
-          else ""
+        f" : {', '.join(node_type.parent_names)}"
+        if getattr(node_type, "parent_names", None)
+        else ""
       )
       params_str = (
-          f"<{', '.join(node_type.type_params)}>"
-          if getattr(node_type, "type_params", None)
-          else ""
+        f"<{', '.join(node_type.type_params)}>"
+        if getattr(node_type, "type_params", None)
+        else ""
       )
-      markdown_text = f"**({kind})** `{node_type.name}{params_str}{inheritance}`"
+      markdown_text = (
+        f"**({kind})** `{node_type.name}{params_str}{inheritance}`"
+      )
       if getattr(node_type, "comments", None):
         markdown_text += f"\n\n{node_type.comments}"
     elif isinstance(node_type, EnumType) and category == "enum":
       markdown_text = f"**(enum)** `{node_type.name}`"
       if node_type.variants:
         members_str = "\n".join(
-            f"- `{k} = {v}`" for k, v in node_type.variants.items()
+          f"- `{k} = {v}`" for k, v in node_type.variants.items()
         )
         markdown_text += f"\n\nMembers:\n{members_str}"
       if getattr(node_type, "comments", None):
         markdown_text += f"\n\n{node_type.comments}"
     elif isinstance(node_type, TraitType) and category == "trait":
       params_str = (
-          f"<{', '.join(node_type.type_params)}>"
-          if getattr(node_type, "type_params", None)
-          else ""
+        f"<{', '.join(node_type.type_params)}>"
+        if getattr(node_type, "type_params", None)
+        else ""
       )
       markdown_text = f"**(trait)** `{node_type.name}{params_str}`"
       if getattr(node_type, "comments", None):
@@ -505,21 +519,21 @@ class HoverProvider:
     else:
       type_desc = str(node_type)
       markdown_text = (
-          f"**({category})** `{node_name}`: `{type_desc}`"
-          if node_name
-          else f"`{type_desc}`"
+        f"**({category})** `{node_name}`: `{type_desc}`"
+        if node_name
+        else f"`{type_desc}`"
       )
       field_comments = ""
       declarations = getattr(ast, "declarations", [])
       if isinstance(node, StructFieldNode) and uri in ls.symbol_table_cache:
         parent_struct = next(
-            (
-                child
-                for child in declarations
-                if isinstance(child, StructDeclNode)
-                and any(f is node for f in child.fields)
-            ),
-            None,
+          (
+            child
+            for child in declarations
+            if isinstance(child, StructDeclNode)
+            and any(f is node for f in child.fields)
+          ),
+          None,
         )
         if parent_struct:
           st = ls.symbol_table_cache[uri].lookup_type(parent_struct.name)
@@ -527,9 +541,9 @@ class HoverProvider:
             field_comments = getattr(st.fields[node.name], "comments", "")
       elif isinstance(node, MemberAccessNode) and uri in ls.symbol_table_cache:
         from src.semantics.symbol_table import (
-            OptionalType,
-            RefType,
-            SharedRefType,
+          OptionalType,
+          RefType,
+          SharedRefType,
         )
 
         receiver_type = node_types.get(node.receiver)
@@ -538,15 +552,15 @@ class HoverProvider:
         if isinstance(receiver_type, (SharedRefType, RefType)):
           receiver_type = receiver_type.inner_type
         if (
-            isinstance(receiver_type, StructType)
-            and node.member in receiver_type.fields
+          isinstance(receiver_type, StructType)
+          and node.member in receiver_type.fields
         ):
           field_comments = getattr(
-              receiver_type.fields[node.member], "comments", ""
+            receiver_type.fields[node.member], "comments", ""
           )
       if field_comments:
         markdown_text += f"\n\n{field_comments}"
 
     return Hover(
-        contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text)
+      contents=MarkupContent(kind=MarkupKind.Markdown, value=markdown_text)
     )

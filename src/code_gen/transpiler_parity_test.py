@@ -16,16 +16,15 @@ import subprocess
 import tempfile
 import unittest
 
-from antlr4 import InputStream, CommonTokenStream
+from antlr4 import CommonTokenStream, InputStream
+
 import src.parser.ast as ast_module
+from src.code_gen.lua_transpiler import LuaTranspiler
+from src.code_gen.python_transpiler import PythonTranspiler
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
 from src.semantics.type_checker import TypeChecker
-from src.code_gen.python_transpiler import PythonTranspiler
-from src.code_gen.lua_transpiler import LuaTranspiler
-
-
 
 # AST node classes that are never dispatched to via the visit_* protocol.
 # These are either abstract base nodes, purely structural container nodes,
@@ -408,6 +407,7 @@ class SemanticParityTest(unittest.TestCase):
   def test_all_e2e_tests_have_expectations(self):
     """Ensures every @test function in testing/e2e/*_test.sp is in EXPECTATIONS."""
     import re
+
     from testing.e2e._expectations import EXPECTATIONS
 
     e2e_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "testing" / "e2e"

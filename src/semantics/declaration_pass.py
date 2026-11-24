@@ -7,7 +7,9 @@ for structs, enums, traits, externs, and functions).
 import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
-from antlr4 import InputStream, CommonTokenStream
+
+from antlr4 import CommonTokenStream, InputStream
+
 try:
   from pygls.uris import from_fs_path
 except ImportError:
@@ -16,47 +18,50 @@ except ImportError:
   def from_fs_path(path: str) -> str:
     return Path(path).resolve().as_uri()
 
-from src.cli.diagnostics import format_diagnostic
+
+from src.code_gen.intrinsics import is_builtin_module
+from src.common.diagnostics import format_diagnostic
 from src.common.errors import SapphireSyntaxError, SemanticError
 from src.parser.ast import (
-    ASTNode,
-    EnumDeclNode,
-    FuncDeclNode,
-    IdentifierNode,
-    ImplBlockNode,
-    MemberAccessNode,
-    ParameterNode,
-    ProgramNode,
-    StructDeclNode,
-    TraitDeclNode,
-    VarDeclNode,
+  ASTNode,
+  EnumDeclNode,
+  FuncDeclNode,
+  IdentifierNode,
+  ImplBlockNode,
+  MemberAccessNode,
+  ParameterNode,
+  ProgramNode,
+  StructDeclNode,
+  TraitDeclNode,
+  VarDeclNode,
 )
 from src.parser.ast_builder import ASTBuilder
 from src.parser.error_listener import CustomErrorListener
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.code_gen.intrinsics import is_builtin_module
 from src.semantics.module_resolver import resolve_module_path
 from src.semantics.symbol_table import (
-    EnumType,
-    EnumSymbol,
-    FunctionType,
-    FunctionSymbol,
-    GenericTypeParameter,
-    ModuleSymbol,
-    ModuleType,
-    PrimitiveType,
-    StructType,
-    StructSymbol,
-    TraitType,
-    TraitSymbol,
-    Type,
-    VariableSymbol,
+  EnumSymbol,
+  EnumType,
+  FunctionSymbol,
+  FunctionType,
+  GenericTypeParameter,
+  ModuleSymbol,
+  ModuleType,
+  PrimitiveType,
+  StructSymbol,
+  StructType,
+  TraitSymbol,
+  TraitType,
+  Type,
+  VariableSymbol,
 )
 
 
 class DeclarationPass:
-  """Executes preliminary module imports and top-level global symbol registration."""
+  """Executes preliminary module imports and top-level global symbol
+  registration.
+  """
 
   # Cache of clean, cycle-free parsed and typechecked modules on disk:
   # abs_file_path -> (mtime, file_size, exports_dict, dep_stats)
@@ -67,43 +72,55 @@ class DeclarationPass:
     """Clears the cached imported module declarations."""
     cls._module_cache.clear()
 
-  VALID_ANNOTATION_PATH_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
+  VALID_ANNOTATION_PATH_RE = re.compile(
+    r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$"
+  )
 
   @staticmethod
-  def validate_annotations(checker: Any, annotations: List[Any], node: Optional[Any] = None) -> None:
-    """Validates that @extern and @export string arguments are well-formed identifier paths."""
+  def validate_annotations(
+    checker: Any, annotations: List[Any], node: Optional[Any] = None
+  ) -> None:
+    """Validates that @extern and @export string arguments are well-formed
+    identifier paths.
+    """
     for ann in annotations or []:
       if ann.name in ("extern", "export") and ann.arg is not None:
         if not DeclarationPass.VALID_ANNOTATION_PATH_RE.match(ann.arg):
           checker.error(
-              f"Invalid identifier path in '@{ann.name}' annotation: '{ann.arg}'.",
-              node=node,
+            f"Invalid identifier path in '@{ann.name}' annotation: "
+            f"'{ann.arg}'.",
+            node=node,
           )
 
   @staticmethod
-  def validate_parameter_defaults(checker: Any, parameters: List[ParameterNode]) -> None:
-    """Validates that parameters without default values do not follow parameters with default values."""
+  def validate_parameter_defaults(
+    checker: Any, parameters: List[ParameterNode]
+  ) -> None:
+    """Validates that parameters without default values do not follow parameters
+    with default values.
+    """
     seen_default = False
     for p in parameters:
       if getattr(p, "default_expr", None) is not None:
         seen_default = True
       elif seen_default:
         checker.error(
-            f"Parameter without a default value '{p.name}' cannot follow a parameter with a default value.",
-            node=p,
+          f"Parameter without a default value '{p.name}' cannot follow a "
+          "parameter with a default value.",
+          node=p,
         )
 
   @staticmethod
   def _is_cache_entry_valid(
-      cached_entry: Any, mtime: Optional[int], fsize: Optional[int]
+    cached_entry: Any, mtime: Optional[int], fsize: Optional[int]
   ) -> bool:
     """Returns True if a cached module and all transitive deps match disk."""
     if (
-        cached_entry is None
-        or mtime is None
-        or fsize is None
-        or cached_entry[0] != mtime
-        or cached_entry[1] != fsize
+      cached_entry is None
+      or mtime is None
+      or fsize is None
+      or cached_entry[0] != mtime
+      or cached_entry[1] != fsize
     ):
       return False
     dep_stats = cached_entry[3] if len(cached_entry) > 3 else {}
@@ -118,7 +135,7 @@ class DeclarationPass:
 
   @staticmethod
   def _propagate_import_errors(
-      checker: Any, imp: Any, mod_errors: List[str], reported_errors: Set[str]
+    checker: Any, imp: Any, mod_errors: List[str], reported_errors: Set[str]
   ) -> None:
     """Propagates imported module diagnostics to the importing checker."""
     if not mod_errors:
@@ -129,15 +146,15 @@ class DeclarationPass:
         reported_sites = set()
         checker._reported_lsp_import_sites = reported_sites
       site_key = (
-          imp.path,
-          getattr(imp, "start_line", None),
-          getattr(imp, "start_column", None),
+        imp.path,
+        getattr(imp, "start_line", None),
+        getattr(imp, "start_column", None),
       )
       if site_key not in reported_sites:
         reported_sites.add(site_key)
         checker.error(
-            f"Imported module '{imp.path}' contains syntax or semantic errors.",
-            node=imp,
+          f"Imported module '{imp.path}' contains syntax or semantic errors.",
+          node=imp,
         )
       return
 
@@ -162,7 +179,7 @@ class DeclarationPass:
 
   @staticmethod
   def _extract_module_exports(
-      sub_checker: Any, sub_ast: Any, mod_sym: ModuleSymbol
+    sub_checker: Any, sub_ast: Any, mod_sym: ModuleSymbol
   ) -> Dict[str, Any]:
     """Collects exported symbols and types from a checked imported module."""
     computed_exports: Dict[str, Any] = {}
@@ -177,10 +194,9 @@ class DeclarationPass:
             if exp:
               computed_exports[export_name] = exp
         else:
-          exp = (
-              sub_checker.symbol_table.lookup(spec.symbol)
-              or sub_checker.symbol_table.lookup_type(spec.symbol)
-          )
+          exp = sub_checker.symbol_table.lookup(
+            spec.symbol
+          ) or sub_checker.symbol_table.lookup_type(spec.symbol)
           if exp:
             if isinstance(exp, StructType):
               exp.is_imported = True
@@ -194,7 +210,7 @@ class DeclarationPass:
               exp.symbol_type.is_imported = True
               exp.symbol_type.defining_module = defining_mod
             elif isinstance(
-                getattr(exp, "symbol_type", None), (TraitType, EnumType)
+              getattr(exp, "symbol_type", None), (TraitType, EnumType)
             ):
               exp.symbol_type.defining_module = defining_mod
             computed_exports[export_name] = exp
@@ -210,7 +226,7 @@ class DeclarationPass:
           sym.symbol_type.is_imported = True
           sym.symbol_type.defining_module = defining_mod
         elif isinstance(
-            getattr(sym, "symbol_type", None), (TraitType, EnumType)
+          getattr(sym, "symbol_type", None), (TraitType, EnumType)
         ):
           sym.symbol_type.defining_module = defining_mod
         computed_exports[name] = sym
@@ -226,16 +242,19 @@ class DeclarationPass:
 
   @staticmethod
   def _parse_and_check_imported_module(
-      target_file: str,
-      mod_file_path: str,
-      sub_code: str,
-      mod_sym: ModuleSymbol,
-      checked_results: Dict[str, Any],
-      active_stack: Set[str],
+    target_file: str,
+    mod_file_path: str,
+    sub_code: str,
+    mod_sym: ModuleSymbol,
+    checked_results: Dict[str, Any],
+    active_stack: Set[str],
   ) -> Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]:
-    """Parses and type-checks *target_file*, returning exports, errors, deps, and cycle flag."""
+    """Parses and type-checks *target_file*, returning exports, errors, deps,
+    and
+    cycle flag.
+    """
     err_listener = CustomErrorListener(
-        file_path=target_file, source_content=sub_code, quiet=True
+      file_path=target_file, source_content=sub_code, quiet=True
     )
     sub_lexer = SapphireLexer(InputStream(sub_code))
     sub_lexer.removeErrorListeners()
@@ -256,14 +275,14 @@ class DeclarationPass:
         sub_ast = ASTBuilder().visit(sub_tree)
       except (SapphireSyntaxError, SyntaxError) as syn_err:
         mod_errors.append(
-            format_diagnostic(
-                error_type="Syntax Error",
-                message=getattr(syn_err, "message", str(syn_err)),
-                file_path=target_file,
-                line=getattr(syn_err, "line", None),
-                column=getattr(syn_err, "column", None),
-                source_content=sub_code,
-            )
+          format_diagnostic(
+            error_type="Syntax Error",
+            message=getattr(syn_err, "message", str(syn_err)),
+            file_path=target_file,
+            line=getattr(syn_err, "line", None),
+            column=getattr(syn_err, "column", None),
+            source_content=sub_code,
+          )
         )
 
       if sub_ast is not None:
@@ -272,7 +291,7 @@ class DeclarationPass:
         from src.semantics.type_checker import TypeChecker
 
         sub_checker = TypeChecker(
-            source_file_path=target_file, source_content=sub_code
+          source_file_path=target_file, source_content=sub_code
         )
         sub_checker._checked_import_results = checked_results
         sub_checker._active_import_stack = active_stack
@@ -292,22 +311,22 @@ class DeclarationPass:
         sub_deps = dict(sub_checker._resolved_dep_stats)
         sub_hit_cycle = bool(getattr(sub_checker, "_hit_import_cycle", False))
         computed_exports = DeclarationPass._extract_module_exports(
-            sub_checker, sub_ast, mod_sym
+          sub_checker, sub_ast, mod_sym
         )
 
     return computed_exports, mod_errors, sub_deps, sub_hit_cycle
 
   @staticmethod
   def _check_imported_file(
-      checker: Any,
-      imp: Any,
-      target_file: str,
-      mod_sym: ModuleSymbol,
-      is_builtin: bool,
-      checked_results: Dict[str, Any],
-      active_stack: Set[str],
-      reported_errors: Set[str],
-      resolved_dep_stats: Dict[str, Tuple[int, int]],
+    checker: Any,
+    imp: Any,
+    target_file: str,
+    mod_sym: ModuleSymbol,
+    is_builtin: bool,
+    checked_results: Dict[str, Any],
+    active_stack: Set[str],
+    reported_errors: Set[str],
+    resolved_dep_stats: Dict[str, Tuple[int, int]],
   ) -> None:
     """Parses, typechecks, caches, and extracts exports for *target_file*."""
     mod_file_path = os.path.abspath(target_file)
@@ -335,11 +354,11 @@ class DeclarationPass:
 
     # 2. Reuse per-compilation result if already checked in this session.
     is_std_testing = imp.path == "std.testing" or imp.path.startswith(
-        "std.testing"
+      "std.testing"
     )
     if mod_file_path in checked_results:
       cached_exports, mod_errors, sub_deps, sub_cycle = checked_results[
-          mod_file_path
+        mod_file_path
       ]
       mod_sym.exports.update(cached_exports)
       if is_std_testing:
@@ -350,7 +369,7 @@ class DeclarationPass:
       if sub_cycle:
         checker._hit_import_cycle = True
       DeclarationPass._propagate_import_errors(
-          checker, imp, mod_errors, reported_errors
+        checker, imp, mod_errors, reported_errors
       )
       return
 
@@ -366,27 +385,27 @@ class DeclarationPass:
         sub_code = f.read()
     except OSError as os_err:
       checker.error(
-          f"Failed to read imported module '{imp.path}': {os_err}",
-          node=imp,
+        f"Failed to read imported module '{imp.path}': {os_err}",
+        node=imp,
       )
       return
 
     computed_exports, mod_errors, sub_deps, sub_hit_cycle = (
-        DeclarationPass._parse_and_check_imported_module(
-            target_file,
-            mod_file_path,
-            sub_code,
-            mod_sym,
-            checked_results,
-            active_stack,
-        )
+      DeclarationPass._parse_and_check_imported_module(
+        target_file,
+        mod_file_path,
+        sub_code,
+        mod_sym,
+        checked_results,
+        active_stack,
+      )
     )
 
     checked_results[mod_file_path] = (
-        dict(computed_exports),
-        list(mod_errors),
-        dict(sub_deps),
-        sub_hit_cycle,
+      dict(computed_exports),
+      list(mod_errors),
+      dict(sub_deps),
+      sub_hit_cycle,
     )
     if sub_hit_cycle:
       checker._hit_import_cycle = True
@@ -396,17 +415,17 @@ class DeclarationPass:
       # Only cache clean, cycle-free modules across compilations.
       if not mod_errors and not sub_hit_cycle:
         DeclarationPass._module_cache[mod_file_path] = (
-            mtime,
-            fsize,
-            dict(computed_exports),
-            dict(sub_deps),
+          mtime,
+          fsize,
+          dict(computed_exports),
+          dict(sub_deps),
         )
 
     mod_sym.exports.update(computed_exports)
     if is_std_testing:
       mod_sym.exports["TestCase"] = checker.symbol_table.testcase_trait
     DeclarationPass._propagate_import_errors(
-        checker, imp, mod_errors, reported_errors
+      checker, imp, mod_errors, reported_errors
     )
 
   @staticmethod
@@ -445,28 +464,31 @@ class DeclarationPass:
 
         # Resolve imported module file path on disk
         target_file = resolve_module_path(
-            imp.path, source_file_path=getattr(checker, "source_file_path", None)
+          imp.path, source_file_path=getattr(checker, "source_file_path", None)
         )
         is_builtin = is_builtin_module(imp.path)
 
         if module_name in seen_import_names:
           if seen_import_names[module_name] != imp.path:
             checker.error(
-                f"Duplicate imported module name '{module_name}' "
-                f"(already imported from '{seen_import_names[module_name]}'); "
-                f"use an 'as' alias for '{imp.path}'.",
-                node=imp,
+              f"Duplicate imported module name '{module_name}' "
+              f"(already imported from '{seen_import_names[module_name]}'); "
+              f"use an 'as' alias for '{imp.path}'.",
+              node=imp,
             )
             if not target_file and not is_builtin:
               checker.error(
-                  f"Cannot resolve imported module '{imp.path}'. Module file not found.",
-                  node=imp,
+                f"Cannot resolve imported module '{imp.path}'. "
+                "Module file not found.",
+                node=imp,
               )
           continue
         seen_import_names[module_name] = imp.path
 
         existing = checker.symbol_table.lookup_current_scope(module_name)
-        is_predefined = existing is not None and isinstance(existing, ModuleSymbol)
+        is_predefined = existing is not None and isinstance(
+          existing, ModuleSymbol
+        )
         if not is_predefined:
           mod_sym = ModuleSymbol(module_name, imp.path)
           checker.symbol_table.define(module_name, mod_sym)
@@ -479,21 +501,22 @@ class DeclarationPass:
 
         if not target_file and not is_builtin and not is_predefined:
           checker.error(
-              f"Cannot resolve imported module '{imp.path}'. Module file not found.",
-              node=imp,
+            f"Cannot resolve imported module '{imp.path}'. Module file not "
+            "found.",
+            node=imp,
           )
 
         if target_file:
           DeclarationPass._check_imported_file(
-              checker,
-              imp,
-              target_file,
-              mod_sym,
-              is_builtin,
-              checked_results,
-              active_stack,
-              reported_errors,
-              resolved_dep_stats,
+            checker,
+            imp,
+            target_file,
+            mod_sym,
+            is_builtin,
+            checked_results,
+            active_stack,
+            reported_errors,
+            resolved_dep_stats,
           )
     finally:
       if added_self and abs_src_path:
@@ -508,27 +531,27 @@ class DeclarationPass:
       for member in decl.members:
         if hasattr(member, "annotations") and member.annotations:
           DeclarationPass.validate_annotations(
-              checker, member.annotations, node=member
+            checker, member.annotations, node=member
           )
     elif hasattr(decl, "members") and isinstance(decl.members, list):
       for member in decl.members:
         if hasattr(member, "annotations") and member.annotations:
           DeclarationPass.validate_annotations(
-              checker, member.annotations, node=member
+            checker, member.annotations, node=member
           )
         if (
-            hasattr(member, "func_decl")
-            and hasattr(member.func_decl, "annotations")
-            and member.func_decl.annotations
+          hasattr(member, "func_decl")
+          and hasattr(member.func_decl, "annotations")
+          and member.func_decl.annotations
         ):
           DeclarationPass.validate_annotations(
-              checker, member.func_decl.annotations, node=member.func_decl
+            checker, member.func_decl.annotations, node=member.func_decl
           )
 
   @staticmethod
   def _declare_enum_global(checker: Any, decl: EnumDeclNode) -> None:
     if checker.symbol_table.lookup_current_scope(
-        decl.name
+      decl.name
     ) or checker.symbol_table.lookup_type(decl.name):
       checker.error(f"Redefinition of identifier '{decl.name}'.")
       return
@@ -536,8 +559,8 @@ class DeclarationPass:
     has_str_val = any(isinstance(m.value, str) for m in decl.members)
     if has_int_val and has_str_val:
       checker.error(
-          f"Enum '{decl.name}' cannot mix integer and string variant values.",
-          node=decl,
+        f"Enum '{decl.name}' cannot mix integer and string variant values.",
+        node=decl,
       )
     current_val: Union[int, str] = "" if has_str_val else 0
     is_string_enum = has_str_val
@@ -545,7 +568,9 @@ class DeclarationPass:
     seen_members: Set[str] = set()
     for member in decl.members:
       if member.name in seen_members:
-        checker.error(f"Duplicate member '{member.name}' in enum '{decl.name}'.")
+        checker.error(
+          f"Duplicate member '{member.name}' in enum '{decl.name}'."
+        )
         continue
       seen_members.add(member.name)
       if member.value is not None:
@@ -556,9 +581,9 @@ class DeclarationPass:
       if isinstance(current_val, int):
         current_val += 1
     enum_type = EnumType(
-        decl.name,
-        variants,
-        defining_module=checker.source_file_path or "__main__",
+      decl.name,
+      variants,
+      defining_module=checker.source_file_path or "__main__",
     )
     enum_type.ast_decl = decl
     checker.symbol_table.define_type(decl.name, enum_type)
@@ -567,17 +592,18 @@ class DeclarationPass:
   @staticmethod
   def _declare_trait_global(checker: Any, decl: TraitDeclNode) -> None:
     if checker.symbol_table.lookup_current_scope(
-        decl.name
+      decl.name
     ) or checker.symbol_table.lookup_type(decl.name):
       checker.error(f"Redefinition of identifier '{decl.name}'.")
       return
     trait_type = TraitType(
-        decl.name,
-        type_params=decl.type_params,
-        ast_decl=decl,
-        defining_module=checker.source_file_path or "__main__",
+      decl.name,
+      type_params=decl.type_params,
+      ast_decl=decl,
+      defining_module=checker.source_file_path or "__main__",
     )
-    # Forward-register trait before resolving member signatures so self-referencing
+    # Forward-register trait before resolving member signatures so
+    # self-referencing
     # traits (e.g. `trait Mergeable { func merge(other: Mergeable); }`) resolve.
     checker.symbol_table.define_type(decl.name, trait_type)
     checker.symbol_table.define(decl.name, TraitSymbol(decl.name, trait_type))
@@ -588,8 +614,8 @@ class DeclarationPass:
     for member in decl.members:
       if member.name in trait_type.methods:
         checker.error(
-            f"Duplicate method '{member.name}' in trait '{decl.name}'.",
-            node=member,
+          f"Duplicate method '{member.name}' in trait '{decl.name}'.",
+          node=member,
         )
         continue
       DeclarationPass.validate_parameter_defaults(checker, member.parameters)
@@ -609,23 +635,23 @@ class DeclarationPass:
           extern_name = ann.arg
           break
       num_defaults = sum(
-          1
-          for p in member.parameters
-          if getattr(p, "default_expr", None) is not None
+        1
+        for p in member.parameters
+        if getattr(p, "default_expr", None) is not None
       )
       param_defaults = [
-          getattr(p, "default_expr", None) for p in member.parameters
+        getattr(p, "default_expr", None) for p in member.parameters
       ]
       trait_type.methods[member.name] = FunctionType(
-          p_types,
-          ret_t,
-          p_mutabilities,
-          param_names=param_names,
-          has_self=has_self,
-          extern_name=extern_name,
-          num_defaults=num_defaults,
-          param_defaults=param_defaults,
-          ast_decl=member,
+        p_types,
+        ret_t,
+        p_mutabilities,
+        param_names=param_names,
+        has_self=has_self,
+        extern_name=extern_name,
+        num_defaults=num_defaults,
+        param_defaults=param_defaults,
+        ast_decl=member,
       )
       if getattr(member, "body", None) is not None:
         trait_type.default_methods[member.name] = member
@@ -642,21 +668,24 @@ class DeclarationPass:
       if any(a.name == "extern" for a in decl.annotations):
         if decl.exprs:
           checker.error(
-              "An '@extern' variable declaration cannot have an initializer expression.",
-              node=decl,
+            "An '@extern' variable declaration cannot have an initializer "
+            "expression.",
+            node=decl,
           )
         v_type = (
-            checker._resolve_type_node(decl.val_types[i])
-            if (decl.val_types and i < len(decl.val_types) and decl.val_types[i])
-            else PrimitiveType("none")
+          checker._resolve_type_node(decl.val_types[i])
+          if (decl.val_types and i < len(decl.val_types) and decl.val_types[i])
+          else PrimitiveType("none")
         )
         if not decl.val_types or not decl.val_types[i]:
           checker.error(
-              f"An '@extern' variable declaration for '{name}' requires an explicit type annotation.",
-              node=decl,
+            f"An '@extern' variable declaration for '{name}' requires an "
+            "explicit type annotation.",
+            node=decl,
           )
         sym = VariableSymbol(name, v_type, decl.is_mutable)
-        # Mark so Pass 2 (`visit_VarDeclNode`) knows this global was pre-declared.
+        # Mark so Pass 2 (`visit_VarDeclNode`) knows this global was
+        # pre-declared.
         sym._from_declare_globals = True
         sym.is_extern = True
         checker.symbol_table.define(name, sym)
@@ -664,7 +693,7 @@ class DeclarationPass:
         expr_node = decl.exprs[i]
         val_t = None
         if isinstance(expr_node, MemberAccessNode) and isinstance(
-            expr_node.receiver, IdentifierNode
+          expr_node.receiver, IdentifierNode
         ):
           mod_sym = checker.symbol_table.lookup(expr_node.receiver.name)
           if isinstance(mod_sym, ModuleSymbol):
@@ -672,7 +701,7 @@ class DeclarationPass:
             if isinstance(exp, Type):
               val_t = exp
             elif hasattr(exp, "symbol_type") and isinstance(
-                exp.symbol_type, Type
+              exp.symbol_type, Type
             ):
               val_t = exp.symbol_type
         elif isinstance(expr_node, IdentifierNode):
@@ -704,47 +733,45 @@ class DeclarationPass:
     if decl.type_params:
       checker.symbol_table.exit_scope()
     num_defaults = sum(
-        1
-        for p in decl.parameters
-        if getattr(p, "default_expr", None) is not None
+      1 for p in decl.parameters if getattr(p, "default_expr", None) is not None
     )
-    param_defaults = [
-        getattr(p, "default_expr", None) for p in decl.parameters
-    ]
+    param_defaults = [getattr(p, "default_expr", None) for p in decl.parameters]
     signature = FunctionType(
-        param_types,
-        ret_type,
-        param_mutabilities,
-        param_names=[p.name for p in decl.parameters],
-        num_defaults=num_defaults,
-        param_defaults=param_defaults,
+      param_types,
+      ret_type,
+      param_mutabilities,
+      param_names=[p.name for p in decl.parameters],
+      num_defaults=num_defaults,
+      param_defaults=param_defaults,
     )
     checker.symbol_table.define(
-        decl.name,
-        FunctionSymbol(
-            decl.name, signature, type_params=decl.type_params, ast_decl=decl
-        ),
+      decl.name,
+      FunctionSymbol(
+        decl.name, signature, type_params=decl.type_params, ast_decl=decl
+      ),
     )
 
   @staticmethod
   def declare_globals(checker: Any, program: ProgramNode) -> None:
-    """Pass 1: Collect struct, enum, and function declarations into global scope."""
+    """Pass 1: Collect struct, enum, and function declarations into global
+    scope.
+    """
     for decl in program.declarations:
       if not isinstance(
-          decl,
-          (
-              StructDeclNode,
-              EnumDeclNode,
-              TraitDeclNode,
-              VarDeclNode,
-              FuncDeclNode,
-              ImplBlockNode,
-          ),
+        decl,
+        (
+          StructDeclNode,
+          EnumDeclNode,
+          TraitDeclNode,
+          VarDeclNode,
+          FuncDeclNode,
+          ImplBlockNode,
+        ),
       ):
         checker.error(
-            "Executable statements are not permitted at module scope. All "
-            "executable logic must reside inside 'func main()' or a function.",
-            node=decl,
+          "Executable statements are not permitted at module scope. All "
+          "executable logic must reside inside 'func main()' or a function.",
+          node=decl,
         )
         continue
 
@@ -752,22 +779,22 @@ class DeclarationPass:
 
       if isinstance(decl, StructDeclNode):
         if checker.symbol_table.lookup_current_scope(
-            decl.name
+          decl.name
         ) or checker.symbol_table.lookup_type(decl.name):
           checker.error(f"Redefinition of identifier '{decl.name}'.")
           continue
         struct_type = StructType(
-            decl.name,
-            parent_names=decl.parent_names,
-            is_prototype=decl.is_prototype,
-            type_params=decl.type_params,
-            ast_decl=decl,
-            defining_module=checker.source_file_path or "__main__",
-            is_imported=False,
+          decl.name,
+          parent_names=decl.parent_names,
+          is_prototype=decl.is_prototype,
+          type_params=decl.type_params,
+          ast_decl=decl,
+          defining_module=checker.source_file_path or "__main__",
+          is_imported=False,
         )
         checker.symbol_table.define_type(decl.name, struct_type)
         checker.symbol_table.define(
-            decl.name, StructSymbol(decl.name, struct_type)
+          decl.name, StructSymbol(decl.name, struct_type)
         )
       elif isinstance(decl, EnumDeclNode):
         DeclarationPass._declare_enum_global(checker, decl)

@@ -322,8 +322,13 @@ class TestSignatureProvider(unittest.TestCase):
   def test_enclosing_impl_and_binding_types_dot_fallback(self):
     """Verifies _find_enclosing_impl_struct None paths and binding_types fallback."""
     from types import SimpleNamespace
+
     from src.lsp.completion_provider import _find_enclosing_impl_struct
-    from src.semantics.symbol_table import PrimitiveType, StructType, SymbolTable
+    from src.semantics.symbol_table import (
+      PrimitiveType,
+      StructType,
+      SymbolTable,
+    )
     from src.semantics.types import StructField
 
     self.assertIsNone(_find_enclosing_impl_struct(None, None, 1))

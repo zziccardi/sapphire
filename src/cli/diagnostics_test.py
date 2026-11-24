@@ -1,8 +1,8 @@
 """Unit tests for the diagnostic error formatting module (diagnostics.py)."""
 
 import unittest
-from src.cli.diagnostics import Diagnostic, get_source_line, format_diagnostic
 
+from src.cli.diagnostics import Diagnostic, format_diagnostic, get_source_line
 
 
 class TestDiagnostics(unittest.TestCase):
@@ -10,18 +10,19 @@ class TestDiagnostics(unittest.TestCase):
 
   def test_get_source_line_string(self):
     content = "first line\nsecond line\nthird line"
-    self.assertEqual(get_source_line(content, 1), "first line")
-    self.assertEqual(get_source_line(content, 2), "second line")
-    self.assertEqual(get_source_line(content, 3), "third line")
-    self.assertIsNone(get_source_line(content, 0))
-    self.assertIsNone(get_source_line(content, 4))
+    self.assertEqual(get_source_line(1, source_text=content), "first line")
+    self.assertEqual(get_source_line(2, source_text=content), "second line")
+    self.assertEqual(get_source_line(3, source_text=content), "third line")
+    self.assertIsNone(get_source_line(0, source_text=content))
+    self.assertIsNone(get_source_line(4, source_text=content))
 
   def test_get_source_line_list(self):
     lines = ["let a = 1;", "let b = 2;", "let c = 3;"]
-    self.assertEqual(get_source_line(lines, 1), "let a = 1;")
-    self.assertEqual(get_source_line(lines, 2), "let b = 2;")
-    self.assertIsNone(get_source_line(lines, 0))
-    self.assertIsNone(get_source_line(lines, 5))
+    self.assertEqual(get_source_line(1, source_lines=lines), "let a = 1;")
+    self.assertEqual(get_source_line(2, source_lines=lines), "let b = 2;")
+    self.assertIsNone(get_source_line(0, source_lines=lines))
+    self.assertIsNone(get_source_line(5, source_lines=lines))
+    self.assertIsNone(get_source_line(1))
 
   def test_format_diagnostic_with_column_and_length(self):
     source = "func test() {\n  let x: int = \"hello\";\n}"
@@ -70,21 +71,30 @@ class TestDiagnostics(unittest.TestCase):
     self.assertEqual(diag, "Error: test.sp:10:5 - Generic failure")
 
   def test_get_source_line_filepath_exception_and_bounds(self):
-    import tempfile
     import os
+    import tempfile
     from unittest.mock import patch
+
+    from src.common.diagnostics import _read_file_lines_cached
 
     with tempfile.NamedTemporaryFile("w+", delete=False) as f:
       f.write("line 1\nline 2\n")
       temp_path = f.name
 
     try:
+      _read_file_lines_cached.cache_clear()
+      self.assertEqual(get_source_line(1, file_path=temp_path), "line 1\n")
       # Test line out of bounds for existing file
-      self.assertIsNone(get_source_line(temp_path, 10))
+      self.assertIsNone(get_source_line(10, file_path=temp_path))
+      # Test directory path is rejected
+      self.assertIsNone(
+          get_source_line(1, file_path=os.path.dirname(temp_path))
+      )
 
-      # Test open() raising Exception
+      # Test open() raising OSError after clearing cache
+      _read_file_lines_cached.cache_clear()
       with patch("builtins.open", side_effect=PermissionError("Denied")):
-        self.assertIsNone(get_source_line(temp_path, 1))
+        self.assertIsNone(get_source_line(1, file_path=temp_path))
     finally:
       if os.path.exists(temp_path):
         os.remove(temp_path)

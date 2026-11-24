@@ -46,9 +46,9 @@ def find_sapphire_lib_dir() -> Optional[str]:
 
   # 5. System prefix installation directories
   prefix_candidates = [
-      os.path.join(sys.prefix, "lib", "sapphire"),
-      os.path.join(sys.prefix, "share", "sapphire", "lib"),
-      os.path.join(sys.prefix, "lib", "sapphire", "lib"),
+    os.path.join(sys.prefix, "lib", "sapphire"),
+    os.path.join(sys.prefix, "share", "sapphire", "lib"),
+    os.path.join(sys.prefix, "lib", "sapphire", "lib"),
   ]
   for candidate in prefix_candidates:
     if os.path.isdir(candidate):
@@ -58,7 +58,7 @@ def find_sapphire_lib_dir() -> Optional[str]:
 
 
 def resolve_module_path(
-    import_path: str, source_file_path: Optional[str] = None
+  import_path: str, source_file_path: Optional[str] = None
 ) -> Optional[str]:
   """Resolves a Sapphire module import path to an absolute path on disk."""
   rel_path = import_path.replace(".", "/") + ".sp"

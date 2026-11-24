@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 def _modules_match(m1: Optional[str], m2: Optional[str]) -> bool:
-  """Returns True if two optional defining_module paths refer to the same module."""
+  """Returns True if two optional defining_module paths refer to the same
+  module.
+  """
   if m1 is None or m2 is None:
     return True
   if m1 == m2:
@@ -22,6 +24,7 @@ def _modules_match(m1: Optional[str], m2: Optional[str]) -> bool:
 # ==========================================
 # Type Representations
 # ==========================================
+
 
 class Type:
   """Base class for all types in the Sapphire type system."""
@@ -36,10 +39,10 @@ class Type:
       # Safe assignment of T to T?
       return self.is_compatible(other.base_type)
     if (
-        isinstance(self, PrimitiveType)
-        and self.name == "int"
-        and isinstance(other, PrimitiveType)
-        and other.name == "float"
+      isinstance(self, PrimitiveType)
+      and self.name == "int"
+      and isinstance(other, PrimitiveType)
+      and other.name == "float"
     ):
       return True
     if isinstance(other, TraitType) and isinstance(self, StructType):
@@ -52,9 +55,9 @@ class Type:
     return type(self) is type(other)
 
   def is_move_only_type(
-      self,
-      symbol_table: Optional[Any] = None,
-      _seen: Optional[Set[str]] = None,
+    self,
+    symbol_table: Optional[Any] = None,
+    _seen: Optional[Set[str]] = None,
   ) -> bool:
     """Returns True if values of this type have Move-Only ownership."""
     if isinstance(self, (RefType, ArenaType, CoroutineType)):
@@ -64,10 +67,9 @@ class Type:
     if isinstance(self, ArrayType):
       return self.element_type.is_move_only_type(symbol_table, _seen)
     if isinstance(self, MapType):
-      return (
-          self.key_type.is_move_only_type(symbol_table, _seen)
-          or self.value_type.is_move_only_type(symbol_table, _seen)
-      )
+      return self.key_type.is_move_only_type(
+        symbol_table, _seen
+      ) or self.value_type.is_move_only_type(symbol_table, _seen)
     if isinstance(self, StructType):
       if self.is_prototype:
         return False
@@ -160,16 +162,16 @@ class FunctionType(Type):
   """
 
   def __init__(
-      self,
-      param_types: List[Type],
-      return_type: Any,
-      param_mutabilities: Optional[List[bool]] = None,
-      param_names: Optional[List[str]] = None,
-      has_self: bool = False,
-      extern_name: Optional[str] = None,
-      num_defaults: int = 0,
-      param_defaults: Optional[List[Any]] = None,
-      ast_decl: Optional[Any] = None,
+    self,
+    param_types: List[Type],
+    return_type: Any,
+    param_mutabilities: Optional[List[bool]] = None,
+    param_names: Optional[List[str]] = None,
+    has_self: bool = False,
+    extern_name: Optional[str] = None,
+    num_defaults: int = 0,
+    param_defaults: Optional[List[Any]] = None,
+    ast_decl: Optional[Any] = None,
   ):
     self.param_types = param_types
     if isinstance(return_type, list):
@@ -184,8 +186,9 @@ class FunctionType(Type):
     self.param_mutabilities = param_mutabilities or [False] * len(param_types)
     self.has_named_params: bool = param_names is not None
     self.param_names = param_names or [f"p{i}" for i in range(len(param_types))]
-    self.has_self = (
-        has_self or (bool(self.param_names) and self.param_names[0] == "self"))
+    self.has_self = has_self or (
+      bool(self.param_names) and self.param_names[0] == "self"
+    )
     self.extern_name = extern_name
     self.num_defaults = num_defaults
     self.param_defaults = param_defaults or [None] * len(param_types)
@@ -196,8 +199,8 @@ class FunctionType(Type):
     if isinstance(self.return_type, MultiReturnType):
       return self.return_type.types
     elif isinstance(self.return_type, NoneType) or (
-        isinstance(self.return_type, PrimitiveType)
-        and self.return_type.name in ("none", "void")
+      isinstance(self.return_type, PrimitiveType)
+      and self.return_type.name in ("none", "void")
     ):
       return []
     else:
@@ -210,15 +213,19 @@ class FunctionType(Type):
       return False
     if len(self.param_types) != len(other.param_types):
       return False
-    for p1, p2 in zip(self.param_types, other.param_types):
+    for p1, p2 in zip(self.param_types, other.param_types, strict=False):
       if not p2.is_compatible(p1):
         return False
     if self.param_mutabilities != other.param_mutabilities:
       return False
     ret1 = self.return_type
     ret2 = other.return_type
-    is_void1 = isinstance(ret1, (NoneType, InferredType)) or (isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void"))
-    is_void2 = isinstance(ret2, (NoneType, InferredType)) or (isinstance(ret2, PrimitiveType) and ret2.name in ("none", "void"))
+    is_void1 = isinstance(ret1, (NoneType, InferredType)) or (
+      isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void")
+    )
+    is_void2 = isinstance(ret2, (NoneType, InferredType)) or (
+      isinstance(ret2, PrimitiveType) and ret2.name in ("none", "void")
+    )
     if is_void1 and is_void2:
       return True
     return ret1.is_compatible(ret2)
@@ -228,13 +235,17 @@ class FunctionType(Type):
       return False
     ret1 = self.return_type
     ret2 = other.return_type
-    is_void1 = isinstance(ret1, (NoneType, InferredType)) or (isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void"))
-    is_void2 = isinstance(ret2, (NoneType, InferredType)) or (isinstance(ret2, PrimitiveType) and ret2.name in ("none", "void"))
+    is_void1 = isinstance(ret1, (NoneType, InferredType)) or (
+      isinstance(ret1, PrimitiveType) and ret1.name in ("none", "void")
+    )
+    is_void2 = isinstance(ret2, (NoneType, InferredType)) or (
+      isinstance(ret2, PrimitiveType) and ret2.name in ("none", "void")
+    )
     ret_eq = (is_void1 and is_void2) or (ret1 == ret2)
     return (
-        self.param_types == other.param_types
-        and ret_eq
-        and self.param_mutabilities == other.param_mutabilities
+      self.param_types == other.param_types
+      and ret_eq
+      and self.param_mutabilities == other.param_mutabilities
     )
 
   def __repr__(self) -> str:
@@ -245,7 +256,9 @@ class FunctionType(Type):
       else:
         params_reprs.append(repr(t))
     params_str = ", ".join(params_reprs)
-    if isinstance(self.return_type, PrimitiveType) and self.return_type.name in ("none", "void"):
+    if isinstance(
+      self.return_type, PrimitiveType
+    ) and self.return_type.name in ("none", "void"):
       ret_str = "()"
     elif isinstance(self.return_type, NoneType):
       ret_str = "()"
@@ -257,8 +270,15 @@ class FunctionType(Type):
 class StructField:
   """Represents a field in a struct."""
 
-  def __init__(self, name: str, field_type: Type, is_mutable: bool,
-               has_default: bool = False, has_explicit_default: bool = False, comments: str = ""):
+  def __init__(
+    self,
+    name: str,
+    field_type: Type,
+    is_mutable: bool,
+    has_default: bool = False,
+    has_explicit_default: bool = False,
+    comments: str = "",
+  ):
     self.name = name
     self.field_type = field_type
     self.is_mutable = is_mutable
@@ -270,10 +290,14 @@ class StructField:
 class StructMethod:
   """Represents a method in a struct impl block."""
 
-  def __init__(self, name: str, method_type: FunctionType,
-               modifier: Optional[str],
-               is_trait_default: bool = False,
-               impl_trait_name: Optional[str] = None):
+  def __init__(
+    self,
+    name: str,
+    method_type: FunctionType,
+    modifier: Optional[str],
+    is_trait_default: bool = False,
+    impl_trait_name: Optional[str] = None,
+  ):
     self.name = name
     self.method_type = method_type
     self.modifier = modifier  # 'static', 'var', or None
@@ -302,14 +326,18 @@ class GenericTypeParameter(Type):
 class StructType(Type):
   """Represents a user-defined struct type."""
 
-  def __init__(self, name: str,
-               parent_names: Optional[Union[str, List[str]]] = None,
-               is_prototype: bool = False, comments: Optional[str] = None,
-               type_params: Optional[List[str]] = None,
-               ast_decl: Optional[Any] = None,
-               parent_name: Optional[str] = None,
-               defining_module: Optional[str] = None,
-               is_imported: bool = False):
+  def __init__(
+    self,
+    name: str,
+    parent_names: Optional[Union[str, List[str]]] = None,
+    is_prototype: bool = False,
+    comments: Optional[str] = None,
+    type_params: Optional[List[str]] = None,
+    ast_decl: Optional[Any] = None,
+    parent_name: Optional[str] = None,
+    defining_module: Optional[str] = None,
+    is_imported: bool = False,
+  ):
     self.name = name
     if parent_names is None:
       self.parent_names = [parent_name] if parent_name else []
@@ -339,9 +367,9 @@ class StructType(Type):
     return "__del__" in self.methods
 
   def has_any_destructor(
-      self,
-      symbol_table: Optional[Any] = None,
-      _seen: Optional[Set[str]] = None,
+    self,
+    symbol_table: Optional[Any] = None,
+    _seen: Optional[Set[str]] = None,
   ) -> bool:
     """Returns True if this struct or any ancestor struct defines '__del__'."""
     if "__del__" in self.methods:
@@ -351,12 +379,16 @@ class StructType(Type):
       return False
     seen.add(self.name)
     for parent in self.parent_types:
-      if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
+      if isinstance(parent, StructType) and parent.has_any_destructor(
+        symbol_table, seen
+      ):
         return True
     if self.parent_names and symbol_table:
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)
-        if isinstance(parent, StructType) and parent.has_any_destructor(symbol_table, seen):
+        if isinstance(parent, StructType) and parent.has_any_destructor(
+          symbol_table, seen
+        ):
           return True
     return False
 
@@ -368,10 +400,10 @@ class StructType(Type):
       self.parent_names = [value]
 
   def has_ancestor(
-      self,
-      target: "StructType",
-      symbol_table: Optional[Any] = None,
-      _seen: Optional[Set[Tuple[Optional[str], str]]] = None,
+    self,
+    target: "StructType",
+    symbol_table: Optional[Any] = None,
+    _seen: Optional[Set[Tuple[Optional[str], str]]] = None,
   ) -> bool:
     """Returns True if *target* is a strict transitive parent of this struct."""
     seen = set() if _seen is None else set(_seen)
@@ -389,8 +421,8 @@ class StructType(Type):
 
     for parent in parents:
       if parent is target or (
-          parent.defining_module == target.defining_module
-          and parent.name == target.name
+        parent.defining_module == target.defining_module
+        and parent.name == target.name
       ):
         return True
       if parent.has_ancestor(target, symbol_table, seen):
@@ -398,9 +430,11 @@ class StructType(Type):
     return False
 
   def get_method(
-      self, name: str,
-      symbol_table: Optional[Any] = None) -> Optional["StructMethod"]:
-    """Look up a method on this struct, falling back to parent structs if symbol_table is provided."""
+    self, name: str, symbol_table: Optional[Any] = None
+  ) -> Optional["StructMethod"]:
+    """Look up a method on this struct, falling back to parent structs if
+    symbol_table is provided.
+    """
     if name in self.methods:
       return self.methods[name]
     if self.parent_types:
@@ -417,19 +451,27 @@ class StructType(Type):
             return res
     return None
 
-  def implements_trait(self, trait: "TraitType",
-                       symbol_table: Optional[Any] = None) -> bool:
-    """Returns True if this struct nominally implements the given trait (directly or via parent structs)."""
+  def implements_trait(
+    self, trait: "TraitType", symbol_table: Optional[Any] = None
+  ) -> bool:
+    """Returns True if this struct nominally implements the given trait
+    (directly
+    or via parent structs).
+    """
     if trait.name in self.implemented_traits:
       return True
     if self.parent_types:
       for parent in self.parent_types:
-        if isinstance(parent, StructType) and parent.implements_trait(trait, symbol_table):
+        if isinstance(parent, StructType) and parent.implements_trait(
+          trait, symbol_table
+        ):
           return True
     if self.parent_names and symbol_table:
       for p_name in self.parent_names:
         parent = symbol_table.lookup_type(p_name)
-        if isinstance(parent, StructType) and parent.implements_trait(trait, symbol_table):
+        if isinstance(parent, StructType) and parent.implements_trait(
+          trait, symbol_table
+        ):
           return True
     return False
 
@@ -438,7 +480,7 @@ class StructType(Type):
       return False
     # Struct types are compared by name and defining module (nominal typing)
     return self.name == other.name and _modules_match(
-        self.defining_module, other.defining_module
+      self.defining_module, other.defining_module
     )
 
   def __repr__(self) -> str:
@@ -450,10 +492,14 @@ class StructType(Type):
 class TraitType(Type):
   """Represents a user-defined trait type."""
 
-  def __init__(self, name: str, comments: Optional[str] = None,
-               type_params: Optional[List[str]] = None,
-               ast_decl: Optional[Any] = None,
-               defining_module: Optional[str] = None):
+  def __init__(
+    self,
+    name: str,
+    comments: Optional[str] = None,
+    type_params: Optional[List[str]] = None,
+    ast_decl: Optional[Any] = None,
+    defining_module: Optional[str] = None,
+  ):
     self.name = name
     self.methods: Dict[str, FunctionType] = {}
     self.default_methods: Dict[str, Any] = {}
@@ -474,7 +520,7 @@ class TraitType(Type):
     if not isinstance(other, TraitType):
       return False
     return self.name == other.name and _modules_match(
-        self.defining_module, other.defining_module
+      self.defining_module, other.defining_module
     )
 
   def __repr__(self) -> str:
@@ -487,11 +533,11 @@ class EnumType(Type):
   """Represents a custom enum type definition."""
 
   def __init__(
-      self,
-      name: str,
-      variants: Optional[Dict[str, Union[int, str]]] = None,
-      comments: Optional[str] = None,
-      defining_module: Optional[str] = None,
+    self,
+    name: str,
+    variants: Optional[Dict[str, Union[int, str]]] = None,
+    comments: Optional[str] = None,
+    defining_module: Optional[str] = None,
   ):
     self.name = name
     self.variants: Dict[str, Union[int, str]] = variants or {}
@@ -509,7 +555,7 @@ class EnumType(Type):
     if not isinstance(other, EnumType):
       return False
     return self.name == other.name and _modules_match(
-        self.defining_module, other.defining_module
+      self.defining_module, other.defining_module
     )
 
   def __repr__(self) -> str:
@@ -579,18 +625,26 @@ class InferredType(Type):
 class ArrayType(Type):
   """Represents an array type (e.g. '[int]' or '[int; 3]')."""
 
-  def __init__(self, element_type: Type, size: Optional[int] = None, is_fixed_size: Optional[bool] = None):
+  def __init__(
+    self,
+    element_type: Type,
+    size: Optional[int] = None,
+    is_fixed_size: Optional[bool] = None,
+  ):
     self.element_type = element_type
     self.size = size
-    self.is_fixed_size = (size is not None) if is_fixed_size is None else is_fixed_size
+    self.is_fixed_size = (
+      (size is not None) if is_fixed_size is None else is_fixed_size
+    )
 
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, ArrayType):
       if other.is_fixed_size:
         if not self.is_fixed_size or self.size != other.size:
           return False
-      if (isinstance(self.element_type, NoneType) or
-          isinstance(other.element_type, NoneType)):
+      if isinstance(self.element_type, NoneType) or isinstance(
+        other.element_type, NoneType
+      ):
         return True
       return self.element_type.is_compatible(other.element_type)
     if isinstance(other, OptionalType):
@@ -600,7 +654,11 @@ class ArrayType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, ArrayType):
       return False
-    return self.element_type == other.element_type and self.size == other.size and self.is_fixed_size == other.is_fixed_size
+    return (
+      self.element_type == other.element_type
+      and self.size == other.size
+      and self.is_fixed_size == other.is_fixed_size
+    )
 
   def __repr__(self) -> str:
     if self.is_fixed_size and self.size is not None:
@@ -618,14 +676,14 @@ class MapType(Type):
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, MapType):
       key_ok = (
-          isinstance(self.key_type, NoneType)
-          or isinstance(other.key_type, NoneType)
-          or self.key_type.is_compatible(other.key_type)
+        isinstance(self.key_type, NoneType)
+        or isinstance(other.key_type, NoneType)
+        or self.key_type.is_compatible(other.key_type)
       )
       val_ok = (
-          isinstance(self.value_type, NoneType)
-          or isinstance(other.value_type, NoneType)
-          or self.value_type.is_compatible(other.value_type)
+        isinstance(self.value_type, NoneType)
+        or isinstance(other.value_type, NoneType)
+        or self.value_type.is_compatible(other.value_type)
       )
       return key_ok and val_ok
     if isinstance(other, OptionalType):
@@ -635,8 +693,9 @@ class MapType(Type):
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, MapType):
       return False
-    return (self.key_type == other.key_type and
-            self.value_type == other.value_type)
+    return (
+      self.key_type == other.key_type and self.value_type == other.value_type
+    )
 
   def __repr__(self) -> str:
     return f"[{self.key_type}: {self.value_type}]"
@@ -651,11 +710,11 @@ class CoroutineType(Type):
   def is_compatible(self, other: "Type") -> bool:
     if isinstance(other, CoroutineType):
       if isinstance(self.yield_type, NoneType) and isinstance(
-          other.yield_type, NoneType
+        other.yield_type, NoneType
       ):
         return True
       if isinstance(self.yield_type, NoneType) or isinstance(
-          other.yield_type, NoneType
+        other.yield_type, NoneType
       ):
         return False
       return self.yield_type.is_compatible(other.yield_type)
@@ -742,128 +801,130 @@ class WeakRefType(Type):
 
 
 COROUTINE_METHODS: Set[str] = {
-    "step",
-    "is_done",
-    "reset",
+  "step",
+  "is_done",
+  "reset",
 }
 
 
 STRING_METHODS: Dict[str, FunctionType] = {
-    "size": FunctionType(
-        [StringType()],
-        PrimitiveType("int"),
-        param_names=["self"],
-        has_self=True,
+  "size": FunctionType(
+    [StringType()],
+    PrimitiveType("int"),
+    param_names=["self"],
+    has_self=True,
+  ),
+  "empty": FunctionType(
+    [StringType()],
+    PrimitiveType("bool"),
+    param_names=["self"],
+    has_self=True,
+  ),
+  "lower": FunctionType(
+    [StringType()],
+    StringType(),
+    param_names=["self"],
+    has_self=True,
+  ),
+  "upper": FunctionType(
+    [StringType()],
+    StringType(),
+    param_names=["self"],
+    has_self=True,
+  ),
+  "strip": FunctionType(
+    [StringType(), OptionalType(StringType())],
+    StringType(),
+    param_names=["self", "chars"],
+    has_self=True,
+    num_defaults=1,
+  ),
+  "split": FunctionType(
+    [StringType(), OptionalType(StringType())],
+    ArrayType(StringType()),
+    param_names=["self", "sep"],
+    has_self=True,
+    num_defaults=1,
+  ),
+  "contains": FunctionType(
+    [StringType(), StringType()],
+    PrimitiveType("bool"),
+    param_names=["self", "sub"],
+    has_self=True,
+  ),
+  "find": FunctionType(
+    [
+      StringType(),
+      StringType(),
+      PrimitiveType("int"),
+      PrimitiveType("bool"),
+    ],
+    OptionalType(PrimitiveType("int")),
+    param_names=(
+      ["self", "start", "reverse"]
+      if False
+      else ["self", "sub", "start", "reverse"]
     ),
-    "empty": FunctionType(
-        [StringType()],
-        PrimitiveType("bool"),
-        param_names=["self"],
-        has_self=True,
-    ),
-    "lower": FunctionType(
-        [StringType()],
-        StringType(),
-        param_names=["self"],
-        has_self=True,
-    ),
-    "upper": FunctionType(
-        [StringType()],
-        StringType(),
-        param_names=["self"],
-        has_self=True,
-    ),
-    "strip": FunctionType(
-        [StringType(), OptionalType(StringType())],
-        StringType(),
-        param_names=["self", "chars"],
-        has_self=True,
-        num_defaults=1,
-    ),
-    "split": FunctionType(
-        [StringType(), OptionalType(StringType())],
-        ArrayType(StringType()),
-        param_names=["self", "sep"],
-        has_self=True,
-        num_defaults=1,
-    ),
-    "contains": FunctionType(
-        [StringType(), StringType()],
-        PrimitiveType("bool"),
-        param_names=["self", "sub"],
-        has_self=True,
-    ),
-    "find": FunctionType(
-        [
-            StringType(),
-            StringType(),
-            PrimitiveType("int"),
-            PrimitiveType("bool"),
-        ],
-        OptionalType(PrimitiveType("int")),
-        param_names=(["self", "start", "reverse"] if False
-                     else ["self", "sub", "start", "reverse"]),
-        has_self=True,
-        num_defaults=2,
-    ),
-    "to_int": FunctionType(
-        [StringType(), PrimitiveType("int")],
-        OptionalType(PrimitiveType("int")),
-        param_names=["self", "radix"],
-        has_self=True,
-        num_defaults=1,
-    ),
-    "to_float": FunctionType(
-        [StringType()],
-        OptionalType(PrimitiveType("float")),
-        param_names=["self"],
-        has_self=True,
-    ),
-    "to_bool": FunctionType(
-        [StringType()],
-        OptionalType(PrimitiveType("bool")),
-        param_names=["self"],
-        has_self=True,
-    ),
-    "slice": FunctionType(
-        [StringType(), PrimitiveType("int"), OptionalType(PrimitiveType("int"))],
-        StringType(),
-        param_names=["self", "start", "end"],
-        has_self=True,
-        num_defaults=1,
-    ),
+    has_self=True,
+    num_defaults=2,
+  ),
+  "to_int": FunctionType(
+    [StringType(), PrimitiveType("int")],
+    OptionalType(PrimitiveType("int")),
+    param_names=["self", "radix"],
+    has_self=True,
+    num_defaults=1,
+  ),
+  "to_float": FunctionType(
+    [StringType()],
+    OptionalType(PrimitiveType("float")),
+    param_names=["self"],
+    has_self=True,
+  ),
+  "to_bool": FunctionType(
+    [StringType()],
+    OptionalType(PrimitiveType("bool")),
+    param_names=["self"],
+    has_self=True,
+  ),
+  "slice": FunctionType(
+    [StringType(), PrimitiveType("int"), OptionalType(PrimitiveType("int"))],
+    StringType(),
+    param_names=["self", "start", "end"],
+    has_self=True,
+    num_defaults=1,
+  ),
 }
 
 
 ARRAY_METHODS: Dict[str, bool] = {
-    "size": True,
-    "empty": True,
-    "contains": True,
-    "get": True,
-    "map": True,
-    "filter": True,
-    "reduce": True,
-    "reverse": True,
-    "sort": True,
-    "join": True,
-    "push": True,
-    "pop": True,
-    "insert": True,
-    "remove": True,
-    "clear": True,
-    "swap": True,
+  "size": True,
+  "empty": True,
+  "contains": True,
+  "get": True,
+  "map": True,
+  "filter": True,
+  "reduce": True,
+  "reverse": True,
+  "sort": True,
+  "join": True,
+  "push": True,
+  "pop": True,
+  "insert": True,
+  "remove": True,
+  "clear": True,
+  "swap": True,
 }
 
 
 MAP_METHODS: Dict[str, bool] = {
-    "size": True,
-    "empty": True,
-    "contains": True,
-    "get": True,
-    "keys": True,
-    "values": True,
-    "insert": True,
-    "remove": True,
-    "clear": True,
+  "size": True,
+  "empty": True,
+  "contains": True,
+  "get": True,
+  "keys": True,
+  "values": True,
+  "insert": True,
+  "remove": True,
+  "clear": True,
 }
-

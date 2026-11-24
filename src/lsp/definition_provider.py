@@ -6,54 +6,59 @@ and struct/trait members from cursor position.
 
 import os
 from typing import Any, Optional, Tuple
-from pygls.uris import from_fs_path, to_fs_path
-from lsprotocol.types import (
-    DefinitionParams,
-    Location,
-    Position,
-    Range,
-)
 
+from lsprotocol.types import (
+  DefinitionParams,
+  Location,
+  Position,
+  Range,
+)
+from pygls.uris import from_fs_path, to_fs_path
+
+from src.lsp.semantic_tokens import (
+  codepoint_to_utf16,
+  find_node_at_position,
+  get_doc_line,
+  utf16_to_codepoint,
+)
 from src.parser.ast import (
-    BasicTypeNode,
-    BlockNode,
-    CallNode,
-    EnumDeclNode,
-    EnumMemberNode,
-    ForNode,
-    FuncDeclNode,
-    HeaderBindingNode,
-    IdentifierNode,
-    ImplBlockNode,
-    ImportStmtNode,
-    MemberAccessNode,
-    MoveNode,
-    ParameterNode,
-    StructDeclNode,
-    StructFieldNode,
-    StructInitializerNode,
-    TraitDeclNode,
-    VarDeclNode,
-    WhileNode,
+  BasicTypeNode,
+  BlockNode,
+  CallNode,
+  EnumDeclNode,
+  EnumMemberNode,
+  ForNode,
+  FuncDeclNode,
+  HeaderBindingNode,
+  IdentifierNode,
+  ImplBlockNode,
+  ImportStmtNode,
+  MemberAccessNode,
+  MoveNode,
+  ParameterNode,
+  StructDeclNode,
+  StructFieldNode,
+  StructInitializerNode,
+  TraitDeclNode,
+  VarDeclNode,
+  WhileNode,
+)
+from src.semantics.module_resolver import (
+  resolve_module_path as sem_resolve_module_path,
 )
 from src.semantics.symbol_table import (
-    OptionalType,
-    RefType,
-    SharedRefType,
-)
-from src.semantics.module_resolver import resolve_module_path as sem_resolve_module_path
-from src.lsp.semantic_tokens import (
-    codepoint_to_utf16,
-    find_node_at_position,
-    get_doc_line,
-    utf16_to_codepoint,
+  OptionalType,
+  RefType,
+  SharedRefType,
 )
 
 
 def resolve_module_path(
-    doc_uri: str, mod_path: str, workspace_root: Optional[str] = None
+  doc_uri: str, mod_path: str, workspace_root: Optional[str] = None
 ) -> Optional[str]:
-  """Resolves a dot-separated Sapphire import path to an absolute file path on disk."""
+  """Resolves a dot-separated Sapphire import path to an absolute file path on
+  disk.
+  """
   doc_path = to_fs_path(doc_uri) if doc_uri.startswith("file://") else doc_uri
   res = sem_resolve_module_path(mod_path, source_file_path=doc_path)
   if res and os.path.isfile(res):
@@ -63,17 +68,17 @@ def resolve_module_path(
 
   rel_parts = mod_path.split(".")
   candidates = [
-      os.path.join(*rel_parts) + ".sp",
-      os.path.join(*rel_parts, "mod.sp"),
-      os.path.join(*rel_parts, "index.sp"),
+    os.path.join(*rel_parts) + ".sp",
+    os.path.join(*rel_parts, "mod.sp"),
+    os.path.join(*rel_parts, "index.sp"),
   ]
 
   search_dirs = [doc_dir]
   if workspace_root:
     ws_path = (
-        to_fs_path(workspace_root)
-        if workspace_root.startswith("file://")
-        else workspace_root
+      to_fs_path(workspace_root)
+      if workspace_root.startswith("file://")
+      else workspace_root
     )
     if ws_path and ws_path not in search_dirs:
       search_dirs.append(ws_path)
@@ -90,7 +95,8 @@ def resolve_module_path(
 
 
 def _line_in_node_span(node: Any, line: int) -> bool:
-  """Returns True if 1-based *line* lies within *node*'s [start_line, end_line]."""
+  """Returns True if 1-based *line* lies within *node*'s [start_line, end_line].
+  """
   s_start = getattr(node, "start_line", None)
   s_end = getattr(node, "end_line", None)
   if s_start is not None and line < s_start:
@@ -109,14 +115,14 @@ def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
       continue
     if isinstance(stmt, VarDeclNode):
       if getattr(stmt, "name", None) == name or name in getattr(
-          stmt, "names", []
+        stmt, "names", []
       ):
         found_in_block = stmt
     elif type(stmt).__name__ == "GuardStmtNode":
       else_block = getattr(stmt, "else_block", None)
       if else_block is not None and _line_in_node_span(else_block, line):
         nested_found = _find_decl_in_stmts(
-            getattr(else_block, "statements", []), name, line
+          getattr(else_block, "statements", []), name, line
         )
         if nested_found is not None:
           return nested_found
@@ -125,17 +131,15 @@ def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
         if line > getattr(else_block, "start_line", line):
           continue
       bindings = getattr(
-          stmt,
-          "bindings",
-          [stmt.init_binding]
-          if getattr(stmt, "init_binding", None)
-          else [],
+        stmt,
+        "bindings",
+        [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
       )
       for b in bindings:
         b_names = getattr(
-            b,
-            "let_names",
-            [b.let_name] if getattr(b, "let_name", None) else [],
+          b,
+          "let_names",
+          [b.let_name] if getattr(b, "let_name", None) else [],
         )
         if name in b_names:
           found_in_block = b
@@ -147,9 +151,9 @@ def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
       in_else = else_block is not None and _line_in_node_span(else_block, line)
       if in_else:
         else_stmts = (
-            [else_block]
-            if type(else_block).__name__ == "IfNode"
-            else getattr(else_block, "statements", [])
+          [else_block]
+          if type(else_block).__name__ == "IfNode"
+          else getattr(else_block, "statements", [])
         )
         nested_found = _find_decl_in_stmts(else_stmts, name, line)
         if nested_found is not None:
@@ -157,22 +161,20 @@ def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
       else:
         if then_block is not None and _line_in_node_span(then_block, line):
           nested_found = _find_decl_in_stmts(
-              getattr(then_block, "statements", []), name, line
+            getattr(then_block, "statements", []), name, line
           )
           if nested_found is not None:
             return nested_found
         bindings = getattr(
-            stmt,
-            "bindings",
-            [stmt.init_binding]
-            if getattr(stmt, "init_binding", None)
-            else [],
+          stmt,
+          "bindings",
+          [stmt.init_binding] if getattr(stmt, "init_binding", None) else [],
         )
         for b in bindings:
           b_names = getattr(
-              b,
-              "let_names",
-              [b.let_name] if getattr(b, "let_name", None) else [],
+            b,
+            "let_names",
+            [b.let_name] if getattr(b, "let_name", None) else [],
           )
           if name in b_names:
             return b
@@ -182,23 +184,23 @@ def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
       block = getattr(stmt, "block", None)
       if block is not None and _line_in_node_span(block, line):
         nested_found = _find_decl_in_stmts(
-            getattr(block, "statements", []), name, line
+          getattr(block, "statements", []), name, line
         )
         if nested_found is not None:
           return nested_found
       if (
-          getattr(stmt, "key_var", None) == name
-          or getattr(stmt, "val_var", None) == name
-          or getattr(stmt, "loop_var", None) == name
+        getattr(stmt, "key_var", None) == name
+        or getattr(stmt, "val_var", None) == name
+        or getattr(stmt, "loop_var", None) == name
       ):
         return stmt
     elif isinstance(stmt, (WhileNode, BlockNode)):
       if not _line_in_node_span(stmt, line):
         continue
       nested = (
-          getattr(stmt, "statements", [])
-          if isinstance(stmt, BlockNode)
-          else getattr(getattr(stmt, "block", None), "statements", [])
+        getattr(stmt, "statements", [])
+        if isinstance(stmt, BlockNode)
+        else getattr(getattr(stmt, "block", None), "statements", [])
       )
       nested_found = _find_decl_in_stmts(nested, name, line)
       if nested_found is not None:
@@ -214,14 +216,12 @@ def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
       s_start = getattr(decl, "start_line", None)
       s_end = getattr(decl, "end_line", None)
       if (
-          s_start is not None
-          and s_start <= line
-          and (s_end is None or line <= s_end)
+        s_start is not None
+        and s_start <= line
+        and (s_end is None or line <= s_end)
       ):
         stmts = (
-            getattr(decl.body, "statements", [])
-            if hasattr(decl, "body")
-            else []
+          getattr(decl.body, "statements", []) if hasattr(decl, "body") else []
         )
         found = _find_decl_in_stmts(stmts, name, line)
         if found:
@@ -236,14 +236,14 @@ def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
           f_start = getattr(func_decl, "start_line", None)
           f_end = getattr(func_decl, "end_line", None)
           if (
-              f_start is not None
-              and f_start <= line
-              and (f_end is None or line <= f_end)
+            f_start is not None
+            and f_start <= line
+            and (f_end is None or line <= f_end)
           ):
             stmts = (
-                getattr(func_decl.body, "statements", [])
-                if hasattr(func_decl, "body")
-                else []
+              getattr(func_decl.body, "statements", [])
+              if hasattr(func_decl, "body")
+              else []
             )
             found = _find_decl_in_stmts(stmts, name, line)
             if found:
@@ -253,7 +253,7 @@ def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
                 return p  # pragma: no cover
     elif isinstance(decl, VarDeclNode):
       if getattr(decl, "name", None) == name or name in getattr(
-          decl, "names", []
+        decl, "names", []
       ):
         return decl  # pragma: no cover
   return None
@@ -276,20 +276,24 @@ class DefinitionProvider:
 
   @classmethod
   def _resolve_module_export_ast(
-      cls, ls: Any, mod_sym: Any, member_name: str
+    cls, ls: Any, mod_sym: Any, member_name: str
   ) -> Optional[Any]:
-    """Resolves an exported symbol from a ModuleSymbol, falling back to cached symbol tables."""
+    """Resolves an exported symbol from a ModuleSymbol, falling back to cached
+    symbol tables.
+    """
     target_sym = mod_sym.lookup_export(member_name)
     target_ast = cls._extract_decl_ast(target_sym)
 
     mod_file_path = getattr(mod_sym, "file_path", None)
     if mod_file_path:
       mod_uri = from_fs_path(os.path.abspath(mod_file_path))
-      if not target_ast and mod_uri in ls.symbol_table_cache:  # pragma: no cover
+      if (
+        not target_ast and mod_uri in ls.symbol_table_cache
+      ):  # pragma: no cover
         sub_sym_table = ls.symbol_table_cache[mod_uri]
-        exp_sym = sub_sym_table.lookup(member_name) or sub_sym_table.lookup_type(
-            member_name
-        )
+        exp_sym = sub_sym_table.lookup(
+          member_name
+        ) or sub_sym_table.lookup_type(member_name)
         target_ast = cls._extract_decl_ast(exp_sym)
       if target_ast:
         target_ast.file_uri = mod_uri
@@ -297,9 +301,11 @@ class DefinitionProvider:
 
   @classmethod
   def _resolve_member_definition(
-      cls, ls: Any, node: MemberAccessNode, sym_table: Any, node_types: Any
+    cls, ls: Any, node: MemberAccessNode, sym_table: Any, node_types: Any
   ) -> Optional[Any]:
-    """Resolves Go to Definition for a MemberAccessNode (module, field, method, enum)."""
+    """Resolves Go to Definition for a MemberAccessNode (module, field, method,
+    enum).
+    """
     target_ast = None
     if isinstance(node.receiver, IdentifierNode):
       sym = sym_table.lookup(node.receiver.name)
@@ -308,9 +314,9 @@ class DefinitionProvider:
 
     receiver_type = node_types.get(node.receiver)
     if (
-        not target_ast
-        and not receiver_type
-        and isinstance(node.receiver, IdentifierNode)
+      not target_ast
+      and not receiver_type
+      and isinstance(node.receiver, IdentifierNode)
     ):  # pragma: no cover
       sym = sym_table.lookup(node.receiver.name)
       if sym:  # pragma: no cover
@@ -332,7 +338,8 @@ class DefinitionProvider:
           target_ast = field
           break
 
-    # Fall back to inherited parent struct fields transitively when not found on child.
+    # Fall back to inherited parent struct fields transitively when not found on
+    # child.
     if not target_ast and getattr(receiver_type, "parent_names", None):
       visited_parents = set()
       queue = list(receiver_type.parent_names)
@@ -352,9 +359,9 @@ class DefinitionProvider:
 
     if not target_ast and hasattr(receiver_type, "methods"):
       method = (
-          receiver_type.get_method(node.member, sym_table)
-          if hasattr(receiver_type, "get_method")
-          else receiver_type.methods.get(node.member)
+        receiver_type.get_method(node.member, sym_table)
+        if hasattr(receiver_type, "get_method")
+        else receiver_type.methods.get(node.member)
       )
       if method and getattr(method, "ast_decl", None):
         target_ast = method.ast_decl
@@ -369,13 +376,16 @@ class DefinitionProvider:
 
   @classmethod
   def _extract_node_range(
-      cls,
-      target_ast: Any,
-      node: Any,
-      line: Optional[int] = None,
-      col: Optional[int] = None,
+    cls,
+    target_ast: Any,
+    node: Any,
+    line: Optional[int] = None,
+    col: Optional[int] = None,
   ) -> Optional[Range]:
-    """Computes the LSP Range (code-point offsets) for a target AST declaration or binding."""
+    """Computes the LSP Range (code-point offsets) for a target AST declaration
+    or
+    binding.
+    """
     target_decl = getattr(target_ast, "func_decl", target_ast)
     name_line = getattr(target_decl, "name_line", None)
     name_col = getattr(target_decl, "name_column", None)
@@ -387,20 +397,20 @@ class DefinitionProvider:
       if isinstance(bindings_info, list) and bindings_info:
         if isinstance(node, (IdentifierNode, MoveNode)):
           matched_info = next(
-              (info for info in bindings_info if info.get("name") == node.name),
-              None,
+            (info for info in bindings_info if info.get("name") == node.name),
+            None,
           )
         elif node is target_decl and line is not None and col is not None:
           matched_info = next(
-              (
-                  info
-                  for info in bindings_info
-                  if info.get("line") == line
-                  and info.get("column") is not None
-                  and info.get("length") is not None
-                  and info["column"] <= col < info["column"] + info["length"]
-              ),
-              None,
+            (
+              info
+              for info in bindings_info
+              if info.get("line") == line
+              and info.get("column") is not None
+              and info.get("length") is not None
+              and info["column"] <= col < info["column"] + info["length"]
+            ),
+            None,
           )
         if matched_info is None:
           matched_info = bindings_info[0]
@@ -413,7 +423,7 @@ class DefinitionProvider:
         name_col = getattr(target_decl, "let_name_column", None)
         name_len = getattr(target_decl, "let_name_length", None)
     elif isinstance(target_decl, ForNode) and isinstance(
-        node, (IdentifierNode, MoveNode)
+      node, (IdentifierNode, MoveNode)
     ):
       if node.name == getattr(target_decl, "key_var", None):
         name_line = getattr(target_decl, "key_var_line", name_line)
@@ -421,83 +431,85 @@ class DefinitionProvider:
         name_len = getattr(target_decl, "key_var_length", name_len)
       else:
         name_line = getattr(
-            target_decl,
-            "val_var_line",
-            getattr(target_decl, "loop_var_line", name_line),
+          target_decl,
+          "val_var_line",
+          getattr(target_decl, "loop_var_line", name_line),
         )
         name_col = getattr(
-            target_decl,
-            "val_var_column",
-            getattr(target_decl, "loop_var_column", name_col),
+          target_decl,
+          "val_var_column",
+          getattr(target_decl, "loop_var_column", name_col),
         )
         name_len = getattr(
-            target_decl,
-            "val_var_length",
-            getattr(target_decl, "loop_var_length", name_len),
+          target_decl,
+          "val_var_length",
+          getattr(target_decl, "loop_var_length", name_len),
         )
 
     if name_line is not None and name_col is not None and name_len is not None:
       return Range(
-          start=Position(line=name_line - 1, character=name_col),
-          end=Position(line=name_line - 1, character=name_col + name_len),
+        start=Position(line=name_line - 1, character=name_col),
+        end=Position(line=name_line - 1, character=name_col + name_len),
       )
     if getattr(target_ast, "start_line", None) is not None:
       s_line = target_ast.start_line - 1
       s_col = target_ast.start_column or 0
       e_line = (target_ast.end_line - 1) if target_ast.end_line else s_line
       e_col = (
-          target_ast.end_column
-          if target_ast.end_column is not None
-          else s_col + 1
+        target_ast.end_column
+        if target_ast.end_column is not None
+        else s_col + 1
       )
       return Range(
-          start=Position(line=s_line, character=s_col),
-          end=Position(line=e_line, character=e_col),
+        start=Position(line=s_line, character=s_col),
+        end=Position(line=e_line, character=e_col),
       )
     return None  # pragma: no cover
 
   @classmethod
   def _locate_in_ast_cache(
-      cls, ls: Any, target_decl: Any
+    cls, ls: Any, target_decl: Any
   ) -> Optional[Tuple[str, Range]]:
-    """Searches cached ASTs when `target_ast.file_uri` is not directly populated."""
+    """Searches cached ASTs when `target_ast.file_uri` is not directly
+    populated.
+    """
     target_name = getattr(target_decl, "name", None)
 
     def _search_ast(ast_node: Any, match_by_name: bool) -> Optional[Any]:
       for c_decl in getattr(ast_node, "declarations", []):
         if c_decl is target_decl or (
-            match_by_name
-            and type(c_decl) is type(target_decl)
-            and target_name
-            and getattr(c_decl, "name", None) == target_name
+          match_by_name
+          and type(c_decl) is type(target_decl)
+          and target_name
+          and getattr(c_decl, "name", None) == target_name
         ):  # pragma: no cover
           return c_decl
         if isinstance(c_decl, (TraitDeclNode, EnumDeclNode)):
           for m in getattr(c_decl, "members", []):
             if m is target_decl or (
-                match_by_name
-                and type(m) is type(target_decl)
-                and target_name
-                and getattr(m, "name", None) == target_name
+              match_by_name
+              and type(m) is type(target_decl)
+              and target_name
+              and getattr(m, "name", None) == target_name
             ):
               return m
         elif isinstance(c_decl, StructDeclNode):
           for f in getattr(c_decl, "fields", []):
             if f is target_decl or (
-                match_by_name
-                and type(f) is type(target_decl)
-                and target_name
-                and getattr(f, "name", None) == target_name
+              match_by_name
+              and type(f) is type(target_decl)
+              and target_name
+              and getattr(f, "name", None) == target_name
             ):
               return f
         elif isinstance(c_decl, ImplBlockNode):
           for m in getattr(c_decl, "members", []):
             fn = getattr(m, "func_decl", m)
             if fn is target_decl or (
-                match_by_name
-                and type(fn) is type(target_decl)
-                and target_name
-                and getattr(fn, "name", None) == target_name
+              match_by_name
+              and type(fn) is type(target_decl)
+              and target_name
+              and getattr(fn, "name", None) == target_name
             ):  # pragma: no cover
               return fn
       return None
@@ -526,34 +538,36 @@ class DefinitionProvider:
 
   @staticmethod
   def _range_to_utf16(ls: Any, target_uri: str, loc_range: Range) -> Range:
-    """Converts code-point character offsets in *loc_range* to LSP UTF-16 offsets."""
+    """Converts code-point character offsets in *loc_range* to LSP UTF-16
+    offsets.
+    """
     start_line_text = get_doc_line(ls, target_uri, loc_range.start.line + 1)
     end_line_text = (
-        start_line_text
-        if loc_range.end.line == loc_range.start.line
-        else get_doc_line(ls, target_uri, loc_range.end.line + 1)
+      start_line_text
+      if loc_range.end.line == loc_range.start.line
+      else get_doc_line(ls, target_uri, loc_range.end.line + 1)
     )
     start_char = (
-        codepoint_to_utf16(start_line_text, loc_range.start.character)
-        if start_line_text is not None
-        else loc_range.start.character
+      codepoint_to_utf16(start_line_text, loc_range.start.character)
+      if start_line_text is not None
+      else loc_range.start.character
     )
     end_char = (
-        codepoint_to_utf16(end_line_text, loc_range.end.character)
-        if end_line_text is not None
-        else loc_range.end.character
+      codepoint_to_utf16(end_line_text, loc_range.end.character)
+      if end_line_text is not None
+      else loc_range.end.character
     )
     return Range(
-        start=Position(line=loc_range.start.line, character=start_char),
-        end=Position(line=loc_range.end.line, character=end_char),
+      start=Position(line=loc_range.start.line, character=start_char),
+      end=Position(line=loc_range.end.line, character=end_char),
     )
 
   @classmethod
   def provide_definition(
-      cls,
-      ls: Any,
-      params: DefinitionParams,
-      find_node_fn: Optional[Any] = None,
+    cls,
+    ls: Any,
+    params: DefinitionParams,
+    find_node_fn: Optional[Any] = None,
   ) -> Optional[Location]:
     """Triggered when user requests Go to Definition."""
     uri = params.text_document.uri
@@ -567,9 +581,9 @@ class DefinitionProvider:
     line = params.position.line + 1
     line_text = get_doc_line(ls, uri, line)
     col = (
-        utf16_to_codepoint(line_text, params.position.character)
-        if line_text is not None
-        else params.position.character
+      utf16_to_codepoint(line_text, params.position.character)
+      if line_text is not None
+      else params.position.character
     )
 
     if find_node_fn is None:
@@ -585,26 +599,26 @@ class DefinitionProvider:
     if isinstance(node, ImportStmtNode):
       path_line = getattr(node, "path_line", getattr(node, "start_line", None))
       path_col = getattr(
-          node, "path_column", getattr(node, "start_column", None)
+        node, "path_column", getattr(node, "start_column", None)
       )
       path_len = getattr(node, "path_length", getattr(node, "length", None))
       if (
-          path_line is not None
-          and path_col is not None
-          and path_len is not None
-          and path_line == line
-          and path_col <= col < path_col + path_len
+        path_line is not None
+        and path_col is not None
+        and path_len is not None
+        and path_line == line
+        and path_col <= col < path_col + path_len
       ):
         ws_root = getattr(getattr(ls, "workspace", None), "root_uri", None)
         target_fs = resolve_module_path(uri, node.path, ws_root)
         if target_fs:
           target_uri = from_fs_path(os.path.abspath(target_fs))
           return Location(
-              uri=target_uri,
-              range=Range(
-                  start=Position(line=0, character=0),
-                  end=Position(line=0, character=0),
-              ),
+            uri=target_uri,
+            range=Range(
+              start=Position(line=0, character=0),
+              end=Position(line=0, character=0),
+            ),
           )
     elif isinstance(node, (IdentifierNode, MoveNode)):
       # Resolve local declarations (parameters, let/var, unwrap/loop bindings)
@@ -613,17 +627,17 @@ class DefinitionProvider:
       if not target_ast:
         sym = sym_table.lookup(node.name)
         if (
-            sym
-            and type(sym).__name__ == "ModuleSymbol"
-            and getattr(sym, "file_path", None)
+          sym
+          and type(sym).__name__ == "ModuleSymbol"
+          and getattr(sym, "file_path", None)
         ):
           mod_uri = from_fs_path(os.path.abspath(sym.file_path))
           return Location(
-              uri=mod_uri,
-              range=Range(
-                  start=Position(line=0, character=0),
-                  end=Position(line=0, character=0),
-              ),
+            uri=mod_uri,
+            range=Range(
+              start=Position(line=0, character=0),
+              end=Position(line=0, character=0),
+            ),
           )
         target_ast = cls._extract_decl_ast(sym)
       if not target_ast:
@@ -642,7 +656,7 @@ class DefinitionProvider:
           target_ast = type_obj.ast_decl
     elif isinstance(node, MemberAccessNode):
       target_ast = cls._resolve_member_definition(
-          ls, node, sym_table, node_types
+        ls, node, sym_table, node_types
       )
     elif isinstance(node, BasicTypeNode):
       if "." in node.name:
@@ -656,10 +670,9 @@ class DefinitionProvider:
           target_ast = type_obj.ast_decl
     elif isinstance(node, StructDeclNode):
       for info in getattr(node, "parent_names_info", []):
-        if (
-            info.get("line") == line
-            and info.get("column") <= col < info.get("column") + info.get("length")
-        ):
+        if info.get("line") == line and info.get("column") <= col < info.get(
+          "column"
+        ) + info.get("length"):
           parent_type = sym_table.lookup_type(info["name"])
           if getattr(parent_type, "ast_decl", None):
             target_ast = parent_type.ast_decl
@@ -679,17 +692,17 @@ class DefinitionProvider:
         if getattr(struct_type, "ast_decl", None):
           target_ast = struct_type.ast_decl
     elif isinstance(
-        node,
-        (
-            FuncDeclNode,
-            VarDeclNode,
-            HeaderBindingNode,
-            ParameterNode,
-            EnumDeclNode,
-            EnumMemberNode,
-            TraitDeclNode,
-            StructFieldNode,
-        ),
+      node,
+      (
+        FuncDeclNode,
+        VarDeclNode,
+        HeaderBindingNode,
+        ParameterNode,
+        EnumDeclNode,
+        EnumMemberNode,
+        TraitDeclNode,
+        StructFieldNode,
+      ),
     ):
       target_ast = node
 

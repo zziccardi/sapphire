@@ -4,79 +4,68 @@ This server provides diagnostics (syntax and semantic errors) and semantic
 tokens for accurate syntax highlighting in Visual Studio Code.
 """
 
-import sys
 import os
 from typing import Any, List, Optional
 
-# Add repository root to Python path to allow `from src...` imports when run directly
-sys.path.insert(0, os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..")))
-
-from antlr4 import InputStream, CommonTokenStream
+from antlr4 import CommonTokenStream, InputStream
 from antlr4.error.ErrorListener import ErrorListener
 from lsprotocol.types import (
-    Diagnostic,
-    DiagnosticSeverity,
-    Position,
-    Range,
-    SemanticTokens,
-    SemanticTokensLegend,
-    SemanticTokensParams,
-    TEXT_DOCUMENT_DID_CHANGE,
-    TEXT_DOCUMENT_DID_OPEN,
-    TEXT_DOCUMENT_DID_SAVE,
-    TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
-    Hover,
-    HoverParams,
-    CompletionList,
-    CompletionItem,
-    CompletionParams,
-    CompletionOptions,
-    DefinitionParams,
-    Location,
-    SignatureHelp,
-    SignatureHelpOptions,
-    SignatureHelpParams,
-    SignatureInformation,
-    ParameterInformation,
-    MarkupContent,
-    MarkupKind,
-    TEXT_DOCUMENT_HOVER,
-    TEXT_DOCUMENT_COMPLETION,
-    TEXT_DOCUMENT_DEFINITION,
-    TEXT_DOCUMENT_SIGNATURE_HELP,
-    TEXT_DOCUMENT_DOCUMENT_SYMBOL,
-    DocumentSymbol,
-    DocumentSymbolParams,
-    PublishDiagnosticsParams,
-    WORKSPACE_DID_CHANGE_WATCHED_FILES,
+  TEXT_DOCUMENT_COMPLETION,
+  TEXT_DOCUMENT_DEFINITION,
+  TEXT_DOCUMENT_DID_CHANGE,
+  TEXT_DOCUMENT_DID_OPEN,
+  TEXT_DOCUMENT_DID_SAVE,
+  TEXT_DOCUMENT_DOCUMENT_SYMBOL,
+  TEXT_DOCUMENT_HOVER,
+  TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
+  TEXT_DOCUMENT_SIGNATURE_HELP,
+  WORKSPACE_DID_CHANGE_WATCHED_FILES,
+  CompletionItem,
+  CompletionList,
+  CompletionOptions,
+  CompletionParams,
+  DefinitionParams,
+  Diagnostic,
+  DiagnosticSeverity,
+  DocumentSymbolParams,
+  Hover,
+  HoverParams,
+  Location,
+  Position,
+  PublishDiagnosticsParams,
+  Range,
+  SemanticTokens,
+  SemanticTokensLegend,
+  SemanticTokensParams,
+  SignatureHelp,
+  SignatureHelpOptions,
+  SignatureHelpParams,
 )
 from pygls.lsp.server import LanguageServer
 
 # Imports from compiler codebase
 from src.common.errors import SapphireSyntaxError
-from src.parser.gen.SapphireLexer import SapphireLexer
-from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.lsp.semantic_tokens import (
-    SemanticTokensTypeChecker,
-    codepoint_span_to_utf16,
-    encode_semantic_tokens,
-    TOKEN_TYPES,
-    TOKEN_MODIFIERS,
-    find_node_at_position,
+from src.lsp.definition_provider import (
+  DefinitionProvider,
+)
+from src.lsp.definition_provider import (
+  resolve_module_path as _resolve_module_path,
 )
 from src.lsp.document_symbols import extract_document_symbols
 from src.lsp.hover_provider import (
-    HoverProvider,
-    format_ast_expr as _format_ast_expr,
+  HoverProvider,
 )
-from src.lsp.definition_provider import (
-    DefinitionProvider,
-    find_local_decl as _find_local_decl,
-    resolve_module_path as _resolve_module_path,
+from src.lsp.semantic_tokens import (
+  TOKEN_MODIFIERS,
+  TOKEN_TYPES,
+  SemanticTokensTypeChecker,
+  codepoint_span_to_utf16,
+  encode_semantic_tokens,
+  find_node_at_position,
 )
-
+from src.parser.ast_builder import ASTBuilder
+from src.parser.gen.SapphireLexer import SapphireLexer
+from src.parser.gen.SapphireParser import SapphireParser
 
 
 class SapphireLanguageServer(LanguageServer):
@@ -105,11 +94,14 @@ class ANTLRDiagnosticListener(ErrorListener):
 
   def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
     length = 1
-    if (offendingSymbol and hasattr(offendingSymbol, "text") and
-        offendingSymbol.text):
+    if (
+      offendingSymbol
+      and hasattr(offendingSymbol, "text")
+      and offendingSymbol.text
+    ):
       length = len(offendingSymbol.text)
 
-    from src.code_gen.transpiler import format_syntax_error_message
+    from src.parser.error_listener import format_syntax_error_message
 
     custom_msg = format_syntax_error_message(recognizer, offendingSymbol, msg)
 
@@ -117,19 +109,19 @@ class ANTLRDiagnosticListener(ErrorListener):
     end_char = column + length
     if self._lines is not None and 0 <= line - 1 < len(self._lines):
       start_char, u16_len = codepoint_span_to_utf16(
-          self._lines[line - 1], column, length
+        self._lines[line - 1], column, length
       )
       end_char = start_char + u16_len
 
     # LSP Diagnostic structure
     diag = Diagnostic(
-        range=Range(
-            start=Position(line=line - 1, character=start_char),
-            end=Position(line=line - 1, character=end_char),
-        ),
-        message=f"Syntax Error: {custom_msg}",
-        severity=DiagnosticSeverity.Error,
-        source="sapphire-parser",
+      range=Range(
+        start=Position(line=line - 1, character=start_char),
+        end=Position(line=line - 1, character=end_char),
+      ),
+      message=f"Syntax Error: {custom_msg}",
+      severity=DiagnosticSeverity.Error,
+      source="sapphire-parser",
     )
     self.diagnostics.append(diag)
 
@@ -174,8 +166,14 @@ def _is_uri_open_in_workspace(ls: SapphireLanguageServer, uri: str) -> bool:
   return False
 
 
-def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: Any, ws_root: Optional[str] = None) -> None:
+def _preload_module_dependencies(
+  ls: SapphireLanguageServer,
+  doc_uri: str,
+  ast: Any,
+  ws_root: Optional[str] = None,
+) -> None:
   from pygls.uris import from_fs_path
+
   for s_decl in getattr(ast, "imports", []):
     if getattr(s_decl, "path", None):
       mod_path_fs = _resolve_module_path(doc_uri, s_decl.path, ws_root)
@@ -183,7 +181,8 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
         abs_mod_path = os.path.abspath(mod_path_fs)
         mod_uri = from_fs_path(abs_mod_path)
         s_decl.target_file_uri = mod_uri
-        # Do not clobber unsaved in-memory editor buffers with stale on-disk files.
+        # Do not clobber unsaved in-memory editor buffers with stale on-disk
+        # files.
         if _is_uri_open_in_workspace(ls, mod_uri) and mod_uri in ls.ast_cache:
           continue
         try:
@@ -193,7 +192,9 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
           mtime_key = None
 
         cached_mtime = ls.mtime_cache.get(mod_uri)
-        if mod_uri not in ls.ast_cache or (mtime_key is not None and cached_mtime != mtime_key):
+        if mod_uri not in ls.ast_cache or (
+          mtime_key is not None and cached_mtime != mtime_key
+        ):
           try:
             with open(mod_path_fs, "r", encoding="utf-8") as f:
               sub_code = f.read()
@@ -206,7 +207,9 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
             sub_ast = ASTBuilder().visit(sub_tree)
             if sub_ast:
               _mark_file_uri(sub_ast, mod_uri)
-              sub_checker = SemanticTokensTypeChecker(sub_code, source_file_path=mod_path_fs)
+              sub_checker = SemanticTokensTypeChecker(
+                sub_code, source_file_path=mod_path_fs
+              )
               try:
                 sub_checker.check(sub_ast)
               except Exception:
@@ -221,8 +224,9 @@ def _preload_module_dependencies(ls: SapphireLanguageServer, doc_uri: str, ast: 
             pass
 
 
-def validate_source(ls: SapphireLanguageServer, doc_uri: str,
-                    doc_text: str) -> None:
+def validate_source(
+  ls: SapphireLanguageServer, doc_uri: str, doc_text: str
+) -> None:
   """Run lexical, syntactic, and semantic validation on the source text."""
   input_stream = InputStream(doc_text)
   listener = ANTLRDiagnosticListener(doc_text)
@@ -242,7 +246,10 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   ast = None
   ast_error = None
   from pygls.uris import to_fs_path
-  doc_fs_path = to_fs_path(doc_uri) if doc_uri.startswith("file://") else doc_uri
+
+  doc_fs_path = (
+    to_fs_path(doc_uri) if doc_uri.startswith("file://") else doc_uri
+  )
   checker = SemanticTokensTypeChecker(doc_text, source_file_path=doc_fs_path)
   try:
     builder = ASTBuilder()
@@ -259,31 +266,31 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
     end_char = err_col + err_len
     if 0 <= err_line - 1 < len(lines):
       start_char, u16_len = codepoint_span_to_utf16(
-          lines[err_line - 1], err_col, err_len
+        lines[err_line - 1], err_col, err_len
       )
       end_char = start_char + max(1, u16_len)
     listener.diagnostics.append(
-        Diagnostic(
-            range=Range(
-                start=Position(line=err_line - 1, character=start_char),
-                end=Position(line=err_line - 1, character=end_char),
-            ),
-            message=f"Syntax Error: {syn_err.message}",
-            severity=DiagnosticSeverity.Error,
-            source="sapphire-parser",
-        )
+      Diagnostic(
+        range=Range(
+          start=Position(line=err_line - 1, character=start_char),
+          end=Position(line=err_line - 1, character=end_char),
+        ),
+        message=f"Syntax Error: {syn_err.message}",
+        severity=DiagnosticSeverity.Error,
+        source="sapphire-parser",
+      )
     )
   except Exception as e:  # pragma: no cover
     ast_error = str(e)
 
   has_syntax_errors = bool(listener.diagnostics)
   has_usable_ast = bool(
-      ast
-      and (
-          getattr(ast, "declarations", None)
-          or getattr(ast, "imports", None)
-          or doc_uri not in ls.ast_cache
-      )
+    ast
+    and (
+      getattr(ast, "declarations", None)
+      or getattr(ast, "imports", None)
+      or doc_uri not in ls.ast_cache
+    )
   )
   # Preserve existing semantic tokens when syntax errors occur during typing,
   # while still keeping partial AST/symbol caches fresh when declarations exist.
@@ -292,10 +299,14 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
     ls.tokens_cache[doc_uri] = encoded
   elif ast and doc_uri not in ls.tokens_cache:
     ls.tokens_cache[doc_uri] = encode_semantic_tokens(
-        checker.raw_tokens, doc_text=doc_text
+      checker.raw_tokens, doc_text=doc_text
     )
 
-  if has_usable_ast and (not has_syntax_errors or getattr(ast, "declarations", None) or doc_uri not in ls.ast_cache):
+  if has_usable_ast and (
+    not has_syntax_errors
+    or getattr(ast, "declarations", None)
+    or doc_uri not in ls.ast_cache
+  ):
     ls.ast_cache[doc_uri] = ast
     ls.node_types_cache[doc_uri] = checker.node_types
     ls.symbol_table_cache[doc_uri] = checker.symbol_table
@@ -307,26 +318,26 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   # If syntax errors are present, report them immediately
   if has_syntax_errors:
     ls.text_document_publish_diagnostics(
-        PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
+      PublishDiagnosticsParams(uri=doc_uri, diagnostics=listener.diagnostics)
     )
     return
 
   if ast_error and not ast:
     ls.text_document_publish_diagnostics(
-        PublishDiagnosticsParams(
-            uri=doc_uri,
-            diagnostics=[
-                Diagnostic(
-                    range=Range(
-                        start=Position(line=0, character=0),
-                        end=Position(line=0, character=1),
-                    ),
-                    message=f"Internal AST generation failure: {ast_error}",
-                    severity=DiagnosticSeverity.Error,
-                    source="sapphire-compiler",
-                )
-            ],
-        )
+      PublishDiagnosticsParams(
+        uri=doc_uri,
+        diagnostics=[
+          Diagnostic(
+            range=Range(
+              start=Position(line=0, character=0),
+              end=Position(line=0, character=1),
+            ),
+            message=f"Internal AST generation failure: {ast_error}",
+            severity=DiagnosticSeverity.Error,
+            source="sapphire-compiler",
+          )
+        ],
+      )
     )
     return
 
@@ -334,41 +345,41 @@ def validate_source(ls: SapphireLanguageServer, doc_uri: str,
   diagnostics = []
   for err in checker.lsp_errors:
     start_pos = Position(
-        line=err["range"]["start"]["line"],
-        character=err["range"]["start"]["character"],
+      line=err["range"]["start"]["line"],
+      character=err["range"]["start"]["character"],
     )
     end_pos = Position(
-        line=err["range"]["end"]["line"],
-        character=err["range"]["end"]["character"],
+      line=err["range"]["end"]["line"],
+      character=err["range"]["end"]["character"],
     )
     diagnostics.append(
-        Diagnostic(
-            range=Range(start=start_pos, end=end_pos),
-            message=err["message"],
-            severity=DiagnosticSeverity.Error,
-            source="sapphire-semantics",
-        )
+      Diagnostic(
+        range=Range(start=start_pos, end=end_pos),
+        message=err["message"],
+        severity=DiagnosticSeverity.Error,
+        source="sapphire-semantics",
+      )
     )
   for warn in getattr(checker, "lsp_warnings", []):
     start_pos = Position(
-        line=warn["range"]["start"]["line"],
-        character=warn["range"]["start"]["character"],
+      line=warn["range"]["start"]["line"],
+      character=warn["range"]["start"]["character"],
     )
     end_pos = Position(
-        line=warn["range"]["end"]["line"],
-        character=warn["range"]["end"]["character"],
+      line=warn["range"]["end"]["line"],
+      character=warn["range"]["end"]["character"],
     )
     diagnostics.append(
-        Diagnostic(
-            range=Range(start=start_pos, end=end_pos),
-            message=warn["message"],
-            severity=DiagnosticSeverity.Warning,
-            source="sapphire-semantics",
-        )
+      Diagnostic(
+        range=Range(start=start_pos, end=end_pos),
+        message=warn["message"],
+        severity=DiagnosticSeverity.Warning,
+        source="sapphire-semantics",
+      )
     )
 
   ls.text_document_publish_diagnostics(
-      PublishDiagnosticsParams(uri=doc_uri, diagnostics=diagnostics)
+    PublishDiagnosticsParams(uri=doc_uri, diagnostics=diagnostics)
   )
 
 
@@ -396,16 +407,20 @@ def did_save(ls: SapphireLanguageServer, params):
 
 @server.feature(WORKSPACE_DID_CHANGE_WATCHED_FILES)
 def did_change_watched_files(ls: SapphireLanguageServer, params):
-  """No-op handler to silent log warnings from workspace/didChangeWatchedFiles."""
+  """No-op handler to silent log warnings from workspace/didChangeWatchedFiles.
+  """
   pass
 
 
 @server.feature(
-    TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
-    SemanticTokensLegend(token_types=TOKEN_TYPES,
-                         token_modifiers=TOKEN_MODIFIERS))
-def semantic_tokens_full(ls: SapphireLanguageServer,
-                         params: SemanticTokensParams) -> SemanticTokens:
+  TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
+  SemanticTokensLegend(
+    token_types=TOKEN_TYPES, token_modifiers=TOKEN_MODIFIERS
+  ),
+)
+def semantic_tokens_full(
+  ls: SapphireLanguageServer, params: SemanticTokensParams
+) -> SemanticTokens:
   """Returns the cached semantic tokens for the document."""
   uri = params.text_document.uri
   # Re-validate if document is not in cache (e.g. freshly opened or not
@@ -420,9 +435,11 @@ def semantic_tokens_full(ls: SapphireLanguageServer,
 
 @server.feature(TEXT_DOCUMENT_DOCUMENT_SYMBOL)
 def document_symbol(
-    ls: SapphireLanguageServer, params: DocumentSymbolParams
+  ls: SapphireLanguageServer, params: DocumentSymbolParams
 ) -> list:
-  """Triggered to populate the Outline pane, Breadcrumbs, and Go to Symbol in File."""
+  """Triggered to populate the Outline pane, Breadcrumbs, and Go to Symbol in
+  File.
+  """
   uri = params.text_document.uri
   if uri not in ls.ast_cache:
     doc = ls.workspace.get_text_document(uri)
@@ -430,6 +447,7 @@ def document_symbol(
       validate_source(ls, uri, doc.source)
 
   from src.parser.ast import ProgramNode
+
   ast = ls.ast_cache.get(uri)
   if not ast or not isinstance(ast, ProgramNode):
     return []
@@ -440,24 +458,30 @@ def document_symbol(
 @server.feature(TEXT_DOCUMENT_HOVER)
 def hover(ls: SapphireLanguageServer, params: HoverParams) -> Optional[Hover]:
   """Triggered when user hovers over an identifier."""
-  return HoverProvider.provide_hover(ls, params, find_node_fn=find_node_at_position)
+  return HoverProvider.provide_hover(
+    ls, params, find_node_fn=find_node_at_position
+  )
 
 
 @server.feature(TEXT_DOCUMENT_DEFINITION)
-def definition(ls: SapphireLanguageServer, params: DefinitionParams) -> Optional[Location]:
+def definition(
+  ls: SapphireLanguageServer, params: DefinitionParams
+) -> Optional[Location]:
   """Triggered when user requests Go to Definition (F12 or Cmd+Click)."""
-  return DefinitionProvider.provide_definition(ls, params, find_node_fn=find_node_at_position)
+  return DefinitionProvider.provide_definition(
+    ls, params, find_node_fn=find_node_at_position
+  )
 
 
 SIGNATURE_HELP_TRIGGER_CHARACTERS = ["(", ","]
 
 
 @server.feature(
-    TEXT_DOCUMENT_SIGNATURE_HELP,
-    SignatureHelpOptions(trigger_characters=SIGNATURE_HELP_TRIGGER_CHARACTERS)
+  TEXT_DOCUMENT_SIGNATURE_HELP,
+  SignatureHelpOptions(trigger_characters=SIGNATURE_HELP_TRIGGER_CHARACTERS),
 )
 def signature_help(
-    ls: SapphireLanguageServer, params: SignatureHelpParams
+  ls: SapphireLanguageServer, params: SignatureHelpParams
 ) -> Optional[SignatureHelp]:
   """Triggered when user types '(' or ',' or requests parameter hints."""
   from src.lsp.signature_provider import SignatureProvider
@@ -466,32 +490,91 @@ def signature_help(
 
 
 TRIGGER_CHARACTERS = [
-    ".", ":", "@",
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-    "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-    "_",
+  ".",
+  ":",
+  "@",
+  "a",
+  "b",
+  "c",
+  "d",
+  "e",
+  "f",
+  "g",
+  "h",
+  "i",
+  "j",
+  "k",
+  "l",
+  "m",
+  "n",
+  "o",
+  "p",
+  "q",
+  "r",
+  "s",
+  "t",
+  "u",
+  "v",
+  "w",
+  "x",
+  "y",
+  "z",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "J",
+  "K",
+  "L",
+  "M",
+  "N",
+  "O",
+  "P",
+  "Q",
+  "R",
+  "S",
+  "T",
+  "U",
+  "V",
+  "W",
+  "X",
+  "Y",
+  "Z",
+  "_",
 ]
 
 
 def _get_scope_completion_items(
-    ast, line: int, col: int, uri: str, ls: SapphireLanguageServer, node_types: dict
+  ast,
+  line: int,
+  col: int,
+  uri: str,
+  ls: SapphireLanguageServer,
+  node_types: dict,
 ) -> List[CompletionItem]:
-  """Backward-compatible wrapper around completion_provider.get_scope_completion_items."""
+  """Backward-compatible wrapper around
+  completion_provider.get_scope_completion_items.
+  """
   from src.lsp.completion_provider import get_scope_completion_items
 
   return get_scope_completion_items(ast, line, col, uri, ls, node_types)
 
 
 @server.feature(
-    TEXT_DOCUMENT_COMPLETION,
-    CompletionOptions(trigger_characters=TRIGGER_CHARACTERS),
+  TEXT_DOCUMENT_COMPLETION,
+  CompletionOptions(trigger_characters=TRIGGER_CHARACTERS),
 )
 def completion(
-    ls: SapphireLanguageServer, params: CompletionParams
+  ls: SapphireLanguageServer, params: CompletionParams
 ) -> CompletionList:
-  """Triggered when user requests completion (dot-access or scope-level identifier)."""
+  """Triggered when user requests completion (dot-access or scope-level
+  identifier).
+  """
   from src.lsp.completion_provider import CompletionProvider
 
   return CompletionProvider.provide_completion(ls, params)

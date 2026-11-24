@@ -4,19 +4,24 @@ import math as _math
 
 _builtins_abs = abs
 
+
 def abs(x):
   return -x if x < 0 else x
+
 
 def sqrt(x):
   if x < 0:
     return None
   return _math.sqrt(x)
 
+
 def min(a, b):
   return a if a < b else b
 
+
 def max(a, b):
   return a if a > b else b
+
 
 def safe_div__int(a, b):
   if b == 0:

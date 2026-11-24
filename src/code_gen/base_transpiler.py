@@ -1,64 +1,70 @@
 """Abstract base class for all Sapphire transpiler backends.
 
 Defines the visitor interface contract that every code-generation backend must
-satisfy. Subclasses that omit any `@abstractmethod` will raise `TypeError` at
-import time, making backend divergence impossible to miss.
+satisfy. Concrete subclasses that omit any `@abstractmethod` raise `TypeError`
+at class definition time via `BaseTranspiler.__init_subclass__`, making backend
+divergence impossible to miss.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set
 
 from src.parser.ast import (
-    ASTNode,
-    ArrayLiteralNode,
-    AssignmentNode,
-    BinaryOpNode,
-    BlockNode,
-    BreakNode,
-    CastExprNode,
-    CallNode,
-    CloneNode,
-    ContinueNode,
-    EllipsisPatternNode,
-    EnumDeclNode,
-    ExportStmtNode,
-    ExprStmtNode,
-    ForNode,
-    FuncDeclNode,
-    GuardClauseNode,
-    GuardStmtNode,
-    IdentifierNode,
-    IfNode,
-    ImplBlockNode,
-    ImplMemberNode,
-    IndexExprNode,
-    InterpolatedStringNode,
-    LambdaNode,
-    LiteralNode,
-    MapLiteralNode,
-    MatchExprNode,
-    MemberAccessNode,
-    MoveNode,
-    ProgramNode,
-    ReturnNode,
-    StructDeclNode,
-    StructFieldNode,
-    StructInitializerNode,
-    TernaryExprNode,
-    TraitDeclNode,
-    UnaryOpNode,
-    VarDeclNode,
-    WhileNode,
-    YieldNode,
-    ImportStmtNode,
-    BasicTypeNode,
-    OptionalTypeNode,
-    TypeNode,
+  ArrayLiteralNode,
+  AssignmentNode,
+  ASTNode,
+  BasicTypeNode,
+  BinaryOpNode,
+  BlockNode,
+  BreakNode,
+  CallNode,
+  CastExprNode,
+  CloneNode,
+  ContinueNode,
+  EllipsisPatternNode,
+  EnumDeclNode,
+  ExportStmtNode,
+  ExprStmtNode,
+  ForNode,
+  FuncDeclNode,
+  GuardClauseNode,
+  GuardStmtNode,
+  IdentifierNode,
+  IfNode,
+  ImplBlockNode,
+  ImplMemberNode,
+  ImportStmtNode,
+  IndexExprNode,
+  InterpolatedStringNode,
+  LambdaNode,
+  LiteralNode,
+  MapLiteralNode,
+  MatchExprNode,
+  MemberAccessNode,
+  MoveNode,
+  OptionalTypeNode,
+  ProgramNode,
+  ReturnNode,
+  StructDeclNode,
+  StructFieldNode,
+  StructInitializerNode,
+  TernaryExprNode,
+  TraitDeclNode,
+  TypeNode,
+  UnaryOpNode,
+  VarDeclNode,
+  WhileNode,
+  YieldNode,
 )
 
 
-def get_default_value_for_type_node(type_node: Optional[TypeNode]) -> Optional[ASTNode]:
-  """Returns a reasonable default literal ASTNode for uninitialized variables and struct fields."""
+def get_default_value_for_type_node(
+  type_node: Optional[TypeNode],
+) -> Optional[ASTNode]:
+  """Returns a reasonable default literal ASTNode for uninitialized variables
+  and
+  struct fields.
+  """
   if type_node is None:
     return None
   if isinstance(type_node, OptionalTypeNode):
@@ -74,7 +80,9 @@ def get_default_value_for_type_node(type_node: Optional[TypeNode]) -> Optional[A
 
 
 def is_coroutine_func(node: Optional[ASTNode]) -> bool:
-  """Returns True if a FuncDeclNode, ImplMemberNode, or FunctionType returns Coroutine."""
+  """Returns True if a FuncDeclNode, ImplMemberNode, or FunctionType returns
+  Coroutine.
+  """
   if node is None:
     return False
   func_node = getattr(node, "func_decl", node)
@@ -83,7 +91,10 @@ def is_coroutine_func(node: Optional[ASTNode]) -> bool:
       if isinstance(t, BasicTypeNode) and t.name == "Coroutine":
         return True
   if getattr(func_node, "return_type", None):
-    if isinstance(func_node.return_type, BasicTypeNode) and func_node.return_type.name == "Coroutine":
+    if (
+      isinstance(func_node.return_type, BasicTypeNode)
+      and func_node.return_type.name == "Coroutine"
+    ):
       return True
   return False
 
@@ -118,11 +129,35 @@ class BaseTranspiler(ABC):
   """Abstract base for all Sapphire code-generation backends.
 
   Every concrete backend (e.g. `PythonTranspiler`, `LuaTranspiler`) must
-  implement all visitor methods declared here. Python's `ABCMeta` machinery
-  raises `TypeError` at *class definition time* if any `@abstractmethod` is
-  left unimplemented, so a new AST node added to one backend but not the other
-  will be caught immediately -- before any tests are even run.
+  implement all visitor methods declared here. While Python's `ABCMeta` only
+  raises `TypeError` at instantiation time, `__init_subclass__` enforces
+  `@abstractmethod` completeness at *class definition time* for concrete
+  subclasses (pass `allow_abstract=True` or inherit directly from `ABC` for
+  intermediate abstract bases), catching backend divergence at import time.
   """
+
+  def __init_subclass__(
+    cls, *, allow_abstract: bool = False, **kwargs: Any
+  ) -> None:
+    """Enforces @abstractmethod completeness at class definition time."""
+    super().__init_subclass__(**kwargs)
+    if allow_abstract or ABC in cls.__bases__:
+      return
+    abstracts: Set[str] = set()
+    for base in cls.__mro__[1:]:
+      for name in getattr(base, "__abstractmethods__", ()):
+        value = getattr(cls, name, None)
+        if getattr(value, "__isabstractmethod__", False):
+          abstracts.add(name)
+    for name, value in cls.__dict__.items():
+      if getattr(value, "__isabstractmethod__", False):
+        abstracts.add(name)
+    if abstracts:
+      missing = ", ".join(sorted(abstracts))
+      raise TypeError(
+        f"Can't define concrete transpiler class {cls.__name__} "
+        f"without implementing abstract methods: {missing}"
+      )
 
   # ------------------------------------------------------------------
   # Core interface & shared helpers
@@ -140,7 +175,9 @@ class BaseTranspiler(ABC):
 
   @abstractmethod
   def generic_visit(self, node: ASTNode) -> None:
-    """Called when no specific visitor exists; should raise `NotImplementedError`."""
+    """Called when no specific visitor exists; should raise
+    `NotImplementedError`.
+    """
 
   def emit(self, text: str) -> None:
     """Append *text* to the output buffer."""
@@ -164,7 +201,9 @@ class BaseTranspiler(ABC):
     return "".join(self.code)
 
   def _next_temp_name(self, prefix: str = "_sp_tmp") -> str:
-    """Generates a unique temporary identifier name for this transpiler instance."""
+    """Generates a unique temporary identifier name for this transpiler
+    instance.
+    """
     counts = getattr(self, "_temp_name_counters", None)
     if counts is None:
       counts = {}
@@ -174,18 +213,21 @@ class BaseTranspiler(ABC):
     return f"{prefix}_{n}"
 
   def _type_needs_destructor(
-      self, type_obj: Any, _seen: Optional[Set[str]] = None
+    self, type_obj: Any, _seen: Optional[Set[str]] = None
   ) -> Optional[str]:
-    """Returns the destructible type name if *type_obj* requires deterministic teardown."""
+    """Returns the destructible type name if *type_obj* requires deterministic
+    teardown.
+    """
     if type_obj is None:
       return None
     from src.semantics.types import (
-        ArenaType,
-        OptionalType,
-        RefType,
-        SharedRefType,
-        StructType,
+      ArenaType,
+      OptionalType,
+      RefType,
+      SharedRefType,
+      StructType,
     )
+
     if isinstance(type_obj, OptionalType):
       return self._type_needs_destructor(type_obj.base_type, _seen)
     if isinstance(type_obj, ArenaType):
@@ -210,13 +252,19 @@ class BaseTranspiler(ABC):
           return type_obj.name
     return None
 
-  def _expr_destructible_struct(self, expr: Any, return_index: int = 0) -> Optional[str]:
-    """Determines if *expr* evaluates to a destructible type (RAII struct, Arena, Ref, SharedRef)."""
+  def _expr_destructible_struct(
+    self, expr: Any, return_index: int = 0
+  ) -> Optional[str]:
+    """Determines if *expr* evaluates to a destructible type (RAII struct,
+    Arena,
+    Ref, SharedRef).
+    """
     if expr is None:
       return None
     inferred = getattr(expr, "inferred_type", None)
     if inferred is not None:
       from src.semantics.types import MultiReturnType
+
       if isinstance(inferred, MultiReturnType):
         if return_index < len(inferred.types):
           inferred = inferred.types[return_index]
@@ -233,36 +281,43 @@ class BaseTranspiler(ABC):
           return expr.callee.name
         if expr.callee.name in self.func_return_types:
           rets = self.func_return_types[expr.callee.name]
-          if return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+          if (
+            return_index < len(rets)
+            and rets[return_index] in self.structs_with_destructor
+          ):
             return rets[return_index]
       elif isinstance(expr.callee, MemberAccessNode):
         if getattr(expr.callee, "is_shared_ref_share", False) or getattr(
-            expr.callee, "is_weak_ref_upgrade", False
+          expr.callee, "is_weak_ref_upgrade", False
         ):
           return "SharedRef"
         m_name = expr.callee.member
         recv_struct = None
         if isinstance(expr.callee.receiver, IdentifierNode):
           rm = (
-              self._mangle_name(expr.callee.receiver.name)
-              if hasattr(self, "_mangle_name")
-              else expr.callee.receiver.name
+            self._mangle_name(expr.callee.receiver.name)
+            if hasattr(self, "_mangle_name")
+            else expr.callee.receiver.name
           )
           recv_struct = self.variable_types.get(rm) or self.variable_types.get(
-              expr.callee.receiver.name
+            expr.callee.receiver.name
           )
         rets = (
-            self.method_return_types.get((recv_struct, m_name))
-            if recv_struct
-            else None
+          self.method_return_types.get((recv_struct, m_name))
+          if recv_struct
+          else None
         )
-        if rets and return_index < len(rets) and rets[return_index] in self.structs_with_destructor:
+        if (
+          rets
+          and return_index < len(rets)
+          and rets[return_index] in self.structs_with_destructor
+        ):
           return rets[return_index]
     elif isinstance(expr, (IdentifierNode, MoveNode)):
       m_name = (
-          self._mangle_name(expr.name)
-          if hasattr(self, "_mangle_name")
-          else expr.name
+        self._mangle_name(expr.name)
+        if hasattr(self, "_mangle_name")
+        else expr.name
       )
       if m_name in self.variable_types:
         st = self.variable_types[m_name]
@@ -273,53 +328,60 @@ class BaseTranspiler(ABC):
         if st in self.structs_with_destructor:
           return st
     elif isinstance(expr, TernaryExprNode):
-      return (
-          self._expr_destructible_struct(expr.true_expr, return_index=return_index)
-          or self._expr_destructible_struct(expr.false_expr, return_index=return_index)
+      return self._expr_destructible_struct(
+        expr.true_expr, return_index=return_index
+      ) or self._expr_destructible_struct(
+        expr.false_expr, return_index=return_index
       )
     elif isinstance(expr, MatchExprNode):
       for case in expr.cases:
         if isinstance(case.body, BlockNode):
           for stmt in case.body.statements:
             if isinstance(stmt, YieldNode):
-              y_exprs = getattr(stmt, "expressions", None) or ([stmt.expr] if getattr(stmt, "expr", None) else [])
+              y_exprs = getattr(stmt, "expressions", None) or (
+                [stmt.expr] if getattr(stmt, "expr", None) else []
+              )
               if return_index < len(y_exprs):
                 st = self._expr_destructible_struct(y_exprs[return_index])
                 if st:
                   return st
         else:
-          st = self._expr_destructible_struct(case.body, return_index=return_index)
+          st = self._expr_destructible_struct(
+            case.body, return_index=return_index
+          )
           if st:
             return st
     return None
 
   @staticmethod
   def _is_owned_unwrap_expr(expr: Any) -> bool:
-    """Returns True if an optional unwrap expression owns the unwrapped value."""
+    """Returns True if an optional unwrap expression owns the unwrapped value.
+    """
     if isinstance(expr, MoveNode):
       return True
     if isinstance(expr, (IdentifierNode, MemberAccessNode, IndexExprNode)):
       return False
     # Array.get(...) and Map.get(...) return borrowed views into the container,
-    # never owned values to be destroyed at the end of an `if let`/`if var` block.
+    # never owned values to be destroyed at the end of an `if let`/`if var`
+    # block.
     if (
-        isinstance(expr, CallNode)
-        and isinstance(expr.callee, MemberAccessNode)
-        and expr.callee.member == "get"
-        and (
-            getattr(expr.callee, "is_array_method", False)
-            or getattr(expr.callee, "is_map_method", False)
-        )
+      isinstance(expr, CallNode)
+      and isinstance(expr.callee, MemberAccessNode)
+      and expr.callee.member == "get"
+      and (
+        getattr(expr.callee, "is_array_method", False)
+        or getattr(expr.callee, "is_map_method", False)
+      )
     ):
       return False
     return True
 
   def _register_binding_destructibles(
-      self,
-      binding_expr: Any,
-      let_names: List[str],
-      then_block: Any,
-      is_unwrap: bool,
+    self,
+    binding_expr: Any,
+    let_names: List[str],
+    then_block: Any,
+    is_unwrap: bool,
   ) -> List[str]:
     """Registers destructible struct bindings on *then_block* if owned."""
     st_name = self._expr_destructible_struct(binding_expr)
@@ -335,14 +397,20 @@ class BaseTranspiler(ABC):
     return list(let_names)
 
   def _is_active_destructible_var(self, m_name: str) -> bool:
-    """Returns True if *m_name* is tracked in an active destructor stack frame."""
+    """Returns True if *m_name* is tracked in an active destructor stack frame.
+    """
     return any(m_name in frame for frame in self.destructor_stack)
 
   def _record_move(self, m_name: str) -> None:
-    """Tracks unconditional vs conditional move of *m_name* for RAII drop flags."""
+    """Tracks unconditional vs conditional move of *m_name* for RAII drop flags.
+    """
     branch_depth = getattr(self, "_branch_depth", 0)
     var_depths = getattr(self, "_var_branch_depth", None)
-    decl_depth = var_depths.get(m_name, branch_depth) if var_depths is not None else branch_depth
+    decl_depth = (
+      var_depths.get(m_name, branch_depth)
+      if var_depths is not None
+      else branch_depth
+    )
     if decl_depth < branch_depth:
       pending = getattr(self, "_pending_null_vars", None)
       if pending is not None and m_name not in pending:
@@ -350,29 +418,36 @@ class BaseTranspiler(ABC):
     else:
       self.moved_vars.add(m_name)
       # Also emit nulling on unconditional moves of tracked destructible vars
-      # so a subsequent conditional reassignment cannot leave an aliased live handle.
+      # so a subsequent conditional reassignment cannot leave an aliased live
+      # handle.
       pending_uncond = getattr(self, "_pending_unconditional_null_vars", None)
       if (
-          pending_uncond is not None
-          and self._is_active_destructible_var(m_name)
-          and m_name not in pending_uncond
+        pending_uncond is not None
+        and self._is_active_destructible_var(m_name)
+        and m_name not in pending_uncond
       ):
         pending_uncond.append(m_name)
 
   def _is_struct_constructor_call(self, node: CallNode) -> bool:
-    """Returns True if *node* invokes a struct constructor (which takes ownership of args)."""
+    """Returns True if *node* invokes a struct constructor (which takes
+    ownership
+    of args).
+    """
     if getattr(node, "_is_struct_constructor", False):
       return True
     if isinstance(node.callee, IdentifierNode):
       name = node.callee.name
       if name in getattr(self, "known_structs", ()) or name in getattr(
-          self, "struct_parent_names", ()
+        self, "struct_parent_names", ()
       ):
         return True
     return False
 
   def _record_consumed_call_moves(self, args: List[Any]) -> None:
-    """Schedules deterministic teardown for destructible vars moved into borrowed calls."""
+    """Schedules deterministic teardown for destructible vars moved into
+    borrowed
+    calls.
+    """
     pending_del = getattr(self, "_pending_destroy_moved_vars", None)
     if pending_del is None:
       pending_del = []
@@ -381,15 +456,17 @@ class BaseTranspiler(ABC):
       expr = arg.expr if hasattr(arg, "expr") else arg
       if isinstance(expr, MoveNode):
         m_name = (
-            self._resolve_var_name(expr.name)
-            if hasattr(self, "_resolve_var_name")
-            else self._identifier_map.get(expr.name, self._mangle_name(expr.name))
+          self._resolve_var_name(expr.name)
+          if hasattr(self, "_resolve_var_name")
+          else self._identifier_map.get(expr.name, self._mangle_name(expr.name))
         )
-        if self._is_active_destructible_var(m_name) and m_name not in pending_del:
+        if (
+          self._is_active_destructible_var(m_name) and m_name not in pending_del
+        ):
           pending_del.append(m_name)
 
   def _drain_pending_destroy_moved_vars(
-      self, exclude: Optional[Set[str]] = None
+    self, exclude: Optional[Set[str]] = None
   ) -> None:
     """Emits destructors for destructible vars moved into borrowed calls."""
     pending_del = getattr(self, "_pending_destroy_moved_vars", None)
@@ -402,11 +479,14 @@ class BaseTranspiler(ABC):
     pending_del.clear()
 
   def _drain_pending_null_vars(
-      self,
-      null_literal: str,
-      exclude: Optional[Set[str]] = None,
+    self,
+    null_literal: str,
+    exclude: Optional[Set[str]] = None,
   ) -> None:
-    """Emits post-statement teardown & drop-flag clearing (`v = None` / `v = nil`) for moved vars."""
+    """Emits post-statement teardown & drop-flag clearing (`v = None` / `v =
+    nil`)
+    for moved vars.
+    """
     self._drain_pending_destroy_moved_vars(exclude=exclude)
     for attr in ("_pending_null_vars", "_pending_unconditional_null_vars"):
       pending = getattr(self, attr, None)
@@ -419,7 +499,9 @@ class BaseTranspiler(ABC):
       pending.clear()
 
   def _visit_in_branch(self, node: ASTNode) -> None:
-    """Visits *node* inside a conditional branch depth for move drop-flag tracking."""
+    """Visits *node* inside a conditional branch depth for move drop-flag
+    tracking.
+    """
     self._branch_depth = getattr(self, "_branch_depth", 0) + 1
     try:
       self.visit(node)
@@ -440,8 +522,13 @@ class BaseTranspiler(ABC):
             self.newline()
             self._emit_destructor_call(var_name)
 
-  def _collect_struct_metadata(self, program: ProgramNode, track_known_structs: bool = False) -> None:
-    """Collects struct methods, traits, return types, and destructors from program declarations."""
+  def _collect_struct_metadata(
+    self, program: ProgramNode, track_known_structs: bool = False
+  ) -> None:
+    """Collects struct methods, traits, return types, and destructors from
+    program
+    declarations.
+    """
     self.struct_default_trait_methods: Dict[str, List[Any]] = {}
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
@@ -460,10 +547,14 @@ class BaseTranspiler(ABC):
           if getattr(m, "func_decl", None):
             ret_names = get_return_type_names(m.func_decl)
             if ret_names:
-              self.method_return_types[(decl.struct_name, m.func_decl.name)] = ret_names
+              self.method_return_types[(decl.struct_name, m.func_decl.name)] = (
+                ret_names
+              )
         default_bindings = getattr(decl, "default_trait_members", None)
         if default_bindings:
-          self.struct_default_trait_methods.setdefault(decl.struct_name, []).extend(default_bindings)
+          self.struct_default_trait_methods.setdefault(
+            decl.struct_name, []
+          ).extend(default_bindings)
           for _trait_ref, m_name, _modifier, trait_member in default_bindings:
             ret_names = get_return_type_names(trait_member)
             if ret_names:
@@ -498,17 +589,17 @@ class BaseTranspiler(ABC):
       for decl in program.declarations:
         if isinstance(decl, StructDeclNode) and not decl.is_prototype:
           destructible_fields = [
-              f.name
-              for f in decl.fields
-              if extract_type_name(f.field_type) in self.structs_with_destructor
+            f.name
+            for f in decl.fields
+            if extract_type_name(f.field_type) in self.structs_with_destructor
           ]
           self.struct_destructible_fields[decl.name] = destructible_fields
           if decl.name not in self.structs_with_destructor and (
-              destructible_fields
-              or any(
-                  p in self.structs_with_destructor
-                  for p in (decl.parent_names or [])
-              )
+            destructible_fields
+            or any(
+              p in self.structs_with_destructor
+              for p in (decl.parent_names or [])
+            )
           ):
             self.structs_with_destructor.add(decl.name)
             changed = True
@@ -592,7 +683,9 @@ class BaseTranspiler(ABC):
   def visit_LiteralNode(self, node: LiteralNode) -> None: ...
 
   @abstractmethod
-  def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> None: ...
+  def visit_InterpolatedStringNode(
+    self, node: InterpolatedStringNode
+  ) -> None: ...
 
   @abstractmethod
   def visit_IdentifierNode(self, node: IdentifierNode) -> None: ...
@@ -634,7 +727,9 @@ class BaseTranspiler(ABC):
   def visit_IndexExprNode(self, node: IndexExprNode) -> None: ...
 
   @abstractmethod
-  def visit_StructInitializerNode(self, node: StructInitializerNode) -> None: ...
+  def visit_StructInitializerNode(
+    self, node: StructInitializerNode
+  ) -> None: ...
 
   @abstractmethod
   def visit_GuardClauseNode(self, node: GuardClauseNode) -> None: ...

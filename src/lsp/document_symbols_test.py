@@ -1,38 +1,31 @@
 """Unit tests for LSP Document Symbol extraction (document_symbols.py)."""
 
 import unittest
-from antlr4 import CommonTokenStream, InputStream
-from lsprotocol.types import SymbolKind, Range, Position
 
+from antlr4 import CommonTokenStream, InputStream
+from lsprotocol.types import SymbolKind
+
+from src.lsp.document_symbols import (
+  _create_range,
+  _ensure_contained,
+  _format_func_signature,
+  _format_type_node,
+  extract_document_symbols,
+)
+from src.parser.ast import (
+  ArrayTypeNode,
+  BasicTypeNode,
+  FunctionTypeNode,
+  ImplBlockNode,
+  MapTypeNode,
+  OptionalTypeNode,
+  ParameterNode,
+  ProgramNode,
+  VarDeclNode,
+)
+from src.parser.ast_builder import ASTBuilder
 from src.parser.gen.SapphireLexer import SapphireLexer
 from src.parser.gen.SapphireParser import SapphireParser
-from src.parser.ast_builder import ASTBuilder
-from src.parser.ast import (
-    ArrayTypeNode,
-    BasicTypeNode,
-    EnumDeclNode,
-    EnumMemberNode,
-    FuncDeclNode,
-    FunctionTypeNode,
-    ImplBlockNode,
-    ImplMemberNode,
-    MapTypeNode,
-    OptionalTypeNode,
-    ParameterNode,
-    ProgramNode,
-    StructDeclNode,
-    StructFieldNode,
-    TraitDeclNode,
-    TraitMemberNode,
-    VarDeclNode,
-)
-from src.lsp.document_symbols import (
-    _create_range,
-    _ensure_contained,
-    _format_func_signature,
-    _format_type_node,
-    extract_document_symbols,
-)
 
 
 def _parse_to_ast(source_text: str) -> ProgramNode:
