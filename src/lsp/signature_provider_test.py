@@ -204,12 +204,12 @@ class TestSignatureProviderIntegration(unittest.TestCase):
   """Integration tests using SapphireLanguageServer and real Sapphire source."""
 
   def _make_server_with_doc(self, uri: str, code: str) -> SapphireLanguageServer:
-    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    from testing.test_utils import FakeWorkspace
+
+    ls = SapphireLanguageServer(
+        "test-lsp", "0.1.0", workspace=FakeWorkspace({uri: code})
+    )
     ls.text_document_publish_diagnostics = MagicMock()
-    mock_doc = MagicMock()
-    mock_doc.source = code
-    ls.protocol._workspace = MagicMock()
-    ls.protocol._workspace.get_text_document.return_value = mock_doc
     validate_source(ls, uri, code)
     return ls
 

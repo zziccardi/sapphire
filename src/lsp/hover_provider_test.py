@@ -62,9 +62,10 @@ class TestHoverProvider(unittest.TestCase):
     self.assertIsNone(result)
 
   def test_hover_integration(self):
-    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    from testing.test_utils import FakeWorkspace
+
+    ls = SapphireLanguageServer("test-lsp", "0.1.0", workspace=FakeWorkspace())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///hover_test.sp"
     code = """
     // Represents a game weapon.
@@ -91,9 +92,10 @@ class TestHoverProvider(unittest.TestCase):
 
   def test_hover_qualified_ancestor_dispatch(self):
     """Verifies hover info on qualified ancestor method calls."""
-    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    from testing.test_utils import FakeWorkspace
+
+    ls = SapphireLanguageServer("test-lsp", "0.1.0", workspace=FakeWorkspace())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///hover_ancestor.sp"
     code = (
         "struct Base {\n"
@@ -130,9 +132,10 @@ class TestHoverProvider(unittest.TestCase):
 
   def test_hover_method_call_unwraps_struct_method_and_shadows_global(self):
     """Verifies CallNode(MemberAccessNode) unwraps StructMethod and local hover beats global."""
-    ls = SapphireLanguageServer("test-lsp", "0.1.0")
+    from testing.test_utils import FakeWorkspace
+
+    ls = SapphireLanguageServer("test-lsp", "0.1.0", workspace=FakeWorkspace())
     ls.text_document_publish_diagnostics = MagicMock()
-    ls.protocol._workspace = MagicMock()
     doc_uri = "file:///hover_bugfixes.sp"
     code = (
         "struct Base {\n"
@@ -148,10 +151,7 @@ class TestHoverProvider(unittest.TestCase):
         "  let a, msg = 1, \"hi\";\n"
         "}\n"
     )
-    doc = MagicMock()
-    doc.source = code
-    doc.uri = doc_uri
-    ls.workspace.get_text_document.return_value = doc
+    ls.workspace.put_document(doc_uri, code)
     validate_source(ls, doc_uri, code)
     lines = code.splitlines()
 

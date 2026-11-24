@@ -40,3 +40,38 @@ class TestTranspilerRegistry(unittest.TestCase):
     self.assertIn("python", targets)
     self.assertIn("lua", targets)
     self.assertIn("llvm", targets)
+
+  def test_create_isolated_registry(self):
+    reg = TranspilerRegistry.create_isolated()
+    self.assertEqual(reg.list_targets(), [])
+
+    @reg.register("dummy", "Dummy", ".dum")
+    class DummyTranspiler:
+      pass
+
+    self.assertEqual(reg.get("dummy").transpiler_cls, DummyTranspiler)
+    self.assertEqual(reg.list_targets(), ["dummy"])
+    with self.assertRaises(SapphireTranspileError):
+      reg.get("python")
+    with self.assertRaises(SapphireTranspileError):
+      TranspilerRegistry.get("dummy")
+
+    copied = TranspilerRegistry.create_isolated(copy_defaults=True)
+    self.assertIn("python", copied.list_targets())
+
+  def test_scoped_context_manager_restores_global_registry(self):
+    before = TranspilerRegistry.list_targets()
+    with TranspilerRegistry.scoped() as scoped_reg:
+      @scoped_reg.register(["temp_a", "temp_b"], "Temp", ".tmp")
+      class TempTranspiler:
+        pass
+
+      self.assertEqual(scoped_reg.get("temp_a").transpiler_cls, TempTranspiler)
+      self.assertIn("temp_b", scoped_reg.list_targets())
+
+    self.assertEqual(TranspilerRegistry.list_targets(), before)
+
+    with TranspilerRegistry.scoped(clear=True) as cleared_reg:
+      self.assertEqual(cleared_reg.list_targets(), [])
+
+    self.assertEqual(TranspilerRegistry.list_targets(), before)

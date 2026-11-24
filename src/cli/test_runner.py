@@ -1,7 +1,6 @@
 """Test discovery and execution engine for Sapphire (`sapphire test`)."""
 
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -269,51 +268,8 @@ def _mangle_lua_name(name: str) -> str:
   return name
 
 
-def _is_path_under(path: str, parent_dir: str) -> bool:
-  """Returns True if *path* is equal to or nested inside *parent_dir*."""
-  try:
-    return os.path.commonpath(
-      [os.path.abspath(parent_dir), os.path.abspath(path)]
-    ) == os.path.abspath(parent_dir)
-  except ValueError:
-    return False
-
-
-def _is_protected_module(
-  mod_name: str,
-  mod_obj: Any,
-  sp_dir: str,
-  out_dir: str | None,
-  compiler_lib_dir: str,
-) -> bool:
-  """Returns True if *mod_name* belongs to Python stdlib or the compiler."""
-  root_pkg = mod_name.split(".", 1)[0]
-  if (
-    root_pkg in sys.stdlib_module_names
-    or root_pkg in sys.builtin_module_names
-    or root_pkg in ("src", "antlr4", "std", "unittest", "pytest")
-  ):
-    return True
-  if mod_obj is None:
-    return False
-  mod_file = getattr(mod_obj, "__file__", None)
-  if not mod_file:
-    return True
-  if _is_path_under(mod_file, compiler_lib_dir) and not _is_path_under(
-    compiler_lib_dir, sp_dir
-  ):
-    return True
-  if _is_path_under(mod_file, sp_dir):
-    return False
-  if out_dir and _is_path_under(mod_file, out_dir):
-    return False
-  return True
-
-
-def _prepare_python_test_paths(
-  sp_file: str, out_dir: str | None = None
-) -> str:
-  """Configures sys.path and clears stale local test modules for *sp_file*."""
+def _build_python_search_paths(sp_file: str, out_dir: str) -> list[str]:
+  """Builds ordered sys.path entries for an isolated Python test subprocess."""
   workspace_root = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
   )
@@ -326,60 +282,287 @@ def _prepare_python_test_paths(
   lib_parent = os.path.dirname(lib_dir)
   sp_dir = os.path.dirname(os.path.abspath(sp_file))
   cwd = os.getcwd()
-  for path_entry in (workspace_root, lib_parent, lib_dir, cwd, sp_dir, out_dir):
-    if path_entry:
-      if path_entry in sys.path:
-        sys.path.remove(path_entry)
-      sys.path.insert(0, path_entry)
+  # Highest priority first: transpiled output dir, source dir, cwd, stdlib.
+  raw_entries = [out_dir, sp_dir, cwd, lib_dir, lib_parent, workspace_root]
+  deduped: list[str] = []
+  for entry in raw_entries:
+    if entry and entry not in deduped:
+      deduped.append(entry)
+  return deduped
 
-  # Clear stale local `lib` or test-dir modules so each test file loads fresh,
-  # while never evicting Python stdlib or Sapphire compiler modules.
-  sp_lib = os.path.abspath(os.path.join(sp_dir, "lib"))
-  out_lib = os.path.abspath(os.path.join(out_dir, "lib")) if out_dir else ""
-  has_local_sp_lib = os.path.isdir(sp_lib) and sp_lib != lib_dir
-  has_isolated_lib = bool(out_lib) and os.path.isdir(out_lib)
-  if has_local_sp_lib or has_isolated_lib:
-    for k in [
-      k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")
-    ]:
-      mod_obj = sys.modules.get(k)
-      mod_file = getattr(mod_obj, "__file__", None)
-      if (
-        has_isolated_lib
-        or mod_obj is None
-        or (mod_file and _is_path_under(mod_file, sp_lib))
-      ):
-        del sys.modules[k]
 
-  # Avoid walking the compiler source tree if a test resides at workspace root.
-  skip_dirs = {
-    os.path.abspath(os.path.join(workspace_root, "src")),
-    lib_dir,
-    os.path.abspath(os.path.join(workspace_root, "testing")),
-  }
-  for root, dirs, files in os.walk(sp_dir):
-    abs_root = os.path.abspath(root)
-    dirs[:] = [
-      d
-      for d in dirs
-      if d not in ("__pycache__", ".git", "node_modules")
-      and os.path.abspath(os.path.join(abs_root, d)) not in skip_dirs
-    ]
-    if abs_root in skip_dirs:
+_PYTHON_TEST_HARNESS_TEMPLATE = """import importlib.util
+import json
+import os
+import sys
+
+_CONFIG = {config_json}
+
+
+def _load_testing_module():
+  try:
+    import std.testing as testing
+    return testing
+  except ImportError:
+    from lib.std import testing
+    return testing
+
+
+def _lookup_attr(obj, primary, fallback):
+  val = getattr(obj, primary, None)
+  if val is None and primary != fallback:
+    val = getattr(obj, fallback, None)
+  return val
+
+
+def _run_standalone(mod, testing, entries):
+  results = []
+  for entry in entries:
+    fn_name = entry["name"]
+    test_func = _lookup_attr(mod, entry["mangled"], fn_name)
+    if not callable(test_func):
+      results.append({{
+        "label": fn_name,
+        "status": "error",
+        "error_kind": "not_found",
+        "message": f"Test function '{{fn_name}}' not found or not callable",
+        "failures": [],
+        "err": None,
+      }})
       continue
-    rel_root = os.path.relpath(root, sp_dir).replace(os.sep, ".")
-    for f in files:
-      if f.endswith(".py"):
-        base_f = os.path.splitext(f)[0]
-        mod_candidates = [base_f]
-        if rel_root != ".":
-          mod_candidates.append(f"{rel_root}.{base_f}")
-        for mc in mod_candidates:
-          if mc in sys.modules and not _is_protected_module(
-            mc, sys.modules.get(mc), sp_dir, out_dir, lib_dir
-          ):
-            del sys.modules[mc]
-  return sp_dir
+
+    ctx = testing.TestContext(fn_name)
+    testing.set_active_context(ctx)
+    err = None
+    try:
+      test_func()
+    except testing.TestFailure as tf:
+      err = str(tf)
+    except Exception as ex:
+      err = f"Unhandled Exception: {{ex}}"
+
+    results.append({{
+      "label": fn_name,
+      "status": "pass" if (not ctx.failures and err is None) else "fail",
+      "error_kind": None,
+      "message": None,
+      "failures": list(ctx.failures),
+      "err": err,
+    }})
+  return results
+
+
+def _run_suites(mod, testing, suites, sp_file):
+  results = []
+  for suite in suites:
+    struct_name = suite["struct"]
+    struct_cls = _lookup_attr(mod, suite["mangled"], struct_name)
+    for method in suite["methods"]:
+      m_name = method["name"]
+      full_name = f"{{struct_name}}.{{m_name}}"
+      if struct_cls is None:
+        results.append({{
+          "label": full_name,
+          "status": "error",
+          "error_kind": "not_found",
+          "message": f"Test suite struct '{{struct_name}}' not found",
+          "failures": [],
+          "err": None,
+        }})
+        continue
+
+      try:
+        instance = struct_cls()
+      except Exception as ex:
+        results.append({{
+          "label": full_name,
+          "status": "error",
+          "error_kind": "instantiation",
+          "message": f"instantiation failed: {{ex}}",
+          "failures": [],
+          "err": None,
+        }})
+        continue
+
+      ctx = testing.TestContext(full_name)
+      testing.set_active_context(ctx)
+      setup_fn = getattr(instance, "set_up", None) or getattr(
+        instance, "func_set_up", None
+      )
+      if setup_fn:
+        try:
+          setup_fn()
+        except Exception as ex:
+          results.append({{
+            "label": full_name,
+            "status": "error",
+            "error_kind": "setup",
+            "message": f"set_up failed: {{ex}}",
+            "failures": [],
+            "err": None,
+          }})
+          continue
+
+      err = None
+      test_method = _lookup_attr(instance, method["mangled"], m_name)
+      if not callable(test_method):
+        err = f"Test method '{{m_name}}' not found on struct '{{struct_name}}'"
+      else:
+        try:
+          test_method()
+        except testing.TestFailure as tf:
+          err = str(tf)
+        except Exception as ex:
+          err = f"Unhandled Exception: {{ex}}"
+
+      teardown_fn = getattr(instance, "tear_down", None) or getattr(
+        instance, "func_tear_down", None
+      )
+      if teardown_fn:
+        try:
+          teardown_fn()
+        except Exception as ex:
+          td_msg = f"tear_down failed: {{ex}}"
+          if err is None:
+            err = td_msg
+          else:
+            ctx.failures.append({{
+              "message": td_msg,
+              "lineno": 0,
+              "filename": sp_file,
+              "fatal": False,
+              "kind": "generic",
+            }})
+
+      results.append({{
+        "label": full_name,
+        "status": "pass" if (not ctx.failures and err is None) else "fail",
+        "error_kind": None,
+        "message": None,
+        "failures": list(ctx.failures),
+        "err": err,
+      }})
+  return results
+
+
+def _main():
+  for entry in reversed(_CONFIG["search_paths"]):
+    if entry in sys.path:
+      sys.path.remove(entry)
+    sys.path.insert(0, entry)
+
+  testing = _load_testing_module()
+  out_py = _CONFIG["out_py"]
+  mod_name = "sapphire_test_" + os.path.basename(out_py).replace(".", "_")
+  spec = importlib.util.spec_from_file_location(mod_name, out_py)
+  mod = importlib.util.module_from_spec(spec)
+  sys.modules[mod_name] = mod
+  spec.loader.exec_module(mod)
+
+  raw_map = getattr(mod, "_SP_LINE_MAP", {{}})
+  sp_line_map = {{str(k): v for k, v in raw_map.items()}}
+  results = _run_standalone(mod, testing, _CONFIG["standalone"])
+  results.extend(
+    _run_suites(mod, testing, _CONFIG["suites"], _CONFIG["sp_file"])
+  )
+
+  with open(_CONFIG["result_json"], "w", encoding="utf-8") as f:
+    json.dump(
+      {{"sp_line_map": sp_line_map, "results": results}},
+      f,
+      default=repr,
+    )
+
+
+if __name__ == "__main__":
+  _main()
+"""
+
+
+def _build_python_test_harness(
+  sp_file: str,
+  out_py: str,
+  result_json: str,
+  standalone_tests: list[str],
+  suite_tests: dict[str, list[str]],
+  filter_pattern: str | None,
+) -> str:
+  """Constructs a self-contained Python test harness script for subprocess run.
+  """
+  out_dir = os.path.dirname(os.path.abspath(out_py))
+  filtered_standalone = [
+    {"name": fn_name, "mangled": _mangle_python_name(fn_name)}
+    for fn_name in standalone_tests
+    if not filter_pattern or filter_pattern in fn_name
+  ]
+  filtered_suites = []
+  for struct_name, methods in suite_tests.items():
+    suite_methods = [
+      {"name": m_name, "mangled": _mangle_python_name(m_name)}
+      for m_name in methods
+      if not filter_pattern
+      or filter_pattern in f"{struct_name}.{m_name}"
+      or filter_pattern in m_name
+    ]
+    if suite_methods:
+      filtered_suites.append(
+        {
+          "struct": struct_name,
+          "mangled": _mangle_python_name(struct_name),
+          "methods": suite_methods,
+        }
+      )
+
+  config = {
+    "sp_file": os.path.abspath(sp_file),
+    "out_py": os.path.abspath(out_py),
+    "result_json": os.path.abspath(result_json),
+    "search_paths": _build_python_search_paths(sp_file, out_dir),
+    "standalone": filtered_standalone,
+    "suites": filtered_suites,
+  }
+  return _PYTHON_TEST_HARNESS_TEMPLATE.format(config_json=json.dumps(config))
+
+
+def _report_python_test_results(
+  sp_file: str, payload: dict[str, Any]
+) -> tuple[int, int, list[str]]:
+  """Prints formatted pass/fail output for results returned by the subprocess.
+  """
+  base_name = os.path.basename(sp_file)
+  sp_line_map = {
+    int(k): v for k, v in payload.get("sp_line_map", {}).items()
+  }
+  passed = 0
+  failed = 0
+  logs: list[str] = []
+
+  for item in payload.get("results", []):
+    label = item["label"]
+    status = item["status"]
+    if status == "pass":
+      passed += 1
+      print(f"[ PASS ] {label} ({base_name})")
+    elif status == "error":
+      failed += 1
+      msg = item.get("message") or "Unknown error"
+      kind = item.get("error_kind")
+      if kind == "instantiation":
+        print(f"[ FAIL ] {label} ({msg})")
+        logs.append(f"{label}: {msg}")
+      elif kind == "setup":
+        print(f"[ FAIL ] {label} ({msg})")
+      else:
+        print(f"[ FAIL ] {label} ({base_name})")
+        print(f"  {msg}")
+        logs.append(msg)
+    else:
+      failed += 1
+      _print_python_test_failures(
+        label, sp_file, item.get("failures", []), item.get("err"), sp_line_map
+      )
+
+  return passed, failed, logs
 
 
 def run_tests_python(
@@ -388,196 +571,69 @@ def run_tests_python(
   suite_tests: dict[str, list[str]],
   filter_pattern: str | None = None,
 ) -> tuple[int, int, list[str]]:
-  """Executes discovered tests in Python target backend."""
-  orig_sys_path = list(sys.path)
-  orig_modules = set(sys.modules.keys())
+  """Executes discovered tests in an isolated Python subprocess."""
   stem = os.path.splitext(os.path.basename(sp_file))[0]
-  try:
-    with tempfile.TemporaryDirectory(prefix="sapphire_test_py_") as tmp_dir:
-      target_out_py = os.path.join(tmp_dir, f"{stem}.py")
-      try:
-        out_py = transpile_file(
-          sp_file,
-          output_file=target_out_py,
-          target="python",
-          test_mode=True,
-          quiet=True,
-          raise_on_error=True,
-        )
-      except Exception as e:  # pragma: no cover
-        print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
-        for line in str(e).splitlines():
-          print(f"  {line}")
-        return 0, 1, [f"Transpilation failed: {e}"]
-
-      out_dir = os.path.dirname(os.path.abspath(out_py))
-      _prepare_python_test_paths(sp_file, out_dir=out_dir)
-
-      try:
-        import std.testing as testing
-      except ImportError:  # pragma: no cover
-        try:
-          from lib.std import testing
-        except ImportError:  # pragma: no cover
-          print(
-            f"[ FAIL ] {os.path.basename(sp_file)} (could not import"
-            f" std.testing module)",
-            file=sys.stderr,
-          )
-          return 0, 1, ["Failed to load std.testing module"]
-
-      module_name = "sapphire_test_" + os.path.basename(out_py).replace(
-        ".", "_"
+  with tempfile.TemporaryDirectory(prefix="sapphire_test_py_") as tmp_dir:
+    target_out_py = os.path.join(tmp_dir, f"{stem}.py")
+    try:
+      out_py = transpile_file(
+        sp_file,
+        output_file=target_out_py,
+        target="python",
+        test_mode=True,
+        quiet=True,
+        raise_on_error=True,
       )
-      spec = importlib.util.spec_from_file_location(module_name, out_py)
-      mod = importlib.util.module_from_spec(spec)
-      sys.modules[module_name] = mod
-      try:
-        spec.loader.exec_module(mod)
-      except Exception as e:  # pragma: no cover
-        print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
-        for line in str(e).splitlines():
-          print(f"  {line}")
-        return 0, 1, [f"Failed to execute transpiled test module: {e}"]
+    except Exception as e:  # pragma: no cover
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (transpilation failed)")
+      for line in str(e).splitlines():
+        print(f"  {line}")
+      return 0, 1, [f"Transpilation failed: {e}"]
 
-      passed = 0
-      failed = 0
-      logs: list[str] = []
-      sp_line_map = getattr(mod, "_SP_LINE_MAP", {})
+    result_json = os.path.join(tmp_dir, f"{stem}.result.json")
+    runner_tmp = os.path.join(tmp_dir, f"{stem}.runner.py")
+    harness_src = _build_python_test_harness(
+      sp_file,
+      out_py,
+      result_json,
+      standalone_tests,
+      suite_tests,
+      filter_pattern,
+    )
+    with open(runner_tmp, "w", encoding="utf-8") as f:
+      f.write(harness_src)
 
-      for fn_name in standalone_tests:
-        if filter_pattern and filter_pattern not in fn_name:
-          continue
-        py_fn_name = _mangle_python_name(fn_name)
-        test_func = getattr(mod, py_fn_name, None)
-        if test_func is None and py_fn_name != fn_name:
-          test_func = getattr(mod, fn_name, None)
-        if not callable(test_func):
-          failed += 1
-          msg = f"Test function '{fn_name}' not found or not callable"
-          print(f"[ FAIL ] {fn_name} ({os.path.basename(sp_file)})")
-          print(f"  {msg}")
-          logs.append(msg)
-          continue
+    res = subprocess.run(
+      [sys.executable, runner_tmp], capture_output=True, text=True
+    )
+    if res.stdout:
+      print(res.stdout.rstrip("\n"))
+    stderr_text = res.stderr.strip() if res.stderr else ""
+    if stderr_text:  # pragma: no cover
+      print(stderr_text, file=sys.stderr)
 
-        ctx = testing.TestContext(fn_name)
-        testing.set_active_context(ctx)
+    if not os.path.isfile(result_json):  # pragma: no cover
+      msg = (
+        stderr_text or f"Python test runner exited with code {res.returncode}"
+      )
+      print(f"[ FAIL ] {os.path.basename(sp_file)} (failed to load module)")
+      for line in msg.splitlines():
+        print(f"  {line}")
+      return 0, 1, [f"Failed to execute transpiled test module: {msg}"]
 
-        err = None
-        try:
-          test_func()
-        except testing.TestFailure as tf:
-          err = str(tf)
-        except Exception as ex:  # pragma: no cover
-          err = f"Unhandled Exception: {ex}"
+    with open(result_json, encoding="utf-8") as f:
+      payload = json.load(f)
 
-        if not ctx.failures and err is None:
-          passed += 1
-          print(f"[ PASS ] {fn_name} ({os.path.basename(sp_file)})")
-        else:
-          failed += 1
-          _print_python_test_failures(
-            fn_name, sp_file, ctx.failures, err, sp_line_map
-          )
-
-      for struct_name, methods in suite_tests.items():
-        py_struct_name = _mangle_python_name(struct_name)
-        struct_cls = getattr(mod, py_struct_name, None)
-        if struct_cls is None and py_struct_name != struct_name:
-          struct_cls = getattr(mod, struct_name, None)
-
-        for m_name in methods:
-          full_name = f"{struct_name}.{m_name}"
-          if (
-            filter_pattern
-            and filter_pattern not in full_name
-            and filter_pattern not in m_name
-          ):
-            continue
-
-          if struct_cls is None:
-            failed += 1
-            msg = f"Test suite struct '{struct_name}' not found"
-            print(f"[ FAIL ] {full_name} ({os.path.basename(sp_file)})")
-            print(f"  {msg}")
-            logs.append(msg)
-            continue
-
-          try:
-            instance = struct_cls()
-          except Exception as ex:
-            failed += 1
-            msg = f"instantiation failed: {ex}"
-            print(f"[ FAIL ] {full_name} ({msg})")
-            logs.append(f"{full_name}: {msg}")
-            continue
-
-          ctx = testing.TestContext(full_name)
-          testing.set_active_context(ctx)
-
-          setup_fn = getattr(instance, "set_up", None) or getattr(
-            instance, "func_set_up", None
-          )
-          if setup_fn:
-            try:
-              setup_fn()
-            except Exception as ex:
-              failed += 1
-              print(f"[ FAIL ] {full_name} (set_up failed: {ex})")
-              continue
-
-          err = None
-          py_m_name = _mangle_python_name(m_name)
-          test_method = getattr(instance, py_m_name, None)
-          if test_method is None and py_m_name != m_name:
-            test_method = getattr(instance, m_name, None)
-
-          if not callable(test_method):
-            err = f"Test method '{m_name}' not found on struct '{struct_name}'"
-          else:
-            try:
-              test_method()
-            except testing.TestFailure as tf:
-              err = str(tf)
-            except Exception as ex:  # pragma: no cover
-              err = f"Unhandled Exception: {ex}"
-
-          teardown_fn = getattr(instance, "tear_down", None) or getattr(
-            instance, "func_tear_down", None
-          )
-          if teardown_fn:
-            try:
-              teardown_fn()
-            except Exception as ex:
-              td_msg = f"tear_down failed: {ex}"
-              if err is None:
-                err = td_msg
-              else:
-                ctx.failures.append(
-                  {
-                    "message": td_msg,
-                    "lineno": 0,
-                    "filename": sp_file,
-                    "fatal": False,
-                    "kind": "generic",
-                  }
-                )
-
-          if not ctx.failures and err is None:
-            passed += 1
-            print(f"[ PASS ] {full_name} ({os.path.basename(sp_file)})")
-          else:
-            failed += 1
-            _print_python_test_failures(
-              full_name, sp_file, ctx.failures, err, sp_line_map
-            )
-
-      return passed, failed, logs
-  finally:
-    for k in list(sys.modules.keys()):
-      if k not in orig_modules or k.startswith("sapphire_test_"):
-        del sys.modules[k]
-    sys.path[:] = orig_sys_path
+    passed, failed, logs = _report_python_test_results(sp_file, payload)
+    if res.returncode != 0 and failed == 0:  # pragma: no cover
+      failed = 1
+      crash_msg = (
+        f"Python test runner exited unexpectedly with code {res.returncode}"
+        + (f": {stderr_text}" if stderr_text else "")
+      )
+      print(f"[ FAIL ] {os.path.basename(sp_file)} ({crash_msg})")
+      logs.append(crash_msg)
+    return passed, failed, logs
 
 
 def _escape_lua_string(s: str) -> str:

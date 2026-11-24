@@ -19,13 +19,12 @@ from src.lsp.signature_provider import SignatureProvider
 
 
 def _make_ls(doc_uri: str, code: str) -> SapphireLanguageServer:
-  ls = SapphireLanguageServer("sapphire-test", "v0")
+  from testing.test_utils import FakeWorkspace
+
+  ls = SapphireLanguageServer(
+      "sapphire-test", "v0", workspace=FakeWorkspace({doc_uri: code})
+  )
   ls.text_document_publish_diagnostics = MagicMock()
-  ls.protocol._workspace = MagicMock()
-  doc = MagicMock()
-  doc.uri = doc_uri
-  doc.source = code
-  ls.workspace.get_text_document.return_value = doc
   validate_source(ls, doc_uri, code)
   return ls
 
@@ -141,10 +140,7 @@ class TestCompletionProvider(unittest.TestCase):
 
 
 def _edit_doc(ls: SapphireLanguageServer, uri: str, code: str) -> None:
-  doc = MagicMock()
-  doc.uri = uri
-  doc.source = code
-  ls.workspace.get_text_document.return_value = doc
+  ls.workspace.put_document(uri, code)
   validate_source(ls, uri, code)
 
 
