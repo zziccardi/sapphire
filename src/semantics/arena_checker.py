@@ -41,6 +41,7 @@ from src.semantics.symbol_table import (
     GenericTypeParameter,
     InferredType,
     MapType,
+    ModuleSymbol,
     NoneType,
     OptionalType,
     PrimitiveType,
@@ -48,6 +49,7 @@ from src.semantics.symbol_table import (
     RefType,
     SharedRefType,
     StringType,
+    StructSymbol,
     StructType,
     SymbolTable,
     TraitType,
@@ -96,66 +98,209 @@ class ArenaChecker:
     )
 
   @staticmethod
+  def _struct_implements_trait(
+      struct_type: StructType,
+      trait_type: TraitType,
+      symbol_table: Optional[SymbolTable] = None,
+  ) -> bool:
+    """Returns True if *struct_type* implements *trait_type* (module-aware)."""
+    impl_types = getattr(struct_type, "implemented_trait_types", None)
+    if impl_types and trait_type.name in impl_types:
+      return impl_types[trait_type.name] == trait_type
+    return struct_type.implements_trait(trait_type, symbol_table)
+
+  @staticmethod
+  def _collect_trait_implementors(
+      trait_type: TraitType,
+      symbol_table: Optional[SymbolTable] = None,
+      checker: Optional[Any] = None,
+  ) -> List[StructType]:
+    """Collects all known closed-world struct/proto implementors of a trait."""
+    implementors: List[StructType] = []
+    seen_ids: Set[int] = set()
+
+    def _add(st: Any) -> None:
+      if not isinstance(st, StructType):
+        return
+      obj_id = id(st)
+      if obj_id in seen_ids:
+        return
+      if ArenaChecker._struct_implements_trait(st, trait_type, symbol_table):
+        seen_ids.add(obj_id)
+        implementors.append(st)
+
+    for st in getattr(trait_type, "implementors", ()):
+      _add(st)
+
+    if symbol_table is not None:
+      scope = getattr(symbol_table, "current_scope", None)
+      visited_scopes: Set[int] = set()
+      while scope is not None and id(scope) not in visited_scopes:
+        visited_scopes.add(id(scope))
+        for t in scope.types.values():
+          _add(t)
+        for sym in scope.symbols.values():
+          if isinstance(sym, StructSymbol):
+            _add(sym.symbol_type)
+          elif isinstance(sym, ModuleSymbol):
+            for exp in sym.exports.values():
+              if isinstance(exp, StructSymbol):
+                _add(exp.symbol_type)
+        scope = scope.parent
+
+    if checker is not None:
+      checked_imports = getattr(checker, "_checked_import_results", None)
+      if isinstance(checked_imports, dict):
+        for entry in checked_imports.values():
+          if isinstance(entry, tuple) and entry and isinstance(entry[0], dict):
+            for exp in entry[0].values():
+              if isinstance(exp, StructSymbol):
+                _add(exp.symbol_type)
+
+    return implementors
+
+  @staticmethod
   def type_can_hold_arena_ref(
       type_obj: Optional[Type],
       seen: Optional[Set[str]] = None,
       is_box_check: bool = False,
+      symbol_table: Optional[SymbolTable] = None,
+      checker: Optional[Any] = None,
   ) -> bool:
     """Returns True if values of *type_obj* can contain an arena reference."""
     if type_obj is None or isinstance(type_obj, InferredType):
       return True
-    if isinstance(type_obj, (TraitType, GenericTypeParameter)):
+    if isinstance(type_obj, GenericTypeParameter):
       return True
+    if isinstance(type_obj, TraitType):
+      if not is_box_check or (symbol_table is None and checker is None):
+        return True
+      seen_set = set() if seen is None else seen
+      trait_key = f"trait:{type_obj.defining_module or ''}:{type_obj.name}"
+      if trait_key in seen_set:
+        return False
+      seen_set.add(trait_key)
+      try:
+        implementors = ArenaChecker._collect_trait_implementors(
+            type_obj, symbol_table=symbol_table, checker=checker
+        )
+        return any(
+            ArenaChecker.type_can_hold_arena_ref(
+                impl_st,
+                seen_set,
+                is_box_check=True,
+                symbol_table=symbol_table,
+                checker=checker,
+            )
+            for impl_st in implementors
+        )
+      finally:
+        seen_set.remove(trait_key)
     if isinstance(type_obj, FunctionType):
       if is_box_check:
         return any(
             ArenaChecker.type_can_hold_arena_ref(
-                rt, seen, is_box_check=True
+                rt,
+                seen,
+                is_box_check=True,
+                symbol_table=symbol_table,
+                checker=checker,
             )
             for rt in type_obj.return_types
         )
       return True
     if isinstance(type_obj, OptionalType):
       return ArenaChecker.type_can_hold_arena_ref(
-          type_obj.base_type, seen, is_box_check=is_box_check
+          type_obj.base_type,
+          seen,
+          is_box_check=is_box_check,
+          symbol_table=symbol_table,
+          checker=checker,
       )
     if isinstance(type_obj, ArrayType):
       return ArenaChecker.type_can_hold_arena_ref(
-          type_obj.element_type, seen, is_box_check=is_box_check
+          type_obj.element_type,
+          seen,
+          is_box_check=is_box_check,
+          symbol_table=symbol_table,
+          checker=checker,
       )
     if isinstance(type_obj, MapType):
       return (
           ArenaChecker.type_can_hold_arena_ref(
-              type_obj.key_type, seen, is_box_check=is_box_check
+              type_obj.key_type,
+              seen,
+              is_box_check=is_box_check,
+              symbol_table=symbol_table,
+              checker=checker,
           )
           or ArenaChecker.type_can_hold_arena_ref(
-              type_obj.value_type, seen, is_box_check=is_box_check
+              type_obj.value_type,
+              seen,
+              is_box_check=is_box_check,
+              symbol_table=symbol_table,
+              checker=checker,
           )
       )
     if isinstance(type_obj, CoroutineType):
       return ArenaChecker.type_can_hold_arena_ref(
-          type_obj.yield_type, seen, is_box_check=is_box_check
+          type_obj.yield_type,
+          seen,
+          is_box_check=is_box_check,
+          symbol_table=symbol_table,
+          checker=checker,
       )
     if isinstance(type_obj, (RefType, SharedRefType, WeakRefType)):
       return ArenaChecker.type_can_hold_arena_ref(
-          type_obj.inner_type, seen, is_box_check=is_box_check
+          type_obj.inner_type,
+          seen,
+          is_box_check=is_box_check,
+          symbol_table=symbol_table,
+          checker=checker,
       )
     if isinstance(type_obj, StructType):
       if type_obj.is_prototype or not is_box_check:
         return True
       seen_set = set() if seen is None else seen
-      if type_obj.name in seen_set:
+      struct_key = f"struct:{type_obj.defining_module or ''}:{type_obj.name}"
+      if struct_key in seen_set:
         return False
-      seen_set.add(type_obj.name)
+      seen_set.add(struct_key)
       try:
-        return any(
+        if any(
             ArenaChecker.type_can_hold_arena_ref(
-                f.field_type, seen_set, is_box_check=is_box_check
+                f.field_type,
+                seen_set,
+                is_box_check=is_box_check,
+                symbol_table=symbol_table,
+                checker=checker,
             )
             for f in type_obj.fields.values()
-        )
+        ):
+          return True
+        for p_type in getattr(type_obj, "parent_types", ()):
+          if ArenaChecker.type_can_hold_arena_ref(
+              p_type,
+              seen_set,
+              is_box_check=is_box_check,
+              symbol_table=symbol_table,
+              checker=checker,
+          ):
+            return True
+        if symbol_table is not None and not getattr(type_obj, "parent_types", ()):
+          for p_name in getattr(type_obj, "parent_names", ()):
+            p_type = symbol_table.lookup_type(p_name)
+            if isinstance(p_type, StructType) and ArenaChecker.type_can_hold_arena_ref(
+                p_type,
+                seen_set,
+                is_box_check=is_box_check,
+                symbol_table=symbol_table,
+                checker=checker,
+            ):
+              return True
+        return False
       finally:
-        seen_set.remove(type_obj.name)
+        seen_set.remove(struct_key)
     return False
 
   @staticmethod

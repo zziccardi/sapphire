@@ -193,6 +193,7 @@ class TypeResolverMixin:
             continue
           struct_type.implemented_traits.add(trait_type.name)
           struct_type.implemented_trait_types[trait_type.name] = trait_type
+          trait_type.add_implementor(struct_type)
 
         for member in decl.members:
           if trait_type and member.func_decl.name in trait_type.methods:
@@ -303,6 +304,7 @@ class TypeResolverMixin:
             child_type.implemented_traits.update(p_type.implemented_traits)
             for t_name, t_obj in p_type.implemented_trait_types.items():
               child_type.implemented_trait_types.setdefault(t_name, t_obj)
+              t_obj.add_implementor(child_type)
             if p_type.parent_types:
               stack.extend(p_type.parent_types)
             else:

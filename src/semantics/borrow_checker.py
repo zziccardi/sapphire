@@ -297,7 +297,10 @@ class BorrowChecker:
     if checker is not None:
       arg_type = checker.node_types.get(arg_expr)
       if arg_type is not None and ArenaChecker.type_can_hold_arena_ref(
-          arg_type, is_box_check=True
+          arg_type,
+          is_box_check=True,
+          symbol_table=symbol_table,
+          checker=checker,
       ):
         error_callback(
             f"Cannot store arena-referencing type '{arg_type}' "

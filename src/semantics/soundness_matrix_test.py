@@ -36,6 +36,14 @@ class TestSoundnessMatrix(unittest.TestCase):
         f"Expected '{expected_substr}' in error:\n{ctx.exception}",
     )
 
+  def _assert_compiles(self, code: str) -> None:
+    lexer = SapphireLexer(InputStream(code))
+    parser = SapphireParser(CommonTokenStream(lexer))
+    ast = ASTBuilder().visitProgram(parser.program())
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(checker.errors, [])
+
   # ------------------------------------------------------------------
   # 1. Move-only & use-after-move intersections
   # ------------------------------------------------------------------
@@ -199,6 +207,102 @@ class TestSoundnessMatrix(unittest.TestCase):
     }
     """
     self._assert_compile_error(code, "arena")
+
+  def test_shared_ref_allows_struct_holding_host_and_struct_only_traits(self):
+    code = """
+    trait Image {
+      func get_width(): int;
+    }
+    trait Drawable {
+      func width(): int;
+    }
+    struct Sprite {
+      var w: int;
+    }
+    impl Drawable for Sprite {
+      func width(): int { return self.w; }
+    }
+    struct Asset {
+      var img: Image?;
+      var drawable: Drawable;
+    }
+    func f(): int {
+      let s = SharedRef(Asset { img = none, drawable = Sprite { w = 32 } });
+      let s2 = s.share();
+      let r = Ref(Asset { img = none, drawable = Sprite { w = 16 } });
+      return s2.drawable.width() + r.drawable.width();
+    }
+    """
+    self._assert_compiles(code)
+
+  def test_shared_ref_rejects_trait_implemented_by_proto(self):
+    code = """
+    trait Combatant {
+      func get_hp(): int;
+    }
+    proto Goblin {
+      var hp: int;
+    }
+    impl Combatant for Goblin {
+      func get_hp(): int { return self.hp; }
+    }
+    struct Holder {
+      var c: Combatant?;
+    }
+    func f() {
+      let s = SharedRef(Holder { c = none });
+    }
+    """
+    self._assert_compile_error(code, "Cannot store arena-referencing type")
+
+  def test_ref_rejects_trait_implemented_by_struct_holding_proto(self):
+    code = """
+    trait Wrapper {
+      func id(): int;
+    }
+    proto Node {
+      var x: int;
+    }
+    struct ArenaHolder {
+      var n: Node;
+    }
+    impl Wrapper for ArenaHolder {
+      func id(): int { return 1; }
+    }
+    struct Boxed {
+      var w: Wrapper?;
+    }
+    func f() {
+      let r = Ref(Boxed { w = none });
+    }
+    """
+    self._assert_compile_error(code, "Cannot store arena-referencing type")
+
+  def test_shared_ref_rejects_trait_inherited_by_child_holding_proto(self):
+    code = """
+    trait BaseTrait {
+      func id(): int;
+    }
+    proto Node {
+      var x: int;
+    }
+    struct Parent {
+      var id_val: int;
+    }
+    impl BaseTrait for Parent {
+      func id(): int { return self.id_val; }
+    }
+    struct Child: Parent {
+      var n: Node;
+    }
+    struct Holder {
+      var b: BaseTrait?;
+    }
+    func f() {
+      let s = SharedRef(Holder { b = none });
+    }
+    """
+    self._assert_compile_error(code, "Cannot store arena-referencing type")
 
   # ------------------------------------------------------------------
   # 5. No struct up-casting (`Child as Parent`)

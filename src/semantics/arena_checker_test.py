@@ -29,8 +29,10 @@ from src.semantics.symbol_table import (
     ArenaType,
     OptionalType,
     PrimitiveType,
+    StructField,
     StructType,
     SymbolTable,
+    TraitType,
     VariableSymbol,
 )
 from src.semantics.arena_checker import ArenaChecker
@@ -387,6 +389,67 @@ class TestArenaChecker(unittest.TestCase):
     )
     self.assertTrue(errs)
     self.assertIn("SharedRef", errs[0])
+
+  def test_closed_world_trait_box_check(self):
+    st = SymbolTable()
+    host_trait = TraitType("HostImage")
+    struct_trait = TraitType("Drawable")
+    proto_trait = TraitType("Combatant")
+    cycle_trait = TraitType("CyclicTrait")
+
+    sprite = StructType("Sprite")
+    sprite.implemented_traits.add("Drawable")
+    sprite.implemented_trait_types["Drawable"] = struct_trait
+    struct_trait.add_implementor(sprite)
+
+    goblin = StructType("Goblin", is_prototype=True)
+    goblin.implemented_traits.add("Combatant")
+    goblin.implemented_trait_types["Combatant"] = proto_trait
+    proto_trait.add_implementor(goblin)
+
+    cyclic_struct = StructType("CyclicStruct")
+    cyclic_struct.fields["next"] = StructField(
+        "next", cycle_trait, is_mutable=True
+    )
+    cyclic_struct.implemented_traits.add("CyclicTrait")
+    cyclic_struct.implemented_trait_types["CyclicTrait"] = cycle_trait
+    cycle_trait.add_implementor(cyclic_struct)
+
+    st.define_type("HostImage", host_trait)
+    st.define_type("Drawable", struct_trait)
+    st.define_type("Combatant", proto_trait)
+    st.define_type("CyclicTrait", cycle_trait)
+    st.define_type("Sprite", sprite)
+    st.define_type("Goblin", goblin)
+    st.define_type("CyclicStruct", cyclic_struct)
+
+    # Without closed-world context, traits conservatively return True
+    self.assertTrue(
+        ArenaChecker.type_can_hold_arena_ref(host_trait, is_box_check=True)
+    )
+    # With closed-world context: host trait (0 impls) and struct-only trait are safe
+    self.assertFalse(
+        ArenaChecker.type_can_hold_arena_ref(
+            host_trait, is_box_check=True, symbol_table=st
+        )
+    )
+    self.assertFalse(
+        ArenaChecker.type_can_hold_arena_ref(
+            struct_trait, is_box_check=True, symbol_table=st
+        )
+    )
+    # Trait implemented by a proto is rejected
+    self.assertTrue(
+        ArenaChecker.type_can_hold_arena_ref(
+            proto_trait, is_box_check=True, symbol_table=st
+        )
+    )
+    # Cyclic trait <-> struct with no proto terminates and returns False
+    self.assertFalse(
+        ArenaChecker.type_can_hold_arena_ref(
+            cycle_trait, is_box_check=True, symbol_table=st
+        )
+    )
 
 
 

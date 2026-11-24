@@ -362,7 +362,10 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     if node.type_args:
       expected_inner = self._resolve_type_node(node.type_args[0])
       if ArenaChecker.type_can_hold_arena_ref(
-          expected_inner, is_box_check=True
+          expected_inner,
+          is_box_check=True,
+          symbol_table=self.symbol_table,
+          checker=self,
       ):
         self.error(
             f"Cannot store arena-referencing type '{expected_inner}' inside '{box_name}'.",
