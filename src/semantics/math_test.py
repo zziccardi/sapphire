@@ -161,7 +161,9 @@ class TestMathModule(unittest.TestCase):
         'local m = require("std.math")\n'
         'print(m.safe_div__int(-7, 2), m.safe_div__int(7, -2), m.safe_div__int(7, 2), tostring(m.safe_div__int(7, 0)))\n'
     )
-    proc = subprocess.run([lua_bin, "-e", script], capture_output=True, text=True, check=True)
+    proc = subprocess.run(
+        [lua_bin, "-"], input=script, capture_output=True, text=True, check=True
+    )
     self.assertEqual(proc.stdout.strip().split(), ["-3", "-3", "3", "nil"])
 
 

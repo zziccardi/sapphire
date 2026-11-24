@@ -133,8 +133,11 @@ class TestStdlibModules(unittest.TestCase):
     self.assertIsNotNone(lua_bin)
     full_script = f'package.path = "{_LIB_DIR}/?.lua;" .. package.path\n' + script
     proc = subprocess.run(
-        [lua_bin, "-e", full_script],
-        capture_output=True, text=True, timeout=10,
+        [lua_bin, "-"],
+        input=full_script,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     if proc.returncode != 0:
       self.fail(f"Lua script failed:\n{proc.stderr}\nScript:\n{script}")

@@ -188,6 +188,85 @@ class TranspilerHygieneTest(unittest.TestCase):
       with open(stale_lua, "r", encoding="utf-8") as f:
         self.assertIn("-- stale output", f.read())
 
+  def test_isolated_python_lib_extend_path_shadows_stale_regular_package(self):
+    """Verifies isolated Python lib/ writes extend_path __init__.py markers."""
+    import importlib.util
+    import sys
+
+    with tempfile.TemporaryDirectory() as root:
+      fake_lib = os.path.join(root, "lib")
+      pkg_dir = os.path.join(fake_lib, "love2d")
+      std_dir = os.path.join(fake_lib, "std")
+      src_dir = os.path.join(root, "src")
+      out_dir = os.path.join(root, "out")
+      os.makedirs(pkg_dir)
+      os.makedirs(std_dir)
+      os.makedirs(src_dir)
+      os.makedirs(out_dir)
+
+      # Regular package markers in fake_lib mimicking Sapphire's lib/.
+      with open(os.path.join(fake_lib, "__init__.py"), "w", encoding="utf-8") as f:
+        f.write("# pkg\n")
+      with open(os.path.join(pkg_dir, "__init__.py"), "w", encoding="utf-8") as f:
+        f.write("# love2d pkg\n")
+      with open(os.path.join(std_dir, "__init__.py"), "w", encoding="utf-8") as f:
+        f.write("# std pkg\n")
+      with open(os.path.join(std_dir, "stubmod.py"), "w", encoding="utf-8") as f:
+        f.write("STD_MARKER = 99\n")
+
+      mod_sp = os.path.join(pkg_dir, "pyfresh.sp")
+      stale_py = os.path.join(pkg_dir, "pyfresh.py")
+      with open(mod_sp, "w", encoding="utf-8") as f:
+        f.write("export { ANSWER } let ANSWER = 123;\n")
+      with open(stale_py, "w", encoding="utf-8") as f:
+        f.write("ANSWER = 0\n")
+      os.utime(stale_py, (100, 100))
+      os.utime(mod_sp, (200, 200))
+
+      main_sp = os.path.join(src_dir, "main.sp")
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "import lib.love2d.pyfresh;\n"
+            "func main(): int { return pyfresh.ANSWER; }\n"
+        )
+
+      with patch(
+          "src.semantics.module_resolver.find_sapphire_lib_dir",
+          return_value=fake_lib,
+      ):
+        out_py = os.path.join(out_dir, "main.py")
+        transpile_file(main_sp, output_file=out_py, target="python", quiet=True)
+
+      self.assertTrue(os.path.exists(os.path.join(out_dir, "lib", "__init__.py")))
+      self.assertTrue(
+          os.path.exists(os.path.join(out_dir, "lib", "love2d", "__init__.py"))
+      )
+
+      orig_path = list(sys.path)
+      saved_lib = {
+          k: sys.modules.pop(k)
+          for k in list(sys.modules.keys())
+          if k == "lib" or k.startswith("lib.")
+      }
+      sys.path.insert(0, root)
+      sys.path.insert(0, out_dir)
+      try:
+        spec = importlib.util.spec_from_file_location("isolated_main_test", out_py)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        # Fresh transpiled module wins over stale regular package.
+        self.assertEqual(mod.main(), 123)
+        # Hand-written stdlib submodule still resolves via pkgutil.extend_path.
+        import lib.std.stubmod as stubmod
+        self.assertEqual(stubmod.STD_MARKER, 99)
+      finally:
+        sys.path[:] = orig_path
+        for k in [
+            k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")
+        ]:
+          sys.modules.pop(k, None)
+        sys.modules.update(saved_lib)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -326,14 +326,19 @@ def _prepare_python_test_paths(
   # Clear stale local `lib` or test-dir modules so each test file loads fresh,
   # while never evicting Python stdlib or Sapphire compiler modules.
   sp_lib = os.path.abspath(os.path.join(sp_dir, "lib"))
-  if os.path.isdir(sp_lib) and sp_lib != lib_dir:
+  out_lib = os.path.abspath(os.path.join(out_dir, "lib")) if out_dir else ""
+  has_local_sp_lib = os.path.isdir(sp_lib) and sp_lib != lib_dir
+  has_isolated_lib = bool(out_lib) and os.path.isdir(out_lib)
+  if has_local_sp_lib or has_isolated_lib:
     for k in [
         k for k in list(sys.modules.keys()) if k == "lib" or k.startswith("lib.")
     ]:
       mod_obj = sys.modules.get(k)
-      if mod_obj is None or (
-          getattr(mod_obj, "__file__", None)
-          and _is_path_under(mod_obj.__file__, sp_lib)
+      mod_file = getattr(mod_obj, "__file__", None)
+      if (
+          has_isolated_lib
+          or mod_obj is None
+          or (mod_file and _is_path_under(mod_file, sp_lib))
       ):
         del sys.modules[k]
 

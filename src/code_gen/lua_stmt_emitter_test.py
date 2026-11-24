@@ -29,7 +29,8 @@ class TestLuaStmtEmitter(unittest.TestCase):
     self.assertEqual(checker.errors, [], f"Unexpected errors: {checker.errors}")
     lua_code = LuaTranspiler().transpile(ast) + "\n" + lua_tail + "\n"
     proc = subprocess.run(
-        [lua_bin, "-e", lua_code],
+        [lua_bin, "-"],
+        input=lua_code,
         capture_output=True,
         text=True,
     )
