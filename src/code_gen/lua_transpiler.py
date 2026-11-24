@@ -5,7 +5,7 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation and Arena memory management.
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.parser.ast import *
 from src.semantics.symbol_table import ArrayType, MapType, RangeType

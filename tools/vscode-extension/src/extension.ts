@@ -54,14 +54,23 @@ export function activate(context: vscode.ExtensionContext) {
     clientOptions
   );
 
-  client.start().catch((error: any) => {
-    const msg = error?.message || String(error);
+  const outputChannel = vscode.window.createOutputChannel(
+    'Sapphire Language Server'
+  );
+  if (context && Array.isArray(context.subscriptions)) {
+    context.subscriptions.push(outputChannel);
+  }
+
+  client.start().catch((error: unknown) => {
+    const msg = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(
       `Failed to start Sapphire Language Server ('${lspPath} lsp'): ${msg}. Please ensure '${lspPath}' is installed on your system PATH or configure 'sapphire.lsp.path' in VS Code settings.`
     );
   });
 
-  console.log('Sapphire Language Support extension is now active!');
+  outputChannel.appendLine(
+    'Sapphire Language Support extension is now active!'
+  );
 }
 
 export function deactivate(): Thenable<void> | undefined {

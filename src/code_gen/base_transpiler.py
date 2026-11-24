@@ -1,8 +1,9 @@
 """Abstract base class for all Sapphire transpiler backends.
 
 Defines the visitor interface contract that every code-generation backend must
-satisfy. Subclasses that omit any `@abstractmethod` will raise `TypeError` at
-import time, making backend divergence impossible to miss.
+satisfy. Concrete subclasses that omit any `@abstractmethod` raise `TypeError`
+at class definition time via `BaseTranspiler.__init_subclass__`, making backend
+divergence impossible to miss.
 """
 
 from abc import ABC, abstractmethod
@@ -118,11 +119,35 @@ class BaseTranspiler(ABC):
   """Abstract base for all Sapphire code-generation backends.
 
   Every concrete backend (e.g. `PythonTranspiler`, `LuaTranspiler`) must
-  implement all visitor methods declared here. Python's `ABCMeta` machinery
-  raises `TypeError` at *class definition time* if any `@abstractmethod` is
-  left unimplemented, so a new AST node added to one backend but not the other
-  will be caught immediately -- before any tests are even run.
+  implement all visitor methods declared here. While Python's `ABCMeta` only
+  raises `TypeError` at instantiation time, `__init_subclass__` enforces
+  `@abstractmethod` completeness at *class definition time* for concrete
+  subclasses (pass `allow_abstract=True` or inherit directly from `ABC` for
+  intermediate abstract bases), catching backend divergence at import time.
   """
+
+  def __init_subclass__(
+      cls, *, allow_abstract: bool = False, **kwargs: Any
+  ) -> None:
+    """Enforces @abstractmethod completeness at class definition time."""
+    super().__init_subclass__(**kwargs)
+    if allow_abstract or ABC in cls.__bases__:
+      return
+    abstracts: Set[str] = set()
+    for base in cls.__mro__[1:]:
+      for name in getattr(base, "__abstractmethods__", ()):
+        value = getattr(cls, name, None)
+        if getattr(value, "__isabstractmethod__", False):
+          abstracts.add(name)
+    for name, value in cls.__dict__.items():
+      if getattr(value, "__isabstractmethod__", False):
+        abstracts.add(name)
+    if abstracts:
+      missing = ", ".join(sorted(abstracts))
+      raise TypeError(
+          f"Can't define concrete transpiler class {cls.__name__} "
+          f"without implementing abstract methods: {missing}"
+      )
 
   # ------------------------------------------------------------------
   # Core interface & shared helpers

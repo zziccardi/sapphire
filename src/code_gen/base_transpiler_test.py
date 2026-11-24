@@ -359,6 +359,34 @@ class TestBaseTranspilerHelpers(unittest.TestCase):
     self.assertEqual(transpiler.variable_types["a"], "Res")
     self.assertEqual(transpiler.variable_types["b"], "Res")
 
+  def test_init_subclass_enforces_abstract_methods_at_definition_time(self):
+    """Concrete BaseTranspiler subclasses fail at definition time if incomplete."""
+    from abc import ABC, abstractmethod
+    from src.code_gen.base_transpiler import BaseTranspiler
+
+    with self.assertRaises(TypeError) as ctx:
+      class IncompleteTranspiler(BaseTranspiler):
+        pass
+
+    self.assertIn("IncompleteTranspiler", str(ctx.exception))
+    self.assertIn("transpile", str(ctx.exception))
+
+    # Intermediate abstract bases can opt out via allow_abstract=True or ABC.
+    class AbstractHelperA(BaseTranspiler, allow_abstract=True):
+      @abstractmethod
+      def extra_hook(self):
+        pass
+
+    class AbstractHelperB(BaseTranspiler, ABC):
+      pass
+
+    with self.assertRaises(TypeError) as ctx2:
+      class MissingExtraHook(AbstractHelperA):
+        pass
+
+    self.assertIn("extra_hook", str(ctx2.exception))
+    self.assertTrue(issubclass(AbstractHelperB, BaseTranspiler))
+
 
 if __name__ == "__main__":
   unittest.main()
