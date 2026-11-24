@@ -1004,9 +1004,24 @@ class ArenaChecker:
         return
 
     deps = ArenaChecker.collect_arena_deps(symbol_table, expr_node, checker)
+    moved_self_name = (
+        expr_node.name if isinstance(expr_node, MoveNode) else None
+    )
+    propagated_deps: List[Tuple[str, int]] = []
     for arena_name, dep_gen in deps:
       arena_sym = symbol_table.lookup(arena_name)
       if isinstance(arena_sym, VariableSymbol):
+        if (
+            moved_self_name is not None
+            and arena_name == moved_self_name
+            and arena_sym.arena_generation == dep_gen
+        ):
+          # Moving a self-contained Arena-owning struct transfers its arena
+          # together with its self-allocated fields to target_sym.
+          propagated_deps.append(
+              (target_sym.name, target_sym.arena_generation)
+          )
+          continue
         if arena_sym.is_moved or arena_sym.arena_generation != dep_gen:
           error_callback(
               f"Cannot assign reference from moved or reassigned Arena "
@@ -1027,10 +1042,13 @@ class ArenaChecker:
                 f"reference to an object allocated in nested arena "
                 f"'{arena_name}'."
             )
+      propagated_deps.append((arena_name, dep_gen))
 
     in_branch = bool(checker and getattr(checker, "_branch_depth", 0) > 0)
     replace = not is_partial_mutation and not in_branch
-    ArenaChecker._merge_symbol_deps(target_sym, deps, replace=replace)
+    ArenaChecker._merge_symbol_deps(
+        target_sym, _dedup_deps(propagated_deps), replace=replace
+    )
     if replace:
       target_sym.has_param_arena_ref = has_param_ref
     elif has_param_ref:
@@ -1054,9 +1072,20 @@ class ArenaChecker:
         return
 
     deps = ArenaChecker.collect_arena_deps(symbol_table, expr_node, checker)
+    moved_self_name = (
+        expr_node.name if isinstance(expr_node, MoveNode) else None
+    )
     for arena_name, dep_gen in deps:
       arena_sym = symbol_table.lookup(arena_name)
       if isinstance(arena_sym, VariableSymbol):
+        if (
+            moved_self_name is not None
+            and arena_name == moved_self_name
+            and arena_sym.arena_generation == dep_gen
+        ):
+          # Returning `move st` transfers st's own Arena and self-allocated
+          # fields together to the caller.
+          continue
         if arena_sym.is_moved or arena_sym.arena_generation != dep_gen:
           error_callback(
               f"Cannot return reference from moved or reassigned Arena "

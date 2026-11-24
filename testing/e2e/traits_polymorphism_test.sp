@@ -223,3 +223,112 @@ func test_trait_default_method_and_override(): int {
   // a: 5 + 10 = 15, b: 5 + 25 = 30, c: (5*2) + 25 (Parent override > Trait default) = 35
   return read_score(a) + read_score(b) + read_score(c) + a.total();
 }
+
+enum StackStateKey {
+  MAP = 1,
+  MENU = 2,
+}
+
+struct ViewCamera {
+  var zoom: int = 2;
+}
+
+trait StackGameState {
+  var func update(var pop_requests: [bool]);
+  func draw(camera: ViewCamera): int;
+}
+
+proto MapTag {
+  var bonus: int = 10;
+}
+
+struct ArenaMapState {
+  var arena: Arena;
+  var tag: MapTag? = none;
+  var ticks: int = 0;
+}
+
+impl StackGameState for ArenaMapState {
+  var func update(var pop_requests: [bool]) {
+    self.ticks += 1;
+  }
+
+  func draw(camera: ViewCamera): int {
+    let b = self.tag?.bonus ?? 0;
+    return (b + self.ticks) * camera.zoom;
+  }
+}
+
+struct CopyMenuState {
+  var selected: int = 5;
+}
+
+impl StackGameState for CopyMenuState {
+  var func update(var pop_requests: [bool]) {
+    pop_requests.push(true);
+  }
+
+  func draw(camera: ViewCamera): int {
+    return self.selected * camera.zoom;
+  }
+}
+
+trait StackStateFactory {
+  func create_state(): StackGameState;
+}
+
+struct MapStateFactory {}
+
+impl StackStateFactory for MapStateFactory {
+  func create_state(): StackGameState {
+    var st = ArenaMapState {
+      arena = Arena(),
+    };
+    st.tag = MapTag { bonus = 12 } in st.arena;
+    return move st;
+  }
+}
+
+struct MenuStateFactory {}
+
+impl StackStateFactory for MenuStateFactory {
+  func create_state(): StackGameState {
+    return CopyMenuState { selected = 7 };
+  }
+}
+
+@test
+func test_trait_stack_mixing_move_only_arena_and_copy_structs_with_factory(): int {
+  let camera = ViewCamera { zoom = 2 };
+  var factories: [StackStateKey: StackStateFactory] = {};
+  factories[StackStateKey.MAP] = MapStateFactory {};
+  factories[StackStateKey.MENU] = MenuStateFactory {};
+
+  var stack: [StackGameState] = [];
+  if let mf ?= factories.get(StackStateKey.MAP) {
+    stack.push(mf.create_state());
+  }
+  if let menuf ?= factories.get(StackStateKey.MENU) {
+    stack.push(menuf.create_state());
+  }
+
+  var total = 0;
+  // Draw both: MapState (12 + 0)*2 = 24, MenuState 7*2 = 14 -> 38
+  for i in range(0, stack.size()) {
+    total += stack[i].draw(camera);
+  }
+
+  var pops: [bool] = [];
+  let top = stack.size() - 1;
+  stack[top].update(pops);
+  if !pops.empty() {
+    stack.remove(top);
+  }
+
+  // Update & draw remaining MapState: ticks=1 -> (12 + 1)*2 = 26
+  var pops2: [bool] = [];
+  stack[0].update(pops2);
+  total += stack[0].draw(camera);
+  // 38 + 26 = 64
+  return total;
+}

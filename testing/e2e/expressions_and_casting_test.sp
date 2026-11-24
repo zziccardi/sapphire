@@ -47,3 +47,15 @@ func test_optional_chaining_none(): int {
   let pid = user.profile?.id;
   return pid ?? -1;
 }
+
+enum EntityKind {
+  PLAYER = "Player",
+  ENEMY  = "Enemy",
+}
+
+@test
+func test_string_enum_to_string_cast(): String {
+  let p = EntityKind.PLAYER as String;
+  let e = EntityKind.ENEMY as String;
+  return f"{p}:{e}";
+}

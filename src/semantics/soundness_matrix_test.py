@@ -304,6 +304,70 @@ class TestSoundnessMatrix(unittest.TestCase):
     """
     self._assert_compile_error(code, "Cannot store arena-referencing type")
 
+  def test_move_and_return_self_arena_owning_struct_allowed(self):
+    code = """
+    proto Tag { var val: int; }
+    struct Holder {
+      var arena: Arena;
+      var tag: Tag? = none;
+    }
+    func make(): Holder {
+      var h = Holder { arena = Arena() };
+      h.tag = Tag { val = 42 } in h.arena;
+      var h2 = move h;
+      return move h2;
+    }
+    """
+    self._assert_compiles(code)
+
+  def test_returning_field_of_self_arena_struct_still_rejected(self):
+    code = """
+    proto Tag { var val: int; }
+    struct Holder {
+      var arena: Arena;
+      var tag: Tag? = none;
+    }
+    func bad(): Tag? {
+      var h = Holder { arena = Arena() };
+      h.tag = Tag { val = 42 } in h.arena;
+      return h.tag;
+    }
+    """
+    self._assert_compile_error(code, "arena")
+
+  def test_dangling_alias_after_moving_self_arena_struct_still_rejected(self):
+    code = """
+    proto Tag { var val: int; }
+    struct Holder {
+      var arena: Arena;
+      var tag: Tag? = none;
+    }
+    func bad(): int {
+      var h = Holder { arena = Arena() };
+      h.tag = Tag { val = 42 } in h.arena;
+      let alias = h.tag;
+      let h2 = move h;
+      return alias?.val ?? 0;
+    }
+    """
+    self._assert_compile_error(code, "moved")
+
+  def test_moving_struct_with_external_local_arena_ref_still_rejected(self):
+    code = """
+    proto Tag { var val: int; }
+    struct Holder {
+      var arena: Arena;
+      var tag: Tag? = none;
+    }
+    func bad(): Holder {
+      var external = Arena();
+      var h = Holder { arena = Arena() };
+      h.tag = Tag { val = 42 } in external;
+      return move h;
+    }
+    """
+    self._assert_compile_error(code, "external")
+
   # ------------------------------------------------------------------
   # 5. No struct up-casting (`Child as Parent`)
   # ------------------------------------------------------------------

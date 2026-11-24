@@ -71,3 +71,17 @@ func test_to_int_invalid(): int {
   let empty = "".to_int() ?? -1;
   return bad + empty;
 }
+
+@test
+func test_split_basic_and_newline(): String {
+  let words = "alpha beta gamma".split(" ");
+  let lines = "first\nsecond".split("\n");
+  return f"{words.size()}:{lines[1]}";
+}
+
+@test
+func test_slice_positive_and_negative(): String {
+  let mid = "abcdef".slice(1, 4);
+  let tail = "abcdef".slice(-2);
+  return f"{mid}:{tail}";
+}

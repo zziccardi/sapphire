@@ -95,3 +95,44 @@ func test_lambda_capturing_self_and_local(): int {
   let acc = Accumulator {};
   return acc.compute(2);
 }
+
+struct CanvasRenderer {
+  var scale: int = 2;
+}
+
+impl CanvasRenderer {
+  func render(overlay: (int, int) -> int): int {
+    return overlay(3, 4) * self.scale;
+  }
+}
+
+struct SceneView {
+  var offset: int = 10;
+}
+
+impl SceneView {
+  func draw_scene(renderer: CanvasRenderer,
+                  extra: ((int, int) -> int)? = none): int {
+    let combined = (x: int, y: int) -> int {
+      var val = x + y + self.offset;
+      if let fn ?= extra {
+        val += fn(x, y);
+      }
+      return val;
+    };
+    return renderer.render(combined);
+  }
+}
+
+@test
+func test_closure_capturing_self_and_optional_callback_forwarded(): int {
+  let r = CanvasRenderer { scale = 2 };
+  let view = SceneView { offset = 10 };
+  let without_extra = view.draw_scene(r);
+  let with_extra = view.draw_scene(r, (a: int, b: int) -> int {
+    return a * b;
+  });
+  // without_extra: (3 + 4 + 10) * 2 = 34
+  // with_extra: (3 + 4 + 10 + 12) * 2 = 58
+  return without_extra * 100 + with_extra;
+}
