@@ -802,24 +802,33 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     return assigned
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
-    default_members = [m for m in node.members if getattr(m, "body", None) is not None]
-    if not default_members:
-      # Pure abstract traits are compile-time contracts and erased at runtime.
-      return
+    default_members = [
+        m for m in node.members if getattr(m, "body", None) is not None
+    ]
     cls_name = self._mangle_name(node.name)
     self.newline()
     self.emit(f"class {cls_name}:")
     self.indent()
-    for member in default_members:
-      synth_func = FuncDeclNode(
-          member.name,
-          member.parameters,
-          member.return_types,
-          member.body,
-          annotations=member.annotations,
-      )
-      synth_member = ImplMemberNode(member.modifier, synth_func)
-      self.visit_ImplMemberNode(synth_member)
+    if not default_members:
+      # Emit an empty placeholder class even for pure abstract traits so that
+      # cross-module trait aliases (`let T = mod.Trait;`), re-exports
+      # (`export { mod.Trait }`), and `__all__` entries resolve cleanly at
+      # import time instead of raising AttributeError in Python. (In Lua,
+      # indexing a missing table key yields nil, whereas Python raises
+      # AttributeError.)
+      self.newline()
+      self.emit("pass")
+    else:
+      for member in default_members:
+        synth_func = FuncDeclNode(
+            member.name,
+            member.parameters,
+            member.return_types,
+            member.body,
+            annotations=member.annotations,
+        )
+        synth_member = ImplMemberNode(member.modifier, synth_func)
+        self.visit_ImplMemberNode(synth_member)
     self.dedent()
     self.newline()
 

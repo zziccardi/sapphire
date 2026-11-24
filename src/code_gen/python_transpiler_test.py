@@ -3308,6 +3308,56 @@ class TestPhase5PythonFixes(unittest.TestCase):
     self.assertIn("TextAlign = enums.Align", py_code)
     self.assertIn('__all__ = ["public_helper", "DrawMode", "TextAlign"]', py_code)
 
+  def test_abstract_trait_emits_placeholder_and_supports_cross_module_alias(self):
+    """Verifies pure abstract traits emit placeholder classes for aliases/re-exports."""
+    import importlib.util
+    import sys
+    import tempfile
+    from src.code_gen.transpiler import transpile_file
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      base_sp = os.path.join(tmpdir, "base_traits.sp")
+      alias_sp = os.path.join(tmpdir, "alias_mod.sp")
+      with open(base_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "export { Combatant, Fighter }\n"
+            "trait Combatant {\n"
+            "  func get_hp(): int;\n"
+            "}\n"
+            "struct Fighter { var hp: int = 10; }\n"
+            "impl Combatant for Fighter {\n"
+            "  func get_hp(): int { return self.hp; }\n"
+            "}\n"
+        )
+      with open(alias_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "import base_traits;\n"
+            "export { Combatant, read_hp }\n"
+            "let Combatant = base_traits.Combatant;\n"
+            "func read_hp(c: Combatant): int { return c.get_hp(); }\n"
+        )
+
+      out_py = os.path.join(tmpdir, "alias_mod.py")
+      transpile_file(alias_sp, output_file=out_py, target="python", quiet=True)
+
+      base_py = os.path.join(tmpdir, "base_traits.py")
+      with open(base_py, "r", encoding="utf-8") as f:
+        base_src = f.read()
+      self.assertIn("class Combatant:", base_src)
+
+      orig_path = list(sys.path)
+      sys.path.insert(0, tmpdir)
+      try:
+        spec = importlib.util.spec_from_file_location("alias_mod_test", out_py)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        fighter = mod.base_traits.Fighter(hp=25)
+        self.assertEqual(mod.read_hp(fighter), 25)
+        self.assertIs(mod.Combatant, mod.base_traits.Combatant)
+      finally:
+        sys.path[:] = orig_path
+        sys.modules.pop("base_traits", None)
+
 
 if __name__ == "__main__":
   unittest.main()
