@@ -5,7 +5,7 @@ Sapphire (.sp) code to target languages (e.g. Lua 5.1).
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Base64 characters used in V3 Source Maps
 BASE64_CHARS = (
@@ -49,7 +49,7 @@ class MappingEntry:
     source_file: str,
     orig_line: int,  # 1-indexed
     orig_col: int,  # 0-indexed
-    symbol_name: Optional[str] = None,
+    symbol_name: str | None = None,
   ):
     self.gen_line = gen_line
     self.gen_col = gen_col
@@ -64,16 +64,16 @@ class SourceMapBuilder:
   line maps.
   """
 
-  def __init__(self, source_file: str, source_content: Optional[str] = None):
-    self.sources: List[str] = [source_file]
-    self.sources_content: Dict[str, str] = {}
+  def __init__(self, source_file: str, source_content: str | None = None):
+    self.sources: list[str] = [source_file]
+    self.sources_content: dict[str, str] = {}
     if source_content is not None:
       self.sources_content[source_file] = source_content
-    self.names: List[str] = []
-    self.mappings: List[MappingEntry] = []
+    self.names: list[str] = []
+    self.mappings: list[MappingEntry] = []
 
   def add_source(
-    self, source_file: str, source_content: Optional[str] = None
+    self, source_file: str, source_content: str | None = None
   ) -> int:
     """Ensures a source file is present in sources list and returns its index.
     """
@@ -96,7 +96,7 @@ class SourceMapBuilder:
     source_file: str,
     orig_line: int,
     orig_col: int,
-    symbol_name: Optional[str] = None,
+    symbol_name: str | None = None,
   ) -> None:
     """Adds a mapping entry from generated position to original source position.
     """
@@ -120,7 +120,7 @@ class SourceMapBuilder:
       self.mappings, key=lambda m: (m.gen_line, m.gen_col)
     )
 
-    lines_mappings: Dict[int, List[MappingEntry]] = {}
+    lines_mappings: dict[int, list[MappingEntry]] = {}
     for m in sorted_mappings:
       if m.gen_line <= 0:
         continue
@@ -128,7 +128,7 @@ class SourceMapBuilder:
 
     max_line = max(lines_mappings.keys()) if lines_mappings else 0
 
-    result_lines: List[str] = []
+    result_lines: list[str] = []
 
     last_source_idx = 0
     last_orig_line = 0
@@ -137,7 +137,7 @@ class SourceMapBuilder:
 
     for current_gen_line in range(1, max_line + 1):
       line_entries = lines_mappings.get(current_gen_line, [])
-      encoded_entries: List[str] = []
+      encoded_entries: list[str] = []
       last_gen_col = 0
 
       for entry in line_entries:
@@ -176,7 +176,7 @@ class SourceMapBuilder:
 
     return ";".join(result_lines)
 
-  def to_v3_dict(self, generated_filename: str) -> Dict[str, Any]:
+  def to_v3_dict(self, generated_filename: str) -> dict[str, Any]:
     """Returns the V3 Source Map as a python dictionary."""
     sources_content_list = [
       self.sources_content.get(src, None) for src in self.sources
@@ -203,7 +203,7 @@ class SourceMapBuilder:
         ...
       }
     """
-    entries: List[str] = []
+    entries: list[str] = []
     # Deduplicate: pick first mapping per generated line
     seen_lines = set()
     sorted_mappings = sorted(

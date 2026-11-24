@@ -4,7 +4,7 @@ Inspects Sapphire AST nodes and semantic types at cursor position to provide
 rich hover tooltips, signatures, documentation, and parameter information.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from lsprotocol.types import Hover, HoverParams, MarkupContent, MarkupKind
 
@@ -96,7 +96,7 @@ class HoverProvider:
   """Extracts hover documentation and tooltips from Sapphire AST and types."""
 
   @staticmethod
-  def _match_binding_name(node: Any, line: int, col: int) -> Optional[str]:
+  def _match_binding_name(node: Any, line: int, col: int) -> str | None:
     """Finds the specific binding name under `(line, col)` in a multi-var node.
     """
     for info in getattr(node, "bindings_info", []) or []:
@@ -416,8 +416,8 @@ class HoverProvider:
     cls,
     ls: Any,
     params: HoverParams,
-    find_node_fn: Optional[Any] = None,
-  ) -> Optional[Hover]:
+    find_node_fn: Any | None = None,
+  ) -> Hover | None:
     """Triggered when user hovers over an identifier in the document."""
     uri = params.text_document.uri
     if uri not in ls.ast_cache or uri not in ls.node_types_cache:

@@ -5,7 +5,7 @@ and struct/trait members from cursor position.
 """
 
 import os
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from lsprotocol.types import (
   DefinitionParams,
@@ -54,8 +54,8 @@ from src.semantics.symbol_table import (
 
 
 def resolve_module_path(
-  doc_uri: str, mod_path: str, workspace_root: Optional[str] = None
-) -> Optional[str]:
+  doc_uri: str, mod_path: str, workspace_root: str | None = None
+) -> str | None:
   """Resolves a dot-separated Sapphire import path to an absolute file path on
   disk.
   """
@@ -106,9 +106,9 @@ def _line_in_node_span(node: Any, line: int) -> bool:
   return True
 
 
-def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
+def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Any | None:
   """Searches statements (including containing nested blocks) for local decl."""
-  found_in_block: Optional[Any] = None
+  found_in_block: Any | None = None
   for stmt in stmts:
     st_start = getattr(stmt, "start_line", None)
     if st_start is not None and st_start > line:
@@ -208,7 +208,7 @@ def _find_decl_in_stmts(stmts: list, name: str, line: int) -> Optional[Any]:
   return found_in_block
 
 
-def find_local_decl(ast: Any, name: str, line: int) -> Optional[Any]:
+def find_local_decl(ast: Any, name: str, line: int) -> Any | None:
   """Finds local variable or parameter declaration in AST containing line."""
   declarations = getattr(ast, "declarations", [])
   for decl in declarations:
@@ -263,7 +263,7 @@ class DefinitionProvider:
   """Resolves Go to Definition locations for Sapphire AST nodes."""
 
   @classmethod
-  def _extract_decl_ast(cls, sym: Any) -> Optional[Any]:
+  def _extract_decl_ast(cls, sym: Any) -> Any | None:
     """Extracts the underlying AST declaration node from a symbol or type."""
     if not sym:
       return None
@@ -277,7 +277,7 @@ class DefinitionProvider:
   @classmethod
   def _resolve_module_export_ast(
     cls, ls: Any, mod_sym: Any, member_name: str
-  ) -> Optional[Any]:
+  ) -> Any | None:
     """Resolves an exported symbol from a ModuleSymbol, falling back to cached
     symbol tables.
     """
@@ -302,7 +302,7 @@ class DefinitionProvider:
   @classmethod
   def _resolve_member_definition(
     cls, ls: Any, node: MemberAccessNode, sym_table: Any, node_types: Any
-  ) -> Optional[Any]:
+  ) -> Any | None:
     """Resolves Go to Definition for a MemberAccessNode (module, field, method,
     enum).
     """
@@ -379,9 +379,9 @@ class DefinitionProvider:
     cls,
     target_ast: Any,
     node: Any,
-    line: Optional[int] = None,
-    col: Optional[int] = None,
-  ) -> Optional[Range]:
+    line: int | None = None,
+    col: int | None = None,
+  ) -> Range | None:
     """Computes the LSP Range (code-point offsets) for a target AST declaration
     or
     binding.
@@ -469,13 +469,13 @@ class DefinitionProvider:
   @classmethod
   def _locate_in_ast_cache(
     cls, ls: Any, target_decl: Any
-  ) -> Optional[Tuple[str, Range]]:
+  ) -> tuple[str, Range] | None:
     """Searches cached ASTs when `target_ast.file_uri` is not directly
     populated.
     """
     target_name = getattr(target_decl, "name", None)
 
-    def _search_ast(ast_node: Any, match_by_name: bool) -> Optional[Any]:
+    def _search_ast(ast_node: Any, match_by_name: bool) -> Any | None:
       for c_decl in getattr(ast_node, "declarations", []):
         if c_decl is target_decl or (
           match_by_name
@@ -567,8 +567,8 @@ class DefinitionProvider:
     cls,
     ls: Any,
     params: DefinitionParams,
-    find_node_fn: Optional[Any] = None,
-  ) -> Optional[Location]:
+    find_node_fn: Any | None = None,
+  ) -> Location | None:
     """Triggered when user requests Go to Definition."""
     uri = params.text_document.uri
     if uri not in ls.ast_cache or uri not in ls.symbol_table_cache:

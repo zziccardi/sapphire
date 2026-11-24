@@ -19,7 +19,6 @@ import shutil
 import subprocess
 import unittest
 from contextlib import redirect_stdout
-from typing import List, Tuple
 
 from antlr4 import CommonTokenStream, InputStream
 
@@ -119,8 +118,8 @@ class TestDifferentialParity(unittest.TestCase):
       raise unittest.SkipTest("Lua runtime not found on PATH")
 
   def _run_both_backends(
-      self, code: str, case_names: List[str], seed: int
-  ) -> Tuple[List[str], List[str]]:
+      self, code: str, case_names: list[str], seed: int
+  ) -> tuple[list[str], list[str]]:
     """Compiles *code*, executes every function in *case_names* on Python & Lua."""
     lexer = SapphireLexer(InputStream(code))
     parser = SapphireParser(CommonTokenStream(lexer))
@@ -182,7 +181,7 @@ class TestDifferentialParity(unittest.TestCase):
     return str(val)
 
   def _assert_parity(
-      self, code: str, cases: List[Tuple[str, str]], seed: int
+      self, code: str, cases: list[tuple[str, str]], seed: int
   ) -> None:
     names = [name for name, _ in cases]
     py_out, lua_out = self._run_both_backends(code, names, seed)
@@ -198,8 +197,8 @@ class TestDifferentialParity(unittest.TestCase):
   def test_differential_arithmetic_and_booleans(self):
     """Generates 40 random arithmetic/division/modulo/boolean expressions."""
     rng = random.Random(_DEFAULT_SEED)
-    cases: List[Tuple[str, str]] = []
-    funcs: List[str] = []
+    cases: list[tuple[str, str]] = []
+    funcs: list[str] = []
 
     for i in range(25):
       expr = _gen_int_expr(rng)
@@ -229,8 +228,8 @@ func probe(tag: int, result: bool): bool {
   return result;
 }
 """
-    cases: List[Tuple[str, str]] = []
-    funcs: List[str] = [header]
+    cases: list[tuple[str, str]] = []
+    funcs: list[str] = [header]
 
     for i in range(30):
       expr = _gen_short_circuit_expr(rng)
@@ -262,8 +261,8 @@ impl Node {
   }
 }
 """
-    cases: List[Tuple[str, str]] = []
-    funcs: List[str] = [header]
+    cases: list[tuple[str, str]] = []
+    funcs: list[str] = [header]
 
     for i in range(30):
       subj = rng.choice([0, 1, 2, 3, 4])
@@ -316,8 +315,8 @@ impl Node {
   def test_differential_containers_negative_index_and_writebacks(self):
     """Generates 30 random programs mutating `[int?]` & `Map<String, int?>` via write-backs."""
     rng = random.Random(_DEFAULT_SEED + 3)
-    cases: List[Tuple[str, str]] = []
-    funcs: List[str] = []
+    cases: list[tuple[str, str]] = []
+    funcs: list[str] = []
 
     for i in range(30):
       arr_vals = [rng.choice(["none", "0", "3", "-2", "8"]) for _ in range(4)]
@@ -378,8 +377,8 @@ func consume(t: Token): int {
   return t.id;
 }
 """
-    cases: List[Tuple[str, str]] = []
-    funcs: List[str] = [header]
+    cases: list[tuple[str, str]] = []
+    funcs: list[str] = [header]
 
     for i in range(20):
       cond1 = rng.choice(["true", "false"])

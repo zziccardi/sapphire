@@ -58,7 +58,7 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "B", "I", "W"]
+select = ["E", "F", "B", "I", "W", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 # TODO: Address E501 line-length violations in test files.

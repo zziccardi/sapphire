@@ -4,7 +4,7 @@ Decouples Array and Map method resolution and call-site argument validation from
 the core TypeChecker.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.parser.ast import (
   CallNode,
@@ -264,15 +264,15 @@ class CollectionChecker:
 
   @staticmethod
   def _bind_args(
-    arguments: List[Any],
-    param_names: List[str],
-    checker: Optional[Any] = None,
-    method_name: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    arguments: list[Any],
+    param_names: list[str],
+    checker: Any | None = None,
+    method_name: str | None = None,
+  ) -> dict[str, Any]:
     """Maps positional and named call arguments to parameter names and validates
     arity/names.
     """
-    bound: Dict[str, Any] = {}
+    bound: dict[str, Any] = {}
     label = f".{method_name}()" if method_name else "collection method"
     reported_too_many = False
     for idx, arg in enumerate(arguments):
@@ -816,7 +816,7 @@ class CollectionChecker:
     return ArrayType(elem_type, size=receiver_type.size)
 
   @staticmethod
-  def check_array_method_call(checker: Any, node: CallNode) -> Optional[Type]:
+  def check_array_method_call(checker: Any, node: CallNode) -> Type | None:
     """Validates a call to a builtin Array method and returns its return Type.
     """
     method = node.callee.array_method
@@ -918,7 +918,7 @@ class CollectionChecker:
     return v_type
 
   @staticmethod
-  def check_map_method_call(checker: Any, node: CallNode) -> Optional[Type]:
+  def check_map_method_call(checker: Any, node: CallNode) -> Type | None:
     """Validates a call to a builtin Map method and returns its return Type."""
     method = node.callee.map_method
     receiver_type = node.callee.map_receiver_type

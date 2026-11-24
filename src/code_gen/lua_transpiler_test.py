@@ -2197,7 +2197,7 @@ class TestLuaTranspiler(unittest.TestCase):
       transpile_file(sp_path, lua_path, target="lua", quiet=True, use_runtime_module=True)
       rt_path = os.path.join(tmpdir, "_sapphire_runtime.lua")
       self.assertTrue(os.path.exists(rt_path))
-      with open(lua_path, "r", encoding="utf-8") as f:
+      with open(lua_path, encoding="utf-8") as f:
         lua_content = f.read()
       self.assertIn("_sp_load_runtime()", lua_content)
       self.assertNotIn("local function _create_proto_object", lua_content)
@@ -2269,7 +2269,7 @@ class TestLuaTranspiler(unittest.TestCase):
 
       transpile_file(dep_sp, dep_lua, target="lua", quiet=True)
       transpile_file(main_sp, main_lua, target="lua", quiet=True)
-      with open(main_lua, "r", encoding="utf-8") as f:
+      with open(main_lua, encoding="utf-8") as f:
         main_lua_text = f.read()
 
       self.assertIn("helpers.STEP", main_lua_text)

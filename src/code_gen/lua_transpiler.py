@@ -5,7 +5,7 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation and Arena memory management.
 """
 
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any
 
 from src.code_gen.base_transpiler import (
   BaseTranspiler,
@@ -111,8 +111,8 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
 
   def __init__(
     self,
-    source_file: Optional[str] = None,
-    source_map_builder: Optional[SourceMapBuilder] = None,
+    source_file: str | None = None,
+    source_map_builder: SourceMapBuilder | None = None,
     test_mode: bool = False,
     dev_mode: bool = False,
     use_runtime_module: bool = False,
@@ -128,14 +128,14 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.current_column = 0
     self.source_file = source_file
     self.source_map_builder = source_map_builder
-    self._pending_source_mapping: Optional[Tuple[str, int, int]] = None
+    self._pending_source_mapping: tuple[str, int, int] | None = None
     self.dev_mode = dev_mode
-    self.on_reload_callbacks: List[str] = []
-    self.declared_symbols: List[str] = []
-    self.known_structs: Set[str] = set()
-    self.imported_modules: Set[str] = set()
-    self._loop_stack: List[bool] = []
-    self._lifted_match_arity: Dict[int, int] = {}
+    self.on_reload_callbacks: list[str] = []
+    self.declared_symbols: list[str] = []
+    self.known_structs: set[str] = set()
+    self.imported_modules: set[str] = set()
+    self._loop_stack: list[bool] = []
+    self._lifted_match_arity: dict[int, int] = {}
 
   def emit(self, text: str) -> None:
     """Emits text on the current line and updates line/column numbers."""
@@ -170,8 +170,8 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
   def transpile(
     self,
     program: ProgramNode,
-    source_file: Optional[str] = None,
-    source_map_builder: Optional[SourceMapBuilder] = None,
+    source_file: str | None = None,
+    source_map_builder: SourceMapBuilder | None = None,
   ) -> str:
     """Main entry point to transpile a Sapphire ProgramNode to Lua 5.1."""
     if source_file:
@@ -341,7 +341,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     enum_name = self._mangle_name(node.name)
     self.emit(f"local {enum_name} = {{")
     self.indent()
-    current_val: Union[int, str] = 0
+    current_val: int | str = 0
     is_string_enum = any(isinstance(m.value, str) for m in node.members)
     for idx, member in enumerate(node.members):
       if member.value is not None:
@@ -476,7 +476,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.newline()
 
   def _emit_struct_init_constructor(
-    self, node: StructDeclNode, methods: List[Any]
+    self, node: StructDeclNode, methods: list[Any]
   ) -> None:
     """Emits `Struct.init(...)` handling proto delegation, `__init__`, and
     kwargs.
@@ -775,7 +775,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       "Lua backend, not directly on a standalone ImplMemberNode."
     )
 
-  def _has_optional_default_param(self, params: List[Any]) -> bool:
+  def _has_optional_default_param(self, params: list[Any]) -> bool:
     """Returns True if any parameter has both an optional type and a default
     value.
     """
@@ -785,7 +785,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     )
 
   def _emit_default_params(
-    self, params: List[Any], has_opt_default: bool
+    self, params: list[Any], has_opt_default: bool
   ) -> None:
     """Emits parameter unpacking (for optional defaults) and default
     assignments.

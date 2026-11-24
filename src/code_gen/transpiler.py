@@ -7,7 +7,7 @@ generation dispatch to target backends (Python or Lua 5.1).
 
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 from antlr4 import CommonTokenStream, FileStream
 
@@ -95,7 +95,7 @@ def _is_path_under(path: str, parent_dir: str) -> bool:
 
 
 def is_stdlib_stub(
-  import_path: str, resolved_path: Optional[str] = None
+  import_path: str, resolved_path: str | None = None
 ) -> bool:
   """Returns True if an import refers to a hand-written stdlib runtime stub."""
   if is_builtin_module(import_path) or import_path.startswith("std."):
@@ -138,7 +138,7 @@ def _parse_and_check(
   quiet: bool,
   raise_on_error: bool,
   verbose: bool = False,
-) -> tuple[Any, str]:
+) -> tuple[Any, str, Any]:
   """Lexes, parses, builds AST, and runs semantic analysis on *input_file*."""
   if verbose and not quiet:
     print(f"Reading source file: {input_file}...")
@@ -191,7 +191,7 @@ def _parse_and_check(
     print("Building AST...")
   src_content = str(input_stream)
   try:
-    ast = ASTBuilder().visit(tree)
+    ast: Any = ASTBuilder().visit(tree)
   except SapphireSyntaxError as e:
     if not e.file_path:
       e.file_path = input_file
@@ -253,7 +253,7 @@ def _transpile_imports(
   input_file: str,
   target: str,
   ext: str,
-  isolated_root: Optional[str],
+  isolated_root: str | None,
   visited: set,
   sourcemap: bool,
   test_mode: bool,
@@ -298,7 +298,7 @@ def _transpile_imports(
 def _instantiate_transpiler(
   target_info: Any,
   src_filename: str,
-  sm_builder: Optional[SourceMapBuilder],
+  sm_builder: SourceMapBuilder | None,
   test_mode: bool,
   dev_mode: bool,
   use_runtime_module: bool,
@@ -343,16 +343,16 @@ def _instantiate_transpiler(
 
 def transpile_file(
   input_file: str,
-  output_file: Optional[str] = None,
+  output_file: str | None = None,
   target: str = "python",
-  visited: Optional[set] = None,
+  visited: set | None = None,
   sourcemap: bool = True,
   test_mode: bool = False,
   dev_mode: bool = False,
   quiet: bool = False,
   raise_on_error: bool = True,
   use_runtime_module: bool = False,
-  _output_root: Optional[str] = None,
+  _output_root: str | None = None,
   verbose: bool = False,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1).

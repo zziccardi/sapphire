@@ -1,6 +1,6 @@
 """Call, argument, and aliasing visitors for TypeChecker."""
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from src.parser.ast import (
   ArgumentNode,
@@ -57,7 +57,7 @@ from src.semantics.symbol_table import (
 class CallVisitorMixin(MemberAccessVisitorMixin):
   """Provides AST visitor methods for calls, arguments, and member access."""
 
-  def _get_lvalue_path(self, node: ASTNode) -> Optional[tuple[str, List[str]]]:
+  def _get_lvalue_path(self, node: ASTNode) -> tuple[str, list[str]] | None:
     """Resolves an AST node to its root variable name and field path if it is an
     lvalue.
     """
@@ -76,7 +76,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     ArenaChecker.check_aliasing(self, node, signature, is_constructor)
 
   def _unify_generic_type(
-    self, param_t: Type, arg_t: Type, inferred_map: Dict[str, Type]
+    self, param_t: Type, arg_t: Type, inferred_map: dict[str, Type]
   ) -> None:
     """Recursively unifies generic type parameters in *param_t* against *arg_t*.
     """
@@ -208,7 +208,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     else:
       # Infer generic type parameters from call arguments when omitted.
       # Snapshot move state so speculative inference does not double-move args.
-      inferred_map: Dict[str, Type] = {}
+      inferred_map: dict[str, Type] = {}
       param_names = sym.symbol_type.param_names or []
       saved_moved = set(self.moved_symbols)
       saved_errors_len = len(self.errors)
@@ -258,7 +258,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
       if mono_sym:
         mod_sym.exports[mangled_name] = mono_sym
 
-  def _try_check_builtin_call(self, node: CallNode) -> Optional[Type]:
+  def _try_check_builtin_call(self, node: CallNode) -> Type | None:
     """Handles special-cased builtin calls (String.from, Enum.from, Ref, etc.).
     """
     if getattr(node.callee, "is_string_from", False):
@@ -397,7 +397,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
 
   def _check_constructor_call(
     self, node: CallNode, callee_type: StructType
-  ) -> Tuple[StructType, Optional[FunctionType]]:
+  ) -> tuple[StructType, FunctionType | None]:
     """Validates struct/proto constructor calls and `in <arena>` clauses."""
     if callee_type.type_params:
       if node.type_args:
@@ -547,7 +547,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
 
   def _collect_coroutine_call_borrows(self, node: CallNode) -> None:
     """Records local stack variables borrowed by a returned Coroutine<T>."""
-    coro_borrows: Set[str] = set()
+    coro_borrows: set[str] = set()
     if isinstance(node.callee, MemberAccessNode):
       r_path = ArenaChecker.get_lvalue_path(
         self.symbol_table, node.callee.receiver
@@ -606,7 +606,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
           builtin_res = OptionalType(builtin_res)
       return builtin_res
 
-    signature: Optional[FunctionType] = None
+    signature: FunctionType | None = None
     is_constructor = False
 
     if isinstance(callee_type, StructType):
@@ -705,7 +705,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     return False
 
   def _visit_call_arg_expr(
-    self, expr: ASTNode, expected: Optional[Type]
+    self, expr: ASTNode, expected: Type | None
   ) -> Type:
     """Visits an argument expression with optional expected type context."""
     old_expected = self.expected_type
@@ -732,8 +732,8 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     arg: ArgumentNode,
     arg_type: Type,
     param_idx: int,
-    expected_param_types: List[Type],
-    expected_mutabilities: List[bool],
+    expected_param_types: list[Type],
+    expected_mutabilities: list[bool],
   ) -> None:
     """Validates mode and type compatibility for a single resolved argument."""
     param_type = expected_param_types[param_idx]
@@ -852,8 +852,8 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
 
   def _check_range_arguments(
     self,
-    arguments: List[ArgumentNode],
-    call_node: Optional[CallNode] = None,
+    arguments: list[ArgumentNode],
+    call_node: CallNode | None = None,
   ) -> None:
     """Validates positional and named arguments for built-in range()."""
     if len(arguments) < 1:
@@ -867,7 +867,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
 
     seen_named = False
     pos_count = 0
-    named_args: Dict[str, ArgumentNode] = {}
+    named_args: dict[str, ArgumentNode] = {}
     int_t = PrimitiveType("int")
 
     for idx, arg in enumerate(arguments):
@@ -925,10 +925,10 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
   def _finalize_call_eval_order(
     self,
     call_node: CallNode,
-    arguments: List[ArgumentNode],
-    callee_node: Optional[ASTNode],
-    bound_slots: Dict[int, ArgumentNode],
-    arg_param_indices: List[Optional[int]],
+    arguments: list[ArgumentNode],
+    callee_node: ASTNode | None,
+    bound_slots: dict[int, ArgumentNode],
+    arg_param_indices: list[int | None],
   ) -> None:
     """Attaches canonicalized argument order and eval-temp flags for codegen."""
     if not bound_slots:
@@ -950,7 +950,7 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
     is_reordered = any(
       valid_slots[k] > valid_slots[k + 1] for k in range(len(valid_slots) - 1)
     )
-    eval_exprs: List[Any] = [a.expr for a in arguments]
+    eval_exprs: list[Any] = [a.expr for a in arguments]
     if isinstance(callee_node, MemberAccessNode):
       eval_exprs.append(callee_node.receiver)
     elif callee_node is not None and not isinstance(
@@ -967,11 +967,11 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
 
   def _check_arguments(
     self,
-    arguments: List[ArgumentNode],
+    arguments: list[ArgumentNode],
     signature: FunctionType,
     is_constructor: bool = False,
-    callee_node: Optional[ASTNode] = None,
-    call_node: Optional[CallNode] = None,
+    callee_node: ASTNode | None = None,
+    call_node: CallNode | None = None,
   ) -> None:
     """Matches argument lists against signatures and canonicalizes call
     metadata.
@@ -1033,12 +1033,12 @@ class CallVisitorMixin(MemberAccessVisitorMixin):
       return
 
     seen_named = False
-    bound_slots: Dict[int, ArgumentNode] = {}
-    arg_param_indices: List[Optional[int]] = []
+    bound_slots: dict[int, ArgumentNode] = {}
+    arg_param_indices: list[int | None] = []
     has_binding_error = False
 
     for idx, arg in enumerate(arguments):
-      param_idx: Optional[int] = None
+      param_idx: int | None = None
       if arg.name:
         seen_named = True
         if not has_named_params:

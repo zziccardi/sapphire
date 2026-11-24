@@ -34,7 +34,7 @@ class TranspilerHygieneTest(unittest.TestCase):
     lib_dir = find_sapphire_lib_dir()
     self.assertIsNotNone(lib_dir)
     utf8_lua = os.path.join(lib_dir, "std", "utf8.lua")
-    with open(utf8_lua, "r", encoding="utf-8") as f:
+    with open(utf8_lua, encoding="utf-8") as f:
       before = f.read()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -50,7 +50,7 @@ class TranspilerHygieneTest(unittest.TestCase):
       transpile_file(main_sp, output_file=out_lua, target="lua", quiet=True)
       self.assertTrue(os.path.exists(out_lua))
 
-    with open(utf8_lua, "r", encoding="utf-8") as f:
+    with open(utf8_lua, encoding="utf-8") as f:
       after = f.read()
     self.assertEqual(before, after)
 
@@ -117,7 +117,7 @@ class TranspilerHygieneTest(unittest.TestCase):
       res = transpile_file(src, output_file=out_ll, target="llvm", quiet=True)
       self.assertEqual(res, out_ll)
       self.assertTrue(os.path.exists(out_ll))
-      with open(out_ll, "r", encoding="utf-8") as f:
+      with open(out_ll, encoding="utf-8") as f:
         self.assertIn('define i64 @"add"', f.read())
 
   def test_is_prebuilt_lib_module_checks_mtime_freshness(self):
@@ -182,10 +182,10 @@ class TranspilerHygieneTest(unittest.TestCase):
 
       isolated_mod = os.path.join(out_dir, "lib", "love2d", "freshmod.lua")
       self.assertTrue(os.path.exists(isolated_mod))
-      with open(isolated_mod, "r", encoding="utf-8") as f:
+      with open(isolated_mod, encoding="utf-8") as f:
         self.assertIn("42", f.read())
       # Original stale file under lib/ is left untouched.
-      with open(stale_lua, "r", encoding="utf-8") as f:
+      with open(stale_lua, encoding="utf-8") as f:
         self.assertIn("-- stale output", f.read())
 
   def test_isolated_python_lib_extend_path_shadows_stale_regular_package(self):

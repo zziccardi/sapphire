@@ -5,7 +5,6 @@ a strongly typed abstract syntax tree (AST) using the node classes defined in
 ast.py.
 """
 
-from typing import List, Optional
 
 from src.common.errors import SapphireSyntaxError
 from src.parser.ast import (
@@ -114,7 +113,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitTopLevelItem(
     self, ctx: SapphireParser.TopLevelItemContext
-  ) -> Optional[ASTNode]:
+  ) -> ASTNode | None:
     if ctx and ctx.children:
       return self.visit(ctx.getChild(0))
     return None
@@ -194,12 +193,12 @@ class ASTBuilder(SapphireVisitor):
 
   def visitTypeParamList(
     self, ctx: SapphireParser.TypeParamListContext
-  ) -> List[str]:
+  ) -> list[str]:
     return [id_token.getText() for id_token in ctx.IDENTIFIER()]
 
   def visitTypeArgumentList(
     self, ctx: SapphireParser.TypeArgumentListContext
-  ) -> List[TypeNode]:
+  ) -> list[TypeNode]:
     return [self.visit(t) for t in ctx.type_()]
 
   def visitStructDeclaration(
@@ -388,7 +387,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitReturnTypeList(
     self, ctx: SapphireParser.ReturnTypeListContext
-  ) -> List[TypeNode]:
+  ) -> list[TypeNode]:
     return [self.visit(t) for t in ctx.type_()]
 
   def visitTraitMember(
@@ -470,7 +469,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitBaseInitializerList(
     self, ctx: SapphireParser.BaseInitializerListContext
-  ) -> List[CallNode]:
+  ) -> list[CallNode]:
     return [self.visitBaseInitializer(b) for b in ctx.baseInitializer()]
 
   def visitBaseInitializer(
@@ -494,7 +493,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitParameterList(
     self, ctx: SapphireParser.ParameterListContext
-  ) -> List[ParameterNode]:
+  ) -> list[ParameterNode]:
     return [self.visit(p) for p in ctx.parameter()]
 
   def visitParameter(
@@ -588,7 +587,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitStatement(
     self, ctx: SapphireParser.StatementContext
-  ) -> Optional[StmtNode]:
+  ) -> StmtNode | None:
     if ctx and ctx.getChildCount() > 0 and ctx.getChild(0) is not None:
       return self.visit(ctx.getChild(0))
     return None
@@ -934,7 +933,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitArgumentList(
     self, ctx: SapphireParser.ArgumentListContext
-  ) -> List[ArgumentNode]:
+  ) -> list[ArgumentNode]:
     return [self.visit(arg) for arg in ctx.argument()]
 
   def visitArgument(self, ctx: SapphireParser.ArgumentContext) -> ArgumentNode:
@@ -1013,7 +1012,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitLambdaParameters(
     self, ctx: SapphireParser.LambdaParametersContext
-  ) -> List[LambdaParamNode]:
+  ) -> list[LambdaParamNode]:
     if ctx.IDENTIFIER():
       return [LambdaParamNode(ctx.IDENTIFIER().getText(), None)]
     else:
@@ -1308,7 +1307,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitStructInitFieldList(
     self, ctx: SapphireParser.StructInitFieldListContext
-  ) -> List[ArgumentNode]:
+  ) -> list[ArgumentNode]:
     return [self.visit(field) for field in ctx.structInitField()]
 
   def visitStructInitField(
@@ -1361,7 +1360,7 @@ class ASTBuilder(SapphireVisitor):
 
   def visitMatchPattern(
     self, ctx: SapphireParser.MatchPatternContext
-  ) -> List[ASTNode]:
+  ) -> list[ASTNode]:
     if ctx.ELLIPSIS():
       return [EllipsisPatternNode()]
     return [self.visit(expr_ctx) for expr_ctx in ctx.nonLambdaExpression()]

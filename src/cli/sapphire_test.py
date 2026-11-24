@@ -182,7 +182,7 @@ class SapphireCLITest(unittest.TestCase):
       with suppress_output():
         main()
     self.assertTrue(os.path.exists(lua_file))
-    with open(lua_file, "r") as f:
+    with open(lua_file) as f:
       content = f.read()
     self.assertIn("_SP_DEV_WATCHER", content)
 
@@ -300,7 +300,7 @@ class SapphireCLITest(unittest.TestCase):
             mock_transpile.assert_called_once()
             marker_path = os.path.join(self.temp_dir.name, ".sapphire_reload")
             self.assertTrue(os.path.exists(marker_path))
-            with open(marker_path, "r", encoding="utf-8") as f:
+            with open(marker_path, encoding="utf-8") as f:
               self.assertIn("main.lua", f.read())
 
   def test_run_dev_watcher_keyboard_interrupt_timeout(self):

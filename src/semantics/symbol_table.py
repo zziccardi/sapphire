@@ -4,7 +4,7 @@ This module defines Symbol subclasses, Scope, and SymbolTable, and
 re-exports type definitions from src.semantics.types for compatibility.
 """
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 from src.semantics.types import (
   ARRAY_METHODS,
@@ -80,7 +80,7 @@ class Symbol:
   def __init__(self, name: str, symbol_type: Type):
     self.name = name
     self.symbol_type = symbol_type
-    self.scope_defined: Optional["Scope"] = None
+    self.scope_defined: Scope | None = None
     self.decl_order: int = 0
 
 
@@ -97,15 +97,15 @@ class VariableSymbol(Symbol):
     super().__init__(name, symbol_type)
     self.is_mutable = is_mutable
     self.is_parameter = is_parameter
-    self.arena_dependency: Optional[str] = None
+    self.arena_dependency: str | None = None
     self.arena_generation: int = 0
-    self.arena_dep_records: List[Tuple[str, int]] = []
+    self.arena_dep_records: list[tuple[str, int]] = []
     self.has_param_arena_ref: bool = False
     self.is_moved: bool = False
-    self.proto_ancestors: Set[str] = set()
-    self.stack_borrow_symbols: Set[str] = set()
-    self.closure_mutated_captures: Set[str] = set()
-    self.closure_read_captures: Set[str] = set()
+    self.proto_ancestors: set[str] = set()
+    self.stack_borrow_symbols: set[str] = set()
+    self.closure_mutated_captures: set[str] = set()
+    self.closure_read_captures: set[str] = set()
 
 
 class FunctionSymbol(Symbol):
@@ -115,8 +115,8 @@ class FunctionSymbol(Symbol):
     self,
     name: str,
     signature: FunctionType,
-    type_params: Optional[List[str]] = None,
-    ast_decl: Optional[Any] = None,
+    type_params: list[str] | None = None,
+    ast_decl: Any | None = None,
   ):
     super().__init__(name, signature)
     self.type_params = type_params or []
@@ -161,13 +161,13 @@ class ModuleSymbol(Symbol):
     self,
     name: str,
     module_path: str,
-    exports: Optional[Dict[str, Symbol]] = None,
+    exports: dict[str, Symbol] | None = None,
   ):
     super().__init__(name, ModuleType(module_path))
     self.module_path = module_path
-    self.exports: Dict[str, Symbol] = exports or {}
+    self.exports: dict[str, Symbol] = exports or {}
 
-  def lookup_export(self, symbol_name: str) -> Optional[Symbol]:
+  def lookup_export(self, symbol_name: str) -> Symbol | None:
     return self.exports.get(symbol_name)
 
 
@@ -180,11 +180,11 @@ class Scope:
   """Represents a single lexical scope in the program."""
 
   def __init__(self, parent: Optional["Scope"] = None):
-    self.symbols: Dict[str, Symbol] = {}
-    self.types: Dict[str, Type] = {}
+    self.symbols: dict[str, Symbol] = {}
+    self.types: dict[str, Type] = {}
     self.parent = parent
     self._next_decl_order: int = 1
-    self.frozen_lvalues: List[Tuple[str, List[str], str]] = []
+    self.frozen_lvalues: list[tuple[str, list[str], str]] = []
 
   def define(self, name: str, symbol: Symbol) -> None:
     """Defines a symbol in the current scope."""
@@ -201,7 +201,7 @@ class Scope:
     """Registers a type name in the current scope."""
     self.types[name] = type_obj
 
-  def lookup(self, name: str) -> Optional[Symbol]:
+  def lookup(self, name: str) -> Symbol | None:
     """Looks up a symbol recursively up the scope chain."""
     if name in self.symbols:
       return self.symbols[name]
@@ -209,7 +209,7 @@ class Scope:
       return self.parent.lookup(name)
     return None
 
-  def lookup_type(self, name: str) -> Optional[Type]:
+  def lookup_type(self, name: str) -> Type | None:
     """Looks up a type name recursively up the scope chain."""
     if "." in name:
       parts = name.split(".")
@@ -230,7 +230,7 @@ class Scope:
       return self.parent.lookup_type(name)
     return None
 
-  def lookup_current(self, name: str) -> Optional[Symbol]:
+  def lookup_current(self, name: str) -> Symbol | None:
     """Looks up a symbol only in the current scope level."""
     return self.symbols.get(name)
 
@@ -347,14 +347,14 @@ class SymbolTable:
     """Registers a type in the current active scope."""
     self.current_scope.define_type(name, type_obj)
 
-  def lookup(self, name: str) -> Optional[Symbol]:
+  def lookup(self, name: str) -> Symbol | None:
     """Resolves an identifier to a Symbol across all active scopes."""
     return self.current_scope.lookup(name)
 
-  def lookup_type(self, name: str) -> Optional[Type]:
+  def lookup_type(self, name: str) -> Type | None:
     """Resolves a type name to a Type object across all active scopes."""
     return self.current_scope.lookup_type(name)
 
-  def lookup_current_scope(self, name: str) -> Optional[Symbol]:
+  def lookup_current_scope(self, name: str) -> Symbol | None:
     """Looks up an identifier only in the current scope level."""
     return self.current_scope.lookup_current(name)

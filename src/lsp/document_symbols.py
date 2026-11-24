@@ -6,7 +6,7 @@ and variables/constants) into LSP DocumentSymbol trees for VS Code's Outline
 view, Breadcrumbs, and Go-to-Symbol.
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from lsprotocol.types import DocumentSymbol, Position, Range, SymbolKind
 
@@ -27,7 +27,7 @@ from src.parser.ast import (
 )
 
 
-def _format_type_node(node: Optional[TypeNode]) -> str:
+def _format_type_node(node: TypeNode | None) -> str:
   """Formats an AST TypeNode into a concise, human-readable type string."""
   if node is None:
     return ""
@@ -54,10 +54,10 @@ def _format_type_node(node: Optional[TypeNode]) -> str:
 
 
 def _create_range(
-  start_line: Optional[int],
-  start_col: Optional[int],
-  end_line: Optional[int],
-  end_col: Optional[int],
+  start_line: int | None,
+  start_col: int | None,
+  end_line: int | None,
+  end_col: int | None,
 ) -> Range:
   """Creates an LSP 0-based Range from 1-based line and 0-based column numbers.
   """
@@ -89,7 +89,7 @@ def _ensure_contained(full_range: Range, sel_range: Range) -> None:
     )
 
 
-def _get_name_position(node: Any, fallback_name: str) -> Tuple[int, int, int]:
+def _get_name_position(node: Any, fallback_name: str) -> tuple[int, int, int]:
   """Returns (line, col, length) for a node's symbol name, with robust
   fallbacks.
   """
@@ -141,7 +141,7 @@ def _build_struct_symbol(decl: StructDeclNode) -> DocumentSymbol:
   detail_str = "".join(details) or ("proto" if decl.is_prototype else "struct")
   full_range, sel_range = _decl_ranges(decl, decl.name)
 
-  field_symbols: List[DocumentSymbol] = []
+  field_symbols: list[DocumentSymbol] = []
   for field in decl.fields:
     f_range, f_sel_range = _decl_ranges(field, field.name)
     field_symbols.append(
@@ -166,7 +166,7 @@ def _build_struct_symbol(decl: StructDeclNode) -> DocumentSymbol:
 
 def _build_enum_symbol(decl: EnumDeclNode) -> DocumentSymbol:
   full_range, sel_range = _decl_ranges(decl, decl.name)
-  member_symbols: List[DocumentSymbol] = []
+  member_symbols: list[DocumentSymbol] = []
   for m in decl.members:
     m_range, m_sel = _decl_ranges(m, m.name)
     member_symbols.append(
@@ -190,7 +190,7 @@ def _build_enum_symbol(decl: EnumDeclNode) -> DocumentSymbol:
 
 def _build_trait_symbol(decl: TraitDeclNode) -> DocumentSymbol:
   full_range, sel_range = _decl_ranges(decl, decl.name)
-  method_symbols: List[DocumentSymbol] = []
+  method_symbols: list[DocumentSymbol] = []
   for tm in decl.members:
     tm_range, tm_sel = _decl_ranges(tm, tm.name)
     method_symbols.append(
@@ -244,7 +244,7 @@ def _build_impl_symbol(decl: ImplBlockNode) -> DocumentSymbol:
   sel_range = _create_range(sel_line, sel_col, sel_line, sel_col + sel_len)
   _ensure_contained(full_range, sel_range)
 
-  methods: List[DocumentSymbol] = []
+  methods: list[DocumentSymbol] = []
   for m in decl.members:
     fn = m.func_decl
     fn_range, fn_sel = _decl_ranges(fn, fn.name)
@@ -269,12 +269,12 @@ def _build_impl_symbol(decl: ImplBlockNode) -> DocumentSymbol:
   )
 
 
-def _build_var_symbols(decl: VarDeclNode) -> List[DocumentSymbol]:
+def _build_var_symbols(decl: VarDeclNode) -> list[DocumentSymbol]:
   kind = SymbolKind.Variable if decl.is_mutable else SymbolKind.Constant
   full_range = _create_range(
     decl.start_line, decl.start_column, decl.end_line, decl.end_column
   )
-  out: List[DocumentSymbol] = []
+  out: list[DocumentSymbol] = []
   bindings_info = getattr(decl, "bindings_info", None)
   if bindings_info:
     for b in bindings_info:
@@ -313,11 +313,11 @@ def _build_var_symbols(decl: VarDeclNode) -> List[DocumentSymbol]:
   return out
 
 
-def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
+def extract_document_symbols(ast: Any) -> list[DocumentSymbol]:
   """Extracts all symbols defined in the given ProgramNode AST, ordered by
   position.
   """
-  symbols: List[DocumentSymbol] = []
+  symbols: list[DocumentSymbol] = []
   if not isinstance(ast, ProgramNode):
     return symbols
 
@@ -348,8 +348,9 @@ def extract_document_symbols(ast: Any) -> List[DocumentSymbol]:
   symbols.sort(key=lambda s: (s.range.start.line, s.range.start.character))
   for s in symbols:
     if s.children:
-      s.children.sort(
-        key=lambda c: (c.range.start.line, c.range.start.character)
+      s.children = sorted(
+        s.children,
+        key=lambda c: (c.range.start.line, c.range.start.character),
       )
 
   return symbols

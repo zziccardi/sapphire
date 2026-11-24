@@ -55,7 +55,7 @@ Sample generated LLVM IR:
     ```
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.code_gen.base_transpiler import BaseTranspiler
 from src.parser.ast import (
@@ -117,11 +117,11 @@ class LLVMTranspiler(BaseTranspiler):
     self.module.triple = target_triple or DEFAULT_TRIPLE
 
     # 2. Type-mapping & symbol table cache
-    self.struct_types: Dict[str, Any] = {}
-    self.struct_field_types: Dict[str, list] = {}
-    self.named_values: Dict[str, Any] = {}
-    self.builder: Optional[Any] = None
-    self.current_function: Optional[Any] = None
+    self.struct_types: dict[str, Any] = {}
+    self.struct_field_types: dict[str, list] = {}
+    self.named_values: dict[str, Any] = {}
+    self.builder: Any | None = None
+    self.current_function: Any | None = None
 
     # Primitive type mapping
     self.int_type = ir.IntType(64)
@@ -192,7 +192,7 @@ class LLVMTranspiler(BaseTranspiler):
 
     raise NotImplementedError(f"Unsupported type: {type_name}")
 
-  def _infer_expr_llvm_type(self, expr: Any) -> Optional[ir.Type]:
+  def _infer_expr_llvm_type(self, expr: Any) -> ir.Type | None:
     """Infers an LLVM IR type from an expression's semantic type or literal
     kind.
     """

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from antlr4 import CommonTokenStream, FileStream
 
@@ -39,7 +39,7 @@ root_dir = os.path.abspath(os.path.join(src_dir, ".."))
 TARGET_CHOICES = ["python", "lua", "lua5.1", "love2d", "love"]
 
 
-def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
+def _collect_sp_watch_files(root_path: str) -> dict[str, float]:
   """Collects modification times for all .sp files in the project and source
   directory.
   """
@@ -60,7 +60,7 @@ def _collect_sp_watch_files(root_path: str) -> Dict[str, float]:
   return watch_files
 
 
-def _prepare_exec_env() -> Dict[str, str]:
+def _prepare_exec_env() -> dict[str, str]:
   """Prepares execution environment with standard Sapphire library paths."""
   env = os.environ.copy()
   discovered_lib = find_sapphire_lib_dir()
@@ -97,7 +97,7 @@ def _run_dev_watcher(
   output_file: str,
   target: str,
   sourcemap: bool,
-  cmd: List[str],
+  cmd: list[str],
   verbose: bool = False,
 ):
   """Spawns process and watches source files for live hot-reloading."""
@@ -173,7 +173,7 @@ def _run_dev_watcher(
     sys.exit(0)
 
 
-def _find_love_binary() -> Optional[str]:
+def _find_love_binary() -> str | None:
   """Locates Love2D executable across PATH and standard OS installation paths.
   """
   binary = shutil.which("love") or shutil.which("love2d")
@@ -193,7 +193,7 @@ def _find_love_binary() -> Optional[str]:
   return None
 
 
-def _find_lua_binary() -> Optional[str]:
+def _find_lua_binary() -> str | None:
   """Locates Lua interpreter across PATH and standard OS installation paths."""
   binary = (
     shutil.which("lua") or shutil.which("luajit") or shutil.which("lua5.1")
@@ -429,8 +429,8 @@ def _validate_target_lowering(
   ast: Any,
   file_path: str,
   target: str,
-  error_diags: List[Diagnostic],
-  formatted_errors: List[str],
+  error_diags: list[Diagnostic],
+  formatted_errors: list[str],
 ) -> None:
   """Runs in-memory target lowering (e.g. `-t lua`) to catch backend errors."""
   target_info = TranspilerRegistry.get(target)
@@ -461,13 +461,13 @@ def _validate_target_lowering(
 
 def _check_file_recursive(
   file_path: str,
-  visited: Set[str],
-  files_checked: List[str],
-  error_diags: List[Diagnostic],
-  warning_diags: List[Diagnostic],
-  formatted_errors: List[str],
-  formatted_warnings: List[str],
-  target: Optional[str],
+  visited: set[str],
+  files_checked: list[str],
+  error_diags: list[Diagnostic],
+  warning_diags: list[Diagnostic],
+  formatted_errors: list[str],
+  formatted_warnings: list[str],
+  target: str | None,
   quiet: bool,
   check_transitive: bool,
   is_root: bool = False,
@@ -619,12 +619,12 @@ def check_command(args):
       print(msg, file=sys.stderr)
     sys.exit(1)
 
-  visited: Set[str] = set()
-  files_checked: List[str] = []
-  error_diags: List[Diagnostic] = []
-  warning_diags: List[Diagnostic] = []
-  formatted_errors: List[str] = []
-  formatted_warnings: List[str] = []
+  visited: set[str] = set()
+  files_checked: list[str] = []
+  error_diags: list[Diagnostic] = []
+  warning_diags: list[Diagnostic] = []
+  formatted_errors: list[str] = []
+  formatted_warnings: list[str] = []
 
   _check_file_recursive(
     source_file,

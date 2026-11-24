@@ -5,7 +5,7 @@ checking and type inference, and validates all semantic constraints of the
 Sapphire language.
 """
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from src.common.diagnostics import Diagnostic, format_diagnostic
 from src.common.errors import SemanticError
@@ -60,45 +60,45 @@ class TypeChecker(
 
   def __init__(
     self,
-    source_file_path: Optional[str] = None,
-    source_content: Optional[Any] = None,
+    source_file_path: str | None = None,
+    source_content: Any | None = None,
   ):
     self.symbol_table = SymbolTable()
     self.context = SemanticContext(symbol_table=self.symbol_table)
-    self.node_types: Dict[ASTNode, Type] = self.context.node_types
-    self.errors: List[str] = []
-    self.warnings: List[str] = []
-    self.diagnostics: List[Diagnostic] = self.context.diagnostics
-    self.source_file_path: Optional[str] = source_file_path
-    self.source_content: Optional[Any] = source_content
-    self.current_function: Optional[FunctionType] = None
-    self.current_struct: Optional[StructType] = None
+    self.node_types: dict[ASTNode, Type] = self.context.node_types
+    self.errors: list[str] = []
+    self.warnings: list[str] = []
+    self.diagnostics: list[Diagnostic] = self.context.diagnostics
+    self.source_file_path: str | None = source_file_path
+    self.source_content: Any | None = source_content
+    self.current_function: FunctionType | None = None
+    self.current_struct: StructType | None = None
     self.is_in_init: bool = False
     self.is_in_del: bool = False
     self.is_in_clone_init: bool = False
     self.initialized_fields: set = set()
-    self.expected_type: Optional[Type] = None
+    self.expected_type: Type | None = None
     self.current_function_scope = None
-    self._match_stack: List[List[Type]] = []
+    self._match_stack: list[list[Type]] = []
     self.loop_depth: int = 0
-    self.moved_symbols: Set[VariableSymbol] = set()
-    self.uninitialized_symbols: Set[VariableSymbol] = set()
+    self.moved_symbols: set[VariableSymbol] = set()
+    self.uninitialized_symbols: set[VariableSymbol] = set()
     self._mono_depth: int = 0
     self._branch_depth: int = 0
-    self._init_assigned_arena_fields: Set[str] = set()
-    self._init_used_arena_fields: Set[str] = set()
-    self._temporary_frozen_lvalues: List[Tuple[str, List[str], str]] = []
-    self._loop_context_stack: List[Tuple[Set[VariableSymbol], Any]] = []
-    self._checked_import_results: Dict[
-      str, Tuple[Dict[str, Any], List[str], Dict[str, Tuple[int, int]], bool]
+    self._init_assigned_arena_fields: set[str] = set()
+    self._init_used_arena_fields: set[str] = set()
+    self._temporary_frozen_lvalues: list[tuple[str, list[str], str]] = []
+    self._loop_context_stack: list[tuple[set[VariableSymbol], Any]] = []
+    self._checked_import_results: dict[
+      str, tuple[dict[str, Any], list[str], dict[str, tuple[int, int]], bool]
     ] = {}
-    self._active_import_stack: Set[str] = set()
-    self._reported_import_errors: Set[str] = set()
-    self._resolved_dep_stats: Dict[str, Tuple[int, int]] = {}
-    self._current_node: Optional[ASTNode] = None
+    self._active_import_stack: set[str] = set()
+    self._reported_import_errors: set[str] = set()
+    self._resolved_dep_stats: dict[str, tuple[int, int]] = {}
+    self._current_node: ASTNode | None = None
 
   @property
-  def temporary_frozen_lvalues(self) -> List[Tuple[str, List[str], str]]:
+  def temporary_frozen_lvalues(self) -> list[tuple[str, list[str], str]]:
     """Public accessor for temporary frozen lvalues used by helper passes."""
     return self._temporary_frozen_lvalues
 
@@ -110,7 +110,7 @@ class TypeChecker(
     self,
     expr_node: ASTNode,
     expr_type: Type,
-    node: Optional[ASTNode] = None,
+    node: ASTNode | None = None,
   ) -> None:
     """Public wrapper for `_check_value_ownership_transfer`."""
     self._check_value_ownership_transfer(expr_node, expr_type, node=node)
@@ -125,7 +125,7 @@ class TypeChecker(
 
   def get_lvalue_path(
     self, node: ASTNode
-  ) -> Optional[Tuple[str, List[str]]]:
+  ) -> tuple[str, list[str]] | None:
     """Public wrapper for `_get_lvalue_path`."""
     return self._get_lvalue_path(node)
 
@@ -133,7 +133,7 @@ class TypeChecker(
     """Public wrapper for `_is_reference_type`."""
     return self._is_reference_type(type_obj)
 
-  def _restore_moved_symbols(self, target_moved: Set[VariableSymbol]) -> None:
+  def _restore_moved_symbols(self, target_moved: set[VariableSymbol]) -> None:
     """Restores `moved_symbols` to *target_moved* and keeps `sym.is_moved`
     synced.
     """
@@ -143,7 +143,7 @@ class TypeChecker(
       sym.is_moved = True
     self.moved_symbols = set(target_moved)
 
-  def _widen_types(self, t1: Type, t2: Type) -> Optional[Type]:
+  def _widen_types(self, t1: Type, t2: Type) -> Type | None:
     """Returns the common widened type for *t1* and *t2*, or None if
     incompatible.
     """
@@ -210,7 +210,7 @@ class TypeChecker(
     self,
     node: ASTNode,
     skip_outermost: bool = False,
-  ) -> Optional[Tuple[str, str]]:
+  ) -> tuple[str, str] | None:
     """Walks an lvalue chain and returns `(field_name, struct_name)` for any
     `let`
     field.
@@ -238,8 +238,8 @@ class TypeChecker(
     return None
 
   def get_frozen_lvalue_reason(
-    self, root: str, path: List[str]
-  ) -> Optional[str]:
+    self, root: str, path: list[str]
+  ) -> str | None:
     """Returns freeze reason if lvalue path overlaps with a frozen lvalue."""
     scope = self.symbol_table.current_scope
     all_frozen = list(self._temporary_frozen_lvalues)
@@ -275,7 +275,7 @@ class TypeChecker(
         break
     return False
 
-  def _get_target_symbol(self, target: ASTNode) -> Optional[VariableSymbol]:
+  def _get_target_symbol(self, target: ASTNode) -> VariableSymbol | None:
     if isinstance(target, IdentifierNode):
       sym = self.symbol_table.lookup(target.name)
       if isinstance(sym, VariableSymbol):
@@ -306,9 +306,9 @@ class TypeChecker(
 
   def _check_value_ownership_transfer(
     self,
-    expr_node: Optional[ASTNode],
+    expr_node: ASTNode | None,
     expr_type: Type,
-    node: Optional[ASTNode] = None,
+    node: ASTNode | None = None,
   ) -> None:
     """Enforces explicit 'move' on move-only lvalues and '.share()'/'move' on
     SharedRef lvalues.
@@ -379,9 +379,9 @@ class TypeChecker(
 
   def _check_return_ownership_transfer(
     self,
-    ret_expr: Optional[ASTNode],
+    ret_expr: ASTNode | None,
     ret_type: Type,
-    node: Optional[ASTNode] = None,
+    node: ASTNode | None = None,
   ) -> None:
     """Validates ownership transfer on return expressions (allowing local RVO).
     """
@@ -438,7 +438,7 @@ class TypeChecker(
 
   def _infer_diagnostic_metadata(
     self, message: str
-  ) -> Tuple[Optional[str], Optional[str]]:
+  ) -> tuple[str | None, str | None]:
     """Infers default error code and fix-it hint for known error patterns."""
     if (
       "cannot escape to" in message
@@ -458,9 +458,9 @@ class TypeChecker(
     self,
     severity: str,
     message: str,
-    node: Optional[ASTNode] = None,
-    hint: Optional[str] = None,
-    code: Optional[str] = None,
+    node: ASTNode | None = None,
+    hint: str | None = None,
+    code: str | None = None,
   ) -> Diagnostic:
     """Constructs a structured Diagnostic for an error or warning."""
     diag_node = (
@@ -486,8 +486,8 @@ class TypeChecker(
     self,
     error_type: str,
     message: str,
-    node: Optional[ASTNode] = None,
-    hint: Optional[str] = None,
+    node: ASTNode | None = None,
+    hint: str | None = None,
   ) -> str:
     """Formats a diagnostic string for an error or warning."""
     diag_node = (
@@ -515,9 +515,9 @@ class TypeChecker(
   def error(
     self,
     message: str,
-    node: Optional[ASTNode] = None,
-    hint: Optional[str] = None,
-    code: Optional[str] = None,
+    node: ASTNode | None = None,
+    hint: str | None = None,
+    code: str | None = None,
   ) -> None:
     """Logs a semantic error."""
     diag = self._make_diagnostic(
@@ -533,9 +533,9 @@ class TypeChecker(
   def warning(
     self,
     message: str,
-    node: Optional[ASTNode] = None,
-    hint: Optional[str] = None,
-    code: Optional[str] = None,
+    node: ASTNode | None = None,
+    hint: str | None = None,
+    code: str | None = None,
   ) -> None:
     """Logs a non-fatal semantic warning."""
     diag = self._make_diagnostic(
@@ -572,7 +572,7 @@ class TypeChecker(
     if self.errors:
       raise SemanticError("\n".join(self.errors))
 
-  def _substitute_ast(self, node: Any, param_map: Dict[str, TypeNode]) -> Any:
+  def _substitute_ast(self, node: Any, param_map: dict[str, TypeNode]) -> Any:
     return GenericsChecker.substitute_ast(node, param_map)
 
   def _mangle_type_name(self, type_obj: Type) -> str:
@@ -581,8 +581,8 @@ class TypeChecker(
   def _monomorphize_struct(
     self,
     generic_struct_type: StructType,
-    type_arg_nodes: List[TypeNode],
-    resolved_type_args: List[Type],
+    type_arg_nodes: list[TypeNode],
+    resolved_type_args: list[Type],
   ) -> StructType:
     """Monomorphizes a generic struct template for a specific set of concrete
     type
@@ -595,8 +595,8 @@ class TypeChecker(
   def _monomorphize_function(
     self,
     func_sym: FunctionSymbol,
-    type_arg_nodes: List[TypeNode],
-    resolved_type_args: List[Type],
+    type_arg_nodes: list[TypeNode],
+    resolved_type_args: list[Type],
   ) -> str:
     """Monomorphizes a generic function template for a specific set of concrete
     type arguments.
@@ -610,7 +610,7 @@ class TypeChecker(
     DeclarationPass.declare_imports(self, program)
 
   def _validate_parameter_defaults(
-    self, parameters: List[ParameterNode]
+    self, parameters: list[ParameterNode]
   ) -> None:
     """Validates that parameters without default values do not follow parameters
     with default values.

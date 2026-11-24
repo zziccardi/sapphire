@@ -1,6 +1,6 @@
 """Statement and control-flow code generation mixin for PythonTranspiler."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any
 
 from src.code_gen.base_transpiler import (
   extract_type_name,
@@ -189,22 +189,22 @@ class PythonStmtMixin(_PythonTranspilerBase):
     return False
 
   def _find_assigned_nonlocals(
-    self, node: Any, local_params: Optional[Set[str]] = None
-  ) -> Set[str]:
+    self, node: Any, local_params: set[str] | None = None
+  ) -> set[str]:
     """Finds enclosing function-local Python var names assigned within *node*.
     """
     if not self._lexical_scopes:
       return set()
-    outer_raws: Set[str] = set()
+    outer_raws: set[str] = set()
     for scope in self._lexical_scopes:
       outer_raws.update(scope)
     if not outer_raws:
       return set()
 
     param_raws = set(local_params) if local_params else set()
-    assigned_py: Set[str] = set()
+    assigned_py: set[str] = set()
 
-    def _walk(n: Any, inner_locals: Set[str]) -> None:
+    def _walk(n: Any, inner_locals: set[str]) -> None:
       if n is None:
         return
       if isinstance(n, FuncDeclNode):
@@ -296,13 +296,13 @@ class PythonStmtMixin(_PythonTranspilerBase):
     return assigned_py
 
   def _find_captured_loop_vars(
-    self, node: Any, local_params: Optional[Set[str]] = None
-  ) -> List[str]:
+    self, node: Any, local_params: set[str] | None = None
+  ) -> list[str]:
     """Finds loop-local Python var names referenced inside a lambda body."""
     if not self._loop_vars_stack:
       return []
-    all_loop_vars: List[str] = []
-    seen_lv: Set[str] = set()
+    all_loop_vars: list[str] = []
+    seen_lv: set[str] = set()
     for frame in self._loop_vars_stack:
       for v in frame:
         if v not in seen_lv:
@@ -313,9 +313,9 @@ class PythonStmtMixin(_PythonTranspilerBase):
 
     param_raws = set(local_params) if local_params else set()
     param_pys = {self._mangle_name(p) for p in param_raws}
-    referenced_pys: Set[str] = set()
+    referenced_pys: set[str] = set()
 
-    def _walk(n: Any, inner_locals: Set[str]) -> None:
+    def _walk(n: Any, inner_locals: set[str]) -> None:
       if n is None:
         return
       if isinstance(n, FuncDeclNode):
@@ -359,7 +359,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
   def _visit_block(
     self,
     node: BlockNode,
-    extra_destructibles: Optional[List[str]] = None,
+    extra_destructibles: list[str] | None = None,
   ) -> None:
     """Visits a BlockNode with lexical scope isolation and LIFO RAII teardown.
     """
@@ -759,7 +759,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
         if isinstance(v, (ASTNode, list)):
           self._lift_match_expressions(v)
 
-  def _emit_writebacks(self, targets: List[Any]) -> None:
+  def _emit_writebacks(self, targets: list[Any]) -> None:
     """Emits writeback statements for any `if var`/`guard var`/`for var`
     bindings
     in *targets*.
@@ -790,7 +790,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
 
   def _emit_binding_rhs_and_writeback(
     self, binding: Any, val_var: str
-  ) -> Optional[tuple]:
+  ) -> tuple | None:
     """Emits evaluation of a header/guard binding into `val_var` and returns
     writeback metadata.
     """
@@ -879,7 +879,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
     # Pre-emit RHS into a buffer? No — emit RHS directly via sub-transpiler ONLY
     # if needed,
     # OR simply compute target Python names BEFORE mutating `_identifier_map`!
-    planned_decls: List[tuple] = []
+    planned_decls: list[tuple] = []
     for idx, name in enumerate(node.names):
       mangled = self._mangle_name(name)
       if self._lexical_scopes:
@@ -1197,7 +1197,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
     self._pending_destroy_moved_vars.clear()
 
   def _emit_match_statement(
-    self, node: MatchExprNode, target_var: Optional[str] = ""
+    self, node: MatchExprNode, target_var: str | None = ""
   ) -> str:
     self._lift_match_expressions(node.subject)
 
@@ -1211,7 +1211,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
     self.emit(f"{subj_var} = ")
     self.visit(node.subject)
 
-    done_flag: Optional[str] = None
+    done_flag: str | None = None
     if target_var and any(
       self._arm_needs_done_flag(c.body) for c in node.cases
     ):
@@ -1392,9 +1392,9 @@ class PythonStmtMixin(_PythonTranspilerBase):
       if pushed_scope:
         self._lexical_scopes.append(set())
       prev_wb = self._unwrap_writebacks.copy()
-      extra_destructibles: List[str] = []
+      extra_destructibles: list[str] = []
       try:
-        py_let_names: List[str] = []
+        py_let_names: list[str] = []
         self.newline()
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
@@ -1468,7 +1468,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self._visit_in_branch(node.else_block)
       self.dedent()
 
-  def _emit_multi_binding_if(self, node: IfNode, bindings: List[Any]) -> None:
+  def _emit_multi_binding_if(self, node: IfNode, bindings: list[Any]) -> None:
     """Emits multi-binding `if` with sequential short-circuiting and LIFO
     cleanup.
     """
@@ -1479,8 +1479,8 @@ class PythonStmtMixin(_PythonTranspilerBase):
 
     def emit_binding_level(
       idx: int,
-      prior_destructibles: List[str],
-      wb_entries: Dict[str, tuple],
+      prior_destructibles: list[str],
+      wb_entries: dict[str, tuple],
     ) -> None:
       if idx < len(bindings):
         b = bindings[idx]
@@ -1505,7 +1505,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
           if pushed_scope:
             self._lexical_scopes.append(set())
           try:
-            py_let_names: List[str] = []
+            py_let_names: list[str] = []
             self.newline()
             if len(let_names) > 1:
               for n_idx, name in enumerate(let_names):
@@ -1794,7 +1794,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
           self.dedent()
           self.newline()
 
-        py_let_names: List[str] = []
+        py_let_names: list[str] = []
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
             py_n = self._declare_local_var(name)

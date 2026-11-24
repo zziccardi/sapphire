@@ -1,9 +1,8 @@
 """Standard library UTF-8 module for Sapphire (Python target)."""
 
-from typing import Optional
 
 
-def size(s: str) -> Optional[int]:
+def size(s: str) -> int | None:
   try:
     s.encode("utf-8")
     return len(s)
@@ -15,7 +14,7 @@ def _is_utf8_cont(b: int) -> bool:
   return 0x80 <= b <= 0xBF
 
 
-def offset(s: str, n: int, i: Optional[int] = None) -> Optional[int]:
+def offset(s: str, n: int, i: int | None = None) -> int | None:
   raw = s.encode("utf-8")
   slen = len(raw)
   if i is None:
@@ -52,7 +51,7 @@ def offset(s: str, n: int, i: Optional[int] = None) -> Optional[int]:
   return pos
 
 
-def sub(s: str, start_char: int, end_char: Optional[int] = None) -> str:
+def sub(s: str, start_char: int, end_char: int | None = None) -> str:
   if not s:
     return ""
   return s[start_char:end_char]

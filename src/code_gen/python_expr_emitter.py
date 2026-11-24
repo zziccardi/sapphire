@@ -151,9 +151,13 @@ class PythonExprMixin(_PythonTranspilerBase):
     self.emit(")")
 
   def visit_CastExprNode(self, node: CastExprNode) -> None:
-    is_opt = isinstance(node.target_type, OptionalTypeNode)
-    inner_type = node.target_type.base_type if is_opt else node.target_type
-    target = inner_type.name if hasattr(inner_type, "name") else str(inner_type)
+    if isinstance(node.target_type, OptionalTypeNode):
+      is_opt = True
+      inner_type = node.target_type.base_type
+    else:
+      is_opt = False
+      inner_type = node.target_type
+    target = getattr(inner_type, "name", str(inner_type))
     conv_map = {
       "float": "float",
       "int": "int",
@@ -353,7 +357,8 @@ class PythonExprMixin(_PythonTranspilerBase):
     for idx, arg in enumerate(node.fields):
       if idx > 0:
         self.emit(", ")
-      self.emit(f"{self._mangle_name(arg.name)}=")
+      if arg.name:
+        self.emit(f"{self._mangle_name(arg.name)}=")
       self.visit(arg.expr)
     self.emit(")")
     if node.arena_expr:

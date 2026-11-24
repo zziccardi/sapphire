@@ -3,10 +3,9 @@
 import importlib.util
 import os
 import sys
-from typing import Optional
 
 
-def find_sapphire_lib_dir() -> Optional[str]:
+def find_sapphire_lib_dir() -> str | None:
   """Locates Sapphire standard library across local and installed locations."""
   # 1. Environment variable override
   env_dir = os.environ.get("SAPPHIRE_LIB_DIR")
@@ -58,8 +57,8 @@ def find_sapphire_lib_dir() -> Optional[str]:
 
 
 def resolve_module_path(
-  import_path: str, source_file_path: Optional[str] = None
-) -> Optional[str]:
+  import_path: str, source_file_path: str | None = None
+) -> str | None:
   """Resolves a Sapphire module import path to an absolute path on disk."""
   rel_path = import_path.replace(".", "/") + ".sp"
 

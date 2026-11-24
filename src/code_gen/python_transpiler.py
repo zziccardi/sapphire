@@ -5,7 +5,7 @@ corresponding to the semantic behavior of Sapphire, including a runtime header
 for prototypal inheritance delegation.
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from src.code_gen.base_transpiler import (
   BaseTranspiler,
@@ -126,19 +126,19 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       semantic_context=semantic_context,
     )
     # Python-specific metadata & scoping state
-    self.struct_traits: Dict[str, Set[str]] = {}
-    self._current_struct_name: Optional[str] = None
+    self.struct_traits: dict[str, set[str]] = {}
+    self._current_struct_name: str | None = None
     self.clone_helper_counter = 0
-    self._lexical_scopes: List[Set[str]] = []
-    self._current_func_globals: Set[str] = set()
-    self._loop_vars_stack: List[List[str]] = []
-    self._lifted_lambdas: Dict[int, str] = {}
-    self._lifted_clones: Dict[int, str] = {}
-    self.extern_vars: Dict[str, str] = {}
-    self.global_vars: Set[str] = set()
+    self._lexical_scopes: list[set[str]] = []
+    self._current_func_globals: set[str] = set()
+    self._loop_vars_stack: list[list[str]] = []
+    self._lifted_lambdas: dict[int, str] = {}
+    self._lifted_clones: dict[int, str] = {}
+    self.extern_vars: dict[str, str] = {}
+    self.global_vars: set[str] = set()
     # Source line map: Python output line -> Sapphire source line
     self._py_lineno = 1
-    self._line_map: Dict[int, int] = {}
+    self._line_map: dict[int, int] = {}
 
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
@@ -173,7 +173,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       return f"{pname}=_SP_UNSET"
     return pname
 
-  def _emit_deferred_default_inits(self, parameters: List[Any]) -> None:
+  def _emit_deferred_default_inits(self, parameters: list[Any]) -> None:
     """Emits runtime initialization for non-literal default parameters inside
     the
     body.
@@ -380,7 +380,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     test_base = f"{getattr(self, 'testing_alias', 'testing')}.TestCase"
     cls_name = self._mangle_name(node.name)
 
-    parents: List[str] = [
+    parents: list[str] = [
       self._mangle_dotted(p) for p in (node.parent_names or [])
     ]
     if is_proto and not any(
@@ -600,7 +600,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     # Python parameter formatting
     params = []
     raw_params = []
-    param_raw_names: Set[str] = set()
+    param_raw_names: set[str] = set()
     if node.modifier != "static":
       params.append("self")
       raw_params.append("self")
@@ -735,8 +735,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.emit(f"{alias_name} = {func_name}")
 
   def _find_assigned_globals(
-    self, node: Any, local_params: Optional[Set[str]] = None
-  ) -> Set[str]:
+    self, node: Any, local_params: set[str] | None = None
+  ) -> set[str]:
     """Finds all global variables assigned within *node* without lexical local
     shadowing.
     """
@@ -744,10 +744,10 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       return set()
 
     local_vars = set(local_params) if local_params else set()
-    assigned: Set[str] = set()
+    assigned: set[str] = set()
 
     def _collect_locals_and_assignments(
-      n: Any, current_locals: Set[str]
+      n: Any, current_locals: set[str]
     ) -> None:
       if n is None:
         return
@@ -963,7 +963,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.newline()
         self.emit(f"{target_path} = {fn_name}")
 
-  def _visit_statements(self, statements: List[StmtNode]) -> None:
+  def _visit_statements(self, statements: list[StmtNode]) -> None:
     done_flag = self._current_match_done_flag
     guarded_depth = 0
     for idx, stmt in enumerate(statements):

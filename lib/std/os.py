@@ -2,15 +2,14 @@
 
 import os as _os
 import sys as _sys
-from typing import List, Optional
 
 
-def args() -> List[str]:
+def args() -> list[str]:
   """Returns process command-line arguments."""
   return list(_sys.argv)
 
 
-def get_env(name: str) -> Optional[str]:
+def get_env(name: str) -> str | None:
   """Retrieves the value of an environment variable, or None if not set."""
   return _os.environ.get(name)
 

@@ -9,7 +9,7 @@ divergence impossible to miss.
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from src.code_gen.emitter_state import EmitterState, OutputBuffer
 from src.parser.ast import (
@@ -62,8 +62,8 @@ from src.parser.ast import (
 
 
 def get_default_value_for_type_node(
-  type_node: Optional[TypeNode],
-) -> Optional[ASTNode]:
+  type_node: TypeNode | None,
+) -> ASTNode | None:
   """Returns a reasonable default literal ASTNode for uninitialized variables
   and
   struct fields.
@@ -82,7 +82,7 @@ def get_default_value_for_type_node(
   return None
 
 
-def is_coroutine_func(node: Optional[ASTNode]) -> bool:
+def is_coroutine_func(node: ASTNode | None) -> bool:
   """Returns True if a FuncDeclNode, ImplMemberNode, or FunctionType returns
   Coroutine.
   """
@@ -102,7 +102,7 @@ def is_coroutine_func(node: Optional[ASTNode]) -> bool:
   return False
 
 
-def extract_type_name(t_node: Optional[ASTNode]) -> Optional[str]:
+def extract_type_name(t_node: ASTNode | None) -> str | None:
   """Extracts the base type name from a TypeNode."""
   if t_node is None:
     return None
@@ -113,9 +113,9 @@ def extract_type_name(t_node: Optional[ASTNode]) -> Optional[str]:
   return None
 
 
-def get_return_type_names(func_node: ASTNode) -> List[str]:
+def get_return_type_names(func_node: ASTNode) -> list[str]:
   """Extracts all return type names from a FuncDeclNode."""
-  res: List[str] = []
+  res: list[str] = []
   if hasattr(func_node, "return_types") and func_node.return_types:
     for t in func_node.return_types:
       name = extract_type_name(t)
@@ -146,7 +146,7 @@ class BaseTranspiler(ABC):
     super().__init_subclass__(**kwargs)
     if allow_abstract or ABC in cls.__bases__:
       return
-    abstracts: Set[str] = set()
+    abstracts: set[str] = set()
     for base in cls.__mro__[1:]:
       for name in getattr(base, "__abstractmethods__", ()):
         value = getattr(cls, name, None)
@@ -513,8 +513,8 @@ class BaseTranspiler(ABC):
     return f"{prefix}_{n}"
 
   def _type_needs_destructor(
-    self, type_obj: Any, _seen: Optional[Set[str]] = None
-  ) -> Optional[str]:
+    self, type_obj: Any, _seen: set[str] | None = None
+  ) -> str | None:
     """Returns the destructible type name if *type_obj* requires deterministic
     teardown.
     """
@@ -554,7 +554,7 @@ class BaseTranspiler(ABC):
 
   def _expr_destructible_struct(
     self, expr: Any, return_index: int = 0
-  ) -> Optional[str]:
+  ) -> str | None:
     """Determines if *expr* evaluates to a destructible type (RAII struct,
     Arena,
     Ref, SharedRef).
@@ -679,10 +679,10 @@ class BaseTranspiler(ABC):
   def _register_binding_destructibles(
     self,
     binding_expr: Any,
-    let_names: List[str],
+    let_names: list[str],
     then_block: Any,
     is_unwrap: bool,
-  ) -> List[str]:
+  ) -> list[str]:
     """Registers destructible struct bindings on *then_block* if owned."""
     st_name = self._expr_destructible_struct(binding_expr)
     if not st_name:
@@ -743,7 +743,7 @@ class BaseTranspiler(ABC):
         return True
     return False
 
-  def _record_consumed_call_moves(self, args: List[Any]) -> None:
+  def _record_consumed_call_moves(self, args: list[Any]) -> None:
     """Schedules deterministic teardown for destructible vars moved into
     borrowed
     calls.
@@ -766,7 +766,7 @@ class BaseTranspiler(ABC):
           pending_del.append(m_name)
 
   def _drain_pending_destroy_moved_vars(
-    self, exclude: Optional[Set[str]] = None
+    self, exclude: set[str] | None = None
   ) -> None:
     """Emits destructors for destructible vars moved into borrowed calls."""
     pending_del = getattr(self, "_pending_destroy_moved_vars", None)
@@ -781,7 +781,7 @@ class BaseTranspiler(ABC):
   def _drain_pending_null_vars(
     self,
     null_literal: str,
-    exclude: Optional[Set[str]] = None,
+    exclude: set[str] | None = None,
   ) -> None:
     """Emits post-statement teardown & drop-flag clearing (`v = None` / `v =
     nil`)
@@ -829,7 +829,7 @@ class BaseTranspiler(ABC):
     program
     declarations.
     """
-    self.struct_default_trait_methods: Dict[str, List[Any]] = {}
+    self.struct_default_trait_methods: dict[str, list[Any]] = {}
     for decl in program.declarations:
       if getattr(decl, "type_params", None):
         continue
@@ -864,9 +864,9 @@ class BaseTranspiler(ABC):
         if ret_names:
           self.func_return_types[decl.name] = ret_names
 
-    self.proto_structs: Set[str] = set()
-    self.struct_destructible_fields: Dict[str, List[str]] = {}
-    self.struct_parent_names: Dict[str, List[str]] = {}
+    self.proto_structs: set[str] = set()
+    self.struct_destructible_fields: dict[str, list[str]] = {}
+    self.struct_parent_names: dict[str, list[str]] = {}
     self.structs_with_destructor = {"Arena", "Ref", "SharedRef"}
 
     for decl in program.declarations:

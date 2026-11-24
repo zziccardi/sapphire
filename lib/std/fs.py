@@ -1,13 +1,12 @@
 """Standard library filesystem module for Sapphire (Python target)."""
 
 import os as _os
-from typing import Optional
 
 
-def read_file(path: str) -> Optional[str]:
+def read_file(path: str) -> str | None:
   """Reads file content as a string, or returns None if reading fails."""
   try:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
       return f.read()
   except Exception:
     return None

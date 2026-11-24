@@ -47,7 +47,7 @@ def _read_file_lines_cached(
   """Reads and caches all lines of a source file keyed by (path, mtime, size).
   """
   del mtime_ns, size
-  with open(path_str, "r", encoding="utf-8") as f:
+  with open(path_str, encoding="utf-8") as f:
     return tuple(f.readlines())
 
 

@@ -5,7 +5,8 @@ transitivity, LIFO scope checking, and call-site mutable reference aliasing
 checks from TypeChecker.
 """
 
-from typing import Any, Callable, List, Optional, Set, Tuple
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from src.parser.ast import (
   ArrayLiteralNode,
@@ -60,10 +61,10 @@ from src.semantics.symbol_table import (
 )
 
 
-def _dedup_deps(deps: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
+def _dedup_deps(deps: list[tuple[str, int]]) -> list[tuple[str, int]]:
   """Deduplicates `(arena_name, generation)` pairs while preserving order."""
-  seen: Set[Tuple[str, int]] = set()
-  out: List[Tuple[str, int]] = []
+  seen: set[tuple[str, int]] = set()
+  out: list[tuple[str, int]] = []
   for item in deps:
     if item not in seen:
       seen.add(item)
@@ -75,7 +76,7 @@ class ArenaChecker:
   """Helper class for arena safety and aliasing checks."""
 
   @staticmethod
-  def get_root_identifier(node: ASTNode) -> Optional[IdentifierNode]:
+  def get_root_identifier(node: ASTNode) -> IdentifierNode | None:
     """Extracts the base IdentifierNode from an lvalue or projection chain."""
     cur = node
     while True:
@@ -89,7 +90,7 @@ class ArenaChecker:
         return None
 
   @staticmethod
-  def _is_scalar_non_arena_type(type_obj: Optional[Type]) -> bool:
+  def _is_scalar_non_arena_type(type_obj: Type | None) -> bool:
     """Returns True if values of *type_obj* are copied scalars with no arena
     ptrs.
     """
@@ -104,7 +105,7 @@ class ArenaChecker:
   def _struct_implements_trait(
     struct_type: StructType,
     trait_type: TraitType,
-    symbol_table: Optional[SymbolTable] = None,
+    symbol_table: SymbolTable | None = None,
   ) -> bool:
     """Returns True if *struct_type* implements *trait_type* (module-aware)."""
     impl_types = getattr(struct_type, "implemented_trait_types", None)
@@ -115,12 +116,12 @@ class ArenaChecker:
   @staticmethod
   def _collect_trait_implementors(
     trait_type: TraitType,
-    symbol_table: Optional[SymbolTable] = None,
-    checker: Optional[Any] = None,
-  ) -> List[StructType]:
+    symbol_table: SymbolTable | None = None,
+    checker: Any | None = None,
+  ) -> list[StructType]:
     """Collects all known closed-world struct/proto implementors of a trait."""
-    implementors: List[StructType] = []
-    seen_ids: Set[int] = set()
+    implementors: list[StructType] = []
+    seen_ids: set[int] = set()
 
     def _add(st: Any) -> None:
       if not isinstance(st, StructType):
@@ -137,7 +138,7 @@ class ArenaChecker:
 
     if symbol_table is not None:
       scope = getattr(symbol_table, "current_scope", None)
-      visited_scopes: Set[int] = set()
+      visited_scopes: set[int] = set()
       while scope is not None and id(scope) not in visited_scopes:
         visited_scopes.add(id(scope))
         for t in scope.types.values():
@@ -164,11 +165,11 @@ class ArenaChecker:
 
   @staticmethod
   def type_can_hold_arena_ref(
-    type_obj: Optional[Type],
-    seen: Optional[Set[str]] = None,
+    type_obj: Type | None,
+    seen: set[str] | None = None,
     is_box_check: bool = False,
-    symbol_table: Optional[SymbolTable] = None,
-    checker: Optional[Any] = None,
+    symbol_table: SymbolTable | None = None,
+    checker: Any | None = None,
   ) -> bool:
     """Returns True if values of *type_obj* can contain an arena reference."""
     if type_obj is None or isinstance(type_obj, InferredType):
@@ -309,8 +310,8 @@ class ArenaChecker:
 
   @staticmethod
   def type_contains_proto(
-    type_obj: Optional[Type],
-    seen: Optional[Set[str]] = None,
+    type_obj: Type | None,
+    seen: set[str] | None = None,
   ) -> bool:
     """Returns True if *type_obj* directly or transitively contains a proto."""
     if type_obj is None or isinstance(type_obj, InferredType):
@@ -351,7 +352,7 @@ class ArenaChecker:
   @staticmethod
   def _resolve_arena_target(
     symbol_table: SymbolTable, arena_expr: ASTNode
-  ) -> Optional[Tuple[str, Optional[VariableSymbol], int]]:
+  ) -> tuple[str, VariableSymbol | None, int] | None:
     """Resolves `(owner_name, symbol, generation)` for an `in <arena>` expr."""
     if isinstance(arena_expr, IdentifierNode):
       sym = symbol_table.lookup(arena_expr.name)
@@ -450,10 +451,10 @@ class ArenaChecker:
   @staticmethod
   def _collect_lambda_capture_deps(
     symbol_table: SymbolTable, lambda_node: LambdaNode
-  ) -> List[Tuple[str, int]]:
+  ) -> list[tuple[str, int]]:
     """Collects arena deps for outer variables captured inside a LambdaNode."""
-    local_names: Set[str] = {p.name for p in lambda_node.parameters}
-    deps: List[Tuple[str, int]] = []
+    local_names: set[str] = {p.name for p in lambda_node.parameters}
+    deps: list[tuple[str, int]] = []
 
     def walk(node: Any) -> None:
       if node is None:
@@ -538,7 +539,7 @@ class ArenaChecker:
   @staticmethod
   def _collect_symbol_arena_deps(
     symbol_table: SymbolTable, name: str
-  ) -> List[Tuple[str, int]]:
+  ) -> list[tuple[str, int]]:
     """Returns `(arena_name, generation)` dependency records for variable
     *name*.
     """
@@ -553,10 +554,10 @@ class ArenaChecker:
   @staticmethod
   def _collect_match_arena_deps(
     symbol_table: SymbolTable, node: MatchExprNode, checker: Any
-  ) -> List[Tuple[str, int]]:
+  ) -> list[tuple[str, int]]:
     """Collects arena dependencies across all branches of a `match` expression.
     """
-    deps: List[Tuple[str, int]] = []
+    deps: list[tuple[str, int]] = []
 
     def walk_stmt(stmt: Any) -> None:
       if stmt is None:
@@ -596,11 +597,11 @@ class ArenaChecker:
 
   @staticmethod
   def _collect_clone_init_deps(
-    symbol_table: SymbolTable, stmts: List[ASTNode], checker: Any
-  ) -> List[Tuple[str, int]]:
+    symbol_table: SymbolTable, stmts: Sequence[ASTNode], checker: Any
+  ) -> list[tuple[str, int]]:
     """Collects arena deps stored via statements inside a `clone { ... }` block.
     """
-    deps: List[Tuple[str, int]] = []
+    deps: list[tuple[str, int]] = []
 
     def walk(stmt: Any) -> None:
       if stmt is None:
@@ -638,7 +639,7 @@ class ArenaChecker:
   @staticmethod
   def collect_arena_deps(
     symbol_table: SymbolTable, node: Any, checker: Any = None
-  ) -> List[Tuple[str, int]]:
+  ) -> list[tuple[str, int]]:
     """Collects all `(arena_name, generation)` dependencies of *node*."""
     if node is None:
       return []
@@ -654,7 +655,7 @@ class ArenaChecker:
       ):
         return []
 
-    deps: List[Tuple[str, int]] = []
+    deps: list[tuple[str, int]] = []
 
     if isinstance(node, StructInitializerNode):
       if node.arena_expr:
@@ -776,7 +777,7 @@ class ArenaChecker:
   @staticmethod
   def get_arena_dependency(
     symbol_table: SymbolTable, node: ASTNode
-  ) -> Optional[str]:
+  ) -> str | None:
     """Recursively finds the primary arena variable name an expression depends
     on.
     """
@@ -809,7 +810,7 @@ class ArenaChecker:
   @staticmethod
   def _merge_symbol_deps(
     target_sym: VariableSymbol,
-    deps: List[Tuple[str, int]],
+    deps: list[tuple[str, int]],
     replace: bool,
   ) -> None:
     """Updates `target_sym.arena_dep_records` and legacy `arena_dependency`."""
@@ -1022,7 +1023,7 @@ class ArenaChecker:
     moved_self_name = (
       expr_node.name if isinstance(expr_node, MoveNode) else None
     )
-    propagated_deps: List[Tuple[str, int]] = []
+    propagated_deps: list[tuple[str, int]] = []
     for arena_name, dep_gen in deps:
       arena_sym = symbol_table.lookup(arena_name)
       if isinstance(arena_sym, VariableSymbol):
@@ -1072,7 +1073,7 @@ class ArenaChecker:
     func_scope: Any,
     expr_node: ASTNode,
     error_callback: Callable[[str, ASTNode], None],
-    is_local_scope_fn: Optional[Callable[[Any], bool]] = None,
+    is_local_scope_fn: Callable[[Any], bool] | None = None,
     checker: Any = None,
   ) -> None:
     """Checks for arena escape when returning expr_node from a function."""
@@ -1169,7 +1170,7 @@ class ArenaChecker:
   @staticmethod
   def collect_stack_borrow_symbols(
     symbol_table: SymbolTable, node: Any, checker: Any = None
-  ) -> Set[str]:
+  ) -> set[str]:
     from src.semantics.borrow_checker import BorrowChecker
 
     return BorrowChecker.collect_stack_borrow_symbols(
@@ -1232,8 +1233,8 @@ class ArenaChecker:
   def validate_container_mutation(
     checker: Any,
     receiver_expr: ASTNode,
-    value_exprs: List[ASTNode],
-    error_node: Optional[ASTNode] = None,
+    value_exprs: list[ASTNode],
+    error_node: ASTNode | None = None,
   ) -> None:
     from src.semantics.borrow_checker import BorrowChecker
 
@@ -1257,7 +1258,7 @@ class ArenaChecker:
   @staticmethod
   def get_lvalue_path(
     symbol_table: SymbolTable, node: ASTNode
-  ) -> Optional[Tuple[str, List[str]]]:
+  ) -> tuple[str, list[str]] | None:
     from src.semantics.borrow_checker import BorrowChecker
 
     return BorrowChecker.get_lvalue_path(symbol_table, node)
