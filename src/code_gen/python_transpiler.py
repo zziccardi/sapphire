@@ -115,89 +115,30 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     return py_name
 
   def __init__(self, test_mode: bool = False, use_runtime_module: bool = False):
-    self.code: List[str] = []
-    self.indent_level = 0
-    self.test_mode = test_mode
-    self.use_runtime_module = use_runtime_module
-    # Map struct names to their collected method AST nodes from impl blocks
-    self.struct_methods: Dict[str, List[Any]] = {}
+    super().__init__(
+      test_mode=test_mode,
+      use_runtime_module=use_runtime_module,
+    )
+    # Python-specific metadata & scoping state
     self.struct_traits: Dict[str, Set[str]] = {}
-    self.destructor_stack: List[List[str]] = []
-    self.loop_destructor_depth: List[int] = []
-    self.structs_with_destructor: Set[str] = {"Arena", "Ref", "SharedRef"}
-    self.proto_structs: Set[str] = set()
-    self.struct_destructible_fields: Dict[str, List[str]] = {}
-    self.struct_parent_names: Dict[str, List[str]] = {}
     self._current_struct_name: Optional[str] = None
-    self.moved_vars: Set[str] = set()
-    self._branch_depth: int = 0
-    self._var_branch_depth: Dict[str, int] = {}
-    self._pending_null_vars: List[str] = []
-    self._pending_unconditional_null_vars: List[str] = []
-    self._pending_destroy_moved_vars: List[str] = []
-    self.func_return_types: Dict[str, Any] = {}
-    self.method_return_types: Dict[Any, Any] = {}
-    self.variable_types: Dict[str, str] = {}
     self.clone_helper_counter = 0
-    self._identifier_map: Dict[str, str] = {}
     self._lexical_scopes: List[Set[str]] = []
     self._current_func_globals: Set[str] = set()
     self._loop_vars_stack: List[List[str]] = []
-    self._lifted_matches: Dict[int, str] = {}
     self._lifted_lambdas: Dict[int, str] = {}
     self._lifted_clones: Dict[int, str] = {}
-    self._lifted_short_circuits: Dict[int, str] = {}
-    self._temp_name_counters: Dict[str, int] = {}
-    self._current_match_target: Optional[str] = None
-    self._current_match_done_flag: Optional[str] = None
-    self._match_loop_depth: int = 0
     self.extern_vars: Dict[str, str] = {}
     self.global_vars: Set[str] = set()
     # Source line map: Python output line -> Sapphire source line
     self._py_lineno = 1
     self._line_map: Dict[int, int] = {}
 
-  def _make_expr_transpiler(self) -> "PythonTranspiler":
-    """Creates a sub-transpiler inheriting module, struct, and rename state."""
-    temp = type(self)(
-      test_mode=self.test_mode,
-      use_runtime_module=self.use_runtime_module,
-    )
-    temp.struct_methods = self.struct_methods
-    temp.struct_traits = self.struct_traits
-    temp.structs_with_destructor = self.structs_with_destructor
-    temp.proto_structs = self.proto_structs
-    temp.struct_destructible_fields = self.struct_destructible_fields
-    temp.struct_parent_names = self.struct_parent_names
-    temp.func_return_types = self.func_return_types
-    temp.method_return_types = self.method_return_types
-    temp.variable_types = self.variable_types
-    temp._identifier_map = self._identifier_map
-    temp._lexical_scopes = self._lexical_scopes
-    temp._current_func_globals = self._current_func_globals
-    temp._loop_vars_stack = self._loop_vars_stack
-    temp._lifted_matches = self._lifted_matches
-    temp._lifted_lambdas = self._lifted_lambdas
-    temp._lifted_clones = self._lifted_clones
-    temp._lifted_short_circuits = self._lifted_short_circuits
-    temp._temp_name_counters = self._temp_name_counters
-    temp._pending_null_vars = self._pending_null_vars
-    temp._pending_unconditional_null_vars = (
-      self._pending_unconditional_null_vars
-    )
-    temp._pending_destroy_moved_vars = self._pending_destroy_moved_vars
-    temp._branch_depth = self._branch_depth
-    temp._var_branch_depth = self._var_branch_depth
-    temp.destructor_stack = self.destructor_stack
-    temp.extern_vars = self.extern_vars
-    temp.global_vars = self.global_vars
-    temp.moved_vars = self.moved_vars
-    return temp
-
   def newline(self) -> None:
     """Starts a new line with the current level of indentation."""
-    self._py_lineno += 1
-    self.code.append("\n" + "  " * self.indent_level)
+    if self.is_root_buffer:
+      self._py_lineno += 1
+    self.emit("\n" + "  " * self.indent_level)
 
   def record_line(self, sp_line: int) -> None:
     """Records a mapping from the current Python output line to a Sapphire
@@ -222,9 +163,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     pname = self._mangle_name(p.name)
     if p.default_expr:
       if self._is_const_default_expr(p.default_expr):
-        temp = self._make_expr_transpiler()
-        temp.visit(p.default_expr)
-        return f"{pname}={temp.get_output()}"
+        return f"{pname}={self.capture_expr(p.default_expr)}"
       return f"{pname}=_SP_UNSET"
     return pname
 
@@ -480,9 +419,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         )
         if default_expr:
           self.newline()
-          temp = self._make_expr_transpiler()
-          temp.visit(default_expr)
-          self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
+          default_code = self.capture_expr(default_expr)
+          self.emit(f"self.{self._mangle_name(f.name)} = {default_code}")
       if not has_init:
         self.newline()
         self.emit("for k, v in kwargs.items():")
@@ -519,9 +457,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         )
         if default_expr:
           self.newline()
-          temp = self._make_expr_transpiler()
-          temp.visit(default_expr)
-          self.emit(f"self.{self._mangle_name(f.name)} = {temp.get_output()}")
+          default_code = self.capture_expr(default_expr)
+          self.emit(f"self.{self._mangle_name(f.name)} = {default_code}")
       if not has_init:
         self.newline()
         self.emit("for k, v in kwargs.items():")
@@ -731,9 +668,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
             self.newline()
             args_list = ["self"]
             for arg in base_init.arguments:
-              temp = self._make_expr_transpiler()
-              temp.visit(arg.expr)
-              val = temp.get_output()
+              val = self.capture_expr(arg.expr)
               if arg.name:
                 args_list.append(f"{self._mangle_name(arg.name)}={val}")
               else:
@@ -1023,7 +958,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.emit(f"{target_path} = {fn_name}")
 
   def _visit_statements(self, statements: List[StmtNode]) -> None:
-    done_flag = getattr(self, "_current_match_done_flag", None)
+    done_flag = self._current_match_done_flag
     guarded_depth = 0
     for idx, stmt in enumerate(statements):
       self.visit(stmt)

@@ -2,6 +2,8 @@
 PythonTranspiler.
 """
 
+from typing import TYPE_CHECKING
+
 from src.code_gen.intrinsics import IntrinsicRegistry
 from src.parser.ast import (
   ArrayLiteralNode,
@@ -25,8 +27,15 @@ from src.parser.ast import (
   UnaryOpNode,
 )
 
+if TYPE_CHECKING:
+  from src.code_gen.python_transpiler import (
+    PythonTranspiler as _PythonTranspilerBase,
+  )
+else:
+  _PythonTranspilerBase = object
 
-class PythonExprMixin:
+
+class PythonExprMixin(_PythonTranspilerBase):
   """Provides expression, call, and literal AST emission for Python."""
 
   def visit_LiteralNode(self, node: LiteralNode) -> None:

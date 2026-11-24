@@ -2283,19 +2283,22 @@ class TestLuaTranspiler(unittest.TestCase):
         proc = subprocess.run([lua_bin, main_lua], capture_output=True, text=True, check=True, env=env)
         self.assertEqual(proc.stdout.strip(), "8,70")
 
-  def test_make_expr_transpiler_preserves_identifier_map_lua(self):
-    """Verifies LuaTranspiler._make_expr_transpiler inherits _identifier_map and imported_modules."""
+  def test_scoped_buffer_preserves_identifier_map_lua(self):
+    """Verifies LuaTranspiler.capture_expr preserves _identifier_map and imported_modules."""
     lt = LuaTranspiler()
     lt.known_structs.add("MyStruct")
     lt.imported_modules.add("mod")
     lt._identifier_map["local_var"] = "_val_local_var"
-    sub = lt._make_expr_transpiler()
-    self.assertIsInstance(sub, LuaTranspiler)
-    self.assertIn("MyStruct", sub.known_structs)
-    self.assertIn("mod", sub.imported_modules)
-    self.assertEqual(sub._identifier_map["local_var"], "_val_local_var")
-    sub.visit(CallNode(MemberAccessNode(IdentifierNode("mod"), "fn", False), [ArgumentNode(None, IdentifierNode("local_var"))]))
-    self.assertEqual(sub.get_output(), "mod.fn(_val_local_var)")
+    lt.emit("root")
+    captured = lt.capture_expr(
+        CallNode(
+            MemberAccessNode(IdentifierNode("mod"), "fn", False),
+            [ArgumentNode(None, IdentifierNode("local_var"))],
+        )
+    )
+    self.assertEqual(captured, "mod.fn(_val_local_var)")
+    self.assertEqual(lt.get_output(), "root")
+    self.assertEqual(lt.current_column, 4)
 
   def _run_lua_project(self, files: dict[str, str], entry: str = "main.sp") -> str:
     """Transpiles and executes a multi-file Sapphire project via Lua."""

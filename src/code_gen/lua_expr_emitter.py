@@ -1,7 +1,7 @@
 """Expression, literal, and initializer code generation mixin for LuaTranspiler.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.code_gen.intrinsics import IntrinsicRegistry
 from src.parser.ast import (
@@ -39,7 +39,13 @@ def _unwrap_ref_opt_type(t: Any) -> Any:
   return t
 
 
-class LuaExprMixin:
+if TYPE_CHECKING:
+  from src.code_gen.lua_transpiler import LuaTranspiler as _LuaTranspilerBase
+else:
+  _LuaTranspilerBase = object
+
+
+class LuaExprMixin(_LuaTranspilerBase):
   """Provides expression, call, and literal AST emission for Lua 5.1."""
 
   def _emit_opt_wrapped(
@@ -546,12 +552,10 @@ class LuaExprMixin:
       "_pending_null_vars": self._pending_null_vars,
       "_pending_unconditional_null_vars": self._pending_unconditional_null_vars,
       "_branch_depth": self._branch_depth,
-      "_current_match_target": getattr(self, "_current_match_target", None),
-      "_current_match_done_flag": getattr(
-        self, "_current_match_done_flag", None
-      ),
-      "_match_loop_depth": getattr(self, "_match_loop_depth", 0),
-      "_unwrap_writebacks": getattr(self, "_unwrap_writebacks", {}),
+      "_current_match_target": self._current_match_target,
+      "_current_match_done_flag": self._current_match_done_flag,
+      "_match_loop_depth": self._match_loop_depth,
+      "_unwrap_writebacks": self._unwrap_writebacks,
       "_loop_stack": self._loop_stack,
     }
     self.destructor_stack = []
