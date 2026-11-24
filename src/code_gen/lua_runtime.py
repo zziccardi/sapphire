@@ -90,7 +90,7 @@ do
   _SP_RT._wrap_opt = _wrap_opt
   _SP_RT._unwrap_opt = _unwrap_opt
 
-  local function _unwrap_read(obj)
+  local function _unwrap_read_slow(obj)
     while type(obj) == "table" do
       local mt = getmetatable(obj)
       if mt and mt.__get_active then
@@ -107,7 +107,14 @@ do
     return obj
   end
 
-  local function _unwrap_write(obj)
+  local function _unwrap_read(obj)
+    if type(obj) ~= "table" or getmetatable(obj) == nil then
+      return obj
+    end
+    return _unwrap_read_slow(obj)
+  end
+
+  local function _unwrap_write_slow(obj)
     while type(obj) == "table" do
       local mt = getmetatable(obj)
       if mt and mt.__ensure_cow then
@@ -122,6 +129,13 @@ do
       end
     end
     return obj
+  end
+
+  local function _unwrap_write(obj)
+    if type(obj) ~= "table" or getmetatable(obj) == nil then
+      return obj
+    end
+    return _unwrap_write_slow(obj)
   end
   _SP_RT._unwrap_read = _unwrap_read
   _SP_RT._unwrap_write = _unwrap_write
@@ -1050,14 +1064,14 @@ do
       stop = b
       step = c
     end
-    local iter = function(state, curr)
-      local next_val = curr + state.step
-      if (state.step > 0 and next_val < state.stop) or (state.step < 0 and next_val > state.stop) then
-        return next_val
+    local curr = start - step
+    return function()
+      curr = curr + step
+      if (step > 0 and curr < stop) or (step < 0 and curr > stop) then
+        return curr
       end
       return nil
     end
-    return iter, {stop = stop, step = step}, start - step
   end
 
   _sapphire_del = function(obj)

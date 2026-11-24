@@ -5,7 +5,34 @@ from typing import Any, Dict, List, Optional, Set
 from src.parser.ast import *
 from src.semantics.symbol_table import ArrayType, MapType, RangeType
 from src.code_gen.base_transpiler import extract_type_name, get_default_value_for_type_node, is_coroutine_func
-from src.code_gen.intrinsics import IntrinsicRegistry
+from src.code_gen.intrinsics import IntrinsicRegistry, _resolve_range_args
+
+_OPTIONAL_CAST_FN_MAP = {
+    "float": "_SP_RT._sapphire_cast_float",
+    "int": "_SP_RT._sapphire_cast_int",
+    "bool": "_SP_RT._sapphire_cast_bool",
+    "String": "tostring",
+}
+
+
+def _get_optional_cast_fn(node: CastExprNode) -> Optional[str]:
+  """Returns the Lua cast helper for an optional primitive cast, or None."""
+  if not isinstance(node.target_type, OptionalTypeNode):
+    return None
+  inner = node.target_type.base_type
+  target = inner.name if hasattr(inner, "name") else str(inner)
+  return _OPTIONAL_CAST_FN_MAP.get(target)
+
+
+def _extract_const_int(expr: Any) -> Optional[int]:
+  """Extracts a compile-time integer literal (with optional unary +/-)."""
+  if isinstance(expr, LiteralNode) and expr.lit_type == "int":
+    return int(expr.value)
+  if isinstance(expr, UnaryOpNode) and expr.op in ("-", "+"):
+    inner = _extract_const_int(expr.expr)
+    if inner is not None:
+      return -inner if expr.op == "-" else inner
+  return None
 
 
 def _has_continue_node(node: ASTNode) -> bool:
@@ -108,10 +135,22 @@ class LuaStmtMixin:
     return isinstance(t, PrimitiveType) and t.name == "String"
 
   def _contains_liftable_expr(self, node: Any, include_moves: bool = False) -> bool:
-    """Returns True if *node* contains a MatchExprNode or (optionally) MoveNode."""
+    """Returns True if *node* contains a liftable expression or (optionally) MoveNode."""
     if node is None:
       return False
-    if isinstance(node, MatchExprNode):
+    if isinstance(node, (MatchExprNode, TernaryExprNode)):
+      return True
+    if isinstance(node, BinaryOpNode) and node.op == "??":
+      return True
+    if (
+        isinstance(node, CallNode)
+        and isinstance(node.callee, MemberAccessNode)
+        and node.callee.is_optional
+    ):
+      return True
+    if isinstance(node, MemberAccessNode) and node.is_optional:
+      return True
+    if isinstance(node, CastExprNode) and _get_optional_cast_fn(node) is not None:
       return True
     if isinstance(node, MoveNode):
       return include_moves
@@ -226,58 +265,51 @@ class LuaStmtMixin:
     self._visit_block(node)
 
   def _lift_match_expressions(self, node: Any) -> None:
-    """Lifts MatchExprNode and conditional short-circuits containing match/move."""
+    """Lifts MatchExprNode and IIFE-prone short-circuit/optional expressions."""
     if node is None:
       return
 
     if isinstance(node, TernaryExprNode):
-      has_cond_branch = (
-          self._contains_liftable_expr(node.true_expr, include_moves=True)
-          or self._contains_liftable_expr(node.false_expr, include_moves=True)
-      )
-      if has_cond_branch:
-        if id(node) not in self._lifted_short_circuits:
-          self._lift_match_expressions(node.condition)
-          res_var = self._next_temp_name("_sc")
+      if id(node) not in self._lifted_short_circuits:
+        self._lift_match_expressions(node.condition)
+        res_var = self._next_temp_name("_sc")
+        self.newline()
+        self.emit(f"local {res_var}")
+        self.newline()
+        self.emit("if ")
+        self.visit(node.condition)
+        self.emit(" then")
+        self.indent()
+        self._branch_depth += 1
+        try:
+          self._lift_match_expressions(node.true_expr)
           self.newline()
-          self.emit(f"local {res_var}")
+          self.emit(f"{res_var} = ")
+          self.visit(node.true_expr)
+          self._drain_pending_null_vars("nil")
+        finally:
+          self._branch_depth -= 1
+        self.dedent()
+        self.newline()
+        self.emit("else")
+        self.indent()
+        self._branch_depth += 1
+        try:
+          self._lift_match_expressions(node.false_expr)
           self.newline()
-          self.emit("if ")
-          self.visit(node.condition)
-          self.emit(" then")
-          self.indent()
-          self._branch_depth += 1
-          try:
-            self._lift_match_expressions(node.true_expr)
-            self.newline()
-            self.emit(f"{res_var} = ")
-            self.visit(node.true_expr)
-            self._drain_pending_null_vars("nil")
-          finally:
-            self._branch_depth -= 1
-          self.dedent()
-          self.newline()
-          self.emit("else")
-          self.indent()
-          self._branch_depth += 1
-          try:
-            self._lift_match_expressions(node.false_expr)
-            self.newline()
-            self.emit(f"{res_var} = ")
-            self.visit(node.false_expr)
-            self._drain_pending_null_vars("nil")
-          finally:
-            self._branch_depth -= 1
-          self.dedent()
-          self.newline()
-          self.emit("end")
-          self._lifted_short_circuits[id(node)] = res_var
-        return
-      self._lift_match_expressions(node.condition)
+          self.emit(f"{res_var} = ")
+          self.visit(node.false_expr)
+          self._drain_pending_null_vars("nil")
+        finally:
+          self._branch_depth -= 1
+        self.dedent()
+        self.newline()
+        self.emit("end")
+        self._lifted_short_circuits[id(node)] = res_var
       return
 
     if isinstance(node, BinaryOpNode) and node.op in ("??", "&&", "||"):
-      if self._contains_liftable_expr(node.right, include_moves=True):
+      if node.op == "??" or self._contains_liftable_expr(node.right, include_moves=True):
         if id(node) not in self._lifted_short_circuits:
           self._lift_match_expressions(node.left)
           res_var = self._next_temp_name("_sc")
@@ -315,38 +347,81 @@ class LuaStmtMixin:
         and isinstance(node.callee, MemberAccessNode)
         and node.callee.is_optional
     ):
-      if any(
-          self._contains_liftable_expr(arg.expr, include_moves=True)
-          for arg in node.arguments
-      ):
+      if id(node) not in self._lifted_short_circuits:
+        self._lift_match_expressions(node.callee.receiver)
+        recv_tmp = self._next_temp_name("_opt_r")
+        res_var = self._next_temp_name("_opt_res")
+        self.newline()
+        self.emit(f"local {recv_tmp} = ")
+        self.visit(node.callee.receiver)
+        self.newline()
+        self.emit(f"local {res_var} = nil")
+        self.newline()
+        self.emit(f"if {recv_tmp} ~= nil then")
+        self.indent()
+        self._branch_depth += 1
+        orig_recv = node.callee.receiver
+        orig_opt = node.callee.is_optional
+        try:
+          for arg in node.arguments:
+            self._lift_match_expressions(arg.expr)
+          recv_id = IdentifierNode(recv_tmp)
+          recv_id.inferred_type = getattr(orig_recv, "inferred_type", None)
+          node.callee.receiver = recv_id
+          node.callee.is_optional = False
+          self.newline()
+          self.emit(f"{res_var} = ")
+          self.visit(node)
+          self._drain_pending_null_vars("nil")
+        finally:
+          node.callee.receiver = orig_recv
+          node.callee.is_optional = orig_opt
+          self._branch_depth -= 1
+        self.dedent()
+        self.newline()
+        self.emit("end")
+        self._lifted_short_circuits[id(node)] = res_var
+      return
+
+    if isinstance(node, MemberAccessNode) and node.is_optional:
+      if id(node) not in self._lifted_short_circuits:
+        self._lift_match_expressions(node.receiver)
+        recv_tmp = self._next_temp_name("_opt_r")
+        res_var = self._next_temp_name("_opt_res")
+        member_name = (
+            getattr(node, "target_name", None)
+            or self._mangle_name(node.member)
+        )
+        self.newline()
+        self.emit(f"local {recv_tmp} = ")
+        self.visit(node.receiver)
+        self.newline()
+        self.emit(f"local {res_var} = nil")
+        self.newline()
+        self.emit(f"if {recv_tmp} ~= nil then")
+        self.indent()
+        self.newline()
+        self.emit(f"{res_var} = {recv_tmp}.{member_name}")
+        self.dedent()
+        self.newline()
+        self.emit("end")
+        self._lifted_short_circuits[id(node)] = res_var
+      return
+
+    if isinstance(node, CastExprNode):
+      cast_fn = _get_optional_cast_fn(node)
+      if cast_fn is not None:
         if id(node) not in self._lifted_short_circuits:
-          self._lift_match_expressions(node.callee.receiver)
-          recv_tmp = self._next_temp_name("_opt_r")
-          res_var = self._next_temp_name("_opt_res")
+          self._lift_match_expressions(node.expr)
+          res_var = self._next_temp_name("_sc")
           self.newline()
-          self.emit(f"local {recv_tmp} = ")
-          self.visit(node.callee.receiver)
+          self.emit(f"local {res_var} = ")
+          self.visit(node.expr)
           self.newline()
-          self.emit(f"local {res_var} = nil")
-          self.newline()
-          self.emit(f"if {recv_tmp} ~= nil then")
+          self.emit(f"if {res_var} ~= nil then")
           self.indent()
-          self._branch_depth += 1
-          orig_recv = node.callee.receiver
-          orig_opt = node.callee.is_optional
-          try:
-            for arg in node.arguments:
-              self._lift_match_expressions(arg.expr)
-            node.callee.receiver = IdentifierNode(recv_tmp)
-            node.callee.is_optional = False
-            self.newline()
-            self.emit(f"{res_var} = ")
-            self.visit(node)
-            self._drain_pending_null_vars("nil")
-          finally:
-            node.callee.receiver = orig_recv
-            node.callee.is_optional = orig_opt
-            self._branch_depth -= 1
+          self.newline()
+          self.emit(f"{res_var} = {cast_fn}({res_var})")
           self.dedent()
           self.newline()
           self.emit("end")
@@ -1297,6 +1372,14 @@ class LuaStmtMixin:
       key_var = self._mangle_name(node.key_var) if node.key_var is not None else None
       is_mut = getattr(node, "is_mutable", False)
 
+      close_guard_if = False
+      is_direct_range = (
+          isinstance(node.iterable, CallNode)
+          and isinstance(node.iterable.callee, IdentifierNode)
+          and node.iterable.callee.name == "range"
+          and not getattr(node.iterable, "_requires_eval_order_temps", False)
+      )
+
       if node.key_var is not None:
         if is_mut:
           iter_tmp = self._next_temp_name("_for_iter")
@@ -1313,6 +1396,61 @@ class LuaStmtMixin:
           self.emit(f"for {key_var}, {val_var} in _SP_RT._sapphire_iter_map(")
           self.visit(node.iterable)
           self.emit(") do")
+      elif is_direct_range:
+        range_args = _resolve_range_args(node.iterable)
+        if len(range_args) == 1:
+          self.newline()
+          self.emit(f"for {val_var} = 0, (")
+          self.visit(range_args[0])
+          self.emit(") - 1 do")
+        elif len(range_args) == 2:
+          self.newline()
+          self.emit(f"for {val_var} = (")
+          self.visit(range_args[0])
+          self.emit("), (")
+          self.visit(range_args[1])
+          self.emit(") - 1 do")
+        else:
+          const_step = _extract_const_int(range_args[2])
+          if const_step is not None and const_step > 0:
+            self.newline()
+            self.emit(f"for {val_var} = (")
+            self.visit(range_args[0])
+            self.emit("), (")
+            self.visit(range_args[1])
+            self.emit(f") - 1, {const_step} do")
+          elif const_step is not None and const_step < 0:
+            self.newline()
+            self.emit(f"for {val_var} = (")
+            self.visit(range_args[0])
+            self.emit("), (")
+            self.visit(range_args[1])
+            self.emit(f") + 1, {const_step} do")
+          else:
+            start_tmp = self._next_temp_name("_r_start")
+            stop_raw_tmp = self._next_temp_name("_r_stop_raw")
+            step_tmp = self._next_temp_name("_r_step")
+            stop_tmp = self._next_temp_name("_r_stop")
+            self.newline()
+            self.emit(f"local {start_tmp} = ")
+            self.visit(range_args[0])
+            self.newline()
+            self.emit(f"local {stop_raw_tmp} = ")
+            self.visit(range_args[1])
+            self.newline()
+            self.emit(f"local {step_tmp} = ")
+            self.visit(range_args[2])
+            self.newline()
+            self.emit(f"if {step_tmp} ~= 0 then")
+            self.indent()
+            self.newline()
+            self.emit(
+                f"local {stop_tmp} = ({step_tmp} > 0) and "
+                f"({stop_raw_tmp} - 1) or ({stop_raw_tmp} + 1)"
+            )
+            self.newline()
+            self.emit(f"for {val_var} = {start_tmp}, {stop_tmp}, {step_tmp} do")
+            close_guard_if = True
       elif (
           isinstance(getattr(node.iterable, "inferred_type", None), RangeType)
           or (isinstance(node.iterable, CallNode) and isinstance(node.iterable.callee, IdentifierNode) and node.iterable.callee.name == "range")
@@ -1342,6 +1480,10 @@ class LuaStmtMixin:
       self.dedent()
       self.newline()
       self.emit("end")
+      if close_guard_if:
+        self.dedent()
+        self.newline()
+        self.emit("end")
     finally:
       self._unwrap_writebacks = prev_wb
       self._match_loop_depth -= 1
