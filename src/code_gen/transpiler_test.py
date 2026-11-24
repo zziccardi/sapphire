@@ -267,6 +267,43 @@ class TranspilerHygieneTest(unittest.TestCase):
           sys.modules.pop(k, None)
         sys.modules.update(saved_lib)
 
+  def test_transpile_file_verbose_controls_stdout(self):
+    """Verifies transpile_file only emits phase logs when verbose=True and not quiet."""
+    import io
+    from contextlib import redirect_stdout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      src = os.path.join(tmpdir, "sample.sp")
+      with open(src, "w", encoding="utf-8") as f:
+        f.write("let x: int = 1;\n")
+
+      # Default (verbose=False) produces no stdout.
+      buf_default = io.StringIO()
+      with redirect_stdout(buf_default):
+        transpile_file(src, os.path.join(tmpdir, "default.py"), target="python")
+      self.assertEqual(buf_default.getvalue(), "")
+
+      # verbose=True emits detailed progress to stdout.
+      buf_verbose = io.StringIO()
+      with redirect_stdout(buf_verbose):
+        transpile_file(
+            src, os.path.join(tmpdir, "verbose.py"), target="python", verbose=True
+        )
+      self.assertIn("Reading source file:", buf_verbose.getvalue())
+      self.assertIn("Compilation successful!", buf_verbose.getvalue())
+
+      # quiet=True overrides verbose=True.
+      buf_quiet = io.StringIO()
+      with redirect_stdout(buf_quiet):
+        transpile_file(
+            src,
+            os.path.join(tmpdir, "quiet.py"),
+            target="python",
+            quiet=True,
+            verbose=True,
+        )
+      self.assertEqual(buf_quiet.getvalue(), "")
+
 
 if __name__ == "__main__":
   unittest.main()

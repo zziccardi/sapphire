@@ -97,10 +97,13 @@ def _is_prebuilt_lib_module(resolved_path: str, ext: str) -> bool:
 
 
 def _parse_and_check(
-    input_file: str, quiet: bool, raise_on_error: bool
+    input_file: str,
+    quiet: bool,
+    raise_on_error: bool,
+    verbose: bool = False,
 ) -> tuple[Any, str]:
   """Lexes, parses, builds AST, and runs semantic analysis on *input_file*."""
-  if not quiet:
+  if verbose and not quiet:
     print(f"Reading source file: {input_file}...")
 
   try:
@@ -113,7 +116,9 @@ def _parse_and_check(
     sys.exit(1)
 
   error_listener = CustomErrorListener(
-      file_path=input_file, source_content=input_stream, quiet=quiet
+      file_path=input_file,
+      source_content=input_stream,
+      quiet=quiet or raise_on_error,
   )
 
   lexer = SapphireLexer(input_stream)
@@ -124,7 +129,7 @@ def _parse_and_check(
   parser.removeErrorListeners()
   parser.addErrorListener(error_listener)
 
-  if not quiet:
+  if verbose and not quiet:
     print("Parsing program to Parse Tree...")
   tree = parser.program()
 
@@ -143,7 +148,7 @@ def _parse_and_check(
       )
     sys.exit(1)
 
-  if not quiet:
+  if verbose and not quiet:
     print("Building AST...")
   src_content = str(input_stream)
   try:
@@ -157,7 +162,7 @@ def _parse_and_check(
       print(f"\nSyntax Error: {e}", file=sys.stderr)
     sys.exit(1)
 
-  if not quiet:
+  if verbose and not quiet:
     print("Running Semantic Analysis & Type Checker...")
   checker = TypeChecker(source_file_path=input_file, source_content=src_content)
   try:
@@ -216,6 +221,7 @@ def _transpile_imports(
     quiet: bool,
     raise_on_error: bool,
     use_runtime_module: bool,
+    verbose: bool = False,
 ) -> None:
   """Recursively transpiles non-stdlib imported Sapphire modules."""
   from src.semantics.module_resolver import resolve_module_path
@@ -245,6 +251,7 @@ def _transpile_imports(
         raise_on_error=raise_on_error,
         use_runtime_module=use_runtime_module,
         _output_root=isolated_root,
+        verbose=verbose,
     )
 
 
@@ -297,6 +304,7 @@ def transpile_file(
     raise_on_error: bool = True,
     use_runtime_module: bool = False,
     _output_root: Optional[str] = None,
+    verbose: bool = False,
 ) -> str:
   """Transpiles Sapphire source file into target language (Python or Lua 5.1)."""
   if visited is None:
@@ -321,7 +329,9 @@ def transpile_file(
     return output_file
   visited.add(abs_input_file)
 
-  ast, src_content = _parse_and_check(input_file, quiet, raise_on_error)
+  ast, src_content = _parse_and_check(
+      input_file, quiet, raise_on_error, verbose=verbose
+  )
   _transpile_imports(
       ast,
       input_file,
@@ -335,6 +345,7 @@ def transpile_file(
       quiet,
       raise_on_error,
       use_runtime_module,
+      verbose=verbose,
   )
 
   sm_builder = None
@@ -350,7 +361,7 @@ def transpile_file(
       use_runtime_module,
   )
 
-  if not quiet:
+  if verbose and not quiet:
     print(f"Transpiling to {target_info.display_name}...")
   generated_code = transpiler.transpile(ast)
   target_name = target_info.display_name
@@ -372,10 +383,10 @@ def transpile_file(
       map_output_file = output_file + ".map"
       with open(map_output_file, "w", encoding="utf-8") as f:
         f.write(sm_builder.to_v3_json(os.path.basename(output_file)))
-      if not quiet:
+      if verbose and not quiet:
         print(f"Source map generated at: {map_output_file}")
 
-    if not quiet:
+    if verbose and not quiet:
       print(
           f"\nCompilation successful! {target_name} output written to:\n"
           f"{output_file}"

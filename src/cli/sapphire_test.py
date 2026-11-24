@@ -649,6 +649,130 @@ class SapphireCLITest(unittest.TestCase):
       self.assertEqual(cm.exception.code, 0)
       self.assertRegex(buf.getvalue().strip(), r"^sapphire \d+\.\d+\.\d+")
 
+  def test_build_default_output_is_concise(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    dep_sp = os.path.join(self.temp_dir.name, "helper.sp")
+    with open(dep_sp, "w", encoding="utf-8") as f:
+      f.write("export { VAL }\nlet VAL: int = 7;\n")
+    entry_sp = os.path.join(self.temp_dir.name, "entry.sp")
+    with open(entry_sp, "w", encoding="utf-8") as f:
+      f.write("import helper;\nfunc main(): int { return helper.VAL; }\n")
+    out_py = os.path.join(self.temp_dir.name, "entry.py")
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "build", entry_sp, "-o", out_py]):
+      with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+        main()
+
+    self.assertEqual(stdout_buf.getvalue(), f"Built {out_py}\n")
+    self.assertEqual(stderr_buf.getvalue(), "")
+
+  def test_build_verbose_flag_prints_detailed_output(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    for flag in ("--verbose", "-v"):
+      lua_file = os.path.join(self.temp_dir.name, f"verbose_{flag.lstrip('-')}.lua")
+      stdout_buf = io.StringIO()
+      stderr_buf = io.StringIO()
+      with patch.object(
+          sys,
+          "argv",
+          ["sapphire", "build", self.sp_file, "-t", "lua", "-o", lua_file, flag],
+      ):
+        with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+          main()
+      out = stdout_buf.getvalue()
+      self.assertIn("Reading source file:", out)
+      self.assertIn("Parsing program to Parse Tree...", out)
+      self.assertIn("Building AST...", out)
+      self.assertIn("Running Semantic Analysis & Type Checker...", out)
+      self.assertIn("Transpiling to Lua", out)
+      self.assertIn("Source map generated at:", out)
+      self.assertIn("Compilation successful!", out)
+      self.assertEqual(stderr_buf.getvalue(), "")
+
+  def test_build_default_still_emits_warnings_to_stderr(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    warn_sp = os.path.join(self.temp_dir.name, "warn.sp")
+    with open(warn_sp, "w", encoding="utf-8") as f:
+      f.write(
+          "func double_lookup(m: Map<String, int>, k: String): int {\n"
+          "  if m.contains(k) {\n"
+          "    return m[k];\n"
+          "  }\n"
+          "  return 0;\n"
+          "}\n"
+      )
+    out_py = os.path.join(self.temp_dir.name, "warn.py")
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "build", warn_sp, "-o", out_py]):
+      with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+        main()
+
+    self.assertEqual(stdout_buf.getvalue(), f"Built {out_py}\n")
+    self.assertIn("Warnings:", stderr_buf.getvalue())
+
+  def test_build_syntax_error_printed_once_to_stderr(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    bad_sp = os.path.join(self.temp_dir.name, "bad_once.sp")
+    with open(bad_sp, "w", encoding="utf-8") as f:
+      f.write("let x = ;\n")
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "build", bad_sp]):
+      with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+        with self.assertRaises(SystemExit) as cm:
+          main()
+      self.assertEqual(cm.exception.code, 1)
+
+    self.assertEqual(stdout_buf.getvalue(), "")
+    self.assertEqual(stderr_buf.getvalue().count("no viable alternative"), 1)
+
+  def test_run_default_and_verbose_output(self):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    # Default `sapphire run` suppresses transpilation noise and execution banner.
+    stdout_buf = io.StringIO()
+    with patch.object(sys, "argv", ["sapphire", "run", self.sp_file]):
+      with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        with redirect_stdout(stdout_buf), redirect_stderr(io.StringIO()):
+          with self.assertRaises(SystemExit) as cm:
+            main()
+        self.assertEqual(cm.exception.code, 0)
+    self.assertEqual(stdout_buf.getvalue(), "")
+
+    # `sapphire run -v` and shortcut `sapphire -v <file>` restore detailed output.
+    for argv in (
+        ["sapphire", "run", "-v", self.sp_file],
+        ["sapphire", "run", "--verbose", self.sp_file],
+        ["sapphire", "-v", self.sp_file],
+    ):
+      stdout_v = io.StringIO()
+      with patch.object(sys, "argv", argv):
+        with patch("subprocess.run") as mock_run:
+          mock_run.return_value.returncode = 0
+          with redirect_stdout(stdout_v), redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+              main()
+          self.assertEqual(cm.exception.code, 0)
+      out = stdout_v.getvalue()
+      self.assertIn("Reading source file:", out)
+      self.assertIn("Compilation successful!", out)
+      self.assertIn("--- Executing Sapphire Program ---", out)
+
 
 if __name__ == "__main__":
   unittest.main()
