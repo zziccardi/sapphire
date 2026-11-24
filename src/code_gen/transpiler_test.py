@@ -3,8 +3,13 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from src.code_gen.transpiler import is_stdlib_stub, transpile_file
+from src.code_gen.transpiler import (
+    _is_prebuilt_lib_module,
+    is_stdlib_stub,
+    transpile_file,
+)
 from src.semantics.module_resolver import find_sapphire_lib_dir
 
 
@@ -114,6 +119,74 @@ class TranspilerHygieneTest(unittest.TestCase):
       self.assertTrue(os.path.exists(out_ll))
       with open(out_ll, "r", encoding="utf-8") as f:
         self.assertIn('define i64 @"add"', f.read())
+
+  def test_is_prebuilt_lib_module_checks_mtime_freshness(self):
+    """Verifies stale prebuilt lib/ outputs are not treated as reusable."""
+    with tempfile.TemporaryDirectory() as fake_lib:
+      pkg_dir = os.path.join(fake_lib, "love2d")
+      os.makedirs(pkg_dir)
+      src_sp = os.path.join(pkg_dir, "sample.sp")
+      out_lua = os.path.join(pkg_dir, "sample.lua")
+      with open(src_sp, "w", encoding="utf-8") as f:
+        f.write("export { x } let x = 1;\n")
+
+      with patch(
+          "src.semantics.module_resolver.find_sapphire_lib_dir",
+          return_value=fake_lib,
+      ):
+        self.assertFalse(_is_prebuilt_lib_module(src_sp, ".lua"))
+
+        with open(out_lua, "w", encoding="utf-8") as f:
+          f.write("return { x = 1 }\n")
+        os.utime(src_sp, (100, 100))
+        os.utime(out_lua, (200, 200))
+        self.assertTrue(_is_prebuilt_lib_module(src_sp, ".lua"))
+
+        # Mark source newer than prebuilt output -> stale.
+        os.utime(src_sp, (300, 300))
+        self.assertFalse(_is_prebuilt_lib_module(src_sp, ".lua"))
+
+  def test_isolated_output_retranspiles_stale_prebuilt_lib_module(self):
+    """Verifies isolated builds transpile stale lib/ modules into out_dir."""
+    with tempfile.TemporaryDirectory() as root:
+      fake_lib = os.path.join(root, "lib")
+      pkg_dir = os.path.join(fake_lib, "love2d")
+      src_dir = os.path.join(root, "src")
+      out_dir = os.path.join(root, "out")
+      os.makedirs(pkg_dir)
+      os.makedirs(src_dir)
+      os.makedirs(out_dir)
+
+      mod_sp = os.path.join(pkg_dir, "freshmod.sp")
+      stale_lua = os.path.join(pkg_dir, "freshmod.lua")
+      with open(mod_sp, "w", encoding="utf-8") as f:
+        f.write("export { ANSWER } let ANSWER = 42;\n")
+      with open(stale_lua, "w", encoding="utf-8") as f:
+        f.write("-- stale output\nreturn {}\n")
+      os.utime(stale_lua, (100, 100))
+      os.utime(mod_sp, (200, 200))
+
+      main_sp = os.path.join(src_dir, "main.sp")
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(
+            "import lib.love2d.freshmod;\n"
+            "func main(): int { return freshmod.ANSWER; }\n"
+        )
+
+      with patch(
+          "src.semantics.module_resolver.find_sapphire_lib_dir",
+          return_value=fake_lib,
+      ):
+        out_lua = os.path.join(out_dir, "main.lua")
+        transpile_file(main_sp, output_file=out_lua, target="lua", quiet=True)
+
+      isolated_mod = os.path.join(out_dir, "lib", "love2d", "freshmod.lua")
+      self.assertTrue(os.path.exists(isolated_mod))
+      with open(isolated_mod, "r", encoding="utf-8") as f:
+        self.assertIn("42", f.read())
+      # Original stale file under lib/ is left untouched.
+      with open(stale_lua, "r", encoding="utf-8") as f:
+        self.assertIn("-- stale output", f.read())
 
 
 if __name__ == "__main__":
