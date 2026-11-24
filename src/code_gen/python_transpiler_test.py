@@ -2524,13 +2524,23 @@ class TestSharedFixtures(unittest.TestCase):
         if line.strip().startswith("import testing.e2e.")
     ]
     loaded_mods: list[str] = []
+    created_e2e_pkg = False
+    prev_testing_e2e_attr = None
+    had_testing_e2e_attr = False
+    e2e_pkg = None
+    _testing_pkg = None
     if local_imports:
       import types as _types
       import testing as _testing_pkg
       e2e_pkg = sys.modules.get("testing.e2e")
       if e2e_pkg is None:
         e2e_pkg = _types.ModuleType("testing.e2e")
+        e2e_pkg.__path__ = [str(_E2E_DIR)]
         sys.modules["testing.e2e"] = e2e_pkg
+        created_e2e_pkg = True
+      had_testing_e2e_attr = hasattr(_testing_pkg, "e2e")
+      if had_testing_e2e_attr:
+        prev_testing_e2e_attr = getattr(_testing_pkg, "e2e")
       setattr(_testing_pkg, "e2e", e2e_pkg)
       for mod_path in local_imports:
         parts = mod_path.split(".")
@@ -2564,6 +2574,17 @@ class TestSharedFixtures(unittest.TestCase):
     finally:
       for mod_path in loaded_mods:
         sys.modules.pop(mod_path, None)
+        if e2e_pkg is not None:
+          short_name = mod_path.rsplit(".", 1)[-1]
+          if hasattr(e2e_pkg, short_name):
+            delattr(e2e_pkg, short_name)
+      if created_e2e_pkg:
+        sys.modules.pop("testing.e2e", None)
+      if _testing_pkg is not None:
+        if had_testing_e2e_attr:
+          setattr(_testing_pkg, "e2e", prev_testing_e2e_attr)
+        elif hasattr(_testing_pkg, "e2e"):
+          delattr(_testing_pkg, "e2e")
 
   def test_omitted_type_annotations_transpilation(self):
     """Verifies Python transpilation and execution of structs and global variables with omitted explicit types."""
