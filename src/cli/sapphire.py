@@ -86,7 +86,14 @@ def _prepare_exec_env() -> Dict[str, str]:
   return env
 
 
-def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap: bool, cmd: List[str]):
+def _run_dev_watcher(
+    source_file: str,
+    output_file: str,
+    target: str,
+    sourcemap: bool,
+    cmd: List[str],
+    verbose: bool = False,
+):
   """Spawns process and watches source files for live hot-reloading."""
   print(f"\n[Sapphire Dev Mode] Starting process with live hot-reloading: {' '.join(cmd)}")
   print("[Sapphire Dev Mode] Watching for file changes... (Press Ctrl+C to stop)")
@@ -113,7 +120,15 @@ def _run_dev_watcher(source_file: str, output_file: str, target: str, sourcemap:
         watch_files = current_watch_files
         print("\n[Sapphire Dev Mode] File change detected, re-transpiling...")
         try:
-          transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=True, quiet=False)
+          transpile_file(
+              source_file,
+              output_file,
+              target=target,
+              sourcemap=sourcemap,
+              dev_mode=True,
+              quiet=False,
+              verbose=verbose,
+          )
           if target in ("love2d", "love"):
             run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
             marker_path = os.path.join(run_dir, ".sapphire_reload")
@@ -193,11 +208,19 @@ def run_command(args):
 
   target = getattr(args, "target", "python").lower()
   dev_mode = getattr(args, "dev", False)
+  verbose = getattr(args, "verbose", False)
   ext = ".lua" if target in ("lua", "lua5.1", "love2d", "love") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
   sourcemap = not getattr(args, "no_sourcemap", False)
   try:
-    out_path = transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+    out_path = transpile_file(
+        source_file,
+        output_file,
+        target=target,
+        sourcemap=sourcemap,
+        dev_mode=dev_mode,
+        verbose=verbose,
+    )
   except SapphireError as e:
     print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)
@@ -212,14 +235,18 @@ def run_command(args):
     run_dir = os.path.dirname(os.path.abspath(output_file)) or "."
     cmd = [love_bin, run_dir]
     if dev_mode:
-      _run_dev_watcher(source_file, output_file, target, sourcemap, cmd)
+      _run_dev_watcher(
+          source_file, output_file, target, sourcemap, cmd, verbose=verbose
+      )
       return
     else:
-      print("\n--- Executing Love2D Engine ---")
+      if verbose:
+        print("\n--- Executing Love2D Engine ---")
       result = subprocess.run(cmd, env=exec_env)
       sys.exit(result.returncode)
 
-  print("\n--- Executing Sapphire Program ---")
+  if verbose:
+    print("\n--- Executing Sapphire Program ---")
   if target in ("lua", "lua5.1"):
     lua_bin = _find_lua_binary()
     if not lua_bin:
@@ -231,7 +258,9 @@ def run_command(args):
     cmd = [sys.executable, out_path]
 
   if dev_mode:
-    _run_dev_watcher(source_file, output_file, target, sourcemap, cmd)
+    _run_dev_watcher(
+        source_file, output_file, target, sourcemap, cmd, verbose=verbose
+    )
   else:
     result = subprocess.run(cmd, env=exec_env)
     sys.exit(result.returncode)
@@ -247,14 +276,24 @@ def build_command(args):
 
   target = getattr(args, "target", "python").lower()
   dev_mode = getattr(args, "dev", False)
+  verbose = getattr(args, "verbose", False)
   ext = ".lua" if target in ("lua", "lua5.1", "love2d", "love") else ".py"
   output_file = args.output or (os.path.splitext(source_file)[0] + ext)
   sourcemap = not getattr(args, "no_sourcemap", False)
   try:
-    transpile_file(source_file, output_file, target=target, sourcemap=sourcemap, dev_mode=dev_mode)
+    out_path = transpile_file(
+        source_file,
+        output_file,
+        target=target,
+        sourcemap=sourcemap,
+        dev_mode=dev_mode,
+        verbose=verbose,
+    )
   except SapphireError as e:
     print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)
+  if not verbose:
+    print(f"Built {out_path}")
 
 
 def parse_command(args):
@@ -648,6 +687,9 @@ def main():
   build_parser.add_argument(
       "--no_sourcemap", action="store_true",
       help="Disable source map generation (.lua.map) for Lua targets")
+  build_parser.add_argument(
+      "-v", "--verbose", action="store_true",
+      help="Print detailed compilation progress for each file")
   build_parser.set_defaults(func=build_command)
 
   # `run` subcommand
@@ -665,6 +707,9 @@ def main():
   run_parser.add_argument(
       "--no_sourcemap", action="store_true",
       help="Disable source map generation (.lua.map) for Lua targets")
+  run_parser.add_argument(
+      "-v", "--verbose", action="store_true",
+      help="Print detailed compilation progress and execution banner")
   run_parser.set_defaults(func=run_command)
 
   # `test` subcommand

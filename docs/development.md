@@ -88,6 +88,9 @@ sapphire build samples/overview.sp [-o custom_output.py]
 
 # Transpile to Lua 5.1 (.lua)
 sapphire build samples/overview.sp -t lua [-o custom_output.lua]
+
+# Print detailed per-file compilation progress (supported by `build` and `run`)
+sapphire build -v samples/overview.sp
 ```
 
 Note: The high-level compilation driver function `transpile_file()` is
