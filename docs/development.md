@@ -21,12 +21,12 @@ pipenv run antlr
 Which executes:
 
 ```bash
-antlr -Dlanguage=Python3 -visitor -o src/parser/gen -Xexact-output-dir \
+antlr -Dlanguage=Python3 -visitor -o sapphire/parser/gen -Xexact-output-dir \
     grammar/Sapphire.g4
 ```
 
 This will create `SapphireLexer.py`, `SapphireParser.py`, `SapphireListener.py`,
-and `SapphireVisitor.py` in `src/parser/gen/`. These generated files are
+and `SapphireVisitor.py` in `sapphire/parser/gen/`. These generated files are
 tracked in Git and verified to be in sync with `grammar/Sapphire.g4` by CI.
 
 ## Installing the CLI as a package
@@ -94,11 +94,11 @@ sapphire build -v samples/overview.sp
 ```
 
 Note: The high-level compilation driver function `transpile_file()` is
-exported by `src/code_gen/transpiler.py`. When `-o` targets an output path
+exported by `sapphire/code_gen/transpiler.py`. When `-o` targets an output path
 outside the input file's directory tree, transitive project dependencies are
-isolated under the target output directory and prebuilt `lib/` bindings are
-reused without modifying files in-place. Additional CLI inspection commands
-include:
+isolated under the target output directory and prebuilt `sapphire/lib/`
+bindings are reused without modifying files in-place. Additional CLI inspection
+commands include:
 
 ```bash
 # Parse source and print concrete parse tree
@@ -132,8 +132,9 @@ pipenv run test
 # Parallel per-module runner (faster local iteration)
 pipenv run test-fast
 
-# Static lint check (ruff)
+# Static lint and type checks (ruff + pyright)
 pipenv run lint
+pipenv run typecheck
 ```
 
 ### Running native Sapphire E2E tests
@@ -165,9 +166,9 @@ coverage (enforcing the CI coverage floor and generating an HTML report in
 pipenv run coverage
 ```
 
-To measure Lua 5.1 line coverage across `lib/std/*.lua` while running the
-native Lua test suite (using Lua's built-in `debug.sethook`, no external tools
-required):
+To measure Lua 5.1 line coverage across `sapphire/lib/std/*.lua` while running
+the native Lua test suite (using Lua's built-in `debug.sethook`, no external
+tools required):
 
 ```bash
 pipenv run coverage-lua
@@ -197,8 +198,9 @@ This generates verified distribution artifacts under `dist/`:
 * `dist/sapphire_lang-0.1.0-py3-none-any.whl`
 * `dist/sapphire_lang-0.1.0.tar.gz`
 
-Both packages bundle all standard library modules (`lib/std/`), Love2D engine
-bindings (`lib/love2d/`), and runtime resources.
+Both packages bundle all standard library modules (`sapphire/lib/std/`), Love2D
+engine bindings (`sapphire/lib/love2d/`), and runtime resources under the
+`sapphire/` package namespace.
 
 To publish the packages to PyPI (optional):
 

@@ -8,7 +8,7 @@ environment setup and compiler architecture notes, see
 ## Getting started
 
 1. Fork and clone the repository.
-2. Install Python dependencies (Python 3.10+ and `pipenv`):
+2. Install Python dependencies (Python 3.12+ and `pipenv`):
 
 ```bash
 pipenv install --dev

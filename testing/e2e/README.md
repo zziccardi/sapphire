@@ -4,7 +4,7 @@
 This directory contains end-to-end (e2e) integration tests used to verify runtime behavior and consistency across Sapphire's target transpiler backends (**Python** and **Lua 5.1**).
 
 ## Scope & purpose
-Unlike compiler and parser unit tests (located in [`src/`](../../src)), which test internal AST construction, type-checker diagnostics, and syntax-parsing rules, the integration tests in this directory serve a specific end-to-end purpose:
+Unlike compiler and parser unit tests (located in [`sapphire/`](../../sapphire)), which test internal AST construction, type-checker diagnostics, and syntax-parsing rules, the integration tests in this directory serve a specific end-to-end purpose:
 
 1. **Cross-backend consistency**: Ensuring that a Sapphire program (`.sp`) transpiles and executes with identical runtime behavior and return values when targeted to Python and Lua 5.1.
 2. **Ground-truth verification**: Matching function outputs against ground-truth expectations defined in [`_expectations.py`](_expectations.py).
@@ -17,8 +17,8 @@ Unlike compiler and parser unit tests (located in [`src/`](../../src)), which te
 ## Running integration tests
 Integration tests are executed via `unittest`:
 ```bash
-pipenv run python -m unittest src/code_gen/python_transpiler_test.py
-pipenv run python -m unittest src/code_gen/lua_transpiler_test.py
+pipenv run python -m unittest sapphire/code_gen/python_transpiler_test.py
+pipenv run python -m unittest sapphire/code_gen/lua_transpiler_test.py
 ```
 Or using the Sapphire CLI across both targets:
 ```bash

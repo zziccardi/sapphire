@@ -68,4 +68,4 @@ To install the extension permanently in your local VS Code instance:
 You can customize the extension behavior in your user or workspace settings (`settings.json`):
 
 * `sapphire.lsp.pythonPath` (Default: `"pipenv"`): The path or command to run Python (e.g. `"python3"` or `"pipenv"`). If set to `"pipenv"`, it automatically boots using the project virtualenv.
-* `sapphire.lsp.serverPath` (Default: `"src/lsp/server.py"`): The relative path to the Python Language Server file within the workspace.
+* `sapphire.lsp.serverPath` (Default: `"sapphire/lsp/server.py"`): The relative path to the Python Language Server file within the workspace.

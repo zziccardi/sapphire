@@ -8,7 +8,7 @@ grammar, see the [contributor setup guide](development.md) instead.
 
 ## Installing the CLI
 
-Sapphire requires Python 3.10 or newer. Install the CLI globally with `pipx`
+Sapphire requires Python 3.12 or newer. Install the CLI globally with `pipx`
 (recommended for an isolated command) or `pip`:
 
 ```bash
