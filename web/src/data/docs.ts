@@ -32,6 +32,13 @@ export const DOC_PAGES: DocPageMeta[] = [
     summary: 'Formatting, 80-char line limits, naming conventions, and idiomatic Sapphire.',
   },
   {
+    slug: 'ai-agents',
+    file: 'ai_agents.md',
+    title: 'AI Agents & Readability',
+    group: 'Getting Started',
+    summary: 'Human readability, compiler-verified AI agent workflows, and common cross-language pitfalls.',
+  },
+  {
     slug: 'spec',
     file: 'SPEC.md',
     title: 'Language Specification',

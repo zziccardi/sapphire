@@ -23,7 +23,7 @@ especially well-suited for interactive applications, simulation, and game
 engines.
 
 Unlike other performance-oriented languages, Sapphire distinguishes itself
-through five key pillars:
+through six key pillars:
 * **Zero-overhead static & dynamic reuse**: Inheritance is treated as
   compile-time syntactic delegation (composition and generated forwarding),
   completely eliminating virtual-method tables (vtables), pointer-chasing, and
@@ -45,6 +45,11 @@ through five key pillars:
   readable code across multiple execution targets (defaulting to Python and
   Lua 5.1/LuaJIT for game frameworks like Love2D), while enforcing strict
   compile-time type checks and deterministic semantics across all backends.
+* **Auditability and machine verifiability**: Explicit mutability (`let`/`var`,
+  `func`/`var func`), explicit `export` manifests, strict compile-time checks,
+  and structured JSON diagnostics (`sapphire check --json`) make code concise
+  to review and reliable to verify—whether written by humans or AI coding
+  agents (see [AI agents and human readability](ai_agents.md)).
 
 ## Program entry and module structure
 

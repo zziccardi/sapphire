@@ -10,6 +10,7 @@ describe('markdown helpers', () => {
   it('rewrites relative doc links to Astro routes', () => {
     expect(rewriteMarkdownHref('SPEC.md#optionals')).toBe('/docs/spec#optionals');
     expect(rewriteMarkdownHref('quickstart.md')).toBe('/docs/quickstart');
+    expect(rewriteMarkdownHref('ai_agents.md#common-agent-pitfalls')).toBe('/docs/ai-agents#common-agent-pitfalls');
     expect(rewriteMarkdownHref('host_interop.md#love2d-interop')).toBe('/docs/host-interop#love2d-interop');
     expect(rewriteMarkdownHref('lua_comparison.md')).toBe('/compare/lua');
     expect(rewriteMarkdownHref('rust_comparison.md')).toBe('/compare/rust');

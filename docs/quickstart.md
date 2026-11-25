@@ -165,3 +165,5 @@ test suite structure.
   and naming conventions.
 * Browse the [standard library](stdlib.md) and
   [built-in types & functions](builtins.md).
+* See [AI agents and human readability](ai_agents.md) for configuring AI coding
+  agents with Sapphire's skill reference and JSON diagnostics loop.
