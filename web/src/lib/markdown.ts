@@ -26,6 +26,7 @@ const DOC_LINK_MAP: Record<string, string> = {
   'development.md': '/docs/development',
   'style_guide.md': '/docs/style-guide',
   'testing.md': '/docs/testing',
+  'ai_agents.md': '/docs/ai-agents',
   'lua_comparison.md': '/compare/lua',
   'rust_comparison.md': '/compare/rust',
   'cpp_comparison.md': '/compare/cpp',

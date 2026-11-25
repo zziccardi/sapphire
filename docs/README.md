@@ -13,6 +13,8 @@ rendered docs and try code in the browser at
 3. [style_guide.md](style_guide.md) — Formatting, naming, and idiomatic style.
 4. [testing.md](testing.md) — Writing and running native `@test` suites with
    `std.testing`.
+5. [ai_agents.md](ai_agents.md) — Human readability, compiler-verified agent
+   workflows, and trade-offs when writing Sapphire with AI coding agents.
 
 ## Standard library & interop
 

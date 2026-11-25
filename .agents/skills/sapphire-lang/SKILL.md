@@ -472,3 +472,25 @@ impl testing.TestCase for MathTestSuite {
   check for trace compilation aborts with `luajit -jv` (`jit.v`). Avoid
   `debug.sethook` during performance profiling because it disables JIT traces.
 
+## 9. Common Cross-Language Pitfalls
+
+Quick checklist of frequent mistakes when switching from Rust, Swift, Python,
+or Lua:
+
+- **Null literal**: Always use `none` (never `nil`, `None`, or `null`).
+- **Optional unwrapping**: Use `?=` (`if let x ?= opt`, `guard var x ?= opt`),
+  never `=`, and use `var` (never `let var`) for mutable bindings.
+- **Semicolons & `match` commas**: Every statement ends with `;` (except
+  standalone `if`/`while`/`for`/statement-`match` blocks and `export { ... }`
+  manifests). Every `match` arm uses `->` and ends with `,`; wildcard is
+  `... ->`; value-producing block arms return via `yield <expr>;`.
+- **Parameter order**: Immutable (`const`) parameters first, mutable (`var`)
+  parameters next, defaulted parameters last.
+- **No struct up-casting**: `Child as Parent` is prohibited; use `trait`s.
+- **Optional chaining**: Repeat `?.` on every hop after the first (`a?.b()?.c`);
+  do not chain `?.` into `?[idx]` (unwrap with `if let` first).
+- **Container unwrap freeze**: `if var v ?= m.get(k)` freezes `m` until the
+  last use of `v`; capture a flag or finish using `v` before mutating `m`.
+- **Module scope**: No executable procedural statements at module scope;
+  module-level `let` initializers must be compile-time constant expressions.
+
