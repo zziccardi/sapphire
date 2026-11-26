@@ -439,7 +439,7 @@ do
   end
   _SP_RT._clone_helper = _clone_helper
 
-  _SP_RT._sapphire_copy = function(val)
+  _SP_RT._sapphire_copy = function(val, seen)
     if type(val) ~= "table" then return val end
     if val == _SP_NONE or val == _SP_UNSET then return val end
     local mt = getmetatable(val)
@@ -454,9 +454,14 @@ do
     if type(val.__del__) == "function" then
       return val
     end
+    seen = seen or {}
+    if seen[val] then
+      return seen[val]
+    end
     local copy = {}
+    seen[val] = copy
     for k, v in pairs(val) do
-      copy[k] = v
+      copy[k] = _SP_RT._sapphire_copy(v, seen)
     end
     if mt then
       setmetatable(copy, mt)

@@ -463,6 +463,8 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         self.newline()
         self.emit(f"if {mp}._init_fields then {mp}._init_fields(self) end")
     for f in node.fields:
+      if getattr(f, "is_static", False):
+        continue
       default_expr = f.default_expr or get_default_value_for_type_node(
         f.field_type
       )
@@ -591,7 +593,10 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.indent()
       self.newline()
       self.emit("local _args = { ... }")
-      for idx, f in enumerate(node.fields):
+      instance_fields = [
+        f for f in node.fields if not getattr(f, "is_static", False)
+      ]
+      for idx, f in enumerate(instance_fields):
         self.newline()
         mangled_f = self._mangle_name(f.name)
         self.emit(
@@ -617,7 +622,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.dedent()
       self.newline()
       self.emit("end")
-      for idx, f in enumerate(node.fields):
+      for idx, f in enumerate(instance_fields):
         fname = self._mangle_name(f.name)
         self.newline()
         self.emit(
@@ -628,9 +633,11 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.newline()
       self.emit("else")
       self.indent()
-      if node.fields:
+      if instance_fields:
         self.newline()
-        self.emit(f"self.{self._mangle_name(node.fields[0].name)} = _arg1")
+        self.emit(
+          f"self.{self._mangle_name(instance_fields[0].name)} = _arg1"
+        )
       self.dedent()
       self.newline()
       self.emit("end")
@@ -693,6 +700,14 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           f"{chain} end }})"
         )
       self.newline()
+
+    for f in node.fields:
+      if getattr(f, "is_static", False) and f.default_expr is not None:
+        default_code = self.capture_expr(f.default_expr)
+        self.emit(
+          f"{struct_name}.{self._mangle_name(f.name)} = {default_code}"
+        )
+        self.newline()
 
     self._emit_struct_init_fields(node)
     self._emit_struct_init_constructor(node, methods)

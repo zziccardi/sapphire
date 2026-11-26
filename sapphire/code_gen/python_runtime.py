@@ -415,19 +415,36 @@ def _sapphire_unwrap_write(obj):
     else:
       return obj
 
-def _sapphire_copy(val):
+def _sapphire_copy(val, _seen=None):
   if isinstance(val, _LazyCoWProxy):
     val = val._get_active()
   if isinstance(val, (int, float, bool, str, type(None), Enum, SapphireObject, Arena, _SapphireRef, _SapphireSharedRef, _SapphireWeakRef, _SapphireCoroutine)):
     return val
-  if isinstance(val, list):
-    return list(val)
-  if isinstance(val, dict):
-    return dict(val)
   if callable(val) or isinstance(val, (type, types.ModuleType)):
     return val
+  if _seen is None:
+    _seen = {}
+  obj_id = id(val)
+  if obj_id in _seen:
+    return _seen[obj_id]
+  if isinstance(val, list):
+    res = []
+    _seen[obj_id] = res
+    for item in val:
+      res.append(_sapphire_copy(item, _seen))
+    return res
+  if isinstance(val, dict):
+    res = {}
+    _seen[obj_id] = res
+    for k, v in val.items():
+      res[k] = _sapphire_copy(v, _seen)
+    return res
   if hasattr(val, '__dict__') and not hasattr(type(val), '__del__'):
-    return copy.copy(val)
+    res = copy.copy(val)
+    _seen[obj_id] = res
+    for k, v in val.__dict__.items():
+      res.__dict__[k] = _sapphire_copy(v, _seen)
+    return res
   return val
 
 def _sapphire_string_split(s, sep=None):

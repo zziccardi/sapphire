@@ -539,6 +539,10 @@ class HoverProvider:
           st = ls.symbol_table_cache[uri].lookup_type(parent_struct.name)
           if st and node.name in st.fields:
             field_comments = getattr(st.fields[node.name], "comments", "")
+          elif st and node.name in getattr(st, "static_fields", {}):
+            field_comments = getattr(
+              st.static_fields[node.name], "comments", ""
+            )
       elif isinstance(node, MemberAccessNode) and uri in ls.symbol_table_cache:
         from sapphire.semantics.symbol_table import (
           OptionalType,
@@ -551,13 +555,17 @@ class HoverProvider:
           receiver_type = receiver_type.base_type
         if isinstance(receiver_type, (SharedRefType, RefType)):
           receiver_type = receiver_type.inner_type
-        if (
-          isinstance(receiver_type, StructType)
-          and node.member in receiver_type.fields
-        ):
-          field_comments = getattr(
-            receiver_type.fields[node.member], "comments", ""
-          )
+        if isinstance(receiver_type, StructType):
+          if node.member in receiver_type.fields:
+            field_comments = getattr(
+              receiver_type.fields[node.member], "comments", ""
+            )
+          else:
+            static_field = receiver_type.get_static_field(
+              node.member, ls.symbol_table_cache[uri]
+            )
+            if static_field is not None:
+              field_comments = getattr(static_field, "comments", "")
       if field_comments:
         markdown_text += f"\n\n{field_comments}"
 

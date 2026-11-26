@@ -401,6 +401,16 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
 
     methods = self.struct_methods.get(node.name, [])
     has_init = any(m.func_decl.name == "__init__" for m in methods)
+    static_fields = [f for f in node.fields if getattr(f, "is_static", False)]
+    instance_fields = [
+      f for f in node.fields if not getattr(f, "is_static", False)
+    ]
+
+    for f in static_fields:
+      if f.default_expr is not None:
+        self.newline()
+        default_code = self.capture_expr(f.default_expr)
+        self.emit(f"{self._mangle_name(f.name)} = {default_code}")
 
     self.newline()
     if is_proto:
@@ -419,7 +429,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
             self.emit(f"{p_m}.__init__(self)")
           else:
             self.emit(f"{p_m}.__init__(self, *args, **kwargs)")
-      for f in node.fields:
+      for f in instance_fields:
         default_expr = f.default_expr or get_default_value_for_type_node(
           f.field_type
         )
@@ -441,7 +451,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.newline()
         self.emit("self._init_sapphire(*args, **kwargs)")
         self.dedent()
-      if not node.parent_names and not node.fields and has_init is False:
+      if not node.parent_names and not instance_fields and has_init is False:
         # kwargs loop was already emitted above
         pass
       self.dedent()
@@ -457,7 +467,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
             self.emit(f"{p_m}.__init__(self)")
           else:
             self.emit(f"{p_m}.__init__(self, *args, **kwargs)")
-      for f in node.fields:
+      for f in instance_fields:
         default_expr = f.default_expr or get_default_value_for_type_node(
           f.field_type
         )

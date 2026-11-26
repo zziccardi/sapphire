@@ -220,6 +220,10 @@ function parameters, loop-iteration bindings, and conditional-unwrap headers:
   plain data `struct`s (without `__del__()` or move-only fields), and
   collections (`[T]`, `[T; N]`, `[K: V]`) of copy types duplicate cleanly on
   assignment (using CoW buffer sharing for collections in native lowering).
+  Copying a plain value `struct` or collection recursively copies nested plain
+  value `struct`s and collections so mutating a nested field on one copy never
+  mutates the source, while reference handles (`proto` handles, `WeakRef<T>`)
+  retain their identity.
 * **Move-only types**: `Ref<T>`, `Arena`, `Coroutine<T>`, any `struct` defining
   a `__del__()` destructor (or inheriting/composing a move-only field), and any
   optional (`T?`) or collection (`[T]`, `[T; N]`, `[K: V]`) wrapping a
@@ -852,6 +856,22 @@ impl Weapon {
   of `self` must be explicitly declared using `var func`.
 * **Static methods**: Declared using the `static` keyword. Inside static
   functions, `self` is unavailable.
+* **Static constants (`static let`)**: Structs may declare immutable
+  type-scoped compile-time constants using `static let`:
+  ```sapphire
+  struct CombatConstants {
+    static let SPEED_THRESHOLD = 5;
+    static let CRIT_MULTIPLIER: int = 3;
+  }
+
+  let threshold = CombatConstants.SPEED_THRESHOLD;
+  ```
+  * `static let` fields require a compile-time constant initializer and occupy
+    zero bytes in struct instances (they are not accepted in struct literal
+    initializers `Struct { ... }` and cannot be accessed on instances).
+  * `static var` is disallowed to prevent hidden mutable global state.
+  * Child structs inheriting from a parent struct (`struct Child: Parent`)
+    inherit access to the parent's `static let` constants (`Child.CONST`).
 
 ### Struct instantiation & constructor enforcement
 

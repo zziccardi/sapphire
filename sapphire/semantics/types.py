@@ -280,6 +280,7 @@ class StructField:
     has_default: bool = False,
     has_explicit_default: bool = False,
     comments: str = "",
+    is_static: bool = False,
   ):
     self.name = name
     self.field_type = field_type
@@ -287,6 +288,7 @@ class StructField:
     self.has_default = has_default
     self.has_explicit_default = has_explicit_default
     self.comments = comments
+    self.is_static = is_static
 
 
 class StructMethod:
@@ -349,6 +351,7 @@ class StructType(Type):
       self.parent_names = list(parent_names)
     self.parent_types: list[StructType] = []
     self.fields: dict[str, StructField] = {}
+    self.static_fields: dict[str, StructField] = {}
     self.methods: dict[str, StructMethod] = {}
     self.implemented_traits: set[str] = set()
     self.implemented_trait_types: dict[str, TraitType] = {}
@@ -359,6 +362,34 @@ class StructType(Type):
     self.ast_decl = ast_decl
     self.defining_module = defining_module
     self.is_imported = is_imported
+
+  def get_static_field(
+    self,
+    name: str,
+    symbol_table: Any | None = None,
+    _seen: set[tuple[str | None, str]] | None = None,
+  ) -> StructField | None:
+    """Looks up a `static let` field on this struct or its ancestor chain."""
+    if name in self.static_fields:
+      return self.static_fields[name]
+    seen = set() if _seen is None else set(_seen)
+    key = (self.defining_module, self.name)
+    if key in seen:
+      return None
+    seen.add(key)
+    for parent in self.parent_types:
+      if isinstance(parent, StructType):
+        found = parent.get_static_field(name, symbol_table, seen)
+        if found is not None:
+          return found
+    if self.parent_names and symbol_table:
+      for p_name in self.parent_names:
+        parent = symbol_table.lookup_type(p_name)
+        if isinstance(parent, StructType):
+          found = parent.get_static_field(name, symbol_table, seen)
+          if found is not None:
+            return found
+    return None
 
   @property
   def parent_name(self) -> str | None:

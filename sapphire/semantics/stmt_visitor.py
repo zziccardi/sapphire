@@ -444,6 +444,17 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       self.error("Property access target is not a struct.", node=node)
       return PrimitiveType("none")
 
+    if (
+      receiver_type.get_static_field(node.member, self.symbol_table)
+      is not None
+    ):
+      self.error(
+        f"Cannot assign to immutable static field '{node.member}' on struct "
+        f"'{receiver_type.name}'.",
+        node=node,
+      )
+      return PrimitiveType("none")
+
     field = receiver_type.fields.get(node.member)
     if not field:
       self.error(

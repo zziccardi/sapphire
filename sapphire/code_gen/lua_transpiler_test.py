@@ -2937,6 +2937,85 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("app.sp:42: (at app.lua:10) -> `let s = 100% %1`", proc.stdout.strip())
     self.assertIn("error 100% failed %s %1", proc.stdout.strip())
 
+  def test_cross_module_static_let_and_deep_struct_copy_lua(self):
+    """Verifies cross-module static let constants and deep value-struct copy in Lua."""
+    lua_bin = shutil.which("lua5.1") or shutil.which("lua")
+    if not lua_bin:
+      self.skipTest("lua5.1 / lua binary not found")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      consts_sp = os.path.join(tmpdir, "combat_consts.sp")
+      main_sp = os.path.join(tmpdir, "main_mod.sp")
+      with open(consts_sp, "w", encoding="utf-8") as f:
+        f.write(
+          "export { CombatConstants, Inner, Unit, TEMPLATE }\n"
+          "struct CombatConstants {\n"
+          "  static let SPEED_THRESHOLD = 5;\n"
+          "}\n"
+          "struct Inner { var hp: int = 20; }\n"
+          "struct Unit { var inner: Inner = Inner {}; }\n"
+          "let TEMPLATE = Unit {};\n"
+        )
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(
+          "import combat_consts;\n"
+          "func main() {\n"
+          "  var copy_a = combat_consts.TEMPLATE;\n"
+          "  copy_a.inner.hp = 7;\n"
+          "  let res = combat_consts.CombatConstants.SPEED_THRESHOLD +\n"
+          "            copy_a.inner.hp + combat_consts.TEMPLATE.inner.hp;\n"
+          "  print(String.from(res));\n"
+          "}\n"
+        )
+
+      out_lua = os.path.join(tmpdir, "main_mod.lua")
+      transpile_file(main_sp, output_file=out_lua, target="lua", quiet=True)
+      lib_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "lib")
+      )
+      env = dict(os.environ)
+      env["LUA_PATH"] = (
+        f"{tmpdir}/?.lua;{lib_path}/?.lua;{lib_path}/?/init.lua;;"
+      )
+      proc = subprocess.run(
+        [lua_bin, out_lua],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+      )
+      self.assertEqual(proc.returncode, 0, proc.stderr)
+      # 5 + 7 + 20 = 32
+      self.assertEqual(proc.stdout.strip(), "32")
+
+  def test_deep_copy_preserves_proto_handle_identity_lua(self):
+    """Verifies recursive value-struct copy isolates nested value structs while preserving proto handles."""
+    source = """
+    proto Node {
+      var tag: int = 10;
+    }
+    struct Inner {
+      var hp: int = 20;
+    }
+    struct Holder {
+      var inner: Inner = Inner {};
+      var handle: Node;
+    }
+    func main() {
+      var arena = Arena();
+      let n = Node {} in arena;
+      var h1 = Holder { handle = n };
+      var h2 = h1;
+      h2.inner.hp = 5;
+      h2.handle.tag = 99;
+      // h1.inner.hp (20) + h2.inner.hp (5) + h1.handle.tag (99) = 124
+      print(String.from(h1.inner.hp + h2.inner.hp + h1.handle.tag));
+    }
+    """
+    lua_code = self._transpile(source)
+    proc = self._run_lua_code(lua_code)
+    self.assertEqual(proc.stdout.strip(), "124")
+
 
 # ---------------------------------------------------------------------------
 # End-to-end integration tests

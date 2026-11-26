@@ -921,6 +921,96 @@ class TestTypeCheckerStructs(TypeCheckerTestBase, unittest.TestCase):
       """)
     self.assertIn("Explicit 'self' parameter is not permitted", str(ctx3.exception))
 
+  def test_static_let_valid_and_inherited(self):
+    self._check("""
+    struct CombatConstants {
+      static let SPEED_THRESHOLD = 5;
+      static let CRIT_MULT: int = 3;
+    }
+    struct ExtendedConstants: CombatConstants {
+      static let BONUS = 10;
+    }
+    func helper(x: int, t: int = CombatConstants.SPEED_THRESHOLD): int {
+      return x + t;
+    }
+    func main(): int {
+      let empty = CombatConstants {};
+      return CombatConstants.SPEED_THRESHOLD + CombatConstants.CRIT_MULT +
+             ExtendedConstants.SPEED_THRESHOLD + ExtendedConstants.BONUS +
+             helper(1);
+    }
+    """)
+
+  def test_static_let_invalid_declarations_and_usages(self):
+    with self.assertRaises(SemanticError) as ctx1:
+      self._check("""
+      struct Bad {
+        static var X = 5;
+      }
+      """)
+    self.assertIn(
+      "must be immutable ('static let')", str(ctx1.exception)
+    )
+
+    with self.assertRaises(SemanticError) as ctx2:
+      self._check("""
+      struct Bad {
+        static let X: int;
+      }
+      """)
+    self.assertIn(
+      "requires a compile-time constant initializer", str(ctx2.exception)
+    )
+
+    with self.assertRaises(SemanticError) as ctx3:
+      self._check("""
+      func compute(): int { return 5; }
+      struct Bad {
+        static let X = compute();
+      }
+      """)
+    self.assertIn("compile-time constant expression", str(ctx3.exception))
+
+    with self.assertRaises(SemanticError) as ctx4:
+      self._check("""
+      struct C {
+        static let X = 5;
+      }
+      func main(): int {
+        let c = C {};
+        return c.X;
+      }
+      """)
+    self.assertIn(
+      "Cannot access static field 'X' on an instance of 'C'",
+      str(ctx4.exception),
+    )
+
+    with self.assertRaises(SemanticError) as ctx5:
+      self._check("""
+      struct C {
+        static let X = 5;
+      }
+      func main() {
+        C.X = 10;
+      }
+      """)
+    self.assertIn(
+      "Cannot assign to immutable static field 'X'", str(ctx5.exception)
+    )
+
+    with self.assertRaises(SemanticError) as ctx6:
+      self._check("""
+      struct C {
+        static let X = 5;
+      }
+      func main() {
+        let c = C { X = 10 };
+      }
+      """)
+    self.assertIn("Struct 'C' has no field 'X'", str(ctx6.exception))
+
 
 if __name__ == "__main__":
   unittest.main()
+

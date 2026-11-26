@@ -308,6 +308,8 @@ class LLVMTranspiler(BaseTranspiler):
       field_types.extend(self.struct_field_types[parent_name])
 
     for field in node.fields:
+      if getattr(field, "is_static", False):
+        continue
       f_type = getattr(field, "field_type", getattr(field, "type_node", None))
       if f_type is not None:
         field_types.append(self.get_llvm_type(f_type))

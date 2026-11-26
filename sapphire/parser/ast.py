@@ -226,6 +226,7 @@ class StructFieldNode(ASTNode):
   name: str
   field_type: TypeNode | None = None
   default_expr: ASTNode | None = None
+  is_static: bool = False
 
 
 @dataclass(eq=False)
