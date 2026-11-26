@@ -466,7 +466,10 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
     if isinstance(expr, IdentifierNode):
       sym = self.symbol_table.lookup(expr.name)
       if sym is not None:
-        return isinstance(sym, StructSymbol)
+        return isinstance(sym, StructSymbol) or (
+          getattr(sym, "is_type_alias", False)
+          and isinstance(sym.symbol_type, StructType)
+        )
       return isinstance(self.symbol_table.lookup_type(expr.name), StructType)
     if (
       isinstance(expr, MemberAccessNode)

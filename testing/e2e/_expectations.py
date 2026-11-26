@@ -162,6 +162,7 @@ EXPECTATIONS: dict[str, dict[str, object]] = {
         "test_default_fields": 0,
         "test_method_call": 2,
         "test_static_method": 7,
+        "test_struct_alias_static_method": 15,
         "test_nested_value_struct_deep_copy_isolation": 45,
         "test_static_let_struct_constants": 30,
     },

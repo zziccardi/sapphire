@@ -692,6 +692,7 @@ class DeclarationPass:
       elif decl.exprs and i < len(decl.exprs):
         expr_node = decl.exprs[i]
         val_t = None
+        is_type_alias = False
         if isinstance(expr_node, MemberAccessNode) and isinstance(
           expr_node.receiver, IdentifierNode
         ):
@@ -700,19 +701,35 @@ class DeclarationPass:
             exp = mod_sym.lookup_export(expr_node.member)
             if isinstance(exp, Type):
               val_t = exp
+              is_type_alias = True
+            elif isinstance(
+              exp, (StructSymbol, EnumSymbol, TraitSymbol)
+            ) or getattr(exp, "is_type_alias", False):
+              val_t = exp.symbol_type
+              is_type_alias = True
             elif hasattr(exp, "symbol_type") and isinstance(
               exp.symbol_type, Type
             ):
               val_t = exp.symbol_type
         elif isinstance(expr_node, IdentifierNode):
-          exp = checker.symbol_table.lookup_type(expr_node.name)
-          if isinstance(exp, Type):
-            val_t = exp
+          exp_sym = checker.symbol_table.lookup(expr_node.name)
+          if isinstance(
+            exp_sym, (StructSymbol, EnumSymbol, TraitSymbol)
+          ) or getattr(exp_sym, "is_type_alias", False):
+            val_t = exp_sym.symbol_type
+            is_type_alias = True
+          else:
+            exp = checker.symbol_table.lookup_type(expr_node.name)
+            if isinstance(exp, Type):
+              val_t = exp
+              is_type_alias = True
         if val_t:
           sym = VariableSymbol(name, val_t, decl.is_mutable)
           sym._from_declare_globals = True
+          if is_type_alias and not decl.is_mutable:
+            sym.is_type_alias = True
+            checker.symbol_table.define_type(name, val_t)
           checker.symbol_table.define(name, sym)
-          checker.symbol_table.define_type(name, val_t)
 
   @staticmethod
   def _declare_func_global(checker: Any, decl: FuncDeclNode) -> None:

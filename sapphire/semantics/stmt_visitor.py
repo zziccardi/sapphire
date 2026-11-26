@@ -195,6 +195,8 @@ class StmtVisitorMixin(ControlFlowVisitorMixin):
       sym = VariableSymbol(name, var_type, node.is_mutable)
       if self.current_function is None and not node.is_mutable:
         sym.is_constant_expr = True
+      if not node.is_mutable and self._is_struct_type_receiver(expr_node):
+        sym.is_type_alias = True
       self.symbol_table.define(name, sym)
 
       self._propagate_binding_metadata(sym, expr_node, replace=False)

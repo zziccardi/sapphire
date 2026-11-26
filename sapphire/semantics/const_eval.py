@@ -26,8 +26,10 @@ from sapphire.parser.ast import (
 from sapphire.semantics.symbol_table import (
   EnumSymbol,
   ModuleSymbol,
+  StructSymbol,
   StructType,
   SymbolTable,
+  TraitSymbol,
   VariableSymbol,
 )
 
@@ -60,7 +62,7 @@ def _check_ident_const(
       f"Identifier '{node.name}' is undefined and cannot be used in a "
       "compile-time constant expression."
     )
-  if isinstance(sym, EnumSymbol):
+  if isinstance(sym, (EnumSymbol, StructSymbol, TraitSymbol)):
     return True, None
   if isinstance(sym, VariableSymbol):
     if getattr(sym, "is_constant_expr", False) and not sym.is_mutable:
