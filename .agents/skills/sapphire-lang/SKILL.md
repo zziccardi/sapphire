@@ -59,6 +59,9 @@ var x, y = 10.0, 20.0;
 - **Copy/CoW vs. Move-only ownership**:
   - Plain data `struct`s, primitives, `enum`s, `String`, `Range`, `proto`
     handles, and collections of Copy types copy (or CoW-share) on assignment.
+    Copying a plain value `struct` or collection recursively copies nested
+    plain value `struct`s and collections (isolating nested mutations) while
+    preserving reference handle identity (`proto` handles, `WeakRef<T>`).
   - `Ref<T>`, `Arena`, `Coroutine<T>`, and any `struct` defining
     `func __del__()` (or holding move-only fields) are **move-only** and
     require explicit `move <ident>`.
@@ -275,6 +278,12 @@ func run_enemy_turn(path: [PathNode],
 - `self` is **immutable by default**. Any method that modifies `self` **must**
   be declared as `var func`.
 - Static methods use `static func` (`self` is unavailable).
+- **Static constants (`static let`)**: Structs may declare immutable
+  type-scoped compile-time constants (`static let SPEED_THRESHOLD = 5;`),
+  accessed via `Struct.CONST` (and inherited by `Child.CONST`). They occupy
+  zero instance layout bytes (cannot be passed to `Struct { ... }` or read on
+  instances), require compile-time constant initializers, and disallow
+  `static var`.
 - **Finite inline struct layout**: Non-`proto` `struct`s cannot directly or
   mutually contain themselves unboxed (`var next: Node?` is a compile error).
   Break cycles with `proto` in an `Arena`, `Ref<T>`, `SharedRef<T>`, or dynamic
@@ -377,7 +386,7 @@ var elite_goblin = clone base_goblin {
   var love: love2d.LoveEngine;
   ```
 
-### Love2D Bindings (`lib/love2d/`) & Trait Rules
+### Love2D Bindings (`sapphire/lib/love2d/`) & Trait Rules
 - **Host API Traits (`static func`)**: `graphics.Graphics`, `timer.Timer`,
   `keyboard.Keyboard`, and `mouse.Mouse` declare module functions with
   `static func` (transpiling to Lua dot syntax `love.graphics.rectangle(...)`).
@@ -387,8 +396,9 @@ var elite_goblin = clone base_goblin {
   `quad:getViewport()`), while module traits use `static func` (transpiling to
   Lua dot syntax). Explicit `self` in parameter lists is a compiler error.
 - **String Enums (`lib.love2d.enums`)**: Includes `DrawMode`, `FilterMode`,
-  `WrapMode`, `AlignMode`, `ArcMode`, `KeyCode`, `GamepadButton`, and
-  `GamepadAxis`.
+  `WrapMode`, `AlignMode`, `ArcMode`, `KeyCode` (full Love2D `KeyConstant` set:
+  `A`–`Z`, `Num0`–`Num9`, `F1`–`F12`, navigation/editing, modifiers/locks,
+  punctuation, numpad, and misc keys), `GamepadButton`, and `GamepadAxis`.
 - **Quad-less `love.graphics.draw` (`drawImageAt` / `drawCanvasAt`)**: Never
   pass `none` (`nil`) as `quad` to `drawImage` / `drawCanvas` — Love2D rejects
   `nil` in argument #2 (`Quad expected, got nil`). Branch on `if let quad ?=
