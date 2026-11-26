@@ -43,6 +43,16 @@ func test_static_method(): int {
   return c.get();
 }
 
+let CounterAlias = Counter;
+
+@test
+func test_struct_alias_static_method(): int {
+  let LocalAlias = CounterAlias;
+  let a = CounterAlias.create_at(10);
+  let b = LocalAlias.create_at(5);
+  return a.get() + b.get();
+}
+
 struct InnerStats {
   var hp: int = 20;
 }

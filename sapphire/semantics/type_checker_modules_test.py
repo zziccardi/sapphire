@@ -1013,6 +1013,70 @@ class TestTypeCheckerModules(TypeCheckerTestBase, unittest.TestCase):
     self.assertIn("Cannot access instance field 'stats' on type 'Unit'",
                   str(ctx.exception))
 
+  def test_struct_type_alias_static_method_and_const(self):
+    """Verifies static func and static let resolution on struct type aliases."""
+    from sapphire.semantics.symbol_table import (
+      FunctionType,
+      ModuleSymbol,
+      StructMethod,
+      StructSymbol,
+      Symbol,
+    )
+
+    unit_struct = StructType("Unit")
+    unit_struct.fields["hp"] = StructField(
+      "hp", PrimitiveType("int"), is_mutable=True
+    )
+    unit_struct.static_fields["MAX_HP"] = StructField(
+      "MAX_HP", PrimitiveType("int"), is_mutable=False, is_static=True
+    )
+    create_sig = FunctionType(
+      [PrimitiveType("int")], unit_struct, param_names=["hp"]
+    )
+    unit_struct.methods["create"] = StructMethod(
+      "create", create_sig, modifier="static"
+    )
+    mod_sym = ModuleSymbol("units", "units.sp")
+    mod_sym.exports["Unit"] = StructSymbol("Unit", unit_struct)
+    mod_sym.exports["ELENA_UNIT"] = Symbol("ELENA_UNIT", unit_struct)
+
+    code = """
+    let Unit = units.Unit;
+    let Unit2 = Unit;
+
+    func make_default(): int {
+      let LocalUnit = units.Unit;
+      let a = Unit.create(10);
+      let b = Unit2.create(20);
+      let c = LocalUnit.create(Unit.MAX_HP);
+      return a.hp + b.hp + c.hp;
+    }
+    """
+    stream = CommonTokenStream(SapphireLexer(InputStream(code)))
+    ast = ASTBuilder().visit(SapphireParser(stream).program())
+    checker = TypeChecker()
+    checker.symbol_table.define("units", mod_sym)
+    checker.check(ast)
+
+    # Value constants of struct type must NOT be treated as type aliases.
+    bad_code = """
+    let ELENA = units.ELENA_UNIT;
+
+    func bad(): Unit {
+      return ELENA.create(10);
+    }
+    """
+    bad_stream = CommonTokenStream(SapphireLexer(InputStream(bad_code)))
+    bad_ast = ASTBuilder().visit(SapphireParser(bad_stream).program())
+    bad_checker = TypeChecker()
+    bad_checker.symbol_table.define("units", mod_sym)
+    with self.assertRaises(SemanticError) as ctx:
+      bad_checker.check(bad_ast)
+    self.assertIn(
+      "Cannot call static method 'create' on an instance of 'Unit'",
+      str(ctx.exception),
+    )
+
 
 if __name__ == "__main__":
   unittest.main()
