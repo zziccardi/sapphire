@@ -453,7 +453,7 @@ impl testing.TestCase for MathTestSuite {
   grid[y] = row;`) turns row population into O(W^2) table copying. Mutate
   existing inner containers in place via `if var`:
   ```sapphire
-  func set_coord_flag(var grid: [int: [int: bool]], x: int, y: int) {
+  func set_coord_flag(x: int, y: int, var grid: [int: [int: bool]]) {
     if var row ?= grid.get(y) {
       row[x] = true;
     } else {
@@ -463,7 +463,7 @@ impl testing.TestCase for MathTestSuite {
   ```
 - **Hoist outer container lookups & accumulators out of inner loops**: Unwrap
   outer rows once before iterating columns (`if let row ?= data.get(y)` before
-  `for x in range(0, width)`), and accumulate per-pass counts in a local `var`
+  `for x in range(width)`), and accumulate per-pass counts in a local `var`
   (writing back to a map key once after the loop) instead of reading and
   writing a map entry on every iteration.
 - **Measuring performance in Love2D & LuaJIT**: Time hot paths with
