@@ -42,3 +42,31 @@ func test_static_method(): int {
   let c = Counter.create_at(7);
   return c.get();
 }
+
+struct InnerStats {
+  var hp: int = 20;
+}
+
+struct MidStats {
+  var inner: InnerStats = InnerStats {};
+  var tags: [int] = [1, 2];
+}
+
+struct OuterUnit {
+  var mid: MidStats = MidStats {};
+}
+
+let TEMPLATE_UNIT = OuterUnit {};
+
+@test
+func test_nested_value_struct_deep_copy_isolation(): int {
+  var copy_a = TEMPLATE_UNIT;
+  copy_a.mid.inner.hp = 3;
+  copy_a.mid.tags.push(99);
+
+  let copy_b = TEMPLATE_UNIT;
+  // copy_a.mid.inner.hp (3) + copy_b.mid.inner.hp (20) +
+  // TEMPLATE_UNIT.mid.inner.hp (20) + copy_b.mid.tags.size() (2) = 45
+  return copy_a.mid.inner.hp + copy_b.mid.inner.hp +
+         TEMPLATE_UNIT.mid.inner.hp + copy_b.mid.tags.size();
+}
