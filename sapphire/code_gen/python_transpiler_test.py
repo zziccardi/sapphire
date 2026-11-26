@@ -3456,6 +3456,41 @@ class TestPhase5PythonFixes(unittest.TestCase):
         sys.path[:] = orig_path
         sys.modules.pop("base_traits", None)
 
+  def test_deep_copy_preserves_proto_handle_identity_python(self):
+    """Verifies recursive value-struct copy isolates nested value structs while preserving proto handles."""
+    source = """
+    proto Node {
+      var tag: int = 10;
+    }
+    struct Inner {
+      var hp: int = 20;
+    }
+    struct Holder {
+      var inner: Inner = Inner {};
+      var handle: Node;
+    }
+    func run(): int {
+      var arena = Arena();
+      let n = Node {} in arena;
+      var h1 = Holder { handle = n };
+      var h2 = h1;
+      h2.inner.hp = 5;
+      h2.handle.tag = 99;
+      return h1.inner.hp + h2.inner.hp + h1.handle.tag;
+    }
+    """
+    stream = CommonTokenStream(SapphireLexer(InputStream(source)))
+    tree = SapphireParser(stream).program()
+    ast = ASTBuilder().visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(checker.errors, [])
+    py_code = PythonTranspiler().transpile(ast)
+    ns: dict = {}
+    exec(py_code, ns)
+    self.assertEqual(ns["run"](), 124)
+
 
 if __name__ == "__main__":
   unittest.main()
+

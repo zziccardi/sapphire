@@ -276,11 +276,14 @@ class ASTBuilder(SapphireVisitor):
   def visitStructField(
     self, ctx: SapphireParser.StructFieldContext
   ) -> StructFieldNode:
+    is_static = ctx.STATIC() is not None
     is_mutable = ctx.VAR() is not None
     name = ctx.IDENTIFIER().getText()
     field_type = self.visit(ctx.type_()) if ctx.type_() else None
     default_expr = self.visit(ctx.expression()) if ctx.expression() else None
-    node = StructFieldNode(is_mutable, name, field_type, default_expr)
+    node = StructFieldNode(
+      is_mutable, name, field_type, default_expr, is_static=is_static
+    )
     # Positioning for Language Server:
     name_token = ctx.IDENTIFIER().getSymbol()
     node.name_line = name_token.line

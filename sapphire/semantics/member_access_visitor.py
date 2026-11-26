@@ -432,6 +432,18 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
         return OptionalType(field.field_type)
       return field.field_type
 
+    static_field = receiver_type.get_static_field(
+      node.member, self.symbol_table
+    )
+    if static_field is not None:
+      self.error(
+        f"Cannot access static field '{node.member}' on an instance of "
+        f"'{receiver_type.name}'; access "
+        f"'{receiver_type.name}.{node.member}' instead.",
+        node=node,
+      )
+      return static_field.field_type
+
     method = receiver_type.get_method(node.member, self.symbol_table)
     if method:
       if method.modifier == "static":
@@ -470,7 +482,9 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
   def _resolve_struct_type_member_access(
     self, node: MemberAccessNode, receiver_type: StructType
   ) -> Type:
-    """Resolves `StructType.member` for static methods or ancestor dispatch."""
+    """Resolves `StructType.member` for static fields, static methods, or
+    ancestor dispatch.
+    """
     if node.member == "__init__":
       self.error(
         f"Cannot call '__init__' directly on '{receiver_type.name}'; "
@@ -479,6 +493,12 @@ class MemberAccessVisitorMixin(_TypeCheckerBase):
         node=node,
       )
       return PrimitiveType("none")
+
+    static_field = receiver_type.get_static_field(
+      node.member, self.symbol_table
+    )
+    if static_field is not None:
+      return static_field.field_type
 
     if node.member in receiver_type.fields:
       self.error(

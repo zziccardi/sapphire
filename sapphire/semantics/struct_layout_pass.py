@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from sapphire.parser.ast import ProgramNode, StructDeclNode, VarDeclNode
+from sapphire.semantics.const_eval import is_constant_expression
 from sapphire.semantics.symbol_table import (
   ArenaType,
   ArrayType,
@@ -133,11 +134,60 @@ class StructLayoutPass:
                 struct_type.fields[field_name] = field_obj
 
       for f in node.fields:
+        if getattr(f, "is_static", False):
+          if f.is_mutable:
+            checker.error(
+              f"Static field '{f.name}' in struct '{node.name}' must be "
+              "immutable ('static let'); 'static var' is not permitted.",
+              node=f,
+            )
+            continue
+          if f.default_expr is None:
+            checker.error(
+              f"Static field '{f.name}' in struct '{node.name}' requires a "
+              "compile-time constant initializer.",
+              node=f,
+            )
+            continue
+          is_const, const_err = is_constant_expression(
+            f.default_expr, checker.symbol_table
+          )
+          if not is_const:
+            checker.error(
+              const_err
+              or f"Static field '{f.name}' in struct '{node.name}' must be "
+              "initialized with a compile-time constant expression.",
+              node=f,
+            )
+          ftype = checker._resolve_field_type(f, node.name)
+          if (
+            f.name in struct_type.static_fields
+            or f.name in struct_type.fields
+          ):
+            checker.error(
+              f"Duplicate field '{f.name}' in struct '{node.name}'.",
+              node=f,
+            )
+          struct_type.static_fields[f.name] = StructField(
+            f.name,
+            ftype,
+            False,
+            has_default=True,
+            has_explicit_default=True,
+            is_static=True,
+          )
+          continue
+
         ftype = checker._resolve_field_type(f, node.name)
         if f.name in struct_type.fields:
           checker.error(
             f"Field '{f.name}' in struct '{node.name}' shadows inherited "
             "parent field."
+          )
+        elif f.name in struct_type.static_fields:
+          checker.error(
+            f"Duplicate field '{f.name}' in struct '{node.name}'.",
+            node=f,
           )
         has_default = (
           f.default_expr is not None

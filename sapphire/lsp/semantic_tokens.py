@@ -339,15 +339,21 @@ class SemanticTokensTypeChecker(TypeChecker):
       "property",
       mods,
     )
-    if self.current_struct and node.name in self.current_struct.fields:
-      field = self.current_struct.fields[node.name]
-      if self.doc_text:
-        comments = extract_comments_above(
-          self.doc_text, getattr(node, "start_line", None)
-        )
-        if comments:
-          field.comments = comments
-      self.node_types[node] = field.field_type
+    if self.current_struct:
+      field_map = (
+        self.current_struct.static_fields
+        if getattr(node, "is_static", False)
+        else self.current_struct.fields
+      )
+      if node.name in field_map:
+        field = field_map[node.name]
+        if self.doc_text:
+          comments = extract_comments_above(
+            self.doc_text, getattr(node, "start_line", None)
+          )
+          if comments:
+            field.comments = comments
+        self.node_types[node] = field.field_type
 
   def visit_TraitDeclNode(self, node) -> None:
     # Trait name declaration
@@ -773,6 +779,13 @@ class SemanticTokensTypeChecker(TypeChecker):
         field = unwrapped_recv.fields[node.member]
         if not getattr(field, "is_mutable", True):
           mods |= 4
+      elif (
+        hasattr(unwrapped_recv, "get_static_field")
+        and unwrapped_recv.get_static_field(node.member, self.symbol_table)
+        is not None
+      ):
+        token_type = "property"
+        mods |= 4
       elif isinstance(res, FunctionType) and not isinstance(
         unwrapped_recv, ModuleType
       ):

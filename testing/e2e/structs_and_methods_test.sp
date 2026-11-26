@@ -70,3 +70,28 @@ func test_nested_value_struct_deep_copy_isolation(): int {
   return copy_a.mid.inner.hp + copy_b.mid.inner.hp +
          TEMPLATE_UNIT.mid.inner.hp + copy_b.mid.tags.size();
 }
+
+struct CombatConstants {
+  static let SPEED_THRESHOLD = 5;
+  static let CRIT_MULTIPLIER: int = 3;
+}
+
+struct ExtendedConstants: CombatConstants {
+  static let BONUS = 10;
+}
+
+func add_with_threshold(x: int, t: int = CombatConstants.SPEED_THRESHOLD): int {
+  return x + t;
+}
+
+@test
+func test_static_let_struct_constants(): int {
+  let a = CombatConstants.SPEED_THRESHOLD;
+  let b = CombatConstants.CRIT_MULTIPLIER;
+  let c = ExtendedConstants.SPEED_THRESHOLD;
+  let d = ExtendedConstants.BONUS;
+  let e = add_with_threshold(2);
+  // 5 + 3 + 5 + 10 + 7 = 30
+  return a + b + c + d + e;
+}
+

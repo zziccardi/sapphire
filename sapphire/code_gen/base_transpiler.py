@@ -891,7 +891,8 @@ class BaseTranspiler(ABC):
           destructible_fields = [
             f.name
             for f in decl.fields
-            if extract_type_name(f.field_type) in self.structs_with_destructor
+            if not getattr(f, "is_static", False)
+            and extract_type_name(f.field_type) in self.structs_with_destructor
           ]
           self.struct_destructible_fields[decl.name] = destructible_fields
           if decl.name not in self.structs_with_destructor and (
