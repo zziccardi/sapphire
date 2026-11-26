@@ -1077,6 +1077,44 @@ class TestTypeCheckerModules(TypeCheckerTestBase, unittest.TestCase):
       str(ctx.exception),
     )
 
+  def test_reexported_trait_alias_preserves_type_alias(self):
+    """Verifies re-exported trait aliases remain usable in impl blocks."""
+    from sapphire.semantics.symbol_table import (
+      ModuleSymbol,
+      TraitSymbol,
+      TraitType,
+    )
+
+    combatant_trait = TraitType("Combatant")
+    char_mod = ModuleSymbol("character", "character.sp")
+    char_mod.exports["Combatant"] = TraitSymbol("Combatant", combatant_trait)
+
+    code_a = """
+    export { Combatant }
+    let Combatant = character.Combatant;
+    """
+    ast_a = ASTBuilder().visit(
+      SapphireParser(CommonTokenStream(SapphireLexer(InputStream(code_a)))).program()
+    )
+    checker_a = TypeChecker()
+    checker_a.symbol_table.define("character", char_mod)
+    checker_a.check(ast_a)
+
+    combat_mod = ModuleSymbol("combat", "combat.sp")
+    combat_mod.exports["Combatant"] = checker_a.symbol_table.lookup("Combatant")
+
+    code_b = """
+    let Combatant = combat.Combatant;
+    struct Hero {}
+    impl Combatant for Hero {}
+    """
+    ast_b = ASTBuilder().visit(
+      SapphireParser(CommonTokenStream(SapphireLexer(InputStream(code_b)))).program()
+    )
+    checker_b = TypeChecker()
+    checker_b.symbol_table.define("combat", combat_mod)
+    checker_b.check(ast_b)
+
 
 if __name__ == "__main__":
   unittest.main()
