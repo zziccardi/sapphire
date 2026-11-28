@@ -8,7 +8,6 @@ from sapphire.code_gen.base_transpiler import (
 )
 from sapphire.code_gen.intrinsics import _resolve_range_args
 from sapphire.parser.ast import (
-  ArrayLiteralNode,
   AssignmentNode,
   ASTNode,
   BinaryOpNode,
@@ -30,13 +29,11 @@ from sapphire.parser.ast import (
   InterpolatedStringNode,
   LambdaNode,
   LiteralNode,
-  MapLiteralNode,
   MatchExprNode,
   MemberAccessNode,
   MoveNode,
   OptionalTypeNode,
   ReturnNode,
-  StructInitializerNode,
   TernaryExprNode,
   UnaryOpNode,
   VarDeclNode,
@@ -101,60 +98,6 @@ else:
 
 class LuaStmtMixin(_LuaTranspilerBase):
   """Provides statement and control-flow AST emission for Lua 5.1."""
-
-  def _needs_value_copy(self, expr: Any) -> bool:
-    """Returns True if *expr* may alias a value-type struct/array/map and needs
-    shallow copy.
-    """
-    if expr is None:
-      return False
-    if isinstance(
-      expr,
-      (
-        LiteralNode,
-        InterpolatedStringNode,
-        ArrayLiteralNode,
-        MapLiteralNode,
-        StructInitializerNode,
-        MoveNode,
-        CloneNode,
-        LambdaNode,
-        BinaryOpNode,
-        UnaryOpNode,
-        CastExprNode,
-      ),
-    ):
-      return False
-    if isinstance(expr, CallNode):
-      if not (
-        isinstance(expr.callee, MemberAccessNode)
-        and expr.callee.member == "get"
-        and (
-          getattr(expr.callee, "is_array_method", False)
-          or getattr(expr.callee, "is_map_method", False)
-        )
-      ):
-        return False
-    inferred = self.get_inferred_type(expr)
-    if inferred is None:
-      return False
-    from sapphire.semantics.types import (
-      ArrayType,
-      MapType,
-      OptionalType,
-      StructType,
-    )
-
-    t = inferred.base_type if isinstance(inferred, OptionalType) else inferred
-    if isinstance(t, (ArrayType, MapType)):
-      return True
-    if isinstance(t, StructType):
-      if t.is_prototype:
-        return False
-      if self._type_needs_destructor(t):
-        return False
-      return True
-    return False
 
   def _is_non_opt_array_expr(self, expr: Any) -> bool:
     """Returns True if *expr* evaluates to an Array of non-optional elements."""

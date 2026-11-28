@@ -84,8 +84,45 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
 * Time hot paths with `love.timer.getTime()` in Love2D or LuaJIT FFI `clock_gettime(CLOCK_MONOTONIC)` in headless `luajit` benchmarks.
 * Never use `debug.sethook` when profiling JIT-compiled code: Lua debug hooks disable or abort LuaJIT trace compilation, skewing measurements toward interpreter overhead.
 
-### Transpiler invariants for LuaJIT
-* **No statement-level IIFE closures**: Never emit `(function(...) ... end)()` in statement-level expression paths. Both `FNEW` (closure creation) and `UCLO` (upvalue close) are NYI in LuaJIT 2.1, aborting trace compilation and creating per-iteration GC pressure. Lift `??`, `?:`, optional `?.` member/call/intrinsics, and optional primitive `as T?` casts into straight-line `local` + `if` blocks via `_lift_match_expressions` (keeping IIFE emitters only as fallbacks for non-statement contexts).
-* **Loop-free runtime fast-paths**: Keep hot runtime helpers (`_unwrap_read`, `_unwrap_write`) loop-free on the common fast-path (`type(obj) ~= "table" or getmetatable(obj) == nil`) and isolate `while` loops in `*_slow` helpers so plain tables/arrays/maps never trigger `inner loop in root trace` aborts.
-* **Native numeric `for` loops (`FORL`) & stateless iterators**: Lower direct `for v in range(...)` and `for v in arr` loops to native Lua numeric `for` statements rather than allocating closure/table iterators (reserving `_SP_RT._sapphire_range` for first-class `Range` values), and keep `_SP_RT._sapphire_iter_array` / `_SP_RT._sapphire_iter_map` stateless (`(next_fn, state, init)` without per-loop closure creation).
+### Transpiler invariants for Python & LuaJIT
+
+* **No statement-level IIFE closures**: Never emit `(function(...) ... end)()`
+  in Lua or `(lambda ...)(...)` in Python statement-level expression paths. Both
+  `FNEW` (closure creation) and `UCLO` (upvalue close) are NYI in LuaJIT 2.1,
+  aborting trace compilation and creating per-iteration GC pressure. Lift `??`,
+  `?:`, optional `?.` member/call/intrinsics, optional primitive `as T?` casts,
+  and `CloneNode` blocks into straight-line `local` + `if` blocks in Lua and
+  walrus/straight-line forms in Python.
+* **Shared Lua metatables & direct Python `__dict__`**: Prototype, CoW proxy,
+  and smart-ref metatables in `lua_runtime.py` must be shared module-level
+  constants keyed by cross-module `_G._SP_K_*` tokens (never allocated per
+  instance). In Python, `SapphireObject` stores own fields directly in
+  `__dict__` without a custom `__setattr__` hook, and eligible non-proto
+  single-inheritance structs emit `__slots__`.
+* **Deterministic Python RAII (`_sapphire_destroy`)**: Emit
+  `def _sapphire_destroy(self):` (not `def __del__(self):`) on user structs so
+  they stay off CPython's GC finalizer queue; reserve `__del__` for runtime
+  wrappers (`Arena`, `_SapphireRef`, `_SapphireSharedRef`). Emit diamond
+  destruction guards (`_sapphire_destroyed_classes_`) only for structs in
+  `_diamond_destructible_structs`.
+* **Fixed-arity constructors, optional defaults & unboxed multi-return**: Emit
+  fixed-arity `Struct._new(...)` and non-`@export` optional-default functions in
+  Lua (padding omitted optional non-`none` defaults with `_SP_RT._SP_UNSET`),
+  unbox multi-return `ReturnNode` and multi-yield `MatchExprNode` into multiple
+  locals, spill Lua modules exceeding 120 top-level declarations into
+  `local _MOD = {}`, and hoist Python coroutine generators (`_sp_gen_*`) to
+  module/class scope.
+* **Loop-free runtime fast-paths**: Keep hot runtime helpers (`_unwrap_read`,
+  `_unwrap_write`) loop-free on the common fast-path
+  (`type(obj) ~= "table" or getmetatable(obj) == nil`) and isolate `while` loops
+  in `*_slow` helpers so plain tables/arrays/maps never trigger
+  `inner loop in root trace` aborts.
+* **Native numeric `for` loops (`FORL`) & stateless iterators**: Lower direct
+  `for v in range(...)` and `for v in arr` loops to native Lua numeric `for`
+  statements rather than allocating closure/table iterators (reserving
+  `_SP_RT._sapphire_range` for first-class `Range` values), and keep
+  `_SP_RT._sapphire_iter_array` / `_SP_RT._sapphire_iter_map` stateless.
+* **Benchmarking**: Run `pipenv run python testing/perf/bench_transpilers.py`
+  (`--compare` / `--save-baseline`) to measure Python and LuaJIT runtime and
+  `luajit -jv` trace-abort regressions.
 

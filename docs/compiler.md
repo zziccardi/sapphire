@@ -101,32 +101,112 @@ directly to `IntrinsicRegistry.try_emit(target, self, node)`. Centralized
 detection of built-in standard library modules is provided via
 `is_builtin_module(import_path)`.
 
-### Python Target (`python_transpiler.py`)
-- **Runtime Preamble**: Outputs `SapphireObject` and `Arena` classes. `SapphireObject` keeps a reference to `__proto__` and `__shadow__` for prototypal property delegation and CoW.
-- **AST Mapping**: Compiles structs to Python classes, methods to instance/static methods, conditional bindings to `None` checks, and `??` to inline lambdas.
-- **Host Engine & Stdlib Interop (`@extern` & `@export`)**: Binds host or Python standard library modules with `@extern("module.name")`, maps trait method aliases with `@export("method")`, and attaches exported function callbacks via `@export("target.path")` with safe fallback for cross-backend targets.
+### Python target (`python_transpiler.py`)
 
-### Lua 5.1 Target (`lua_transpiler.py`)
-- **Runtime Preamble**: Emits `Arena`, `_create_proto_object`, and `_clone_helper` using Lua's native `setmetatable` mechanism (`__index` fallback, `__proto`, `__shadow`).
-- **Array Indexing**: Maps Sapphire 0-based array indexing (`arr[i]`) to 1-based Lua table indexing (`arr[i + 1]`).
-- **Compound Assignment Expansion**: Expands compound assignment statements (`+=`, `-=`, `*=`, `/=`) into simple binary operation assignments (`x = x + y`).
-- **Optionals & Lambdas**: Translates optional unwrapping bindings to safe Lua `nil` checks, `??` to anonymous-function coalescing, and Sapphire lambdas to Lua anonymous functions.
-- **Host Engine Interop (`@extern` & `@export`)**:
-  - `@extern var` declarations omit `local` initializations, leaving variable names bound to host global scope (e.g. `love`).
-  - `@export("path")` functions generate global Lua function definitions (e.g., `function love.update(dt) ... end`).
-  - Calls on host trait fields (e.g. `love.graphics.rectangle(...)`) transpile using dot notation (`.`) rather than colon (`:`) syntax.
+- **Runtime preamble (`python_runtime.py`)**: Defines slotted runtime classes
+  (`Arena` with `O(1)` dict-backed registration, `_SapphireCoroutine`,
+  `_SapphireRef`, `_SapphireSharedRef`, `_SapphireWeakRef`, `_LazyCoWProxy`,
+  `_BoundProxyMethod`) and `SapphireObject`. `SapphireObject` stores own fields
+  directly in `__dict__` (without a custom `__setattr__` or separate
+  `__shadow__` dictionary) and delegates missing attributes to `__proto__` with
+  lazy Copy-on-Write on nested mutations.
+- **Structs, copies & deterministic RAII**: Eligible non-proto,
+  single-inheritance structs emit `__slots__`, fixed-signature `__init__`
+  methods (inlined when neither subclassed nor exported), and type-directed
+  value-copy fast paths (`.copy()` / `@staticmethod _sp_copy`). User struct
+  destructors emit `def _sapphire_destroy(self):` invoked deterministically by
+  `_sapphire_del`, keeping user structs off CPython's GC finalizer queue;
+  diamond destruction guards (`_sapphire_destroyed_classes_`) are emitted only
+  for diamond-eligible hierarchies.
+- **Expressions, coroutines & control flow**: Emits native PEP 701 f-strings,
+  walrus-based optional chaining/coalescing (`:=`) without IIFE lambdas,
+  hoisted `_sp_gen_*` coroutine generators, tuple membership (`in (...)`) for
+  multi-literal `match` arms, deduplicated aliases for byte-identical
+  monomorphized functions, cached `_sp_builtins` for `@extern` writes, and
+  `test_mode`-gated `_SP_LINE_MAP` tables.
+- **Host engine & stdlib interop (`@extern` & `@export`)**: Binds host or
+  Python standard library modules with `@extern("module.name")`, maps trait
+  method aliases with `@export("method")`, and attaches exported callbacks via
+  `@export("target.path")` with safe fallback for cross-backend targets.
 
-### LLVM IR Target (Experimental – `llvm_transpiler.py`)
-- **Experimental Native Backend**: Defined in [llvm_transpiler.py](../sapphire/code_gen/llvm_transpiler.py), this backend lowers Sapphire AST nodes directly into LLVM IR text using `llvmlite`.
-- **Supported Primitive & Stack Operations**: Handles primitive types (`int` -> `i64`, `float` -> `double`, `bool` -> `i1`, `void`), function declarations, stack-allocated variables (`alloca`/`load`/`store`), integer/float arithmetic with implicit promotion, basic block returns, and struct definitions.
-- **AOT & JIT Foundation**: Lays the foundation for Ahead-Of-Time (AOT) native executable compilation via `clang`/`llc` and in-memory Just-In-Time (JIT) execution. Unimplemented high-level features gracefully raise `NotImplementedError`.
+### Lua 5.1 target (`lua_transpiler.py`)
 
-### High-Level Compiler Driver API & Error Listeners
-- **Centralized ANTLR Error Listener**: Defined in [error_listener.py](../sapphire/parser/error_listener.py), `CustomErrorListener` captures ANTLR syntax errors and formats detailed diagnostics with source code snippets.
-- **Domain Exception Hierarchy**: Defined in [errors.py](../sapphire/common/errors.py), standard exceptions (`SapphireSyntaxError`, `SapphireTypeError`, `SapphireTranspileError`, `SapphireLSPError`) extend `SapphireError` for uniform error reporting.
-- **Compiler Driver (`transpile_file`)**: The high-level compilation driver function `transpile_file(input_file, output_file, target="python", sourcemap=True, verbose=False)` in [transpiler.py](../sapphire/code_gen/transpiler.py) orchestrates parsing, semantic analysis, and target backend resolution via `TranspilerRegistry.get(target)`. Both the `sapphire` CLI (`sapphire/cli/sapphire.py`) and test runner (`sapphire/cli/test_runner.py`) invoke `transpile_file` directly. Progress logging to `stdout` is gated on `verbose=True`, while compiler warnings and errors continue to emit to `stderr` unless `quiet=True`.
-  - **Stdlib Stub Protection**: `is_stdlib_stub` skips transpiling `std.*` modules and any `.sp` signature stubs under `sapphire/lib/std/` that have sibling `.lua`/`.py` runtime files, ensuring hand-written runtime implementations are never overwritten.
-  - **Isolated `-o` Build Output**: When `output_file` is explicitly passed outside `input_file`'s directory tree, transitive project dependencies are emitted relative to the target output directory while prebuilt `sapphire/lib/` bindings are reused in place without dirtying library directories.
+- **Runtime preamble (`lua_runtime.py`)**: Caches Lua standard library globals
+  at module scope, shares reusable metatables (`_PROTO_MT`, `_COW_MT`,
+  `_REF_MT`, `_SHARED_REF_MT`, `_WEAK_REF_MT`) keyed by cross-module
+  `_G._SP_K_*` tokens, provides ASCII fast paths and zero-allocation UTF-8
+  sizing, and guards the Love2D `love.errorhandler` hook once globally via
+  `_G._SP_ERRORHANDLER_INSTALLED` and `_G._SP_LINE_MAPS`.
+- **Structs & constructors**: Emits fixed-arity `Struct._new(...)` constructing
+  single presized table literals for compiled Sapphire calls (while keeping
+  `Struct.init(...)` for Lua interop), flat multi-parent method inheritance via
+  `_SP_RT._inherit_multi`, and conditional diamond destructor guards.
+- **Collections & indexing**: Maps Sapphire 0-based indexing (`arr[i]`) to
+  1-based Lua table indexing with non-optional fast paths
+  (`_sapphire_array_at_val`, `_set_val`, `_push_val`, `_get_val`), direct `#arr`
+  on plain locals, single-lookup compound index assignments
+  (`_sapphire_array_ref` / `_sapphire_map_ref`), and numeric `for` loops.
+- **Expressions, multi-return & 200-local hygiene**: Lifts `??`, `?:`, optional
+  `?.` chains, optional casts, and `CloneNode` blocks into straight-line
+  `local` + `if` statements (avoiding LuaJIT `FNEW`/`UCLO` aborts), flattens
+  string `+` chains into single `..` expressions, unboxes multi-return
+  `ReturnNode` and multi-yield `MatchExprNode` into multiple locals, uses
+  fixed-arity signatures for non-`@export` optional-default functions, wraps
+  discarded expression statements in `do local _ = ... end`, and spills modules
+  with more than 120 top-level declarations into `local _MOD = {}`.
+- **Host engine interop (`@extern` & `@export`)**:
+  - `@extern var` declarations omit `local` initializations, leaving variable
+    names bound to host global scope (e.g. `love`).
+  - `@export("path")` functions generate global Lua definitions (e.g.
+    `function love.update(dt) ... end`).
+  - Calls on host trait fields (e.g. `love.graphics.rectangle(...)`) transpile
+    using dot notation (`.`) rather than colon (`:`) syntax.
+
+### LLVM IR target (experimental – `llvm_transpiler.py`)
+
+- **Experimental native backend**: Defined in
+  [llvm_transpiler.py](../sapphire/code_gen/llvm_transpiler.py), this backend
+  lowers Sapphire AST nodes directly into LLVM IR text using `llvmlite`.
+- **Supported primitive & stack operations**: Handles primitive types
+  (`int` -> `i64`, `float` -> `double`, `bool` -> `i1`, `void`), function
+  declarations, stack-allocated variables (`alloca`/`load`/`store`), arithmetic
+  with implicit promotion, basic block returns, and struct definitions.
+- **AOT & JIT foundation**: Lays the foundation for Ahead-Of-Time (AOT) native
+  executable compilation via `clang`/`llc` and in-memory JIT execution.
+  Unimplemented high-level features raise `NotImplementedError`.
+
+### High-level compiler driver API & error listeners
+
+- **Centralized ANTLR error listener**: Defined in
+  [error_listener.py](../sapphire/parser/error_listener.py),
+  `CustomErrorListener` captures ANTLR syntax errors and formats detailed
+  diagnostics with source code snippets.
+- **Domain exception hierarchy**: Defined in
+  [errors.py](../sapphire/common/errors.py), standard exceptions
+  (`SapphireSyntaxError`, `SapphireTypeError`, `SapphireTranspileError`,
+  `SapphireLSPError`) extend `SapphireError` for uniform error reporting.
+- **Compiler driver (`transpile_file`)**: The compilation driver function
+  `transpile_file(input_file, output_file, target="python", sourcemap=True, verbose=False)`
+  in [transpiler.py](../sapphire/code_gen/transpiler.py) orchestrates parsing,
+  semantic analysis, and target backend resolution via
+  `TranspilerRegistry.get(target)`. Both the `sapphire` CLI
+  (`sapphire/cli/sapphire.py`) and test runner (`sapphire/cli/test_runner.py`)
+  invoke `transpile_file` directly. Progress logging to `stdout` is gated on
+  `verbose=True`, while warnings and errors emit to `stderr` unless
+  `quiet=True`.
+  - **Shared runtime module**: `use_runtime_module=None` (the default)
+    automatically emits a shared `_sapphire_runtime.py` or
+    `_sapphire_runtime.lua` module on multi-file builds with local `.sp`
+    imports while keeping single-file outputs self-contained.
+  - **Stdlib stub protection**: `is_stdlib_stub` skips transpiling `std.*`
+    modules and any `.sp` signature stubs under `sapphire/lib/std/` that have
+    sibling `.lua`/`.py` runtime files, ensuring hand-written runtime
+    implementations are never overwritten.
+  - **Isolated `-o` build output**: When `output_file` is explicitly passed
+    outside `input_file`'s directory tree, transitive project dependencies are
+    emitted relative to the target output directory while prebuilt
+    `sapphire/lib/` bindings are reused in place without dirtying library
+    directories.
 
 ## Stage 4: Source Map Generation & Love2D Debugging
 

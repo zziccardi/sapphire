@@ -7,14 +7,12 @@ from sapphire.code_gen.base_transpiler import (
   get_default_value_for_type_node,
 )
 from sapphire.parser.ast import (
-  ArrayLiteralNode,
   AssignmentNode,
   ASTNode,
   BinaryOpNode,
   BlockNode,
   BreakNode,
   CallNode,
-  CastExprNode,
   CloneNode,
   ContinueNode,
   EllipsisPatternNode,
@@ -26,17 +24,13 @@ from sapphire.parser.ast import (
   IdentifierNode,
   IfNode,
   IndexExprNode,
-  InterpolatedStringNode,
   LambdaNode,
   LiteralNode,
-  MapLiteralNode,
   MatchExprNode,
   MemberAccessNode,
   MoveNode,
   ReturnNode,
-  StructInitializerNode,
   TernaryExprNode,
-  UnaryOpNode,
   VarDeclNode,
   WhileNode,
   YieldNode,
@@ -52,60 +46,6 @@ else:
 
 class PythonStmtMixin(_PythonTranspilerBase):
   """Provides statement and control-flow AST emission for Python."""
-
-  def _needs_value_copy(self, expr: Any) -> bool:
-    """Returns True if *expr* may alias a value-type struct/array/map and needs
-    shallow copy.
-    """
-    if expr is None:
-      return False
-    if isinstance(
-      expr,
-      (
-        LiteralNode,
-        InterpolatedStringNode,
-        ArrayLiteralNode,
-        MapLiteralNode,
-        StructInitializerNode,
-        MoveNode,
-        CloneNode,
-        LambdaNode,
-        BinaryOpNode,
-        UnaryOpNode,
-        CastExprNode,
-      ),
-    ):
-      return False
-    if isinstance(expr, CallNode):
-      if not (
-        isinstance(expr.callee, MemberAccessNode)
-        and expr.callee.member == "get"
-        and (
-          getattr(expr.callee, "is_array_method", False)
-          or getattr(expr.callee, "is_map_method", False)
-        )
-      ):
-        return False
-    inferred = self.get_inferred_type(expr)
-    if inferred is None:
-      return False
-    from sapphire.semantics.types import (
-      ArrayType,
-      MapType,
-      OptionalType,
-      StructType,
-    )
-
-    t = inferred.base_type if isinstance(inferred, OptionalType) else inferred
-    if isinstance(t, (ArrayType, MapType)):
-      return True
-    if isinstance(t, StructType):
-      if t.is_prototype:
-        return False
-      if self._type_needs_destructor(t):
-        return False
-      return True
-    return False
 
   def _emit_value_expr(self, expr: Any) -> None:
     """Emits *expr*, choosing the fastest type-directed value copy."""
@@ -515,87 +455,6 @@ class PythonStmtMixin(_PythonTranspilerBase):
         self.dedent()
         self.newline()
         self.emit(f"{fn_name} = {make_fn}({cap_str})")
-    finally:
-      self._lexical_scopes.pop()
-      self._identifier_map = prev_id_map
-      (
-        self.destructor_stack,
-        self.loop_destructor_depth,
-        self.moved_vars,
-        self._var_branch_depth,
-        self._pending_null_vars,
-        self._pending_unconditional_null_vars,
-        self._branch_depth,
-        self._current_match_target,
-        self._current_match_done_flag,
-        self._match_loop_depth,
-        self._unwrap_writebacks,
-        self._current_func_globals,
-        self._loop_vars_stack,
-      ) = saved_state
-
-    return fn_name
-
-  def _emit_lifted_clone_init(self, node: CloneNode) -> str:
-    """Emits a helper function `def _clone_init_N(self):` for a CloneNode
-    initializer block.
-    """
-    fn_name = self._next_temp_name("_clone_init")
-    init_block = BlockNode(node.initializer_block)
-    param_raw_names = {"self"}
-    assigned_nonlocals = self._find_assigned_nonlocals(
-      init_block, param_raw_names
-    )
-    assigned_globals = self._find_assigned_globals(
-      init_block, local_params={"self"}
-    )
-    assigned_globals = assigned_globals - assigned_nonlocals
-
-    saved_state = (
-      self.destructor_stack,
-      self.loop_destructor_depth,
-      self.moved_vars,
-      self._var_branch_depth,
-      self._pending_null_vars,
-      self._pending_unconditional_null_vars,
-      self._branch_depth,
-      self._current_match_target,
-      self._current_match_done_flag,
-      self._match_loop_depth,
-      self._unwrap_writebacks,
-      self._current_func_globals,
-      self._loop_vars_stack,
-    )
-    prev_id_map = self._identifier_map.copy()
-    self._identifier_map.pop("self", None)
-    self._lexical_scopes.append({"self"})
-
-    self.destructor_stack = []
-    self.loop_destructor_depth = []
-    self.moved_vars = set()
-    self._var_branch_depth = {}
-    self._pending_null_vars = []
-    self._pending_unconditional_null_vars = []
-    self._branch_depth = 0
-    self._current_match_target = None
-    self._current_match_done_flag = None
-    self._match_loop_depth = 0
-    self._unwrap_writebacks = {}
-    self._current_func_globals = set(assigned_globals)
-    self._loop_vars_stack = []
-
-    try:
-      self.newline()
-      self.emit(f"def {fn_name}(self):")
-      self.indent()
-      if assigned_nonlocals:
-        self.newline()
-        self.emit(f"nonlocal {', '.join(sorted(assigned_nonlocals))}")
-      if assigned_globals:
-        self.newline()
-        self.emit(f"global {', '.join(sorted(assigned_globals))}")
-      self._visit_block(init_block)
-      self.dedent()
     finally:
       self._lexical_scopes.pop()
       self._identifier_map = prev_id_map
