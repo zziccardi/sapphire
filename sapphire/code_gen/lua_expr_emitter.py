@@ -454,16 +454,20 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.emit(":register(")
 
     if isinstance(node.callee, MemberAccessNode):
-      from sapphire.semantics.types import FunctionType
+      from sapphire.semantics.types import (
+        FunctionType,
+        OptionalType,
+        RefType,
+        SharedRefType,
+      )
 
       member_name = getattr(
         node.callee, "target_name", None
       ) or self._mangle_name(node.callee.member)
       receiver_name = getattr(node.callee.receiver, "name", None)
       mangled_recv = self._mangle_name(receiver_name) if receiver_name else None
-      if getattr(
-        node.callee, "is_instance_method", False
-      ) or self._is_runtime_method_call(node.callee):
+      is_rt_method = self._is_runtime_method_call(node.callee)
+      if getattr(node.callee, "is_instance_method", False) or is_rt_method:
         use_colon = True
       elif getattr(node.callee, "is_static_method", False):
         use_colon = False
@@ -481,11 +485,24 @@ class LuaExprMixin(_LuaTranspilerBase):
           )
           or isinstance(node.callee.receiver, MemberAccessNode)
         )
+      recv_t = self.get_inferred_type(node.callee.receiver)
+      if isinstance(recv_t, OptionalType):
+        recv_t = recv_t.base_type
+      unwrap_smart_ref = (
+        use_colon
+        and not is_rt_method
+        and isinstance(recv_t, (RefType, SharedRefType))
+      )
       if needs_temps:
         self.emit("(function() ")
         if use_colon:
           self.emit("local _r = ")
-          self.visit(node.callee.receiver)
+          if unwrap_smart_ref:
+            self.emit("_SP_RT._unwrap_read(")
+            self.visit(node.callee.receiver)
+            self.emit(")")
+          else:
+            self.visit(node.callee.receiver)
           self.emit("; ")
           temp_args = self._format_reordered_slot_temps(
             node, len(resolved_exprs)
@@ -503,7 +520,12 @@ class LuaExprMixin(_LuaTranspilerBase):
           self.emit(")")
         return
       sep = ":" if use_colon else "."
-      self.visit(node.callee.receiver)
+      if unwrap_smart_ref:
+        self.emit("_SP_RT._unwrap_read(")
+        self.visit(node.callee.receiver)
+        self.emit(")")
+      else:
+        self.visit(node.callee.receiver)
       self.emit(f"{sep}{member_name}(")
     elif needs_temps:
       self.emit("(function() local _f = ")

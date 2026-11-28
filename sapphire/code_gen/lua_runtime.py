@@ -100,8 +100,20 @@ do
 
   _G._SP_NONE = _G._SP_NONE or {}
   _G._SP_UNSET = _G._SP_UNSET or {}
+  _G._SP_K_PROTO = _G._SP_K_PROTO or {}
+  _G._SP_K_SHADOW = _G._SP_K_SHADOW or {}
+  _G._SP_K_CLASS = _G._SP_K_CLASS or {}
+  _G._SP_K_PARENT = _G._SP_K_PARENT or {}
+  _G._SP_K_KEY = _G._SP_K_KEY or {}
+  _G._SP_K_TARGET = _G._SP_K_TARGET or {}
   local _SP_NONE = _G._SP_NONE
   local _SP_UNSET = _G._SP_UNSET
+  local _K_PROTO = _G._SP_K_PROTO
+  local _K_SHADOW = _G._SP_K_SHADOW
+  local _K_CLASS = _G._SP_K_CLASS
+  local _K_PARENT = _G._SP_K_PARENT
+  local _K_KEY = _G._SP_K_KEY
+  local _K_TARGET = _G._SP_K_TARGET
   _SP_RT._SP_NONE = _SP_NONE
   _SP_RT._SP_UNSET = _SP_UNSET
 
@@ -120,7 +132,7 @@ do
     while _type(obj) == "table" do
       local mt = _getmetatable(obj)
       if mt and mt.__get_active then
-        obj = mt.__get_active()
+        obj = mt.__get_active(obj)
       elseif mt and mt.__is_ref then
         obj = _rawget(obj, "_val")
       elseif mt and mt.__is_shared_ref then
@@ -144,7 +156,7 @@ do
     while _type(obj) == "table" do
       local mt = _getmetatable(obj)
       if mt and mt.__ensure_cow then
-        obj = mt.__ensure_cow()
+        obj = mt.__ensure_cow(obj)
       elseif mt and mt.__is_ref then
         obj = _rawget(obj, "_val")
       elseif mt and mt.__is_shared_ref then
@@ -265,10 +277,10 @@ do
       local obj = objs[i]
       _sapphire_del(obj)
       _arena_owners[obj] = nil
-      local meta = _getmetatable(obj)
-      if meta and meta.__shadow then
-        for k in _pairs(meta.__shadow) do
-          meta.__shadow[k] = nil
+      local shadow = _rawget(obj, _K_SHADOW)
+      if shadow then
+        for k in _pairs(shadow) do
+          shadow[k] = nil
         end
       end
     end
@@ -283,156 +295,190 @@ do
   local _clone_helper
   local _create_cow_proxy
 
-  _create_cow_proxy = function(parent_obj, key, target_tbl)
-    if type(target_tbl) == "table" then
-      local t_meta = getmetatable(target_tbl)
-      if t_meta and t_meta.__get_active then
-        target_tbl = t_meta.__get_active()
-      end
+  local function _cow_get_active(proxy)
+    local parent_obj = _rawget(proxy, _K_PARENT)
+    local key = _rawget(proxy, _K_KEY)
+    local target_tbl = _rawget(proxy, _K_TARGET)
+    local p_meta = _type(parent_obj) == "table" and _getmetatable(parent_obj) or nil
+    local parent_active
+    if p_meta and p_meta.__get_active then
+      parent_active = p_meta.__get_active(parent_obj)
+    else
+      parent_active = parent_obj
     end
-    local proxy_meta = {}
-
-    local function get_active()
-      local p_meta = type(parent_obj) == "table" and getmetatable(parent_obj) or nil
-      local parent_active
-      if p_meta and p_meta.__get_active then
-        parent_active = p_meta.__get_active()
+    if _type(parent_active) == "table" then
+      local shadow = _rawget(parent_active, _K_SHADOW)
+      if shadow then
+        local sv = shadow[key]
+        if sv ~= nil then
+          return _unwrap_opt(sv)
+        end
       else
-        parent_active = parent_obj
-      end
-      if type(parent_active) == "table" then
-        local pa_meta = getmetatable(parent_active)
-        if pa_meta and pa_meta.__shadow then
-          local sv = pa_meta.__shadow[key]
-          if sv ~= nil then
-            return _unwrap_opt(sv)
-          end
-        else
-          local v = rawget(parent_active, key)
-          if v ~= nil then
-            return _unwrap_opt(v)
-          end
+        local v = _rawget(parent_active, key)
+        if v ~= nil then
+          return _unwrap_opt(v)
         end
       end
-      return target_tbl
     end
+    return target_tbl
+  end
 
-    local function ensure_cow()
-      local p_meta = type(parent_obj) == "table" and getmetatable(parent_obj) or nil
-      local parent_mat
-      if p_meta and p_meta.__ensure_cow then
-        parent_mat = p_meta.__ensure_cow()
-      else
-        parent_mat = parent_obj
-      end
-      local pm_meta = type(parent_mat) == "table" and getmetatable(parent_mat) or nil
-      if pm_meta and pm_meta.__shadow then
-        if pm_meta.__shadow[key] == nil then
-          pm_meta.__shadow[key] = _clone_helper(target_tbl, nil, nil)
-        end
-        return _unwrap_opt(pm_meta.__shadow[key])
-      else
-        local curr = rawget(parent_mat, key)
-        if curr == nil or curr == target_tbl then
-          local cloned = _clone_helper(target_tbl, nil, nil)
-          rawset(parent_mat, key, cloned)
-          return cloned
-        end
-        return _unwrap_opt(curr)
-      end
+  local function _cow_ensure_cow(proxy)
+    local parent_obj = _rawget(proxy, _K_PARENT)
+    local key = _rawget(proxy, _K_KEY)
+    local target_tbl = _rawget(proxy, _K_TARGET)
+    local p_meta = _type(parent_obj) == "table" and _getmetatable(parent_obj) or nil
+    local parent_mat
+    if p_meta and p_meta.__ensure_cow then
+      parent_mat = p_meta.__ensure_cow(parent_obj)
+    else
+      parent_mat = parent_obj
     end
+    local shadow = _type(parent_mat) == "table" and _rawget(parent_mat, _K_SHADOW) or nil
+    if shadow then
+      if shadow[key] == nil then
+        shadow[key] = _clone_helper(target_tbl, nil, nil)
+      end
+      return _unwrap_opt(shadow[key])
+    else
+      local curr = _rawget(parent_mat, key)
+      if curr == nil or curr == target_tbl then
+        local cloned = _clone_helper(target_tbl, nil, nil)
+        _rawset(parent_mat, key, cloned)
+        return cloned
+      end
+      return _unwrap_opt(curr)
+    end
+  end
 
-    proxy_meta.__get_active = get_active
-    proxy_meta.__ensure_cow = ensure_cow
-    proxy_meta.__index = function(tbl, sub_key)
-      local active = get_active()
+  local _COW_MT = {
+    __is_cow = true,
+    __get_active = _cow_get_active,
+    __ensure_cow = _cow_ensure_cow,
+    __index = function(tbl, sub_key)
+      local active = _cow_get_active(tbl)
       if active ~= nil then
         local val = active[sub_key]
         if val == _SP_NONE then return nil end
-        if type(val) == "table" then
+        if _type(val) == "table" then
           return _create_cow_proxy(tbl, sub_key, val)
         end
         return val
       end
       return nil
-    end
-    proxy_meta.__newindex = function(tbl, sub_key, value)
-      local mat = ensure_cow()
+    end,
+    __newindex = function(tbl, sub_key, value)
+      local mat = _cow_ensure_cow(tbl)
       mat[sub_key] = value
+    end,
+  }
+
+  _create_cow_proxy = function(parent_obj, key, target_tbl)
+    if _type(target_tbl) == "table" then
+      local t_meta = _getmetatable(target_tbl)
+      if t_meta and t_meta.__get_active then
+        target_tbl = t_meta.__get_active(target_tbl)
+      end
     end
-    return setmetatable({}, proxy_meta)
+    return _setmetatable({
+      [_K_PARENT] = parent_obj,
+      [_K_KEY] = key,
+      [_K_TARGET] = target_tbl,
+    }, _COW_MT)
   end
   _SP_RT._create_cow_proxy = _create_cow_proxy
 
-  local function _create_proto_object(proto, class_tbl)
-    local shadow = {}
-    local meta = {}
-    local obj = {}
-    meta.__shadow = shadow
-    meta.__proto = proto
-    meta.__class = class_tbl
-    meta.__index = function(tbl, key)
-      if key == "__proto__" then return meta.__proto end
-      if key == "__shadow__" then return meta.__shadow end
-      local sv = shadow[key]
-      if sv ~= nil then
-        if sv == _SP_NONE then return nil end
-        return sv
+  local _PROTO_MT = {
+    __is_proto = true,
+    __index = function(tbl, key)
+      if key == "__proto__" then return _rawget(tbl, _K_PROTO) end
+      if key == "__shadow__" then
+        local sh = _rawget(tbl, _K_SHADOW)
+        if not sh then
+          sh = {}
+          _rawset(tbl, _K_SHADOW, sh)
+        end
+        return sh
       end
+      local shadow = _rawget(tbl, _K_SHADOW)
+      if shadow then
+        local sv = shadow[key]
+        if sv ~= nil then
+          if sv == _SP_NONE then return nil end
+          return sv
+        end
+      end
+      local proto = _rawget(tbl, _K_PROTO)
       if proto ~= nil then
         local val = proto[key]
         if val ~= nil then
           if val == _SP_NONE then return nil end
-          if type(val) == "table" then
-            return _create_cow_proxy(obj, key, val)
+          if _type(val) == "table" then
+            return _create_cow_proxy(tbl, key, val)
           end
           return val
         end
       end
+      local class_tbl = _rawget(tbl, _K_CLASS)
       if class_tbl and class_tbl[key] ~= nil then
         return class_tbl[key]
       end
       return nil
-    end
-    meta.__newindex = function(tbl, key, val)
+    end,
+    __newindex = function(tbl, key, val)
       if key == "__proto__" or key == "__shadow__" then return end
-      if proto ~= nil then
+      if _rawget(tbl, _K_PROTO) ~= nil then
+        local shadow = _rawget(tbl, _K_SHADOW)
+        if not shadow then
+          shadow = {}
+          _rawset(tbl, _K_SHADOW, shadow)
+        end
         shadow[key] = (val == nil) and _SP_NONE or val
       else
-        rawset(tbl, key, val)
+        _rawset(tbl, key, val)
       end
+    end,
+  }
+
+  local function _create_proto_object(proto, class_tbl)
+    if proto ~= nil then
+      return _setmetatable({
+        [_K_PROTO] = proto,
+        [_K_SHADOW] = {},
+        [_K_CLASS] = class_tbl,
+      }, _PROTO_MT)
     end
-    return setmetatable(obj, meta)
+    return _setmetatable({
+      [_K_CLASS] = class_tbl,
+    }, _PROTO_MT)
   end
   _SP_RT._create_proto_object = _create_proto_object
 
   local function _copy_plain_table(obj, seen)
-    if type(obj) ~= "table" then return obj end
-    local meta = getmetatable(obj)
+    if _type(obj) ~= "table" then return obj end
+    local meta = _getmetatable(obj)
     if meta and meta.__get_active then
-      obj = meta.__get_active()
-      meta = getmetatable(obj)
+      obj = meta.__get_active(obj)
+      meta = _getmetatable(obj)
     end
     if seen and seen[obj] then return seen[obj] end
-    if obj.clone and type(obj.clone) == "function" then
+    if obj.clone and _type(obj.clone) == "function" then
       return obj:clone()
-    elseif meta and meta.__class then
-      return _create_proto_object(obj, meta.__class)
-    elseif meta and meta.__proto ~= nil then
-      return _create_proto_object(obj, nil)
+    elseif meta and meta.__is_proto then
+      return _create_proto_object(obj, _rawget(obj, _K_CLASS))
     end
     seen = seen or {}
     local copy = {}
     seen[obj] = copy
-    for k, v in pairs(obj) do
-      if type(v) == "table" and v ~= _SP_NONE then
+    for k, v in _pairs(obj) do
+      if _type(v) == "table" and v ~= _SP_NONE then
         copy[k] = _copy_plain_table(v, seen)
       else
         copy[k] = v
       end
     end
     if meta then
-      setmetatable(copy, meta)
+      _setmetatable(copy, meta)
     end
     return copy
   end
@@ -440,28 +486,26 @@ do
   _clone_helper = function(obj, init_fn, arena)
     if obj == nil then return nil end
     local clone_obj
-    if type(obj) == "table" then
-      local meta = getmetatable(obj)
+    if _type(obj) == "table" then
+      local meta = _getmetatable(obj)
       if meta and meta.__get_active then
-        obj = meta.__get_active()
-        meta = getmetatable(obj)
+        obj = meta.__get_active(obj)
+        meta = _getmetatable(obj)
       end
-      if obj.clone and type(obj.clone) == "function" then
+      if obj.clone and _type(obj.clone) == "function" then
         clone_obj = obj:clone()
-      elseif meta and meta.__class then
-        clone_obj = _create_proto_object(obj, meta.__class)
-      elseif meta and meta.__proto ~= nil then
-        clone_obj = _create_proto_object(obj, nil)
+      elseif meta and meta.__is_proto then
+        clone_obj = _create_proto_object(obj, _rawget(obj, _K_CLASS))
       else
         clone_obj = _copy_plain_table(obj, nil)
       end
     else
       clone_obj = obj
     end
-    if arena == nil and type(obj) == "table" then
+    if arena == nil and _type(obj) == "table" then
       arena = _arena_owners[obj]
     end
-    if arena ~= nil and type(clone_obj) == "table" then
+    if arena ~= nil and _type(clone_obj) == "table" then
       arena:register(clone_obj)
     end
     if init_fn then
@@ -472,18 +516,18 @@ do
   _SP_RT._clone_helper = _clone_helper
 
   _SP_RT._sapphire_copy = function(val, seen)
-    if type(val) ~= "table" then return val end
+    if _type(val) ~= "table" then return val end
     if val == _SP_NONE or val == _SP_UNSET then return val end
-    local mt = getmetatable(val)
+    local mt = _getmetatable(val)
     if mt and mt.__get_active then
-      val = mt.__get_active()
-      if type(val) ~= "table" then return val end
-      mt = getmetatable(val)
+      val = mt.__get_active(val)
+      if _type(val) ~= "table" then return val end
+      mt = _getmetatable(val)
     end
-    if mt and (mt.__shadow or mt.__proto ~= nil or mt.__class or mt.__is_arena or mt.__is_ref or mt.__is_shared_ref or mt.__is_weak_ref or mt.__is_coroutine) then
+    if mt and (mt.__is_proto or mt.__is_arena or mt.__is_ref or mt.__is_shared_ref or mt.__is_weak_ref or mt.__is_coroutine) then
       return val
     end
-    if type(val.__del__) == "function" then
+    if _type(val.__del__) == "function" then
       return val
     end
     seen = seen or {}
@@ -492,38 +536,38 @@ do
     end
     local copy = {}
     seen[val] = copy
-    for k, v in pairs(val) do
+    for k, v in _pairs(val) do
       copy[k] = _SP_RT._sapphire_copy(v, seen)
     end
     if mt then
-      setmetatable(copy, mt)
+      _setmetatable(copy, mt)
     end
     return copy
   end
 
   local function _sapphire_eq(a, b)
-    if type(a) == "table" then
-      local mta = getmetatable(a)
-      if mta and mta.__get_active then a = mta.__get_active() end
+    if _type(a) == "table" then
+      local mta = _getmetatable(a)
+      if mta and mta.__get_active then a = mta.__get_active(a) end
     end
-    if type(b) == "table" then
-      local mtb = getmetatable(b)
-      if mtb and mtb.__get_active then b = mtb.__get_active() end
+    if _type(b) == "table" then
+      local mtb = _getmetatable(b)
+      if mtb and mtb.__get_active then b = mtb.__get_active(b) end
     end
     if a == _SP_NONE then a = nil end
     if b == _SP_NONE then b = nil end
     if a == b then return true end
-    if type(a) ~= "table" or type(b) ~= "table" then return false end
-    if getmetatable(a) ~= nil or getmetatable(b) ~= nil then return false end
+    if _type(a) ~= "table" or _type(b) ~= "table" then return false end
+    if _getmetatable(a) ~= nil or _getmetatable(b) ~= nil then return false end
     local count_a = 0
-    for k, va in pairs(a) do
+    for k, va in _pairs(a) do
       count_a = count_a + 1
       local vb = b[k]
       if vb == nil then return false end
       if not _sapphire_eq(va, vb) then return false end
     end
     local count_b = 0
-    for _ in pairs(b) do
+    for _ in _pairs(b) do
       count_b = count_b + 1
     end
     return count_a == count_b
@@ -1197,20 +1241,21 @@ do
 
   _sapphire_del = function(obj)
     if obj == nil then return end
-    if type(obj) == "table" then
-      local mt = getmetatable(obj)
+    local t = _type(obj)
+    if t == "table" then
+      local mt = _getmetatable(obj)
       if mt == Arena then
         obj:destroy()
       elseif mt and mt.__is_ref then
-        if rawget(obj, "_sapphire_disposed_") then return end
-        rawset(obj, "_sapphire_disposed_", true)
-        local val = rawget(obj, "_val")
-        rawset(obj, "_val", nil)
+        if _rawget(obj, "_sapphire_disposed_") then return end
+        _rawset(obj, "_sapphire_disposed_", true)
+        local val = _rawget(obj, "_val")
+        _rawset(obj, "_val", nil)
         _sapphire_del(val)
       elseif mt and mt.__is_shared_ref then
-        if rawget(obj, "_sapphire_disposed_") then return end
-        rawset(obj, "_sapphire_disposed_", true)
-        local cb = rawget(obj, "_cb")
+        if _rawget(obj, "_sapphire_disposed_") then return end
+        _rawset(obj, "_sapphire_disposed_", true)
+        local cb = _rawget(obj, "_cb")
         if cb ~= nil then
           cb.strong = cb.strong - 1
           if cb.strong == 0 then
@@ -1219,50 +1264,49 @@ do
             _sapphire_del(val)
           end
         end
-      elseif type(obj.__del__) == "function" then
-        if rawget(obj, "_sapphire_disposed_") then return end
-        rawset(obj, "_sapphire_disposed_", true)
+      elseif _type(obj.__del__) == "function" then
+        if _rawget(obj, "_sapphire_disposed_") then return end
+        _rawset(obj, "_sapphire_disposed_", true)
         obj:__del__()
       end
-    elseif type(obj) == "userdata" then
-      local meta = getmetatable(obj)
-      if meta and type(meta.__del__) == "function" then
+    elseif t == "userdata" then
+      local meta = _getmetatable(obj)
+      if meta and _type(meta.__del__) == "function" then
         obj:__del__()
       end
     end
   end
   _SP_RT._sapphire_del = _sapphire_del
 
+  local _REF_MT = {
+    __is_ref = true,
+    __index = function(t, k)
+      local inner = _rawget(t, "_val")
+      if _type(inner) == "table" then
+        local v = inner[k]
+        if _type(v) == "function" then
+          return function(recv, ...)
+            if recv == t then
+              return v(inner, ...)
+            end
+            return v(recv, ...)
+          end
+        end
+        return v
+      end
+      return nil
+    end,
+    __newindex = function(t, k, v)
+      local inner = _rawget(t, "_val")
+      if _type(inner) == "table" then
+        inner[k] = v
+      end
+    end,
+  }
+
   local _Ref = {}
   function _Ref.create(val)
-    local self = { _val = val }
-    local mt = {
-      __is_ref = true,
-      __index = function(t, k)
-        local inner = rawget(self, "_val")
-        if type(inner) == "table" then
-          local v = inner[k]
-          if type(v) == "function" then
-            return function(recv, ...)
-              if recv == self then
-                return v(inner, ...)
-              else
-                return v(recv, ...)
-              end
-            end
-          end
-          return v
-        end
-        return nil
-      end,
-      __newindex = function(t, k, v)
-        local inner = rawget(self, "_val")
-        if type(inner) == "table" then
-          inner[k] = v
-        end
-      end
-    }
-    return setmetatable(self, mt)
+    return _setmetatable({ _val = val }, _REF_MT)
   end
   _SP_RT._Ref = _Ref
   _SP_RT.Ref = _Ref.create
@@ -1270,70 +1314,83 @@ do
   local _SharedRef = {}
   local _WeakRef = {}
 
+  local function _weak_ref_upgrade(self)
+    local cb = _rawget(self, "_cb")
+    if cb and cb.strong > 0 then
+      cb.strong = cb.strong + 1
+      return _SharedRef.create(cb)
+    end
+    return nil
+  end
+
+  local _WEAK_REF_MT = {
+    __is_weak_ref = true,
+    __index = { upgrade = _weak_ref_upgrade },
+  }
+
   function _WeakRef.create(cb)
-    local self = { _cb = cb }
-    function self:upgrade()
-      if self._cb and self._cb.strong > 0 then
-        self._cb.strong = self._cb.strong + 1
-        return _SharedRef.create(self._cb)
+    return _setmetatable({ _cb = cb }, _WEAK_REF_MT)
+  end
+
+  local function _shared_ref_share(self)
+    local cb = _rawget(self, "_cb")
+    cb.strong = cb.strong + 1
+    return _SharedRef.create(cb)
+  end
+
+  local function _shared_ref_downgrade(self)
+    local cb = _rawget(self, "_cb")
+    cb.weak = cb.weak + 1
+    return _WeakRef.create(cb)
+  end
+
+  local _SHARED_REF_MT = {
+    __is_shared_ref = true,
+    __index = function(t, k)
+      if k == "share" then return _shared_ref_share end
+      if k == "downgrade" then return _shared_ref_downgrade end
+      local cb = _rawget(t, "_cb")
+      local inner = cb and cb.val or nil
+      if _type(inner) == "table" then
+        local v = inner[k]
+        if _type(v) == "function" then
+          return function(recv, ...)
+            if recv == t then
+              return v(inner, ...)
+            end
+            return v(recv, ...)
+          end
+        end
+        return v
       end
       return nil
-    end
-    return setmetatable(self, { __is_weak_ref = true })
-  end
+    end,
+    __newindex = function(t, k, v)
+      local cb = _rawget(t, "_cb")
+      local inner = cb and cb.val or nil
+      if _type(inner) == "table" then
+        inner[k] = v
+      end
+    end,
+  }
 
   function _SharedRef.create(target)
     local cb
-    local t_mt = type(target) == "table" and getmetatable(target) or nil
+    local is_tbl = _type(target) == "table"
+    local t_mt = is_tbl and _getmetatable(target) or nil
     if t_mt and t_mt.__is_shared_ref then
-      cb = rawget(target, "_cb")
-    elseif type(target) == "table" and rawget(target, "strong") ~= nil and rawget(target, "weak") ~= nil then
+      cb = _rawget(target, "_cb")
+    elseif is_tbl and _rawget(target, "strong") ~= nil and _rawget(target, "weak") ~= nil then
       cb = target
     elseif t_mt and t_mt.__is_ref then
-      local val = rawget(target, "_val")
-      rawset(target, "_sapphire_disposed_", true)
-      rawset(target, "_val", nil)
+      local val = _rawget(target, "_val")
+      _rawset(target, "_sapphire_disposed_", true)
+      _rawset(target, "_val", nil)
       cb = { val = val, strong = 1, weak = 0 }
     else
       cb = { val = target, strong = 1, weak = 0 }
     end
-    local self = { _cb = cb }
-    function self:share()
-      self._cb.strong = self._cb.strong + 1
-      return _SharedRef.create(self._cb)
-    end
-    function self:downgrade()
-      self._cb.weak = self._cb.weak + 1
-      return _WeakRef.create(self._cb)
-    end
-    local mt = {
-      __is_shared_ref = true,
-      __index = function(t, k)
-        if k == "share" then return function(recv) return self:share() end end
-        if k == "downgrade" then return function(recv) return self:downgrade() end end
-        local inner = self._cb.val
-        if type(inner) == "table" then
-          local v = inner[k]
-          if type(v) == "function" then
-            return function(recv, ...)
-              if recv == self then
-                return v(inner, ...)
-              else
-                return v(recv, ...)
-              end
-            end
-          end
-          return v
-        end
-        return nil
-      end,
-      __newindex = function(t, k, v)
-        if type(self._cb.val) == "table" then
-          self._cb.val[k] = v
-        end
-      end
-    }
-    return setmetatable(self, mt)
+    return _setmetatable({ _cb = cb }, _SHARED_REF_MT)
   end
   _SP_RT._SharedRef = _SharedRef
   _SP_RT._WeakRef = _WeakRef

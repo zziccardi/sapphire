@@ -111,10 +111,10 @@ class Arena:
     for obj in reversed(objs):
       _sapphire_del(obj)
       obj_dict = getattr(obj, '__dict__', None)
-      if obj_dict is not None:
-        shadow = obj_dict.get('__shadow__')
-        if shadow is not None:
-          shadow.clear()
+      if obj_dict is not None and obj_dict.get('__proto__') is not None:
+        for k in list(obj_dict.keys()):
+          if k not in ('__proto__', '_sapphire_disposed_'):
+            del obj_dict[k]
 
   def __del__(self):
     self.destroy()
@@ -174,6 +174,16 @@ def _sapphire_cow_copy(target, _seen=None):
     return res
   return copy.copy(target)
 
+class _BoundProxyMethod:
+  __slots__ = ('_func', '_proxy')
+
+  def __init__(self, func, proxy):
+    self._func = func
+    self._proxy = proxy
+
+  def __call__(self, *args, **kwargs):
+    return self._func(self._proxy, *args, **kwargs)
+
 class _LazyCoWProxy:
   __slots__ = ('_parent', '_name', '_target')
 
@@ -186,26 +196,24 @@ class _LazyCoWProxy:
 
   def _get_parent_obj(self):
     p = object.__getattribute__(self, '_parent')
-    if isinstance(p, _LazyCoWProxy):
+    if type(p) is _LazyCoWProxy:
       return p._get_active()
     return p
 
   def _get_active(self):
     parent = self._get_parent_obj()
     name = object.__getattribute__(self, '_name')
-    if type(parent) is dict:
+    pt = type(parent)
+    if pt is dict:
       return parent[name] if name in parent else object.__getattribute__(self, '_target')
-    if type(parent) is list:
+    if pt is list:
       return parent[name] if 0 <= name < len(parent) else object.__getattribute__(self, '_target')
     p_dict = getattr(parent, '__dict__', None)
     if p_dict is not None:
-      shadow = p_dict.get('__shadow__')
-      if shadow is not None:
-        if name in shadow:
-          return shadow[name]
-        return object.__getattribute__(self, '_target')
-      if isinstance(name, str) and name in p_dict:
+      if name in p_dict:
         return p_dict[name]
+      if '__proto__' in p_dict:
+        return object.__getattribute__(self, '_target')
     if isinstance(name, str) and hasattr(parent, name):
       val = getattr(parent, name)
       if val is not None:
@@ -216,34 +224,36 @@ class _LazyCoWProxy:
     p = object.__getattribute__(self, '_parent')
     attr_name = object.__getattribute__(self, '_name')
     target = object.__getattribute__(self, '_target')
-    if isinstance(target, _LazyCoWProxy):
+    if type(target) is _LazyCoWProxy:
       target = target._get_active()
 
-    if isinstance(p, _LazyCoWProxy):
+    if type(p) is _LazyCoWProxy:
       parent_obj = p._ensure_cow()
     else:
       parent_obj = p
 
-    if isinstance(parent_obj, dict):
+    pt = type(parent_obj)
+    if pt is dict:
       if attr_name not in parent_obj or parent_obj[attr_name] is target:
         cow_val = _sapphire_cow_copy(target)
         parent_obj[attr_name] = cow_val
         return cow_val
       return parent_obj[attr_name]
 
-    if isinstance(parent_obj, list):
+    if pt is list:
       if parent_obj[attr_name] is target:
         cow_val = _sapphire_cow_copy(target)
         parent_obj[attr_name] = cow_val
         return cow_val
       return parent_obj[attr_name]
 
-    if hasattr(parent_obj, '__shadow__'):
-      if attr_name not in parent_obj.__shadow__:
+    p_dict = getattr(parent_obj, '__dict__', None)
+    if p_dict is not None and '__proto__' in p_dict:
+      if attr_name not in p_dict or p_dict[attr_name] is target:
         cow_val = _sapphire_cow_copy(target)
-        parent_obj.__shadow__[attr_name] = cow_val
+        p_dict[attr_name] = cow_val
         return cow_val
-      return parent_obj.__shadow__[attr_name]
+      return p_dict[attr_name]
 
     curr = getattr(parent_obj, attr_name, None)
     if curr is None or curr is target:
@@ -256,7 +266,7 @@ class _LazyCoWProxy:
     active = self._get_active()
     val = getattr(active, name)
     if hasattr(val, '__self__') and hasattr(val, '__func__') and val.__self__ is active:
-      return lambda *args, **kwargs: val.__func__(self, *args, **kwargs)
+      return _BoundProxyMethod(val.__func__, self)
     if callable(val) and not isinstance(val, type):
       return val
     if not isinstance(val, (int, float, bool, str, type(None), Enum)):
@@ -381,8 +391,7 @@ class _LazyCoWProxy:
 
 class SapphireObject:
   def __init__(self, proto=None):
-    object.__setattr__(self, '__proto__', proto)
-    object.__setattr__(self, '__shadow__', {})
+    self.__dict__['__proto__'] = proto
 
   def clone(self, _arena=_SP_UNSET):
     clone_obj = self.__class__(proto=self)
@@ -394,10 +403,7 @@ class SapphireObject:
   def __getattr__(self, name):
     if name.startswith('__') and name.endswith('__'):
       raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
-    shadow = self.__shadow__
-    if name in shadow:
-      return shadow[name]
-    proto = self.__proto__
+    proto = self.__dict__.get('__proto__')
     if proto is not None:
       val = getattr(proto, name)
       if callable(val) and not isinstance(val, type):
@@ -406,14 +412,6 @@ class SapphireObject:
         return _LazyCoWProxy(self, name, val)
       return val
     raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
-
-  def __setattr__(self, name, value):
-    if name in ('__proto__', '__shadow__'):
-      object.__setattr__(self, name, value)
-    elif self.__proto__ is not None:
-      self.__shadow__[name] = value
-    else:
-      object.__setattr__(self, name, value)
 
 def _clone_helper(obj, init_fn=None, arena=None):
   if isinstance(obj, SapphireObject):
