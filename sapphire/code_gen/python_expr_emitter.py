@@ -354,12 +354,32 @@ class PythonExprMixin(_PythonTranspilerBase):
       self.visit(node.arena_expr)
       self.emit(".register(")
     self.emit(f"{self._mangle_dotted(node.struct_name)}(")
-    for idx, arg in enumerate(node.fields):
-      if idx > 0:
-        self.emit(", ")
-      if arg.name:
-        self.emit(f"{self._mangle_name(arg.name)}=")
-      self.visit(arg.expr)
+    resolved_exprs = getattr(node, "_resolved_field_exprs", None)
+    use_positional = False
+    last_provided = -1
+    if resolved_exprs is not None and not getattr(
+      node, "_requires_eval_order_temps", False
+    ):
+      for idx, expr in enumerate(resolved_exprs):
+        if expr is not None:
+          last_provided = idx
+      use_positional = all(
+        resolved_exprs[i] is not None for i in range(last_provided + 1)
+      )
+    if use_positional and resolved_exprs is not None:
+      for idx in range(last_provided + 1):
+        if idx > 0:
+          self.emit(", ")
+        expr = resolved_exprs[idx]
+        if expr is not None:
+          self.visit(expr)
+    else:
+      for idx, arg in enumerate(node.fields):
+        if idx > 0:
+          self.emit(", ")
+        if arg.name:
+          self.emit(f"{self._mangle_name(arg.name)}=")
+        self.visit(arg.expr)
     self.emit(")")
     if node.arena_expr:
       self.emit(")")

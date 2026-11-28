@@ -847,7 +847,7 @@ class TestPythonTranspiler(unittest.TestCase):
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("__import__('builtins').engine = Engine(speed=42)", py_code)
+    self.assertIn("__import__('builtins').engine = Engine(42)", py_code)
 
     env = {}
     try:

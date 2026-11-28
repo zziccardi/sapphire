@@ -29,6 +29,7 @@ from sapphire.parser.ast import (
   ImplBlockNode,
   ImplMemberNode,
   ImportStmtNode,
+  LiteralNode,
   OptionalTypeNode,
   ProgramNode,
   StructDeclNode,
@@ -246,6 +247,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.newline()
 
     top_level_decls = struct_decls + func_decls
+    self._multi_parent_structs: list[tuple[str, list[str]]] = []
 
     # 3. Transpile all top-level declarations (types, functions, global
     # variables)
@@ -270,6 +272,25 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           if alias_name != m_method:
             self.emit(f"{m_struct}.{alias_name} = {m_struct}.{m_method}")
             self.newline()
+
+    # 3c. Flatten multi-parent struct methods directly onto child struct tables
+    if self._multi_parent_structs:
+      pending = dict(self._multi_parent_structs)
+      emitted_multi: set[str] = set()
+
+      def _emit_multi_chain(raw_name: str) -> None:
+        if raw_name in emitted_multi or raw_name not in pending:
+          return
+        emitted_multi.add(raw_name)
+        for p in pending[raw_name]:
+          _emit_multi_chain(p)
+        m_child = self._mangle_name(raw_name)
+        m_parents = ", ".join(self._mangle_dotted(p) for p in pending[raw_name])
+        self.emit(f"_SP_RT._inherit_multi({m_child}, {m_parents})")
+        self.newline()
+
+      for raw_name, _ in self._multi_parent_structs:
+        _emit_multi_chain(raw_name)
 
     # 4. Transpile main invocation if present
     if has_main:
@@ -537,22 +558,6 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       if len(init_params) == 0:
         self.emit(f"{struct_name}._init_sapphire(self)")
       else:
-        init_args = []
-        for idx, p in enumerate(init_params):
-          pname = self._mangle_name(p.name)
-          unset_val = (
-            "_SP_RT._SP_UNSET"
-            if isinstance(p.param_type, OptionalTypeNode)
-            else "nil"
-          )
-          init_args.append(
-            f"(function() if _arg1['{pname}'] ~= nil then "
-            f"return _SP_RT._unwrap_opt(_arg1['{pname}']) "
-            f"elseif _arg1[{idx + 1}] ~= nil then "
-            f"return _SP_RT._unwrap_opt(_arg1[{idx + 1}]) "
-            f"else return {unset_val} end end)()"
-          )
-        call_args = ["self"] + init_args
         param_checks = " or ".join(
           f"_arg1['{self._mangle_name(p.name)}'] ~= nil" for p in init_params
         )
@@ -564,6 +569,24 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
           f"({param_checks} or {pos_checks} or next(_arg1) == nil) then"
         )
         self.indent()
+        call_args = ["self"]
+        for idx, p in enumerate(init_params):
+          pname = self._mangle_name(p.name)
+          unset_val = (
+            "_SP_RT._SP_UNSET"
+            if isinstance(p.param_type, OptionalTypeNode)
+            else "nil"
+          )
+          tmp = f"_p{idx + 1}"
+          call_args.append(tmp)
+          self.newline()
+          self.emit(
+            f"local {tmp}; if _arg1['{pname}'] ~= nil then "
+            f"{tmp} = _SP_RT._unwrap_opt(_arg1['{pname}']) "
+            f"elseif _arg1[{idx + 1}] ~= nil then "
+            f"{tmp} = _SP_RT._unwrap_opt(_arg1[{idx + 1}]) "
+            f"else {tmp} = {unset_val} end"
+          )
         self.newline()
         self.emit(f"{struct_name}._init_sapphire({', '.join(call_args)})")
         self.dedent()
@@ -652,6 +675,159 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self.emit("end")
     self.newline()
 
+  def _emit_struct_new_constructor(
+    self, node: StructDeclNode, methods: list[Any]
+  ) -> None:
+    """Emits fixed-arity `Struct._new(...)` used by compiled Sapphire calls."""
+    from sapphire.semantics.types import OptionalType, StructType
+
+    struct_name = self._mangle_name(node.name)
+    is_proto = node.is_prototype
+    init_member = next(
+      (m for m in methods if m.func_decl.name == "__init__"), None
+    )
+    flat_fields, all_parents_local = self._get_flattened_struct_fields(node)
+    can_inline_defaults = all_parents_local and all(
+      f.default_expr is None
+      or not self._contains_liftable_expr(f.default_expr, include_moves=True)
+      for f in flat_fields
+    )
+
+    if init_member:
+      init_params = [
+        p for p in init_member.func_decl.parameters if p.name != "self"
+      ]
+      has_opt_default = self._has_optional_default_param(init_params)
+      mangled_params = [self._mangle_name(p.name) for p in init_params]
+      sig = "..." if has_opt_default else ", ".join(mangled_params)
+      self.emit(f"function {struct_name}._new({sig})")
+      self.indent()
+      self.newline()
+      if can_inline_defaults:
+        entries: list[str] = []
+        for f in flat_fields:
+          d_expr = f.default_expr or get_default_value_for_type_node(
+            f.field_type
+          )
+          if d_expr is not None and not (
+            isinstance(d_expr, LiteralNode) and d_expr.lit_type == "none"
+          ):
+            entries.append(
+              f"{self._mangle_name(f.name)} = {self.capture_expr(d_expr)}"
+            )
+        tbl_lit = "{ " + ", ".join(entries) + " }" if entries else "{}"
+        if is_proto:
+          self.emit(
+            f"local self = _SP_RT._create_proto_object(nil, {struct_name}, "
+            f"{tbl_lit})"
+          )
+        else:
+          self.emit(f"local self = setmetatable({tbl_lit}, {struct_name})")
+      else:
+        if is_proto:
+          self.emit(
+            f"local self = _SP_RT._create_proto_object(nil, {struct_name})"
+          )
+        else:
+          self.emit(f"local self = setmetatable({{}}, {struct_name})")
+        self.newline()
+        self.emit(f"{struct_name}._init_fields(self)")
+      self.newline()
+      if has_opt_default:
+        self.emit(f"{struct_name}._init_sapphire(self, ...)")
+      elif mangled_params:
+        self.emit(
+          f"{struct_name}._init_sapphire(self, {', '.join(mangled_params)})"
+        )
+      else:
+        self.emit(f"{struct_name}._init_sapphire(self)")
+      self.newline()
+      self.emit("return self")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      self.newline()
+      return
+
+    if can_inline_defaults:
+      param_names = [self._mangle_name(f.name) for f in flat_fields]
+      self.emit(f"function {struct_name}._new({', '.join(param_names)})")
+      self.indent()
+      for f, m_f in zip(flat_fields, param_names, strict=True):
+        if isinstance(f.field_type, OptionalTypeNode):
+          if f.default_expr is not None:
+            d_code = self.capture_expr(f.default_expr)
+            self.newline()
+            self.emit(f"if {m_f} == _SP_RT._SP_UNSET then {m_f} = {d_code} end")
+        else:
+          d_expr = f.default_expr or get_default_value_for_type_node(
+            f.field_type
+          )
+          if d_expr is not None:
+            d_code = self.capture_expr(d_expr)
+            self.newline()
+            self.emit(f"if {m_f} == nil then {m_f} = {d_code} end")
+      entries = [f"{m_f} = {m_f}" for m_f in param_names]
+      tbl_lit = "{ " + ", ".join(entries) + " }" if entries else "{}"
+      self.newline()
+      if is_proto:
+        self.emit(
+          f"return _SP_RT._create_proto_object(nil, {struct_name}, {tbl_lit})"
+        )
+      else:
+        self.emit(f"return setmetatable({tbl_lit}, {struct_name})")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      self.newline()
+      return
+
+    canonical_fields = getattr(node, "_canonical_fields", None)
+    if canonical_fields is None and self.semantic_context is not None:
+      struct_type = self.semantic_context.symbol_table.lookup_type(node.name)
+      if isinstance(struct_type, StructType):
+        canonical_fields = [
+          (
+            fn,
+            isinstance(f_obj.field_type, OptionalType)
+            and f_obj.has_explicit_default,
+          )
+          for fn, f_obj in struct_type.fields.items()
+        ]
+    if canonical_fields is not None:
+      param_names = [self._mangle_name(fn) for fn, _ in canonical_fields]
+      self.emit(f"function {struct_name}._new({', '.join(param_names)})")
+      self.indent()
+      self.newline()
+      if is_proto:
+        self.emit(
+          f"local self = _SP_RT._create_proto_object(nil, {struct_name})"
+        )
+      else:
+        self.emit(f"local self = setmetatable({{}}, {struct_name})")
+      self.newline()
+      self.emit(f"{struct_name}._init_fields(self)")
+      for (_fn, is_opt_default), m_f in zip(
+        canonical_fields, param_names, strict=True
+      ):
+        self.newline()
+        if is_opt_default:
+          self.emit(f"if {m_f} ~= _SP_RT._SP_UNSET then self.{m_f} = {m_f} end")
+        else:
+          self.emit(f"if {m_f} ~= nil then self.{m_f} = {m_f} end")
+      self.newline()
+      self.emit("return self")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      self.newline()
+      return
+
+    self.emit(
+      f"function {struct_name}._new(...) return {struct_name}.init(...) end"
+    )
+    self.newline()
+
   def _emit_diamond_del_guard(self, raw_struct_name: str) -> None:
     """Emits per-class destruction tracking so diamond bases run `__del__` once.
     """
@@ -693,13 +869,11 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         self.emit(
           f"setmetatable({struct_name}, {{ __index = {mangled_parents[0]} }})"
         )
+        self.newline()
       else:
-        chain = " or ".join(f"{p}[k]" for p in mangled_parents)
-        self.emit(
-          f"setmetatable({struct_name}, {{ __index = function(t, k) return "
-          f"{chain} end }})"
-        )
-      self.newline()
+        if not hasattr(self, "_multi_parent_structs"):
+          self._multi_parent_structs = []
+        self._multi_parent_structs.append((raw_name, list(node.parent_names)))
 
     for f in node.fields:
       if getattr(f, "is_static", False) and f.default_expr is not None:
@@ -711,6 +885,7 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
 
     self._emit_struct_init_fields(node)
     self._emit_struct_init_constructor(node, methods)
+    self._emit_struct_new_constructor(node, methods)
 
     has_explicit_del = any(
       getattr(m, "func_decl", None) and m.func_decl.name == "__del__"

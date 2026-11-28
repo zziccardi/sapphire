@@ -333,7 +333,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     """Returns True if *slot_idx* on *node*'s callee is an OptionalType
     parameter.
     """
-    from sapphire.semantics.types import FunctionType, OptionalType
+    from sapphire.semantics.types import FunctionType, OptionalType, StructType
 
     callee_t = self.get_inferred_type(node.callee)
     if (
@@ -342,6 +342,19 @@ class LuaExprMixin(_LuaTranspilerBase):
       and isinstance(callee_t.param_types[slot_idx], OptionalType)
     ):
       return True
+    if isinstance(callee_t, StructType):
+      init_m = callee_t.methods.get("__init__")
+      if init_m is not None:
+        sig = init_m.method_type
+        p_types = (
+          sig.param_types[1:]
+          if (sig.has_self and sig.param_names and sig.param_names[0] == "self")
+          else sig.param_types
+        )
+        if slot_idx < len(p_types) and isinstance(
+          p_types[slot_idx], OptionalType
+        ):
+          return True
     return False
 
   def _emit_lua_call_args_list(
@@ -406,17 +419,34 @@ class LuaExprMixin(_LuaTranspilerBase):
       if node.arena_expr:
         self.visit(node.arena_expr)
         self.emit(":register(")
-      self.visit(node.callee)
-      self.emit(".init({")
-      for idx, arg in enumerate(node.arguments):
-        if idx > 0:
-          self.emit(", ")
-        if arg.name:
-          self.emit(f"{self._mangle_name(arg.name)} = ")
+      resolved_exprs = getattr(node, "_resolved_arguments", None)
+      if resolved_exprs is not None:
+        needs_temps = bool(getattr(node, "_requires_eval_order_temps", False))
+        if needs_temps:
+          self.emit("(function() ")
+          temp_args = self._format_reordered_slot_temps(
+            node, len(resolved_exprs)
+          )
+          self.emit("return ")
+          self.visit(node.callee)
+          self.emit(f"._new({', '.join(temp_args)}) end)()")
         else:
-          self.emit(f"[{idx + 1}] = ")
-        self._emit_opt_wrapped(arg.expr)
-      self.emit("})")
+          self.visit(node.callee)
+          self.emit("._new(")
+          self._emit_lua_call_args_list(resolved_exprs, node)
+          self.emit(")")
+      else:
+        self.visit(node.callee)
+        self.emit(".init({")
+        for idx, arg in enumerate(node.arguments):
+          if idx > 0:
+            self.emit(", ")
+          if arg.name:
+            self.emit(f"{self._mangle_name(arg.name)} = ")
+          else:
+            self.emit(f"[{idx + 1}] = ")
+          self._emit_opt_wrapped(arg.expr)
+        self.emit("})")
       if node.arena_expr:
         self.emit(")")
       return
@@ -704,15 +734,61 @@ class LuaExprMixin(_LuaTranspilerBase):
     if node.arena_expr:
       self.visit(node.arena_expr)
       self.emit(":register(")
-    self.emit(f"{self._mangle_dotted(node.struct_name)}.init({{")
-    for idx, arg in enumerate(node.fields):
-      if idx > 0:
-        self.emit(", ")
-      if arg.name:
-        self.emit(f"{self._mangle_name(arg.name)} = ")
+
+    mangled_struct = self._mangle_dotted(node.struct_name)
+    resolved_exprs = getattr(node, "_resolved_field_exprs", None)
+    if resolved_exprs is not None:
+      opt_explicit_defaults = getattr(
+        node, "_optional_explicit_default_slots", set()
+      )
+      last_needed = -1
+      for idx, expr in enumerate(resolved_exprs):
+        if expr is not None or idx in opt_explicit_defaults:
+          last_needed = idx
+
+      if getattr(node, "_requires_eval_order_temps", False):
+        self.emit("(function() ")
+        for f_idx, f_arg in enumerate(node.fields):
+          self.emit(f"local _a{f_idx} = ")
+          self.visit(f_arg.expr)
+          self.emit("; ")
+        slot_to_temp = {
+          slot: f"_a{f_idx}"
+          for f_idx, slot in enumerate(getattr(node, "_eval_order_slots", []))
+        }
+        args_out: list[str] = []
+        for idx in range(last_needed + 1):
+          if idx in slot_to_temp:
+            args_out.append(slot_to_temp[idx])
+          elif idx in opt_explicit_defaults:
+            args_out.append("_SP_RT._SP_UNSET")
+          else:
+            args_out.append("nil")
+        self.emit(f"return {mangled_struct}._new({', '.join(args_out)}) end)()")
       else:
-        self.emit(f"[{idx + 1}] = ")
-      self._emit_opt_wrapped(arg.expr)
-    self.emit("})")
+        self.emit(f"{mangled_struct}._new(")
+        for idx in range(last_needed + 1):
+          if idx > 0:
+            self.emit(", ")
+          expr = resolved_exprs[idx]
+          if expr is not None:
+            self.visit(expr)
+          elif idx in opt_explicit_defaults:
+            self.emit("_SP_RT._SP_UNSET")
+          else:
+            self.emit("nil")
+        self.emit(")")
+    else:
+      self.emit(f"{mangled_struct}.init({{")
+      for idx, arg in enumerate(node.fields):
+        if idx > 0:
+          self.emit(", ")
+        if arg.name:
+          self.emit(f"{self._mangle_name(arg.name)} = ")
+        else:
+          self.emit(f"[{idx + 1}] = ")
+        self._emit_opt_wrapped(arg.expr)
+      self.emit("})")
+
     if node.arena_expr:
       self.emit(")")

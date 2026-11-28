@@ -319,7 +319,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("Item = {}", lua_code)
     self.assertIn("function Item.init(...)", lua_code)
     self.assertIn("Item._init_sapphire", lua_code)
-    self.assertIn("Item.init({[1] = 100})", lua_code)
+    self.assertIn("Item._new(100)", lua_code)
 
   def test_constructor_chaining_lua(self):
     """Verifies that constructor chaining emits parent _init_sapphire calls in Lua."""
@@ -519,7 +519,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("Point.init({x = 10, y = 20})", lua_code)
+    self.assertIn("Point._new(10, 20)", lua_code)
     self.assertIn("(function(x)", lua_code)
     self.assertIn("return (x * 2)", lua_code)
 
@@ -1552,7 +1552,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("setmetatable(Player, { __index = function(t, k) return Position[k] or Health[k] end })", lua_code)
+    self.assertIn("_SP_RT._inherit_multi(Player, Position, Health)", lua_code)
     self.assertIn("Position._init_fields(self)", lua_code)
     self.assertIn("Health._init_fields(self)", lua_code)
 

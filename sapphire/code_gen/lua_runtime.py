@@ -440,7 +440,7 @@ do
     end,
   }
 
-  local function _create_proto_object(proto, class_tbl)
+  local function _create_proto_object(proto, class_tbl, fields)
     if proto ~= nil then
       return _setmetatable({
         [_K_PROTO] = proto,
@@ -448,11 +448,43 @@ do
         [_K_CLASS] = class_tbl,
       }, _PROTO_MT)
     end
+    if fields ~= nil then
+      fields[_K_CLASS] = class_tbl
+      return _setmetatable(fields, _PROTO_MT)
+    end
     return _setmetatable({
       [_K_CLASS] = class_tbl,
     }, _PROTO_MT)
   end
   _SP_RT._create_proto_object = _create_proto_object
+
+  local _INHERIT_SKIP = {
+    __index = true,
+    init = true,
+    _new = true,
+    _init_fields = true,
+    _init_sapphire = true,
+  }
+  _SP_RT._inherit_multi = function(cls, ...)
+    local n = _select("#", ...)
+    for i = 1, n do
+      local cur = _select(i, ...)
+      while _type(cur) == "table" do
+        for k, v in _pairs(cur) do
+          if not _INHERIT_SKIP[k] and _rawget(cls, k) == nil then
+            _rawset(cls, k, v)
+          end
+        end
+        local mt = _getmetatable(cur)
+        local idx = mt and mt.__index
+        if _type(idx) == "table" and idx ~= cur then
+          cur = idx
+        else
+          break
+        end
+      end
+    end
+  end
 
   local function _copy_plain_table(obj, seen)
     if _type(obj) ~= "table" then return obj end

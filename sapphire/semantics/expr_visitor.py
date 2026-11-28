@@ -962,7 +962,13 @@ class ExprVisitorMixin(_TypeCheckerBase):
         ):
           self._init_used_arena_fields.add(node.arena_expr.member)
 
-    initialized = set()
+    initialized: dict[str, ASTNode] = {}
+    has_binding_error = False
+    canonical_fields = list(struct_type.fields.items())
+    field_index_map = {
+      f_name: idx for idx, (f_name, _f_obj) in enumerate(canonical_fields)
+    }
+    eval_order_slots: list[int] = []
     for field_arg in node.fields:
       field_name = field_arg.name
       if not field_name:
@@ -970,10 +976,12 @@ class ExprVisitorMixin(_TypeCheckerBase):
           "Positional arguments are not allowed in struct initializer of "
           f"'{node.struct_name}'. Use named initializers instead."
         )
+        has_binding_error = True
         continue
 
       if field_name not in struct_type.fields:
         self.error(f"Struct '{node.struct_name}' has no field '{field_name}'.")
+        has_binding_error = True
         continue
 
       if field_name in initialized:
@@ -981,6 +989,7 @@ class ExprVisitorMixin(_TypeCheckerBase):
           f"Field '{field_name}' is initialized multiple times in struct "
           "initializer."
         )
+        has_binding_error = True
         continue
 
       expected_type = struct_type.fields[field_name].field_type
@@ -1000,10 +1009,11 @@ class ExprVisitorMixin(_TypeCheckerBase):
           f"has type '{expr_type}', but expected '{expected_type}'."
         )
 
-      initialized.add(field_name)
+      initialized[field_name] = field_arg.expr
+      eval_order_slots.append(field_index_map[field_name])
 
     # Verify all non-optional and non-default fields are initialized
-    for f_name, f_obj in struct_type.fields.items():
+    for f_name, f_obj in canonical_fields:
       if (
         f_name not in initialized
         and not isinstance(f_obj.field_type, OptionalType)
@@ -1013,5 +1023,31 @@ class ExprVisitorMixin(_TypeCheckerBase):
           f"Struct initializer for '{node.struct_name}' is missing required "
           f"field '{f_name}'."
         )
+
+    if not has_binding_error:
+      node._resolved_field_names = [f_name for f_name, _ in canonical_fields]
+      node._resolved_field_exprs = [
+        initialized.get(f_name) for f_name, _ in canonical_fields
+      ]
+      node._omitted_field_slots = {
+        idx
+        for idx, (f_name, _f_obj) in enumerate(canonical_fields)
+        if f_name not in initialized
+      }
+      node._optional_explicit_default_slots = {
+        idx
+        for idx, (_f_name, f_obj) in enumerate(canonical_fields)
+        if isinstance(f_obj.field_type, OptionalType)
+        and f_obj.has_explicit_default
+      }
+      is_reordered = any(
+        eval_order_slots[k] > eval_order_slots[k + 1]
+        for k in range(len(eval_order_slots) - 1)
+      )
+      has_side_effects = any(
+        not self._is_expr_pure(fa.expr) for fa in node.fields
+      )
+      node._requires_eval_order_temps = bool(is_reordered and has_side_effects)
+      node._eval_order_slots = eval_order_slots
 
     return struct_type

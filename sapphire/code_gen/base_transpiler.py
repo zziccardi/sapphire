@@ -176,6 +176,11 @@ class BaseTranspiler(ABC):
     )
     self.semantic_context: Any = semantic_context
     self._buffers: list[OutputBuffer] = [OutputBuffer()]
+    self._struct_decl_map: dict[str, StructDeclNode] = {}
+    self._local_parent_names: set[str] = set()
+    self._multi_parent_bases: set[str] = set()
+    self._exported_symbols: set[str] = set()
+    self._has_export_stmt: bool = False
 
   def get_inferred_type(self, node: Any) -> Any:
     """Returns the resolved semantic Type for *node* from SemanticContext or
@@ -868,12 +873,43 @@ class BaseTranspiler(ABC):
     self.struct_destructible_fields: dict[str, list[str]] = {}
     self.struct_parent_names: dict[str, list[str]] = {}
     self.structs_with_destructor = {"Arena", "Ref", "SharedRef"}
+    self._struct_decl_map: dict[str, StructDeclNode] = {}
+    self._local_parent_names: set[str] = set()
+    self._multi_parent_bases: set[str] = set()
+    self._exported_symbols: set[str] = set()
+    self._has_export_stmt: bool = False
 
     for decl in program.declarations:
-      if isinstance(decl, StructDeclNode):
+      if isinstance(decl, ExportStmtNode):
+        self._has_export_stmt = True
+        for spec in decl.specifiers:
+          self._exported_symbols.add(spec.symbol)
+      elif isinstance(decl, StructDeclNode) and not getattr(
+        decl, "type_params", None
+      ):
         if decl.is_prototype:
           self.proto_structs.add(decl.name)
-        self.struct_parent_names[decl.name] = list(decl.parent_names or [])
+        p_names = list(decl.parent_names or [])
+        self.struct_parent_names[decl.name] = p_names
+        self._struct_decl_map[decl.name] = decl
+        for p in p_names:
+          self._local_parent_names.add(p)
+
+    def _mark_multi_ancestors(name: str) -> None:
+      if name in self._multi_parent_bases:
+        return
+      self._multi_parent_bases.add(name)
+      for gp in self.struct_parent_names.get(name, []):
+        _mark_multi_ancestors(gp)
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and not getattr(
+        decl, "type_params", None
+      ):
+        p_names = decl.parent_names or []
+        if len(p_names) > 1:
+          for p in p_names:
+            _mark_multi_ancestors(p)
 
     for s_name, members in self.struct_methods.items():
       if s_name in self.proto_structs:
@@ -904,6 +940,41 @@ class BaseTranspiler(ABC):
           ):
             self.structs_with_destructor.add(decl.name)
             changed = True
+
+  def _get_flattened_struct_fields(
+    self, node: StructDeclNode
+  ) -> tuple[list[StructFieldNode], bool]:
+    """Returns `(fields, all_parents_local)` in StructLayoutPass order.
+
+    Parent fields are collected recursively in declaration order before own
+    non-static fields. `all_parents_local` is False if any ancestor struct is
+    imported from an external module (absent from `_struct_decl_map`).
+    """
+    result: list[StructFieldNode] = []
+    seen: set[str] = set()
+    all_local = True
+    visited_structs: set[str] = set()
+
+    def _collect(s_node: StructDeclNode) -> None:
+      nonlocal all_local
+      if s_node.name in visited_structs:
+        return
+      visited_structs.add(s_node.name)
+      for p_name in s_node.parent_names or []:
+        p_decl = self._struct_decl_map.get(p_name)
+        if p_decl is None:
+          all_local = False
+        else:
+          _collect(p_decl)
+      for f in s_node.fields:
+        if getattr(f, "is_static", False):
+          continue
+        if f.name not in seen:
+          seen.add(f.name)
+          result.append(f)
+
+    _collect(node)
+    return result, all_local
 
   # ------------------------------------------------------------------
   # Declaration visitors

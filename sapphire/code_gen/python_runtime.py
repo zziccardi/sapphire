@@ -141,6 +141,28 @@ def _sapphire_del(obj):
   if del_fn is not None:
     del_fn()
 
+def _iter_slots(cls):
+  for base in cls.__mro__:
+    slots = base.__dict__.get('__slots__')
+    if slots:
+      if isinstance(slots, str):
+        yield slots
+      else:
+        yield from slots
+
+def _inherit_multi_py(cls, *bases):
+  for base in bases:
+    for b in base.__mro__:
+      if b is object:
+        continue
+      for k, v in b.__dict__.items():
+        if k.startswith('__') and k.endswith('__') and k != '__del__':
+          continue
+        if k in ('_init_fields', '_init_sapphire'):
+          continue
+        if k not in cls.__dict__:
+          setattr(cls, k, v)
+
 def _sapphire_cow_copy(target, _seen=None):
   if isinstance(target, _LazyCoWProxy):
     target = target._get_active()
@@ -165,12 +187,20 @@ def _sapphire_cow_copy(target, _seen=None):
     for k, v in target.items():
       res[k] = _sapphire_cow_copy(v, _seen)
     return res
+  cls = type(target)
   if hasattr(target, '__dict__'):
     res = copy.copy(target)
     _seen[obj_id] = res
     for k, v in list(res.__dict__.items()):
       if not k.startswith('__'):
         setattr(res, k, _sapphire_cow_copy(v, _seen))
+    return res
+  if hasattr(cls, '__slots__'):
+    res = cls.__new__(cls)
+    _seen[obj_id] = res
+    for k in _iter_slots(cls):
+      if not k.startswith('__') and hasattr(target, k):
+        object.__setattr__(res, k, _sapphire_cow_copy(getattr(target, k), _seen))
     return res
   return copy.copy(target)
 
@@ -393,8 +423,14 @@ class SapphireObject:
   def __init__(self, proto=None):
     self.__dict__['__proto__'] = proto
 
+  @classmethod
+  def _from_proto(cls, proto):
+    obj = cls.__new__(cls)
+    obj.__dict__['__proto__'] = proto
+    return obj
+
   def clone(self, _arena=_SP_UNSET):
-    clone_obj = self.__class__(proto=self)
+    clone_obj = self.__class__._from_proto(self)
     arena = self.__dict__.get('__arena__') if _arena is _SP_UNSET else _arena
     if arena is not None:
       arena.register(clone_obj)
@@ -479,12 +515,21 @@ def _sapphire_copy(val, _seen=None):
     for k, v in val.items():
       res[k] = _sapphire_copy(v, _seen)
     return res
-  if hasattr(val, '__dict__') and not hasattr(type(val), '__del__'):
-    res = copy.copy(val)
-    _seen[obj_id] = res
-    for k, v in val.__dict__.items():
-      res.__dict__[k] = _sapphire_copy(v, _seen)
-    return res
+  cls = type(val)
+  if not hasattr(cls, '__del__') and not hasattr(cls, '_sapphire_destroy'):
+    if hasattr(val, '__dict__'):
+      res = copy.copy(val)
+      _seen[obj_id] = res
+      for k, v in val.__dict__.items():
+        res.__dict__[k] = _sapphire_copy(v, _seen)
+      return res
+    if hasattr(cls, '__slots__'):
+      res = cls.__new__(cls)
+      _seen[obj_id] = res
+      for k in _iter_slots(cls):
+        if hasattr(val, k):
+          object.__setattr__(res, k, _sapphire_copy(getattr(val, k), _seen))
+      return res
   return val
 
 def _sapphire_string_split(s, sep=None):

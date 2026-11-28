@@ -213,6 +213,14 @@ class GenericsChecker:
           has_default=has_default,
           has_explicit_default=f.default_expr is not None,
         )
+      cloned_decl._canonical_fields = [
+        (
+          f_name,
+          isinstance(f_obj.field_type, OptionalType)
+          and f_obj.has_explicit_default,
+        )
+        for f_name, f_obj in mono_struct_type.fields.items()
+      ]
 
       from sapphire.semantics.struct_layout_pass import StructLayoutPass
 
