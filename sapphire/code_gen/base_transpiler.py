@@ -181,6 +181,40 @@ class BaseTranspiler(ABC):
     self._multi_parent_bases: set[str] = set()
     self._exported_symbols: set[str] = set()
     self._has_export_stmt: bool = False
+    self._known_enums: set[str] = set()
+    self._flat_value_structs: set[str] = set()
+    self._plain_local_containers: set[str] = set()
+
+  def _is_plain_local_var(self, expr: Any) -> bool:
+    """Returns True if *expr* is a local container guaranteed not to be a proxy
+    or smart-ref wrapper.
+    """
+    if not isinstance(expr, IdentifierNode):
+      return False
+    if expr.name not in self._plain_local_containers:
+      return False
+    if expr.name in getattr(self, "extern_vars", ()):
+      return False
+    id_map = getattr(self, "_identifier_map", {})
+    m_name = id_map.get(expr.name, expr.name)
+    wb = getattr(self, "_unwrap_writebacks", {})
+    return m_name not in wb and expr.name not in wb
+
+  def _is_fresh_plain_container_expr(self, expr: Any) -> bool:
+    """Returns True if *expr* evaluates to a fresh plain list/dict/flat struct
+    (guaranteed never to be a CoW proxy or smart-ref wrapper).
+    """
+    from sapphire.semantics.types import StructType
+
+    if expr is None:
+      return False
+    if isinstance(expr, (ArrayLiteralNode, MapLiteralNode)):
+      return True
+    if isinstance(expr, StructInitializerNode):
+      t = self.get_inferred_type(expr)
+      return isinstance(t, StructType) and t.name in self._flat_value_structs
+    kind, _ = self._classify_value_copy(expr)
+    return kind != "NONE"
 
   def get_inferred_type(self, node: Any) -> Any:
     """Returns the resolved semantic Type for *node* from SemanticContext or
@@ -878,12 +912,16 @@ class BaseTranspiler(ABC):
     self._multi_parent_bases: set[str] = set()
     self._exported_symbols: set[str] = set()
     self._has_export_stmt: bool = False
+    self._known_enums: set[str] = set()
+    self._flat_value_structs: set[str] = set()
 
     for decl in program.declarations:
       if isinstance(decl, ExportStmtNode):
         self._has_export_stmt = True
         for spec in decl.specifiers:
           self._exported_symbols.add(spec.symbol)
+      elif isinstance(decl, EnumDeclNode):
+        self._known_enums.add(decl.name)
       elif isinstance(decl, StructDeclNode) and not getattr(
         decl, "type_params", None
       ):
@@ -940,6 +978,149 @@ class BaseTranspiler(ABC):
           ):
             self.structs_with_destructor.add(decl.name)
             changed = True
+
+    imm_type_names = (
+      {"int", "float", "bool", "String", "Arena", "Ref", "SharedRef", "WeakRef"}
+      | self._known_enums
+      | self.proto_structs
+      | self.structs_with_destructor
+    )
+
+    def _is_flat_field_type_node(t_node: Any) -> bool:
+      if isinstance(t_node, OptionalTypeNode):
+        return _is_flat_field_type_node(t_node.base_type)
+      if isinstance(t_node, BasicTypeNode):
+        return t_node.name in imm_type_names
+      return False
+
+    for decl in program.declarations:
+      if (
+        isinstance(decl, StructDeclNode)
+        and not getattr(decl, "type_params", None)
+        and not decl.is_prototype
+        and decl.name not in self.structs_with_destructor
+      ):
+        flat_fields, all_local = self._get_flattened_struct_fields(decl)
+        if all_local and all(
+          _is_flat_field_type_node(f.field_type) for f in flat_fields
+        ):
+          self._flat_value_structs.add(decl.name)
+
+  def _is_immutable_value_type(self, typ: Any) -> bool:
+    """Returns True if values of semantic type *typ* need no deep copy."""
+    from sapphire.semantics.types import (
+      ArenaType,
+      CoroutineType,
+      EnumType,
+      FunctionType,
+      NoneType,
+      OptionalType,
+      PrimitiveType,
+      RangeType,
+      RefType,
+      SharedRefType,
+      StructType,
+      WeakRefType,
+    )
+
+    if typ is None:
+      return False
+    if isinstance(typ, OptionalType):
+      typ = typ.base_type
+    if isinstance(
+      typ,
+      (
+        PrimitiveType,
+        NoneType,
+        EnumType,
+        FunctionType,
+        ArenaType,
+        RefType,
+        SharedRefType,
+        WeakRefType,
+        CoroutineType,
+        RangeType,
+      ),
+    ):
+      return True
+    if isinstance(typ, StructType):
+      if typ.is_prototype:
+        return True
+      needs_dtor = getattr(self, "_type_needs_destructor", None)
+      if needs_dtor is not None and needs_dtor(typ):
+        return True
+    return False
+
+  def _classify_value_copy(self, expr: Any) -> tuple[str, Any]:
+    """Classifies the value-copy strategy for *expr*.
+
+    Returns `(kind, unwrapped_type)` where `kind` is one of:
+    `"NONE"`, `"SHALLOW_ARRAY"`, `"SHALLOW_MAP"`, `"FLAT_STRUCT"`, `"DEEP"`.
+    """
+    from sapphire.semantics.types import (
+      ArrayType,
+      MapType,
+      OptionalType,
+      StructType,
+    )
+
+    if expr is None:
+      return "NONE", None
+    if isinstance(
+      expr,
+      (
+        LiteralNode,
+        InterpolatedStringNode,
+        ArrayLiteralNode,
+        MapLiteralNode,
+        StructInitializerNode,
+        MoveNode,
+        CloneNode,
+        LambdaNode,
+        BinaryOpNode,
+        UnaryOpNode,
+        CastExprNode,
+      ),
+    ):
+      return "NONE", None
+    if isinstance(expr, CallNode):
+      if not (
+        isinstance(expr.callee, MemberAccessNode)
+        and expr.callee.member == "get"
+        and (
+          getattr(expr.callee, "is_array_method", False)
+          or getattr(expr.callee, "is_map_method", False)
+        )
+      ):
+        return "NONE", None
+    inferred = self.get_inferred_type(expr)
+    if inferred is None:
+      return "NONE", None
+    is_opt = isinstance(inferred, OptionalType)
+    t = inferred.base_type if is_opt else inferred
+    if isinstance(t, ArrayType):
+      if self._is_immutable_value_type(t.element_type):
+        return ("DEEP" if is_opt else "SHALLOW_ARRAY"), t
+      return "DEEP", t
+    if isinstance(t, MapType):
+      if self._is_immutable_value_type(t.value_type):
+        return ("DEEP" if is_opt else "SHALLOW_MAP"), t
+      return "DEEP", t
+    if isinstance(t, StructType):
+      if isinstance(expr, IdentifierNode) and (
+        expr.name in self._struct_decl_map
+        or expr.name in getattr(self, "known_structs", ())
+      ):
+        return "NONE", t
+      if t.is_prototype:
+        return "NONE", t
+      needs_dtor = getattr(self, "_type_needs_destructor", None)
+      if needs_dtor is not None and needs_dtor(t):
+        return "NONE", t
+      if not is_opt and t.name in self._flat_value_structs:
+        return "FLAT_STRUCT", t
+      return "DEEP", t
+    return "NONE", None
 
   def _get_flattened_struct_fields(
     self, node: StructDeclNode

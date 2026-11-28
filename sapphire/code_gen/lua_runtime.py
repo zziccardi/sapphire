@@ -577,6 +577,27 @@ do
     return copy
   end
 
+  _SP_RT._sapphire_copy_array_flat = function(arr)
+    arr = _unwrap_read(arr)
+    if arr == nil then return nil end
+    local len = #arr
+    local res = {}
+    for i = 1, len do
+      res[i] = arr[i]
+    end
+    return res
+  end
+
+  _SP_RT._sapphire_copy_map_flat = function(m)
+    m = _unwrap_read(m)
+    if m == nil then return nil end
+    local res = {}
+    for k, v in _pairs(m) do
+      res[k] = v
+    end
+    return res
+  end
+
   local function _sapphire_eq(a, b)
     if _type(a) == "table" then
       local mta = _getmetatable(a)
@@ -605,6 +626,28 @@ do
     return count_a == count_b
   end
   _SP_RT._sapphire_eq = _sapphire_eq
+
+  _SP_RT._sapphire_array_eq = function(a, b)
+    if _type(a) == "table" then
+      local mta = _getmetatable(a)
+      if mta and mta.__get_active then a = mta.__get_active(a) end
+    end
+    if _type(b) == "table" then
+      local mtb = _getmetatable(b)
+      if mtb and mtb.__get_active then b = mtb.__get_active(b) end
+    end
+    if a == b then return true end
+    if _type(a) ~= "table" or _type(b) ~= "table" then return false end
+    local len = #a
+    if len ~= #b then return false end
+    for i = 1, len do
+      local va, vb = a[i], b[i]
+      if va ~= vb and not _sapphire_eq(va, vb) then
+        return false
+      end
+    end
+    return true
+  end
 
   -- UTF-8 code-point utilities (Lua 5.1/LuaJIT safe)
   local function _is_ascii(s)
@@ -892,14 +935,21 @@ do
     if q >= 0 then return _math_floor(q) else return _math_ceil(q) end
   end
 
+  local _enum_rev_cache = _setmetatable({}, { __mode = "k" })
   _SP_RT._sapphire_enum_from = function(enum_tbl, val)
     if val == nil or enum_tbl == nil then return nil end
-    for _, value in pairs(enum_tbl) do
-      if value == val then
-        return value
+    local rev = _enum_rev_cache[enum_tbl]
+    if not rev then
+      rev = {}
+      for _, value in _pairs(enum_tbl) do
+        rev[value] = true
       end
+      _enum_rev_cache[enum_tbl] = rev
     end
-    if type(val) == "string" and enum_tbl[val] ~= nil then
+    if rev[val] then
+      return val
+    end
+    if _type(val) == "string" and enum_tbl[val] ~= nil then
       return enum_tbl[val]
     end
     return nil
@@ -927,6 +977,16 @@ do
     return _unwrap_opt(arr[idx_1])
   end
 
+  _SP_RT._sapphire_array_at_val = function(arr, index)
+    arr = _unwrap_read(arr)
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 < 1 or idx_1 > len then
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
+    end
+    return arr[idx_1]
+  end
+
   _SP_RT._sapphire_array_set = function(arr, index, val)
     arr = _unwrap_write(arr)
     local len = #arr
@@ -936,6 +996,53 @@ do
     end
     arr[idx_1] = _wrap_opt(val)
     return val
+  end
+
+  _SP_RT._sapphire_array_set_val = function(arr, index, val)
+    arr = _unwrap_write(arr)
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 < 1 or idx_1 > len then
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
+    end
+    arr[idx_1] = val
+    return val
+  end
+
+  _SP_RT._sapphire_array_ref = function(arr, index)
+    arr = _unwrap_write(arr)
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 < 1 or idx_1 > len then
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
+    end
+    return arr, idx_1
+  end
+
+  _SP_RT._sapphire_array_push_val = function(arr, element)
+    arr = _unwrap_write(arr)
+    arr[#arr + 1] = element
+    return element
+  end
+
+  _SP_RT._sapphire_array_get_val = function(arr, index)
+    arr = _unwrap_read(arr)
+    if arr == nil then return nil end
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 >= 1 and idx_1 <= len then
+      return arr[idx_1]
+    end
+    return nil
+  end
+
+  _SP_RT._sapphire_map_ref = function(m, k)
+    m = _unwrap_write(m)
+    local v = m[k]
+    if v == nil then
+      _error("KeyError: key '" .. _tostring(k) .. "' not found in map")
+    end
+    return m, _unwrap_opt(v)
   end
 
   _SP_RT._sapphire_array_map = function(arr, fn, in_place)

@@ -209,14 +209,19 @@ class LuaExprMixin(_LuaTranspilerBase):
       if isinstance(lt, (ArrayType, MapType)) or isinstance(
         rt, (ArrayType, MapType)
       ):
+        eq_fn = (
+          "_SP_RT._sapphire_array_eq"
+          if isinstance(lt, ArrayType) and isinstance(rt, ArrayType)
+          else "_SP_RT._sapphire_eq"
+        )
         if node.op == "!=":
-          self.emit("(not _SP_RT._sapphire_eq(")
+          self.emit(f"(not {eq_fn}(")
           self.visit(node.left)
           self.emit(", ")
           self.visit(node.right)
           self.emit("))")
         else:
-          self.emit("_SP_RT._sapphire_eq(")
+          self.emit(f"{eq_fn}(")
           self.visit(node.left)
           self.emit(", ")
           self.visit(node.right)
@@ -611,6 +616,7 @@ class LuaExprMixin(_LuaTranspilerBase):
       "_match_loop_depth": self._match_loop_depth,
       "_unwrap_writebacks": self._unwrap_writebacks,
       "_loop_stack": self._loop_stack,
+      "_plain_local_containers": self._plain_local_containers,
     }
     self.destructor_stack = []
     self.loop_destructor_depth = []
@@ -624,6 +630,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     self._match_loop_depth = 0
     self._unwrap_writebacks = {}
     self._loop_stack = []
+    self._plain_local_containers = set()
     return saved
 
   def _restore_nested_fn_state(self, saved: dict[str, Any]) -> None:
@@ -715,6 +722,8 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit("}")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
+    from sapphire.semantics.types import OptionalType
+
     recv_t = _unwrap_ref_opt_type(self.get_inferred_type(node.array))
     if isinstance(recv_t, MapType):
       self.emit("_SP_RT._sapphire_map_at(")
@@ -724,7 +733,13 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.emit(")")
       return
 
-    self.emit("_SP_RT._sapphire_array_at(")
+    at_fn = (
+      "_SP_RT._sapphire_array_at_val"
+      if isinstance(recv_t, ArrayType)
+      and not isinstance(recv_t.element_type, OptionalType)
+      else "_SP_RT._sapphire_array_at"
+    )
+    self.emit(f"{at_fn}(")
     self.visit(node.array)
     self.emit(", ")
     self.visit(node.index)

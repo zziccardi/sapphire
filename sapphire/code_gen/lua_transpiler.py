@@ -886,6 +886,25 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
     self._emit_struct_init_fields(node)
     self._emit_struct_init_constructor(node, methods)
     self._emit_struct_new_constructor(node, methods)
+    if raw_name in self._flat_value_structs:
+      flat_fields, _ = self._get_flattened_struct_fields(node)
+      entries = [
+        f"{self._mangle_name(f.name)} = v.{self._mangle_name(f.name)}"
+        for f in flat_fields
+      ]
+      tbl_lit = "{ " + ", ".join(entries) + " }" if entries else "{}"
+      self.emit(f"function {struct_name}._copy(v)")
+      self.indent()
+      self.newline()
+      self.emit(f"if v == {struct_name} then return v end")
+      self.newline()
+      self.emit("v = _SP_RT._unwrap_read(v)")
+      self.newline()
+      self.emit(f"return setmetatable({tbl_lit}, {struct_name})")
+      self.dedent()
+      self.newline()
+      self.emit("end")
+      self.newline()
 
     has_explicit_del = any(
       getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
@@ -1044,8 +1063,37 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.emit(f"function {m_struct}:{func_name}({sig_params})")
 
     self.indent()
-    self._emit_default_params(non_self_params, has_opt_default)
+    prev_plain = self._plain_local_containers
+    self._plain_local_containers = set()
+    try:
+      self._emit_default_params(non_self_params, has_opt_default)
+      self._emit_impl_member_body(node, func, struct_name, params)
+    finally:
+      self._plain_local_containers = prev_plain
+    self.dedent()
+    self.newline()
+    self.emit("end")
+    export_ann = next(
+      (a for a in getattr(func, "annotations", []) if a.name == "export"),
+      None,
+    )
+    if export_ann and export_ann.arg:
+      alias_name = self._mangle_name(export_ann.arg)
+      if alias_name != func_name:
+        self.newline()
+        self.emit(f"{m_struct}.{alias_name} = {m_struct}.{func_name}")
+    self.newline()
 
+  def _emit_impl_member_body(
+    self,
+    node: ImplMemberNode,
+    func: FuncDeclNode,
+    struct_name: str,
+    params: list[str],
+  ) -> None:
+    """Emits the body of a struct method (coroutine, __init__, __del__, or
+    regular method).
+    """
     if is_coroutine_func(func):
       self.newline()
       all_params = (["self"] if node.modifier != "static" else []) + params
@@ -1179,19 +1227,6 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         self._emit_struct_auto_teardown(struct_name, call_parents=True)
       else:
         self.visit(func.body)
-    self.dedent()
-    self.newline()
-    self.emit("end")
-    export_ann = next(
-      (a for a in getattr(func, "annotations", []) if a.name == "export"),
-      None,
-    )
-    if export_ann and export_ann.arg:
-      alias_name = self._mangle_name(export_ann.arg)
-      if alias_name != func_name:
-        self.newline()
-        self.emit(f"{m_struct}.{alias_name} = {m_struct}.{func_name}")
-    self.newline()
 
   def visit_TraitDeclNode(self, node: TraitDeclNode) -> None:
     default_members = [
@@ -1247,30 +1282,35 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
       self.emit(f"function {fn_name}({sig_params})")
 
     self.indent()
-    if self.dev_mode and export_ann and export_ann.arg == "love.update":
-      self.newline()
-      self.emit("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end")
+    prev_plain = self._plain_local_containers
+    self._plain_local_containers = set()
+    try:
+      if self.dev_mode and export_ann and export_ann.arg == "love.update":
+        self.newline()
+        self.emit("if _SP_DEV_WATCHER then _SP_DEV_WATCHER.check(dt) end")
 
-    self._emit_default_params(node.parameters, has_opt_default)
+      self._emit_default_params(node.parameters, has_opt_default)
 
-    if is_coroutine_func(node):
-      self.newline()
-      if params:
-        self.emit(
-          f"return _SP_RT._Coroutine.create(function({', '.join(params)})"
-        )
+      if is_coroutine_func(node):
+        self.newline()
+        if params:
+          self.emit(
+            f"return _SP_RT._Coroutine.create(function({', '.join(params)})"
+          )
+        else:
+          self.emit("return _SP_RT._Coroutine.create(function()")
+        self.indent()
+        self.visit(node.body)
+        self.dedent()
+        self.newline()
+        if params:
+          self.emit(f"end, {', '.join(params)})")
+        else:
+          self.emit("end)")
       else:
-        self.emit("return _SP_RT._Coroutine.create(function()")
-      self.indent()
-      self.visit(node.body)
-      self.dedent()
-      self.newline()
-      if params:
-        self.emit(f"end, {', '.join(params)})")
-      else:
-        self.emit("end)")
-    else:
-      self.visit(node.body)
+        self.visit(node.body)
+    finally:
+      self._plain_local_containers = prev_plain
     self.dedent()
     self.newline()
     self.emit("end")

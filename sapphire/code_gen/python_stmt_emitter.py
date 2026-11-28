@@ -108,15 +108,32 @@ class PythonStmtMixin(_PythonTranspilerBase):
     return False
 
   def _emit_value_expr(self, expr: Any) -> None:
-    """Emits *expr*, wrapping in `_sapphire_copy(...)` when value semantics
-    apply.
-    """
-    if self._needs_value_copy(expr):
+    """Emits *expr*, choosing the fastest type-directed value copy."""
+    kind, unwrapped_t = self._classify_value_copy(expr)
+    if kind == "NONE":
+      self.visit(expr)
+    elif kind in ("SHALLOW_ARRAY", "SHALLOW_MAP"):
+      if self._is_plain_local_var(expr):
+        self.visit(expr)
+        self.emit(".copy()")
+      else:
+        self.emit("_sapphire_unwrap_read(")
+        self.visit(expr)
+        self.emit(").copy()")
+    elif kind == "FLAT_STRUCT" and unwrapped_t is not None:
+      cls_name = self._mangle_dotted(unwrapped_t.name)
+      if self._is_plain_local_var(expr):
+        self.emit(f"{cls_name}._sp_copy(")
+        self.visit(expr)
+        self.emit(")")
+      else:
+        self.emit(f"{cls_name}._sp_copy(_sapphire_unwrap_read(")
+        self.visit(expr)
+        self.emit("))")
+    else:
       self.emit("_sapphire_copy(")
       self.visit(expr)
       self.emit(")")
-    else:
-      self.visit(expr)
 
   def _contains_liftable_expr(
     self, node: Any, include_moves: bool = False
@@ -952,6 +969,15 @@ class PythonStmtMixin(_PythonTranspilerBase):
         if self.destructor_stack:
           self.destructor_stack[-1].append(py_name)
           self._var_branch_depth[py_name] = self._branch_depth
+      if (
+        self._lexical_scopes
+        and node.exprs
+        and len(node.exprs) == len(node.names)
+        and self._is_fresh_plain_container_expr(node.exprs[idx])
+      ):
+        self._plain_local_containers.add(name)
+      else:
+        self._plain_local_containers.discard(name)
 
   def _is_int_div_assign(self, node: AssignmentNode) -> bool:
     """Returns True if `node` is an integer `/=` compound assignment."""
@@ -1008,6 +1034,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
         for idx, target in enumerate(node.targets):
           if isinstance(target, IdentifierNode):
             self.moved_vars.discard(self._resolve_var_name(target.name))
+            self._plain_local_containers.discard(target.name)
           if idx > 0:
             self.emit(", ")
           if (
@@ -1027,6 +1054,11 @@ class PythonStmtMixin(_PythonTranspilerBase):
       for idx, target in enumerate(node.targets):
         if isinstance(target, IdentifierNode):
           self.moved_vars.discard(self._resolve_var_name(target.name))
+          if not (
+            len(node.exprs) == len(node.targets)
+            and self._is_fresh_plain_container_expr(node.exprs[idx])
+          ):
+            self._plain_local_containers.discard(target.name)
         if idx > 0:
           self.emit(", ")
         if (
@@ -1114,6 +1146,49 @@ class PythonStmtMixin(_PythonTranspilerBase):
     self.visit(node.expr)
     self._emit_writebacks([node.target])
 
+  def _try_emit_plain_container_stmt(self, expr: ASTNode) -> bool:
+    """Inlines statement-position push/clear/insert on plain local vars."""
+    if not isinstance(expr, CallNode):
+      return False
+    callee = expr.callee
+    if not isinstance(callee, MemberAccessNode) or callee.is_optional:
+      return False
+    if not self._is_plain_local_var(callee.receiver):
+      return False
+    is_arr = getattr(callee, "is_array_method", False)
+    is_map = getattr(callee, "is_map_method", False)
+    if is_arr and callee.member == "push" and len(expr.arguments) == 1:
+      self.visit(callee.receiver)
+      self.emit(".append(")
+      self.visit(expr.arguments[0].expr)
+      self.emit(")")
+      return True
+    if (is_arr or is_map) and callee.member == "clear" and not expr.arguments:
+      self.visit(callee.receiver)
+      self.emit(".clear()")
+      return True
+    if (
+      is_map
+      and callee.member == "insert"
+      and len(expr.arguments) == 2
+      and not getattr(expr, "_requires_eval_order_temps", False)
+    ):
+      key_expr = None
+      val_expr = None
+      for idx, arg in enumerate(expr.arguments):
+        if arg.name == "key" or (idx == 0 and not arg.name):
+          key_expr = arg.expr
+        elif arg.name == "value" or (idx == 1 and not arg.name):
+          val_expr = arg.expr
+      if key_expr is not None and val_expr is not None:
+        self.visit(callee.receiver)
+        self.emit("[")
+        self.visit(key_expr)
+        self.emit("] = ")
+        self.visit(val_expr)
+        return True
+    return False
+
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
       self._emit_match_statement(node.expr, target_var=None)
@@ -1121,7 +1196,8 @@ class PythonStmtMixin(_PythonTranspilerBase):
     self._lift_match_expressions(node.expr)
     self.newline()
     self.record_line(getattr(node, "start_line", None))
-    self.visit(node.expr)
+    if not self._try_emit_plain_container_stmt(node.expr):
+      self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     self._lift_match_expressions(node.expressions)

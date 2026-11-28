@@ -433,6 +433,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     prev_id_map = self._identifier_map
     prev_func_globals = self._current_func_globals
     prev_loop_vars = self._loop_vars_stack
+    prev_plain = self._plain_local_containers
     assigned_globals = self._find_assigned_globals(
       func.body, local_params=set(raw_params)
     )
@@ -440,6 +441,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._identifier_map = {}
     self._current_func_globals = set(assigned_globals)
     self._loop_vars_stack = []
+    self._plain_local_containers = set()
     try:
       self.emit(f"def __init__({', '.join(params)}):")
       self.indent()
@@ -499,6 +501,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self._identifier_map = prev_id_map
       self._current_func_globals = prev_func_globals
       self._loop_vars_stack = prev_loop_vars
+      self._plain_local_containers = prev_plain
 
   def visit_StructDeclNode(self, node: StructDeclNode) -> None:
     from sapphire.semantics.types import StructType
@@ -789,6 +792,28 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         self.dedent()
         self.dedent()
 
+    if node.name in self._flat_value_structs:
+      self.newline()
+      self.emit("@staticmethod")
+      self.newline()
+      self.emit("def _sp_copy(v):")
+      self.indent()
+      self.newline()
+      self.emit(f"if v is {cls_name}:")
+      self.indent()
+      self.newline()
+      self.emit("return v")
+      self.dedent()
+      self.newline()
+      self.emit(f"c = {cls_name}.__new__({cls_name})")
+      for f in flat_fields:
+        m_f = self._mangle_name(f.name)
+        self.newline()
+        self.emit(f"c.{m_f} = v.{m_f}")
+      self.newline()
+      self.emit("return c")
+      self.dedent()
+
     has_explicit_del = any(
       getattr(m, "func_decl", None) and m.func_decl.name == "__del__"
       for m in methods
@@ -942,6 +967,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     prev_id_map = self._identifier_map
     prev_func_globals = self._current_func_globals
     prev_loop_vars = self._loop_vars_stack
+    prev_plain = self._plain_local_containers
     assigned_globals = self._find_assigned_globals(
       func.body, local_params=set(raw_params)
     )
@@ -949,6 +975,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._identifier_map = {}
     self._current_func_globals = set(assigned_globals)
     self._loop_vars_stack = []
+    self._plain_local_containers = set()
     try:
       if is_coroutine_func(func):
         self.emit(f"def {func_name}({', '.join(params)}):")
@@ -1061,6 +1088,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self._identifier_map = prev_id_map
       self._current_func_globals = prev_func_globals
       self._loop_vars_stack = prev_loop_vars
+      self._plain_local_containers = prev_plain
 
     export_ann = next(
       (a for a in getattr(func, "annotations", []) if a.name == "export"),
@@ -1233,6 +1261,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     prev_id_map = self._identifier_map
     prev_func_globals = self._current_func_globals
     prev_loop_vars = self._loop_vars_stack
+    prev_plain = self._plain_local_containers
     assigned_globals = self._find_assigned_globals(
       node.body, local_params=set(raw_params)
     )
@@ -1240,6 +1269,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._identifier_map = {}
     self._current_func_globals = set(assigned_globals)
     self._loop_vars_stack = []
+    self._plain_local_containers = set()
     try:
       if is_coroutine_func(node):
         self.emit(f"def {fn_name}({', '.join(params)}):")
@@ -1278,6 +1308,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self._identifier_map = prev_id_map
       self._current_func_globals = prev_func_globals
       self._loop_vars_stack = prev_loop_vars
+      self._plain_local_containers = prev_plain
 
     export_ann = next(
       (a for a in getattr(node, "annotations", []) if a.name == "export"), None
