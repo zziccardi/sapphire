@@ -920,6 +920,10 @@ do
     if n >= 0 then return _math_floor(n) else return _math_ceil(n) end
   end
 
+  _SP_RT._sapphire_trunc = function(n)
+    if n >= 0 then return _math_floor(n) else return _math_ceil(n) end
+  end
+
   _SP_RT._sapphire_cast_float = function(v)
     if _type(v) == "boolean" then return v and 1.0 or 0.0 end
     return _tonumber(v) or 0.0

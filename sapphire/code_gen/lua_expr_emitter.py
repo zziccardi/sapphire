@@ -123,6 +123,17 @@ class LuaExprMixin(_LuaTranspilerBase):
     else:
       self.emit(str(node.value))
 
+  def _is_non_opt_string_expr(self, expr: ASTNode) -> bool:
+    """Returns True if *expr* is statically a non-optional String."""
+    from sapphire.semantics.types import PrimitiveType
+
+    if isinstance(expr, InterpolatedStringNode):
+      return True
+    if isinstance(expr, LiteralNode) and expr.lit_type == "string":
+      return True
+    t = self.get_inferred_type(expr)
+    return isinstance(t, PrimitiveType) and t.name == "String"
+
   def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> None:
     if not node.parts:
       self.emit('""')
@@ -138,6 +149,8 @@ class LuaExprMixin(_LuaTranspilerBase):
           .replace("\n", "\\n")
         )
         self.emit(f'"{escaped_val}"')
+      elif self._is_non_opt_string_expr(part):
+        self.visit(part)
       else:
         self.emit("tostring(")
         self.visit(part)
@@ -156,6 +169,8 @@ class LuaExprMixin(_LuaTranspilerBase):
           .replace("\n", "\\n")
         )
         self.emit(f'"{escaped_val}"')
+      elif self._is_non_opt_string_expr(part):
+        self.visit(part)
       else:
         self.emit("tostring(")
         self.visit(part)
@@ -232,17 +247,16 @@ class LuaExprMixin(_LuaTranspilerBase):
     op = op_map.get(node.op, node.op)
 
     if op == "+":
-      if (
-        getattr(node, "is_string_concat", False)
-        or (
-          isinstance(node.left, LiteralNode) and node.left.lit_type == "string"
-        )
-        or (
-          isinstance(node.right, LiteralNode)
-          and node.right.lit_type == "string"
-        )
-      ):
-        op = ".."
+      if self._is_string_concat_binop(node):
+        parts: list[ASTNode] = []
+        self._collect_string_concat_parts(node, parts)
+        self.emit("(")
+        for idx, part in enumerate(parts):
+          if idx > 0:
+            self.emit(" .. ")
+          self._visit_concat_operand(part, is_string_concat=True)
+        self.emit(")")
+        return
 
     self.emit("(")
     self._visit_concat_operand(node.left, is_string_concat=(op == ".."))
@@ -250,13 +264,35 @@ class LuaExprMixin(_LuaTranspilerBase):
     self._visit_concat_operand(node.right, is_string_concat=(op == ".."))
     self.emit(")")
 
+  def _is_string_concat_binop(self, node: BinaryOpNode) -> bool:
+    """Returns True if *node* is a string concatenation `+` BinaryOpNode."""
+    return node.op == "+" and (
+      getattr(node, "is_string_concat", False)
+      or (isinstance(node.left, LiteralNode) and node.left.lit_type == "string")
+      or (
+        isinstance(node.right, LiteralNode) and node.right.lit_type == "string"
+      )
+    )
+
+  def _collect_string_concat_parts(
+    self, expr: ASTNode, out: list[ASTNode]
+  ) -> None:
+    """Flattens associative string `+` chains into a single operand list."""
+    if isinstance(expr, BinaryOpNode) and self._is_string_concat_binop(expr):
+      self._collect_string_concat_parts(expr.left, out)
+      self._collect_string_concat_parts(expr.right, out)
+    else:
+      out.append(expr)
+
   def _visit_concat_operand(
     self, expr: ASTNode, is_string_concat: bool
   ) -> None:
     if not is_string_concat:
       self.visit(expr)
       return
-    if isinstance(expr, LiteralNode) and expr.lit_type in (
+    if self._is_non_opt_string_expr(expr):
+      self.visit(expr)
+    elif isinstance(expr, LiteralNode) and expr.lit_type in (
       "string",
       "int",
       "float",
@@ -300,6 +336,8 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit(")")
 
   def visit_CastExprNode(self, node: CastExprNode) -> None:
+    from sapphire.semantics.types import OptionalType, PrimitiveType
+
     lifted = getattr(self, "_lifted_short_circuits", None)
     if lifted and id(node) in lifted:
       self.emit(lifted[id(node)])
@@ -311,6 +349,38 @@ class LuaExprMixin(_LuaTranspilerBase):
       is_opt_target = False
       inner_type = node.target_type
     target = getattr(inner_type, "name", str(inner_type))
+    src_t = self.get_inferred_type(node.expr)
+    if not is_opt_target and isinstance(src_t, PrimitiveType):
+      if src_t.name == target or (src_t.name == "int" and target == "float"):
+        self.visit(node.expr)
+        return
+      if src_t.name == "float" and target == "int":
+        self.emit("_SP_RT._sapphire_trunc(")
+        self.visit(node.expr)
+        self.emit(")")
+        return
+    if (
+      is_opt_target
+      and isinstance(src_t, OptionalType)
+      and isinstance(src_t.base_type, PrimitiveType)
+      and (
+        src_t.base_type.name == target
+        or (src_t.base_type.name == "int" and target == "float")
+      )
+    ):
+      self.visit(node.expr)
+      return
+    if (
+      not is_opt_target
+      and target == "bool"
+      and isinstance(node.expr, (IdentifierNode, LiteralNode))
+    ):
+      expr_code = self.capture_expr(node.expr)
+      self.emit(
+        f"({expr_code} ~= false and {expr_code} ~= nil and {expr_code} ~= 0)"
+      )
+      return
+
     cast_fn_map = {
       "float": "_SP_RT._sapphire_cast_float",
       "int": "_SP_RT._sapphire_cast_int",
@@ -322,6 +392,13 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.visit(node.expr)
       return
     if is_opt_target:
+      if (
+        target == "int"
+        and isinstance(src_t, OptionalType)
+        and isinstance(src_t.base_type, PrimitiveType)
+        and src_t.base_type.name == "float"
+      ):
+        cast_fn = "_SP_RT._sapphire_trunc"
       c_tmp = self._next_temp_name("_c")
       self.emit(
         f"((function({c_tmp}) if {c_tmp} ~= nil then "
@@ -641,6 +718,10 @@ class LuaExprMixin(_LuaTranspilerBase):
       setattr(self, k, v)
 
   def visit_CloneNode(self, node: CloneNode) -> None:
+    lifted = getattr(self, "_lifted_short_circuits", None)
+    if lifted and id(node) in lifted:
+      self.emit(lifted[id(node)])
+      return
     self.emit("_SP_RT._clone_helper(")
     self.visit(node.expr)
 

@@ -490,9 +490,15 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         f.field_type
       )
       if default_expr:
-        self.newline()
-        default_code = self.capture_expr(default_expr)
-        self.emit(f"self.{self._mangle_name(f.name)} = {default_code}")
+        if self._contains_liftable_expr(default_expr, include_moves=True):
+          self._lift_match_expressions(default_expr)
+          self.newline()
+          self.emit(f"self.{self._mangle_name(f.name)} = ")
+          self.visit(default_expr)
+        else:
+          self.newline()
+          default_code = self.capture_expr(default_expr)
+          self.emit(f"self.{self._mangle_name(f.name)} = {default_code}")
     self.dedent()
     self.newline()
     self.emit("end")
@@ -1217,13 +1223,60 @@ class LuaTranspiler(LuaStmtMixin, LuaExprMixin, BaseTranspiler):
         )
       )
       if has_auto_teardown:
-        self.newline()
-        self.emit("(function()")
-        self.indent()
-        self.visit(func.body)
-        self.dedent()
-        self.newline()
-        self.emit("end)()")
+        from sapphire.parser.ast import (
+          ForNode,
+          LambdaNode,
+          ReturnNode,
+          WhileNode,
+        )
+
+        def _scan_returns(n: Any, in_loop: bool = False) -> tuple[bool, bool]:
+          if isinstance(n, ReturnNode):
+            return True, in_loop
+          if isinstance(n, (LambdaNode, FuncDeclNode)):
+            return False, False
+          next_loop = in_loop or isinstance(n, (WhileNode, ForNode))
+          any_ret = False
+          in_l_ret = False
+          for k, v in getattr(n, "__dict__", {}).items():
+            if k.startswith("_"):
+              continue
+            if isinstance(v, ASTNode):
+              r, lr = _scan_returns(v, next_loop)
+              any_ret = any_ret or r
+              in_l_ret = in_l_ret or lr
+            elif isinstance(v, list):
+              for item in v:
+                if isinstance(item, ASTNode):
+                  r, lr = _scan_returns(item, next_loop)
+                  any_ret = any_ret or r
+                  in_l_ret = in_l_ret or lr
+          return any_ret, in_l_ret
+
+        has_ret, has_loop_ret = _scan_returns(func.body)
+        if not has_ret:
+          self.visit(func.body)
+        elif not has_loop_ret:
+          self.newline()
+          self.emit("repeat")
+          self.indent()
+          prev_in_del = getattr(self, "_in_del_repeat", False)
+          self._in_del_repeat = True
+          try:
+            self.visit(func.body)
+          finally:
+            self._in_del_repeat = prev_in_del
+          self.dedent()
+          self.newline()
+          self.emit("until true")
+        else:
+          self.newline()
+          self.emit("(function()")
+          self.indent()
+          self.visit(func.body)
+          self.dedent()
+          self.newline()
+          self.emit("end)()")
         self._emit_struct_auto_teardown(struct_name, call_parents=True)
       else:
         self.visit(func.body)

@@ -515,6 +515,28 @@ class LuaStmtMixin(_LuaTranspilerBase):
     if isinstance(node, CastExprNode):
       cast_fn = _get_optional_cast_fn(node)
       if cast_fn is not None:
+        from sapphire.semantics.types import OptionalType, PrimitiveType
+
+        src_t = self.get_inferred_type(node.expr)
+        inner = node.target_type.base_type
+        target = inner.name if hasattr(inner, "name") else str(inner)
+        if (
+          isinstance(src_t, OptionalType)
+          and isinstance(src_t.base_type, PrimitiveType)
+          and (
+            src_t.base_type.name == target
+            or (src_t.base_type.name == "int" and target == "float")
+          )
+        ):
+          self._lift_match_expressions(node.expr)
+          return
+        if (
+          target == "int"
+          and isinstance(src_t, OptionalType)
+          and isinstance(src_t.base_type, PrimitiveType)
+          and src_t.base_type.name == "float"
+        ):
+          cast_fn = "_SP_RT._sapphire_trunc"
         if id(node) not in self._lifted_short_circuits:
           self._lift_match_expressions(node.expr)
           res_var = self._next_temp_name("_sc")
@@ -539,6 +561,37 @@ class LuaStmtMixin(_LuaTranspilerBase):
       self._lift_match_expressions(node.expr)
       if node.arena_expr:
         self._lift_match_expressions(node.arena_expr)
+      if (
+        node.initializer_block
+        and id(node) not in self._lifted_short_circuits
+      ):
+        clone_var = self._next_temp_name("_clone")
+        self.newline()
+        self.emit(f"local {clone_var} = _SP_RT._clone_helper(")
+        self.visit(node.expr)
+        if node.arena_expr:
+          self.emit(", nil, ")
+          self.visit(node.arena_expr)
+        self.emit(")")
+        prev_id_map = self._identifier_map.copy()
+        self._identifier_map["self"] = clone_var
+        has_var_decl = any(
+          isinstance(s, VarDeclNode) for s in node.initializer_block
+        )
+        try:
+          if has_var_decl:
+            self.newline()
+            self.emit("do")
+            self.indent()
+            self.visit(BlockNode(node.initializer_block))
+            self.dedent()
+            self.newline()
+            self.emit("end")
+          else:
+            self.visit(BlockNode(node.initializer_block))
+        finally:
+          self._identifier_map = prev_id_map
+        self._lifted_short_circuits[id(node)] = clone_var
       return
 
     if isinstance(node, MatchExprNode):
@@ -1066,6 +1119,8 @@ class LuaStmtMixin(_LuaTranspilerBase):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    elif getattr(self, "_in_del_repeat", False):
+      self.emit("break")
     else:
       self.emit("return")
     self._pending_null_vars.clear()

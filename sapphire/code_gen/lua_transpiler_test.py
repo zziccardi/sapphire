@@ -1270,9 +1270,9 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua = self._transpile(code)
-    self.assertIn("_SP_RT._sapphire_cast_float(10)", lua)
-    self.assertIn("_SP_RT._sapphire_cast_int(3.14)", lua)
-    self.assertIn("_SP_RT._sapphire_cast_bool(1)", lua)
+    self.assertIn("local f = 10", lua)
+    self.assertIn("_SP_RT._sapphire_trunc(3.14)", lua)
+    self.assertIn("(1 ~= false and 1 ~= nil and 1 ~= 0)", lua)
     self.assertIn("tostring(10)", lua)
     self.assertIn("tostring(42)", lua)
     self.assertIn("tostring(true)", lua)

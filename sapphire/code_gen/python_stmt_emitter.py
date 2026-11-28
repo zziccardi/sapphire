@@ -755,8 +755,27 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self._lift_match_expressions(node.expr)
       if node.arena_expr:
         self._lift_match_expressions(node.arena_expr)
-      if node.initializer_block and id(node) not in self._lifted_clones:
-        self._lifted_clones[id(node)] = self._emit_lifted_clone_init(node)
+      if (
+        node.initializer_block
+        and id(node) not in self._lifted_short_circuits
+      ):
+        clone_var = self._next_temp_name("_clone")
+        self.newline()
+        self.emit(f"{clone_var} = _clone_helper(")
+        self.visit(node.expr)
+        if node.arena_expr:
+          self.emit(", None, arena=")
+          self.visit(node.arena_expr)
+        self.emit(")")
+        prev_id_map = self._identifier_map.copy()
+        self._lexical_scopes.append({"self"})
+        self._identifier_map["self"] = clone_var
+        try:
+          self._visit_block(BlockNode(node.initializer_block))
+        finally:
+          self._lexical_scopes.pop()
+          self._identifier_map = prev_id_map
+        self._lifted_short_circuits[id(node)] = clone_var
       return
 
     if isinstance(node, MatchExprNode):
@@ -1189,9 +1208,44 @@ class PythonStmtMixin(_PythonTranspilerBase):
         return True
     return False
 
+  def _try_emit_lazy_assert_stmt(self, expr: ASTNode) -> bool:
+    """Emits statement-position `assert(cond, msg)` with lazy `msg` eval."""
+    if not (
+      isinstance(expr, CallNode)
+      and isinstance(expr.callee, IdentifierNode)
+      and expr.callee.name == "assert"
+      and not getattr(expr, "_requires_eval_order_temps", False)
+    ):
+      return False
+    from sapphire.code_gen.intrinsics import _resolve_assert_args
+
+    cond_expr, msg_expr = _resolve_assert_args(expr)
+    if cond_expr is None:
+      return False
+    self._lift_match_expressions(cond_expr)
+    self.newline()
+    self.record_line(getattr(expr, "start_line", None))
+    self.emit("if not (")
+    self.visit(cond_expr)
+    self.emit("):")
+    self.indent()
+    if msg_expr is not None:
+      self._lift_match_expressions(msg_expr)
+      self.newline()
+      self.emit("raise AssertionError(")
+      self.visit(msg_expr)
+      self.emit(")")
+    else:
+      self.newline()
+      self.emit('raise AssertionError("assertion failed")')
+    self.dedent()
+    return True
+
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
       self._emit_match_statement(node.expr, target_var=None)
+      return
+    if self._try_emit_lazy_assert_stmt(node.expr):
       return
     self._lift_match_expressions(node.expr)
     self.newline()

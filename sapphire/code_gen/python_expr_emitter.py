@@ -49,12 +49,41 @@ class PythonExprMixin(_PythonTranspilerBase):
     else:
       self.emit(str(node.value))
 
+  def _needs_string_from(self, expr: object) -> bool:
+    """Returns True if *expr* needs `_sapphire_string_from` inside f-strings."""
+    from sapphire.semantics.types import PrimitiveType
+
+    if isinstance(expr, LiteralNode) and expr.lit_type in (
+      "string",
+      "int",
+      "float",
+    ):
+      return False
+    if isinstance(expr, InterpolatedStringNode):
+      return False
+    t = self.get_inferred_type(expr)
+    return not (
+      isinstance(t, PrimitiveType) and t.name in ("String", "int", "float")
+    )
+
+  def _is_non_opt_string_expr(self, expr: object) -> bool:
+    """Returns True if *expr* is statically a non-optional String."""
+    from sapphire.semantics.types import PrimitiveType
+
+    if isinstance(expr, InterpolatedStringNode):
+      return True
+    if isinstance(expr, LiteralNode) and expr.lit_type == "string":
+      return True
+    t = self.get_inferred_type(expr)
+    return isinstance(t, PrimitiveType) and t.name == "String"
+
   def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> None:
     if not node.parts:
       self.emit('""')
       return
 
-    def _emit_part_str(part):
+    if len(node.parts) == 1:
+      part = node.parts[0]
       if isinstance(part, LiteralNode) and part.lit_type == "string":
         escaped_val = (
           part.value.replace("\\", "\\\\")
@@ -63,21 +92,69 @@ class PythonExprMixin(_PythonTranspilerBase):
           .replace("\n", "\\n")
         )
         self.emit(f'"{escaped_val}"')
+      elif self._is_non_opt_string_expr(part):
+        self.visit(part)
+      elif not self._needs_string_from(part):
+        self.emit("str(")
+        self.visit(part)
+        self.emit(")")
       else:
         self.emit("_sapphire_string_from(")
         self.visit(part)
         self.emit(")")
-
-    if len(node.parts) == 1:
-      _emit_part_str(node.parts[0])
       return
 
-    self.emit("(")
+    # Emit native Python 3.12+ f-string (PEP 701 supports nested quotes).
+    f_chunks: list[str] = []
+    can_use_fstring = True
+    for part in node.parts:
+      if isinstance(part, LiteralNode) and part.lit_type == "string":
+        escaped_val = (
+          part.value.replace("\\", "\\\\")
+          .replace('"', '\\"')
+          .replace("{", "{{")
+          .replace("}", "}}")
+          .replace("\r", "\\r")
+          .replace("\n", "\\n")
+        )
+        f_chunks.append(escaped_val)
+      else:
+        expr_code = self.capture_expr(part)
+        if "\n" in expr_code or "\r" in expr_code:
+          can_use_fstring = False
+          break
+        if self._needs_string_from(part):
+          f_chunks.append(f"{{_sapphire_string_from({expr_code})}}")
+        else:
+          f_chunks.append(f"{{{expr_code}}}")
+
+    if can_use_fstring:
+      self.emit(f'f"{"".join(f_chunks)}"')
+      return
+
+    self.emit('"".join([')
     for idx, part in enumerate(node.parts):
       if idx > 0:
-        self.emit(" + ")
-      _emit_part_str(part)
-    self.emit(")")
+        self.emit(", ")
+      if isinstance(part, LiteralNode) and part.lit_type == "string":
+        escaped_val = (
+          part.value.replace("\\", "\\\\")
+          .replace('"', '\\"')
+          .replace("\r", "\\r")
+          .replace("\n", "\\n")
+        )
+        self.emit(f'"{escaped_val}"')
+      elif self._is_non_opt_string_expr(part):
+        self.visit(part)
+      elif not self._needs_string_from(part):
+        self.emit("str(")
+        self.visit(part)
+        self.emit(")")
+      else:
+        self.emit("_sapphire_string_from(")
+        self.visit(part)
+        self.emit(")")
+    self.emit("])")
 
   def visit_IdentifierNode(self, node: IdentifierNode) -> None:
     self.emit(self._resolve_var_name(node.name))
@@ -88,11 +165,21 @@ class PythonExprMixin(_PythonTranspilerBase):
       return
 
     if node.op == "+" and getattr(node, "is_string_concat", False):
-      self.emit("(_sapphire_string_from(")
-      self.visit(node.left)
-      self.emit(") + _sapphire_string_from(")
-      self.visit(node.right)
-      self.emit("))")
+      self.emit("(")
+      if self._is_non_opt_string_expr(node.left):
+        self.visit(node.left)
+      else:
+        self.emit("_sapphire_string_from(")
+        self.visit(node.left)
+        self.emit(")")
+      self.emit(" + ")
+      if self._is_non_opt_string_expr(node.right):
+        self.visit(node.right)
+      else:
+        self.emit("_sapphire_string_from(")
+        self.visit(node.right)
+        self.emit(")")
+      self.emit(")")
       return
 
     if node.op == "/":
@@ -115,12 +202,18 @@ class PythonExprMixin(_PythonTranspilerBase):
         return
 
     if node.op == "??":
-      v_tmp = self._next_temp_name("_v")
-      self.emit(f"((lambda {v_tmp}: {v_tmp} if {v_tmp} is not None else ")
-      self.visit(node.right)
-      self.emit(")(")
-      self.visit(node.left)
-      self.emit("))")
+      if isinstance(node.left, IdentifierNode):
+        lhs_name = self._resolve_var_name(node.left.name)
+        self.emit(f"({lhs_name} if {lhs_name} is not None else ")
+        self.visit(node.right)
+        self.emit(")")
+      else:
+        v_tmp = self._next_temp_name("_v")
+        self.emit(f"({v_tmp} if ({v_tmp} := ")
+        self.visit(node.left)
+        self.emit(") is not None else ")
+        self.visit(node.right)
+        self.emit(")")
       return
 
     op_map = {"&&": "and", "||": "or"}
@@ -151,6 +244,8 @@ class PythonExprMixin(_PythonTranspilerBase):
     self.emit(")")
 
   def visit_CastExprNode(self, node: CastExprNode) -> None:
+    from sapphire.semantics.types import OptionalType, PrimitiveType
+
     if isinstance(node.target_type, OptionalTypeNode):
       is_opt = True
       inner_type = node.target_type.base_type
@@ -158,6 +253,23 @@ class PythonExprMixin(_PythonTranspilerBase):
       is_opt = False
       inner_type = node.target_type
     target = getattr(inner_type, "name", str(inner_type))
+    src_t = self.get_inferred_type(node.expr)
+    if (
+      not is_opt
+      and isinstance(src_t, PrimitiveType)
+      and src_t.name == target
+    ):
+      self.visit(node.expr)
+      return
+    if (
+      is_opt
+      and isinstance(src_t, OptionalType)
+      and isinstance(src_t.base_type, PrimitiveType)
+      and src_t.base_type.name == target
+    ):
+      self.visit(node.expr)
+      return
+
     conv_map = {
       "float": "float",
       "int": "int",
@@ -167,13 +279,16 @@ class PythonExprMixin(_PythonTranspilerBase):
     conv = conv_map.get(target)
     if conv:
       if is_opt:
-        c_tmp = self._next_temp_name("_c")
-        self.emit(
-          f"((lambda {c_tmp}: {conv}({c_tmp}) if {c_tmp} is not None else "
-          "None)("
-        )
-        self.visit(node.expr)
-        self.emit("))")
+        if isinstance(node.expr, IdentifierNode):
+          var_name = self._resolve_var_name(node.expr.name)
+          self.emit(
+            f"({conv}({var_name}) if {var_name} is not None else None)"
+          )
+        else:
+          c_tmp = self._next_temp_name("_c")
+          self.emit(f"({conv}({c_tmp}) if ({c_tmp} := ")
+          self.visit(node.expr)
+          self.emit(") is not None else None)")
       else:
         self.emit(f"{conv}(")
         self.visit(node.expr)
@@ -194,19 +309,28 @@ class PythonExprMixin(_PythonTranspilerBase):
       member_name = getattr(
         node.callee, "target_name", None
       ) or self._mangle_name(node.callee.member)
-      r_tmp = self._next_temp_name("_r")
-      self.emit(f"((lambda {r_tmp}: {r_tmp}.")
-      self.emit(member_name)
-      self.emit("(")
-      for idx, arg in enumerate(node.arguments):
-        if idx > 0:
-          self.emit(", ")
-        if arg.name:
-          self.emit(f"{self._mangle_name(arg.name)}=")
-        self.visit(arg.expr)
-      self.emit(f") if {r_tmp} is not None else None)(")
-      self.visit(node.callee.receiver)
-      self.emit("))")
+      if isinstance(node.callee.receiver, IdentifierNode):
+        r_name = self._resolve_var_name(node.callee.receiver.name)
+        self.emit(f"({r_name}.{member_name}(")
+        for idx, arg in enumerate(node.arguments):
+          if idx > 0:
+            self.emit(", ")
+          if arg.name:
+            self.emit(f"{self._mangle_name(arg.name)}=")
+          self.visit(arg.expr)
+        self.emit(f") if {r_name} is not None else None)")
+      else:
+        r_tmp = self._next_temp_name("_r")
+        self.emit(f"({r_tmp}.{member_name}(")
+        for idx, arg in enumerate(node.arguments):
+          if idx > 0:
+            self.emit(", ")
+          if arg.name:
+            self.emit(f"{self._mangle_name(arg.name)}=")
+          self.visit(arg.expr)
+        self.emit(f") if ({r_tmp} := ")
+        self.visit(node.callee.receiver)
+        self.emit(") is not None else None)")
       return
 
     if not self._is_struct_constructor_call(node):
@@ -239,17 +363,22 @@ class PythonExprMixin(_PythonTranspilerBase):
       node.member
     )
     if node.is_optional:
-      r_tmp = self._next_temp_name("_r")
-      self.emit(f"((lambda {r_tmp}: {r_tmp}.")
-      self.emit(member_name)
-      self.emit(f" if {r_tmp} is not None else None)(")
-      self.visit(node.receiver)
-      self.emit("))")
+      if isinstance(node.receiver, IdentifierNode):
+        r_name = self._resolve_var_name(node.receiver.name)
+        self.emit(f"({r_name}.{member_name} if {r_name} is not None else None)")
+      else:
+        r_tmp = self._next_temp_name("_r")
+        self.emit(f"({r_tmp}.{member_name} if ({r_tmp} := ")
+        self.visit(node.receiver)
+        self.emit(") is not None else None)")
     else:
       self.visit(node.receiver)
       self.emit(f".{member_name}")
 
   def visit_CloneNode(self, node: CloneNode) -> None:
+    if id(node) in self._lifted_short_circuits:
+      self.emit(self._lifted_short_circuits[id(node)])
+      return
     self.emit("_clone_helper(")
     self.visit(node.expr)
 
