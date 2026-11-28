@@ -359,13 +359,13 @@ class LuaExprMixin(_LuaTranspilerBase):
         self.visit(node.expr)
         self.emit(")")
         return
+    src_base = src_t.base_type if isinstance(src_t, OptionalType) else src_t
     if (
       is_opt_target
-      and isinstance(src_t, OptionalType)
-      and isinstance(src_t.base_type, PrimitiveType)
+      and isinstance(src_base, PrimitiveType)
       and (
-        src_t.base_type.name == target
-        or (src_t.base_type.name == "int" and target == "float")
+        src_base.name == target
+        or (src_base.name == "int" and target == "float")
       )
     ):
       self.visit(node.expr)
@@ -411,55 +411,77 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.visit(node.expr)
     self.emit(")")
 
-  def _is_optional_param_slot(self, node: CallNode, slot_idx: int) -> bool:
-    """Returns True if *slot_idx* on *node*'s callee is an OptionalType
-    parameter.
-    """
+  def _get_callee_opt_default_slots(self, node: CallNode | None) -> set[int]:
+    """Returns parameter indices that are optional with a non-`none` default."""
     from sapphire.semantics.types import FunctionType, OptionalType, StructType
 
+    if node is None:
+      return set()
     callee_t = self.get_inferred_type(node.callee)
-    if (
-      isinstance(callee_t, FunctionType)
-      and slot_idx < len(callee_t.param_types)
-      and isinstance(callee_t.param_types[slot_idx], OptionalType)
-    ):
-      return True
-    if isinstance(callee_t, StructType):
+    p_types: list[Any] = []
+    p_defaults: list[Any] = []
+    if isinstance(callee_t, FunctionType):
+      if getattr(callee_t, "extern_name", None):
+        return set()
+      p_types = callee_t.param_types
+      p_defaults = getattr(callee_t, "param_defaults", None) or []
+    elif isinstance(callee_t, StructType):
       init_m = callee_t.methods.get("__init__")
       if init_m is not None:
         sig = init_m.method_type
-        p_types = (
-          sig.param_types[1:]
-          if (sig.has_self and sig.param_names and sig.param_names[0] == "self")
-          else sig.param_types
-        )
-        if slot_idx < len(p_types) and isinstance(
-          p_types[slot_idx], OptionalType
-        ):
-          return True
-    return False
+        if getattr(sig, "extern_name", None):
+          return set()
+        if sig.has_self and sig.param_names and sig.param_names[0] == "self":
+          p_types = sig.param_types[1:]
+          p_defaults = (getattr(sig, "param_defaults", None) or [])[1:]
+        else:
+          p_types = sig.param_types
+          p_defaults = getattr(sig, "param_defaults", None) or []
+    slots: set[int] = set()
+    for idx, p_t in enumerate(p_types):
+      if not isinstance(p_t, OptionalType):
+        continue
+      d_expr = p_defaults[idx] if idx < len(p_defaults) else None
+      if d_expr is None:
+        continue
+      if isinstance(d_expr, LiteralNode) and d_expr.lit_type == "none":
+        continue
+      slots.add(idx)
+    return slots
+
+  def _is_optional_param_slot(self, node: CallNode, slot_idx: int) -> bool:
+    """Returns True if *slot_idx* on *node*'s callee is an optional non-none
+    default parameter.
+    """
+    return slot_idx in self._get_callee_opt_default_slots(node)
 
   def _emit_lua_call_args_list(
     self, exprs: list[ASTNode], node: CallNode | None = None
   ) -> None:
     """Emits comma-separated Lua argument expressions, preserving omitted
-    optional
-    slots.
+    optional non-none default slots (including trailing omitted slots).
     """
     omitted_slots = (
       getattr(node, "_omitted_arg_slots", set()) if node else set()
     )
-    for idx, expr in enumerate(exprs):
+    opt_def_slots = self._get_callee_opt_default_slots(node)
+    total_slots = len(exprs)
+    if opt_def_slots:
+      max_opt = max(opt_def_slots)
+      if max_opt + 1 > total_slots:
+        total_slots = max_opt + 1
+    for idx in range(total_slots):
       if idx > 0:
         self.emit(", ")
-      if (
-        idx in omitted_slots
-        and node is not None
-        and self._is_optional_param_slot(node, idx)
-      ):
+      if idx < len(exprs):
+        if idx in omitted_slots and idx in opt_def_slots:
+          self.emit("_SP_RT._SP_UNSET")
+        else:
+          self.visit(exprs[idx])
+      elif idx in opt_def_slots:
         self.emit("_SP_RT._SP_UNSET")
       else:
-        self.visit(expr)
+        self.emit("nil")
 
   def _format_reordered_slot_temps(
     self, node: CallNode, total_slots: int
@@ -473,11 +495,16 @@ class LuaExprMixin(_LuaTranspilerBase):
       slot: f"_a{arg_idx}"
       for arg_idx, slot in enumerate(getattr(node, "_eval_order_slots", []))
     }
+    opt_def_slots = self._get_callee_opt_default_slots(node)
+    if opt_def_slots:
+      max_opt = max(opt_def_slots)
+      if max_opt + 1 > total_slots:
+        total_slots = max_opt + 1
     res: list[str] = []
     for i in range(total_slots):
       if i in slot_to_temp:
         res.append(slot_to_temp[i])
-      elif self._is_optional_param_slot(node, i):
+      elif i in opt_def_slots:
         res.append("_SP_RT._SP_UNSET")
       else:
         res.append("nil")
@@ -756,6 +783,12 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit(f"(function({', '.join(params)})")
     self.indent()
     saved = self._save_nested_fn_state()
+    prev_id_map = (
+      self._identifier_map.copy() if self._module_ns_names else None
+    )
+    if prev_id_map is not None:
+      for p in node.parameters:
+        self._identifier_map.pop(p.name, None)
     try:
       if isinstance(node.body, BlockNode):
         self.visit(node.body)
@@ -766,6 +799,8 @@ class LuaExprMixin(_LuaTranspilerBase):
         self.emit("return ")
         self.visit(node.body)
     finally:
+      if prev_id_map is not None:
+        self._identifier_map = prev_id_map
       self._restore_nested_fn_state(saved)
     self.dedent()
     self.newline()

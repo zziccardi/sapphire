@@ -26,6 +26,7 @@ for _cand in [os.path.join(_curr_dir, "lib"), os.path.join(_parent_dir, "lib"), 
   if os.path.isdir(_cand) and _cand not in sys.path:
     sys.path.insert(0, _cand)
 
+import builtins as _sp_builtins
 import copy
 import types
 from enum import Enum, IntEnum
@@ -128,8 +129,19 @@ class Arena:
 def _sapphire_del(obj):
   if obj is None:
     return
-  if type(obj) is Arena:
+  cls = type(obj)
+  if cls is Arena:
     obj.destroy()
+    return
+  destroy_fn = getattr(cls, '_sapphire_destroy', None)
+  if destroy_fn is not None:
+    d = getattr(obj, '__dict__', None)
+    if d is not None:
+      if d.get('_sapphire_disposed_', False):
+        return
+    elif obj._sapphire_disposed_:
+      return
+    destroy_fn(obj)
     return
   d = getattr(obj, '__dict__', None)
   if d is not None:
@@ -137,9 +149,9 @@ def _sapphire_del(obj):
       return
   elif getattr(obj, '_sapphire_disposed_', False):
     return
-  del_fn = getattr(obj, '__del__', None)
+  del_fn = getattr(cls, '__del__', None)
   if del_fn is not None:
-    del_fn()
+    del_fn(obj)
 
 def _iter_slots(cls):
   for base in cls.__mro__:
@@ -885,17 +897,17 @@ def SharedRef(val):
 RUNTIME_PREAMBLE = PYTHON_RUNTIME_PREAMBLE
 
 PYTHON_RUNTIME_MODULE_IMPORT = """# Sapphire Runtime Module Import
-import os
 import sys
 
-_curr_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-if _curr_dir not in sys.path:
-  sys.path.insert(0, _curr_dir)
-
-_parent_dir = os.path.dirname(_curr_dir)
-for _cand in [os.path.join(_curr_dir, "lib"), os.path.join(_parent_dir, "lib"), os.path.join(_parent_dir, "sapphire", "lib"), _parent_dir]:
-  if os.path.isdir(_cand) and _cand not in sys.path:
-    sys.path.insert(0, _cand)
+if '_sapphire_runtime' not in sys.modules:
+  import os
+  _curr_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+  if _curr_dir not in sys.path:
+    sys.path.insert(0, _curr_dir)
+  _parent_dir = os.path.dirname(_curr_dir)
+  for _cand in [os.path.join(_curr_dir, "lib"), os.path.join(_parent_dir, "lib"), os.path.join(_parent_dir, "sapphire", "lib"), _parent_dir]:
+    if os.path.isdir(_cand) and _cand not in sys.path:
+      sys.path.insert(0, _cand)
 
 from _sapphire_runtime import *
 """

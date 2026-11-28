@@ -183,6 +183,7 @@ class BaseTranspiler(ABC):
     self._has_export_stmt: bool = False
     self._known_enums: set[str] = set()
     self._flat_value_structs: set[str] = set()
+    self._diamond_destructible_structs: set[str] = set()
     self._plain_local_containers: set[str] = set()
 
   def _is_plain_local_var(self, expr: Any) -> bool:
@@ -914,6 +915,13 @@ class BaseTranspiler(ABC):
     self._has_export_stmt: bool = False
     self._known_enums: set[str] = set()
     self._flat_value_structs: set[str] = set()
+    self._diamond_destructible_structs: set[str] = set()
+
+    export_block = getattr(program, "export_block", None)
+    if export_block is not None:
+      self._has_export_stmt = True
+      for spec in export_block.specifiers:
+        self._exported_symbols.add(spec.symbol)
 
     for decl in program.declarations:
       if isinstance(decl, ExportStmtNode):
@@ -978,6 +986,30 @@ class BaseTranspiler(ABC):
           ):
             self.structs_with_destructor.add(decl.name)
             changed = True
+
+    def _mark_diamond_ancestors(name: str) -> None:
+      if name in self._diamond_destructible_structs:
+        return
+      if name in self.structs_with_destructor:
+        self._diamond_destructible_structs.add(name)
+      for gp in self.struct_parent_names.get(name, []):
+        _mark_diamond_ancestors(gp)
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and not getattr(
+        decl, "type_params", None
+      ):
+        if decl.name not in self.structs_with_destructor:
+          continue
+        p_names = decl.parent_names or []
+        has_ext_parent = any(p not in self._struct_decl_map for p in p_names)
+        if (
+          len(p_names) > 1
+          or decl.name in self._multi_parent_bases
+          or has_ext_parent
+          or decl.name in self._exported_symbols
+        ):
+          _mark_diamond_ancestors(decl.name)
 
     imm_type_names = (
       {"int", "float", "bool", "String", "Arena", "Ref", "SharedRef", "WeakRef"}

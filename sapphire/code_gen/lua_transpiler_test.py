@@ -1492,7 +1492,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua = self._transpile(code)
-    self.assertIn("table.unpack", lua)
+    self.assertIn("_match_res_2_1, _match_res_2_2", lua)
+    self.assertNotIn("(table.unpack or unpack)", lua)
     self.assertIn("nil", lua)
 
   def test_break_and_continue_lua(self):
@@ -3016,6 +3017,79 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_code = self._transpile(source)
     proc = self._run_lua_code(lua_code)
     self.assertEqual(proc.stdout.strip(), "124")
+
+  def test_lua_200_local_module_spillover(self):
+    """Verifies modules with >120 top-level decls spill into local _MOD = {}."""
+    funcs = "\n".join(
+      f"func f{i}(x: int): int {{ return x + {i}; }}" for i in range(210)
+    )
+    source = f"""
+    enum Tag {{ A = 1, B = 2 }}
+    let BASE: int = 10;
+    struct Box {{ var v: int; }}
+    {funcs}
+    func main() {{
+      let b = Box {{ v = BASE + (Tag.B as int) }};
+      let r = f0(b.v) + f209(1);
+      print(String.from(r));
+    }}
+    """
+    lua_code = self._transpile(source)
+    self.assertIn("local _MOD = {}", lua_code)
+    proc = self._run_lua_code(lua_code)
+    self.assertEqual(proc.stdout.strip(), "222")
+
+  def test_lua_unboxed_multi_return_fixed_arity_opt_defaults_and_raii(self):
+    """Verifies unboxed multi-return with RAII, fixed-arity opt defaults, and
+    elided diamond destructor guards on non-diamond structs.
+    """
+    source = """
+    var drops: int = 0;
+    struct Guard { var id: int; }
+    impl Guard {
+      func __del__() { drops += self.id; }
+    }
+    func pair(x: int): int, int { return x + 1, x + 2; }
+    func with_guard(x: int): int, int {
+      let g = Guard { id = x };
+      return pair(x);
+    }
+    func add_opt(a: int, b: int? = 42): int {
+      return a + (b ?? 0);
+    }
+    func main() {
+      let a, b = with_guard(10);
+      let c1 = add_opt(1);
+      let c2 = add_opt(1, none);
+      let c3 = add_opt(1, 5);
+      print(String.from(a + b + drops + c1 + c2 + c3));
+    }
+    """
+    lua_code = self._transpile(source)
+    self.assertNotIn("(table.unpack or unpack)", lua_code)
+    self.assertIn("function add_opt(a, b)", lua_code)
+    self.assertNotIn("_sapphire_destroyed_classes_", lua_code)
+    proc = self._run_lua_code(lua_code)
+    # a=11, b=12, drops=10, c1=43, c2=1, c3=6 -> 83
+    self.assertEqual(proc.stdout.strip(), "83")
+
+  def test_lua_sourcemap_demangler_installs_errorhandler_once(self):
+    """Verifies LUA_SOURCEMAP_DEMANGLER wraps love.errorhandler only once."""
+    from sapphire.code_gen.lua_runtime import LUA_SOURCEMAP_DEMANGLER
+
+    driver = (
+      "local calls = 0\n"
+      "love = { errorhandler = function(m) calls = calls + 1; return m end }\n"
+      'local _SP_LINE_MAP = { [1] = { file = "a.sp", line = 1, text = "" } }\n'
+      f"{LUA_SOURCEMAP_DEMANGLER}\n"
+      "local first_fn = love.errorhandler\n"
+      f"{LUA_SOURCEMAP_DEMANGLER}\n"
+      "assert(love.errorhandler == first_fn, 'wrapped twice')\n"
+      'love.errorhandler("boom")\n'
+      "print(calls)\n"
+    )
+    proc = self._run_lua_code(driver)
+    self.assertEqual(proc.stdout.strip().splitlines()[-1], "1")
 
 
 # ---------------------------------------------------------------------------

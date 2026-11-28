@@ -1545,6 +1545,18 @@ local Arena, Ref, SharedRef, WeakRef = _SP_RT.Arena, _SP_RT.Ref, _SP_RT.SharedRe
 
 
 LUA_SOURCEMAP_DEMANGLER = """-- Sapphire Lua Runtime Source Map Demangler & Love2D Error Handler Hook
+local _sp_maps = _G._SP_LINE_MAPS
+if not _sp_maps then
+  _sp_maps = {}
+  _G._SP_LINE_MAPS = _sp_maps
+end
+if _SP_LINE_MAP then
+  local _info = debug and debug.getinfo and debug.getinfo(1, "S")
+  local _src = _info and _info.source and _info.source:match("([^/\\\\]+%.lua)$")
+  if _src then
+    _sp_maps[_src] = _SP_LINE_MAP
+  end
+end
 local function _sapphire_demangle_traceback(msg)
   local err_msg = tostring(msg or "Runtime Error")
   local traceback = debug.traceback("", 2)
@@ -1559,8 +1571,10 @@ local function _sapphire_demangle_traceback(msg)
     end
     if line_num then
       local n = tonumber(line_num)
-      if _SP_LINE_MAP and _SP_LINE_MAP[n] then
-        local info = _SP_LINE_MAP[n]
+      local base_file = lua_file and lua_file:match("([^/\\\\]+%.lua)$") or lua_file
+      local lmap = (base_file and _sp_maps[base_file]) or _SP_LINE_MAP
+      if lmap and lmap[n] then
+        local info = lmap[n]
         local sp_info = string.format("%s:%d: (at %s:%d)", info.file, info.line, lua_file or "lua", n)
         if info.text and info.text ~= "" then
           sp_info = sp_info .. " -> `" .. info.text .. "`"
@@ -1574,7 +1588,8 @@ local function _sapphire_demangle_traceback(msg)
   return table.concat(demangled_lines, "\\n")
 end
 
-if love and love.errorhandler then
+if love and love.errorhandler and not _G._SP_ERRORHANDLER_INSTALLED then
+  _G._SP_ERRORHANDLER_INSTALLED = true
   local original_errorhandler = love.errorhandler
   love.errorhandler = function(msg)
     local demangled = _sapphire_demangle_traceback(msg)

@@ -39,6 +39,7 @@ from sapphire.parser.ast import (
   ImportStmtNode,
   LambdaNode,
   LiteralNode,
+  MatchExprNode,
   ProgramNode,
   ReturnNode,
   StmtNode,
@@ -48,6 +49,7 @@ from sapphire.parser.ast import (
   UnaryOpNode,
   VarDeclNode,
   WhileNode,
+  YieldNode,
 )
 
 
@@ -136,6 +138,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._lifted_clones: dict[int, str] = {}
     self.extern_vars: dict[str, str] = {}
     self.global_vars: set[str] = set()
+    self._mono_fn_bodies: dict[str, str] = {}
     # Source line map: Python output line -> Sapphire source line
     self._py_lineno = 1
     self._line_map: dict[int, int] = {}
@@ -210,6 +213,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._identifier_map = {}
     self._current_func_globals = set()
     self._loop_vars_stack = []
+    self._mono_fn_bodies = {}
 
     # 1. Output runtime preamble or shared runtime module import
     preamble = (
@@ -294,7 +298,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self.visit(program.export_block)
 
     # 6. Emit source line map for test runner demangling
-    if self._line_map:
+    if self.test_mode and self._line_map:
       self.newline()
       self.emit("_SP_LINE_MAP = {")
       for py_line, sp_line in sorted(self._line_map.items()):
@@ -409,7 +413,8 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         }
         if decl.name in self.structs_with_destructor:
           own_slots.add("_sapphire_disposed_")
-          own_slots.add("_sapphire_destroyed_classes_")
+          if decl.name in self._diamond_destructible_structs:
+            own_slots.add("_sapphire_destroyed_classes_")
         self._slotted_structs.add(decl.name)
         self._struct_slot_names[decl.name] = ancestor_slots | own_slots
         changed = True
@@ -556,7 +561,12 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         if self._mangle_name(f.name) not in ancestor_slots
       ]
       if node.name in self.structs_with_destructor:
-        for ra_slot in ("_sapphire_disposed_", "_sapphire_destroyed_classes_"):
+        ra_slots = (
+          ("_sapphire_disposed_", "_sapphire_destroyed_classes_")
+          if node.name in self._diamond_destructible_structs
+          else ("_sapphire_disposed_",)
+        )
+        for ra_slot in ra_slots:
           if ra_slot not in ancestor_slots and ra_slot not in slot_list:
             slot_list.append(ra_slot)
       self.newline()
@@ -846,47 +856,12 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           self.visit(m)
         if needs_synth_del:
           self.newline()
-          self.emit("def __del__(self):")
+          self.emit("def _sapphire_destroy(self):")
           self.indent()
-          self.newline()
-          self.emit(
-            "_sp_destroyed = getattr(self, '_sapphire_destroyed_classes_', "
-            "None)"
-          )
-          self.newline()
-          self.emit("if _sp_destroyed is None:")
-          self.indent()
-          self.newline()
-          self.emit("_sp_destroyed = set()")
-          self.newline()
-          self.emit(
-            "object.__setattr__(self, '_sapphire_destroyed_classes_', "
-            "_sp_destroyed)"
-          )
-          self.dedent()
-          self.newline()
-          self.emit(f"if '{cls_name}' in _sp_destroyed:")
-          self.indent()
-          self.newline()
-          self.emit("return")
-          self.dedent()
-          self.newline()
-          self.emit(f"_sp_destroyed.add('{cls_name}')")
-          self.newline()
-          self.emit("try:")
-          self.indent()
+          if node.name in self._diamond_destructible_structs:
+            self._emit_py_diamond_del_guard(cls_name)
           self._emit_struct_auto_teardown(node.name, call_parents=True)
-          self.dedent()
-          self.newline()
-          self.emit("finally:")
-          self.indent()
-          self.newline()
-          self.emit(f"if type(self) is {cls_name}:")
-          self.indent()
-          self.newline()
-          self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
-          self.dedent()
-          self.dedent()
+          self._emit_py_mark_disposed(node.name, cls_name)
           self.dedent()
     finally:
       self._current_struct_name = old_struct_name
@@ -898,6 +873,87 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
         f"_inherit_multi_py({cls_name}, {', '.join(defer_multi_parents)})"
       )
     self.newline()
+
+  def _emit_py_diamond_del_guard(self, cls_name: str) -> None:
+    """Emits per-class destruction tracking for diamond-destructible structs."""
+    self.newline()
+    self.emit(
+      "_sp_destroyed = getattr(self, '_sapphire_destroyed_classes_', None)"
+    )
+    self.newline()
+    self.emit("if _sp_destroyed is None:")
+    self.indent()
+    self.newline()
+    self.emit("_sp_destroyed = set()")
+    self.newline()
+    self.emit("self._sapphire_destroyed_classes_ = _sp_destroyed")
+    self.dedent()
+    self.newline()
+    self.emit(f"if '{cls_name}' in _sp_destroyed:")
+    self.indent()
+    self.newline()
+    self.emit("return")
+    self.dedent()
+    self.newline()
+    self.emit(f"_sp_destroyed.add('{cls_name}')")
+
+  def _emit_py_mark_disposed(
+    self, struct_name: str | None, cls_name: str
+  ) -> None:
+    """Marks the instance disposed at the end of `_sapphire_destroy`."""
+    needs_type_check = bool(
+      cls_name
+      and struct_name
+      and (
+        struct_name in self._local_parent_names
+        or struct_name in self._exported_symbols
+      )
+    )
+    self.newline()
+    if needs_type_check:
+      self.emit(f"if type(self) is {cls_name}:")
+      self.indent()
+      self.newline()
+      self.emit("self._sapphire_disposed_ = True")
+      self.dedent()
+    else:
+      self.emit("self._sapphire_disposed_ = True")
+
+  @classmethod
+  def _body_has_coroutine_yield(cls, node: Any) -> bool:
+    """Returns True if *node* contains a coroutine YieldNode (outside match)."""
+    if node is None:
+      return False
+    if isinstance(node, YieldNode):
+      return True
+    if isinstance(node, (MatchExprNode, LambdaNode, FuncDeclNode)):
+      return False
+    if isinstance(node, list):
+      return any(cls._body_has_coroutine_yield(item) for item in node)
+    if isinstance(node, ASTNode):
+      for k, v in node.__dict__.items():
+        if not k.startswith("_") and isinstance(v, (ASTNode, list)):
+          if cls._body_has_coroutine_yield(v):
+            return True
+    return False
+
+  @classmethod
+  def _body_has_return(cls, node: Any) -> bool:
+    """Returns True if *node* contains a ReturnNode (outside nested funcs)."""
+    if node is None:
+      return False
+    if isinstance(node, ReturnNode):
+      return True
+    if isinstance(node, (LambdaNode, FuncDeclNode)):
+      return False
+    if isinstance(node, list):
+      return any(cls._body_has_return(item) for item in node)
+    if isinstance(node, ASTNode):
+      for k, v in node.__dict__.items():
+        if not k.startswith("_") and isinstance(v, (ASTNode, list)):
+          if cls._body_has_return(v):
+            return True
+    return False
 
   def _emit_struct_auto_teardown(
     self, struct_name: str, call_parents: bool = True
@@ -916,7 +972,7 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       for p_name in reversed(self.struct_parent_names.get(struct_name, [])):
         if p_name in self.structs_with_destructor:
           self.newline()
-          self.emit(f"{self._mangle_dotted(p_name)}.__del__(self)")
+          self.emit(f"{self._mangle_dotted(p_name)}._sapphire_destroy(self)")
           emitted = True
     if not emitted:
       self.newline()
@@ -935,19 +991,13 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     if is_test_func and not self.test_mode:
       return
 
-    self.newline()
-
-    if node.modifier == "static":
-      self.emit("@staticmethod")
-      self.newline()
-
-    # Rename __init__ constructor to _init_sapphire to separate from boilerplate
-    # __init__
-    func_name = (
-      "_init_sapphire"
-      if func.name == "__init__"
-      else self._mangle_name(func.name)
-    )
+    # Rename __init__ -> _init_sapphire and __del__ -> _sapphire_destroy
+    if func.name == "__init__":
+      func_name = "_init_sapphire"
+    elif func.name == "__del__":
+      func_name = "_sapphire_destroy"
+    else:
+      func_name = self._mangle_name(func.name)
 
     # Python parameter formatting
     params = []
@@ -977,59 +1027,81 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._loop_vars_stack = []
     self._plain_local_containers = set()
     try:
+      cur_struct = getattr(self, "_current_struct_name", None)
+      cur_cls = self._mangle_name(cur_struct) if cur_struct else ""
       if is_coroutine_func(func):
-        self.emit(f"def {func_name}({', '.join(params)}):")
-        self.indent()
-        self._emit_deferred_default_inits(func.parameters)
-        self.newline()
-        self.emit(f"def _gen_{func_name}({', '.join(raw_params)}):")
-        self.indent()
-        if assigned_globals:
+        needs_dummy_yield = not self._body_has_coroutine_yield(func.body)
+        if cur_cls:
+          gen_name = f"_sp_gen_{func_name}"
           self.newline()
-          self.emit(f"global {', '.join(sorted(assigned_globals))}")
-        self.visit(func.body)
-        self.newline()
-        self.emit("if False: yield")
-        self.dedent()
-        self.newline()
-        if raw_params:
-          self.emit(
-            f"return _SapphireCoroutine(_gen_{func_name}, "
-            f"{', '.join(raw_params)})"
-          )
+          if node.modifier == "static":
+            self.emit("@staticmethod")
+            self.newline()
+          self.emit(f"def {gen_name}({', '.join(raw_params)}):")
+          self.indent()
+          if assigned_globals:
+            self.newline()
+            self.emit(f"global {', '.join(sorted(assigned_globals))}")
+          self.visit(func.body)
+          if needs_dummy_yield:
+            self.newline()
+            self.emit("if False: yield")
+          self.dedent()
+          self.newline()
+          if node.modifier == "static":
+            self.emit("@staticmethod")
+            self.newline()
+          self.emit(f"def {func_name}({', '.join(params)}):")
+          self.indent()
+          self._emit_deferred_default_inits(func.parameters)
+          self.newline()
+          if raw_params:
+            self.emit(
+              f"return _SapphireCoroutine({cur_cls}.{gen_name}, "
+              f"{', '.join(raw_params)})"
+            )
+          else:
+            self.emit(f"return _SapphireCoroutine({cur_cls}.{gen_name})")
+          self.dedent()
         else:
-          self.emit(f"return _SapphireCoroutine(_gen_{func_name})")
-        self.dedent()
+          self.newline()
+          if node.modifier == "static":
+            self.emit("@staticmethod")
+            self.newline()
+          self.emit(f"def {func_name}({', '.join(params)}):")
+          self.indent()
+          self._emit_deferred_default_inits(func.parameters)
+          self.newline()
+          self.emit(f"def _gen_{func_name}({', '.join(raw_params)}):")
+          self.indent()
+          if assigned_globals:
+            self.newline()
+            self.emit(f"global {', '.join(sorted(assigned_globals))}")
+          self.visit(func.body)
+          if needs_dummy_yield:
+            self.newline()
+            self.emit("if False: yield")
+          self.dedent()
+          self.newline()
+          if raw_params:
+            self.emit(
+              f"return _SapphireCoroutine(_gen_{func_name}, "
+              f"{', '.join(raw_params)})"
+            )
+          else:
+            self.emit(f"return _SapphireCoroutine(_gen_{func_name})")
+          self.dedent()
       else:
+        self.newline()
+        if node.modifier == "static":
+          self.emit("@staticmethod")
+          self.newline()
         self.emit(f"def {func_name}({', '.join(params)}):")
         self.indent()
-        cur_struct = getattr(self, "_current_struct_name", None)
-        cur_cls = self._mangle_name(cur_struct) if cur_struct else ""
-        if func.name == "__del__":
-          self.newline()
-          self.emit(
-            "_sp_destroyed = getattr(self, '_sapphire_destroyed_classes_', "
-            "None)"
-          )
-          self.newline()
-          self.emit("if _sp_destroyed is None:")
-          self.indent()
-          self.newline()
-          self.emit("_sp_destroyed = set()")
-          self.newline()
-          self.emit(
-            "object.__setattr__(self, '_sapphire_destroyed_classes_', "
-            "_sp_destroyed)"
-          )
-          self.dedent()
-          self.newline()
-          self.emit(f"if '{cur_cls}' in _sp_destroyed:")
-          self.indent()
-          self.newline()
-          self.emit("return")
-          self.dedent()
-          self.newline()
-          self.emit(f"_sp_destroyed.add('{cur_cls}')")
+        if func.name == "__del__" and (
+          not cur_struct or cur_struct in self._diamond_destructible_structs
+        ):
+          self._emit_py_diamond_del_guard(cur_cls)
         if assigned_globals:
           self.newline()
           self.emit(f"global {', '.join(sorted(assigned_globals))}")
@@ -1060,26 +1132,24 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
           )
         )
         if func.name == "__del__":
-          self.newline()
-          self.emit("try:")
-          self.indent()
-          self.visit(func.body)
-          self.dedent()
-          self.newline()
-          self.emit("finally:")
-          self.indent()
-          if has_auto_teardown:
-            self._emit_struct_auto_teardown(cur_struct, call_parents=True)
-          self.newline()
-          if cur_cls:
-            self.emit(f"if type(self) is {cur_cls}:")
-            self.indent()
+          if self._body_has_return(func.body):
             self.newline()
-            self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
+            self.emit("try:")
+            self.indent()
+            self.visit(func.body)
+            self.dedent()
+            self.newline()
+            self.emit("finally:")
+            self.indent()
+            if has_auto_teardown:
+              self._emit_struct_auto_teardown(cur_struct, call_parents=True)
+            self._emit_py_mark_disposed(cur_struct, cur_cls)
             self.dedent()
           else:
-            self.emit("object.__setattr__(self, '_sapphire_disposed_', True)")
-          self.dedent()
+            self.visit(func.body)
+            if has_auto_teardown:
+              self._emit_struct_auto_teardown(cur_struct, call_parents=True)
+            self._emit_py_mark_disposed(cur_struct, cur_cls)
         else:
           self.visit(func.body)
         self.dedent()
@@ -1270,30 +1340,59 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
     self._current_func_globals = set(assigned_globals)
     self._loop_vars_stack = []
     self._plain_local_containers = set()
+    export_ann = next(
+      (a for a in getattr(node, "annotations", []) if a.name == "export"), None
+    )
     try:
       if is_coroutine_func(node):
-        self.emit(f"def {fn_name}({', '.join(params)}):")
-        self.indent()
-        self._emit_deferred_default_inits(node.parameters)
-        self.newline()
-        self.emit(f"def _gen_{fn_name}({', '.join(raw_params)}):")
+        gen_name = f"_sp_gen_{fn_name}"
+        needs_dummy_yield = not self._body_has_coroutine_yield(node.body)
+        self.emit(f"def {gen_name}({', '.join(raw_params)}):")
         self.indent()
         if assigned_globals:
           self.newline()
           self.emit(f"global {', '.join(sorted(assigned_globals))}")
         self.visit(node.body)
-        self.newline()
-        self.emit("if False: yield")
+        if needs_dummy_yield:
+          self.newline()
+          self.emit("if False: yield")
         self.dedent()
+        self.newline()
+        self.emit(f"def {fn_name}({', '.join(params)}):")
+        self.indent()
+        self._emit_deferred_default_inits(node.parameters)
         self.newline()
         if raw_params:
           self.emit(
-            f"return _SapphireCoroutine(_gen_{fn_name}, "
-            f"{', '.join(raw_params)})"
+            f"return _SapphireCoroutine({gen_name}, {', '.join(raw_params)})"
           )
         else:
-          self.emit(f"return _SapphireCoroutine(_gen_{fn_name})")
+          self.emit(f"return _SapphireCoroutine({gen_name})")
         self.dedent()
+      elif getattr(node, "is_monomorphized", False) and not export_ann:
+        with self.scoped_buffer() as buf:
+          self.emit(f"({', '.join(params)}):")
+          self.indent()
+          if assigned_globals:
+            self.newline()
+            self.emit(f"global {', '.join(sorted(assigned_globals))}")
+          self._emit_deferred_default_inits(node.parameters)
+          self.visit(node.body)
+          self.dedent()
+          sig_and_body = buf.get_output()
+        if fn_name not in sig_and_body:
+          prev_fn = self._mono_fn_bodies.get(sig_and_body)
+          if prev_fn is not None:
+            self.emit(f"{fn_name} = {prev_fn}")
+          else:
+            self._mono_fn_bodies[sig_and_body] = fn_name
+            self.emit(f"def {fn_name}{sig_and_body}")
+            if self.is_root_buffer:
+              self._py_lineno += sig_and_body.count("\n")
+        else:
+          self.emit(f"def {fn_name}{sig_and_body}")
+          if self.is_root_buffer:
+            self._py_lineno += sig_and_body.count("\n")
       else:
         self.emit(f"def {fn_name}({', '.join(params)}):")
         self.indent()
@@ -1309,10 +1408,6 @@ class PythonTranspiler(PythonStmtMixin, PythonExprMixin, BaseTranspiler):
       self._current_func_globals = prev_func_globals
       self._loop_vars_stack = prev_loop_vars
       self._plain_local_containers = prev_plain
-
-    export_ann = next(
-      (a for a in getattr(node, "annotations", []) if a.name == "export"), None
-    )
     if export_ann:
       target_path = export_ann.arg if export_ann.arg else fn_name
       if "." in target_path:

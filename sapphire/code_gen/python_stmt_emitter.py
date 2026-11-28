@@ -1061,7 +1061,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
             and target.name in self.extern_vars
           ):
             ext_name = self.extern_vars[target.name]
-            self.emit(f"__import__('builtins').{ext_name}")
+            self.emit(f"_sp_builtins.{ext_name}")
           else:
             self.visit(target)
         self.emit(" = " + ", ".join(tmp_names))
@@ -1084,7 +1084,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
           isinstance(target, IdentifierNode) and target.name in self.extern_vars
         ):
           ext_name = self.extern_vars[target.name]
-          self.emit(f"__import__('builtins').{ext_name}")
+          self.emit(f"_sp_builtins.{ext_name}")
         else:
           self.visit(target)
       self.emit(" = ")
@@ -1104,7 +1104,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
         self.moved_vars.discard(py_t)
         if node.target.name in self.extern_vars:
           ext_lhs = (
-            f"__import__('builtins').{self.extern_vars[node.target.name]}"
+            f"_sp_builtins.{self.extern_vars[node.target.name]}"
           )
           self.emit(f"{ext_lhs} = _sapphire_div({ext_lhs}, ")
           self.visit(node.expr)
@@ -1156,7 +1156,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self.moved_vars.discard(self._resolve_var_name(node.target.name))
       if node.target.name in self.extern_vars:
         ext_name = self.extern_vars[node.target.name]
-        self.emit(f"__import__('builtins').{ext_name}")
+        self.emit(f"_sp_builtins.{ext_name}")
       else:
         self.visit(node.target)
     else:
@@ -1331,21 +1331,40 @@ class PythonStmtMixin(_PythonTranspilerBase):
   ) -> str:
     self._lift_match_expressions(node.subject)
 
-    if target_var == "":
+    done_flag: str | None = None
+    needs_target = target_var == ""
+    if needs_target:
       target_var = self._next_temp_name("_match_res")
-      self.newline()
-      self.emit(f"{target_var} = None")
+    if target_var and any(
+      self._arm_needs_done_flag(c.body) for c in node.cases
+    ):
+      done_flag = self._next_temp_name("_match_done")
+
+    if needs_target:
+      has_final_catchall = bool(
+        node.cases
+        and any(
+          isinstance(p, EllipsisPatternNode) for p in node.cases[-1].patterns
+        )
+      )
+      all_arms_assign = has_final_catchall and not done_flag and all(
+        (not isinstance(c.body, BlockNode))
+        or (
+          bool(c.body.statements)
+          and isinstance(c.body.statements[-1], (YieldNode, ReturnNode))
+        )
+        for c in node.cases
+      )
+      if not all_arms_assign:
+        self.newline()
+        self.emit(f"{target_var} = None")
 
     subj_var = self._next_temp_name("_match_subj")
     self.newline()
     self.emit(f"{subj_var} = ")
     self.visit(node.subject)
 
-    done_flag: str | None = None
-    if target_var and any(
-      self._arm_needs_done_flag(c.body) for c in node.cases
-    ):
-      done_flag = self._next_temp_name("_match_done")
+    if done_flag:
       self.newline()
       self.emit(f"{done_flag} = False")
 
@@ -1371,17 +1390,28 @@ class PythonStmtMixin(_PythonTranspilerBase):
             self.emit("elif True:")
         else:
           kw = "if" if c_idx == 0 else "elif"
-          self.emit(f"{kw} ")
-          for p_idx, pat in enumerate(case.patterns):
-            if p_idx > 0:
-              self.emit(" or ")
-            if isinstance(pat, LiteralNode) and pat.lit_type == "none":
-              self.emit(f"({subj_var} is None)")
-            else:
-              self.emit(f"({subj_var} == ")
+          if len(case.patterns) > 1 and all(
+            isinstance(p, LiteralNode) and p.lit_type != "none"
+            for p in case.patterns
+          ):
+            self.emit(f"{kw} {subj_var} in (")
+            for p_idx, pat in enumerate(case.patterns):
+              if p_idx > 0:
+                self.emit(", ")
               self.visit(pat)
-              self.emit(")")
-          self.emit(":")
+            self.emit("):")
+          else:
+            self.emit(f"{kw} ")
+            for p_idx, pat in enumerate(case.patterns):
+              if p_idx > 0:
+                self.emit(" or ")
+              if isinstance(pat, LiteralNode) and pat.lit_type == "none":
+                self.emit(f"({subj_var} is None)")
+              else:
+                self.emit(f"({subj_var} == ")
+                self.visit(pat)
+                self.emit(")")
+            self.emit(":")
 
         self.indent()
         self._branch_depth += 1
@@ -1602,10 +1632,11 @@ class PythonStmtMixin(_PythonTranspilerBase):
     """Emits multi-binding `if` with sequential short-circuiting and LIFO
     cleanup.
     """
-    cond_flag = self._next_temp_name("_if_ok")
-
-    self.newline()
-    self.emit(f"{cond_flag} = False")
+    cond_flag: str | None = None
+    if node.else_block:
+      cond_flag = self._next_temp_name("_if_ok")
+      self.newline()
+      self.emit(f"{cond_flag} = False")
 
     def emit_binding_level(
       idx: int,
@@ -1705,8 +1736,9 @@ class PythonStmtMixin(_PythonTranspilerBase):
             self.visit(node.condition)
             self.emit(":")
             self.indent()
-            self.newline()
-            self.emit(f"{cond_flag} = True")
+            if cond_flag:
+              self.newline()
+              self.emit(f"{cond_flag} = True")
             self._branch_depth += 1
             try:
               self._visit_block(
@@ -1724,8 +1756,9 @@ class PythonStmtMixin(_PythonTranspilerBase):
                 self.emit(f"_sapphire_del({d_var})")
               self.dedent()
           else:
-            self.newline()
-            self.emit(f"{cond_flag} = True")
+            if cond_flag:
+              self.newline()
+              self.emit(f"{cond_flag} = True")
             self._branch_depth += 1
             try:
               self._visit_block(
@@ -1738,7 +1771,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
 
     emit_binding_level(0, [], {})
 
-    if node.else_block:
+    if node.else_block and cond_flag:
       self.newline()
       self.emit(f"if not {cond_flag}:")
       self.indent()
@@ -1906,6 +1939,83 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self.visit(node.condition)
 
   def visit_GuardStmtNode(self, node: GuardStmtNode) -> None:
+    has_destructible_clause = any(
+      clause.binding is not None
+      and bool(self._expr_destructible_struct(clause.binding.expr))
+      and (
+        not clause.binding.is_unwrap
+        or self._is_owned_unwrap_expr(clause.binding.expr)
+      )
+      for clause in node.clauses
+    )
+    if len(node.clauses) > 1 and not has_destructible_clause:
+      guard_ok = self._next_temp_name("_guard_ok")
+      self.newline()
+      self.emit(f"{guard_ok} = True")
+      indent_depth = 0
+      for clause in node.clauses:
+        if clause.binding:
+          binding = clause.binding
+          self._lift_match_expressions(binding.expr)
+          let_names = getattr(binding, "let_names", [binding.let_name])
+          tmp_var = self._next_temp_name("_guard_val")
+          self.newline()
+          wb_entry = self._emit_binding_rhs_and_writeback(binding, tmp_var)
+          if binding.is_unwrap:
+            self.newline()
+            self.emit(f"if {tmp_var} is None:")
+            self.indent()
+            self.newline()
+            self.emit(f"{guard_ok} = False")
+            self.dedent()
+            self.newline()
+            self.emit("else:")
+            self.indent()
+            indent_depth += 1
+          self.newline()
+          py_let_names: list[str] = []
+          if len(let_names) > 1:
+            for idx, name in enumerate(let_names):
+              py_n = self._declare_local_var(name)
+              py_let_names.append(py_n)
+              self.emit(f"{py_n} = {tmp_var}[{idx}]")
+              if idx < len(let_names) - 1:
+                self.newline()
+          else:
+            py_n = self._declare_local_var(binding.let_name)
+            py_let_names.append(py_n)
+            self.emit(f"{py_n} = {tmp_var}")
+          if wb_entry and len(py_let_names) == 1:
+            self._unwrap_writebacks[py_let_names[0]] = wb_entry
+        elif clause.condition:
+          self._lift_match_expressions(clause.condition)
+          self.newline()
+          self.emit("if not (")
+          self.visit(clause.condition)
+          self.emit("):")
+          self.indent()
+          self.newline()
+          self.emit(f"{guard_ok} = False")
+          self.dedent()
+          self.newline()
+          self.emit("else:")
+          self.indent()
+          indent_depth += 1
+      if indent_depth > 0:
+        # Ensure the innermost `else:` block is non-empty when the last clause
+        # was a condition clause.
+        if node.clauses[-1].condition is not None:
+          self.newline()
+          self.emit("pass")
+        for _ in range(indent_depth):
+          self.dedent()
+      self.newline()
+      self.emit(f"if not {guard_ok}:")
+      self.indent()
+      self._visit_in_branch(node.else_block)
+      self.dedent()
+      return
+
     for clause in node.clauses:
       if clause.binding:
         binding = clause.binding
@@ -1924,7 +2034,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
           self.dedent()
           self.newline()
 
-        py_let_names: list[str] = []
+        py_let_names = []
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
             py_n = self._declare_local_var(name)
