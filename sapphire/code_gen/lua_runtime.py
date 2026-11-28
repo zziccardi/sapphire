@@ -72,6 +72,32 @@ do
   end
   _sp_install_loader()
 
+  local _type = type
+  local _getmetatable = getmetatable
+  local _setmetatable = setmetatable
+  local _rawget = rawget
+  local _rawset = rawset
+  local _pairs = pairs
+  local _next = next
+  local _select = select
+  local _tostring = tostring
+  local _tonumber = tonumber
+  local _error = error
+  local _math_floor = math.floor
+  local _math_ceil = math.ceil
+  local _str_byte = string.byte
+  local _str_find = string.find
+  local _str_sub = string.sub
+  local _tbl_concat = table.concat
+  local _tbl_sort = table.sort
+  local _tbl_remove = table.remove
+  local _tbl_insert = table.insert
+  local _unpack = table.unpack or unpack
+  local _co_create = coroutine.create
+  local _co_resume = coroutine.resume
+  local _co_status = coroutine.status
+  _SP_RT._unpack = _unpack
+
   _G._SP_NONE = _G._SP_NONE or {}
   _G._SP_UNSET = _G._SP_UNSET or {}
   local _SP_NONE = _G._SP_NONE
@@ -91,14 +117,14 @@ do
   _SP_RT._unwrap_opt = _unwrap_opt
 
   local function _unwrap_read_slow(obj)
-    while type(obj) == "table" do
-      local mt = getmetatable(obj)
+    while _type(obj) == "table" do
+      local mt = _getmetatable(obj)
       if mt and mt.__get_active then
         obj = mt.__get_active()
       elseif mt and mt.__is_ref then
-        obj = rawget(obj, "_val")
+        obj = _rawget(obj, "_val")
       elseif mt and mt.__is_shared_ref then
-        local cb = rawget(obj, "_cb")
+        local cb = _rawget(obj, "_cb")
         obj = cb and cb.val or nil
       else
         return obj
@@ -108,21 +134,21 @@ do
   end
 
   local function _unwrap_read(obj)
-    if type(obj) ~= "table" or getmetatable(obj) == nil then
+    if _type(obj) ~= "table" or _getmetatable(obj) == nil then
       return obj
     end
     return _unwrap_read_slow(obj)
   end
 
   local function _unwrap_write_slow(obj)
-    while type(obj) == "table" do
-      local mt = getmetatable(obj)
+    while _type(obj) == "table" do
+      local mt = _getmetatable(obj)
       if mt and mt.__ensure_cow then
         obj = mt.__ensure_cow()
       elseif mt and mt.__is_ref then
-        obj = rawget(obj, "_val")
+        obj = _rawget(obj, "_val")
       elseif mt and mt.__is_shared_ref then
-        local cb = rawget(obj, "_cb")
+        local cb = _rawget(obj, "_cb")
         obj = cb and cb.val or nil
       else
         return obj
@@ -132,7 +158,7 @@ do
   end
 
   local function _unwrap_write(obj)
-    if type(obj) ~= "table" or getmetatable(obj) == nil then
+    if _type(obj) ~= "table" or _getmetatable(obj) == nil then
       return obj
     end
     return _unwrap_write_slow(obj)
@@ -145,8 +171,8 @@ do
 
   function _Coroutine.create(fn, ...)
     local args = { ... }
-    local n = select("#", ...)
-    local self = setmetatable({}, _Coroutine)
+    local n = _select("#", ...)
+    local self = _setmetatable({}, _Coroutine)
     self._fn = fn
     self._args = args
     self._n = n
@@ -156,23 +182,30 @@ do
   end
 
   function _Coroutine:step(...)
-    if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    if self._done then
+      return nil
+    end
+    local co = self._co
+    if not co or _co_status(co) == "dead" then
       self._done = true
       return nil
     end
-    local ok, val = coroutine.resume(self._co, ...)
+    local ok, val = _co_resume(co, ...)
     if not ok then
-      error(val)
+      _error(val)
     end
-    if coroutine.status(self._co) == "dead" then
+    if _co_status(co) == "dead" then
       self._done = true
-      return val
     end
     return val
   end
 
   function _Coroutine:is_done()
-    if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    if self._done then
+      return true
+    end
+    local co = self._co
+    if co and _co_status(co) == "dead" then
       self._done = true
       return true
     end
@@ -183,41 +216,39 @@ do
     local fn = self._fn
     local args = self._args
     local n = self._n or #args
-    self._co = coroutine.create(function()
-      if table.unpack then
-        return fn(table.unpack(args, 1, n))
-      else
-        return fn(unpack(args, 1, n))
-      end
+    self._co = _co_create(function()
+      return fn(_unpack(args, 1, n))
     end)
     self._done = false
   end
   _SP_RT._Coroutine = _Coroutine
 
   local _sapphire_del
-  local _arena_owners = setmetatable({}, { __mode = "k" })
+  local _arena_owners = _setmetatable({}, { __mode = "k" })
   local Arena = { __is_arena = true }
   Arena.__index = Arena
 
   function Arena.init()
-    local self = setmetatable({}, Arena)
+    local self = _setmetatable({}, Arena)
     self.objects = {}
     return self
   end
 
   function Arena:register(obj)
-    if type(obj) == "table" then
+    if _type(obj) == "table" then
       local prev = _arena_owners[obj]
       if prev and prev ~= self then
-        for i, o in ipairs(prev.objects) do
-          if o == obj then
-            table.remove(prev.objects, i)
+        local prev_objs = prev.objects
+        for i = 1, #prev_objs do
+          if prev_objs[i] == obj then
+            _tbl_remove(prev_objs, i)
             break
           end
         end
       end
       if prev ~= self then
-        table.insert(self.objects, obj)
+        local objs = self.objects
+        objs[#objs + 1] = obj
         _arena_owners[obj] = self
       end
     end
@@ -225,17 +256,18 @@ do
   end
 
   function Arena:destroy()
-    if rawget(self, "_sapphire_disposed_") then
+    if _rawget(self, "_sapphire_disposed_") then
       return
     end
-    rawset(self, "_sapphire_disposed_", true)
-    for i = #self.objects, 1, -1 do
-      local obj = self.objects[i]
+    _rawset(self, "_sapphire_disposed_", true)
+    local objs = self.objects
+    for i = #objs, 1, -1 do
+      local obj = objs[i]
       _sapphire_del(obj)
       _arena_owners[obj] = nil
-      local meta = getmetatable(obj)
+      local meta = _getmetatable(obj)
       if meta and meta.__shadow then
-        for k in pairs(meta.__shadow) do
+        for k in _pairs(meta.__shadow) do
           meta.__shadow[k] = nil
         end
       end
@@ -499,13 +531,24 @@ do
   _SP_RT._sapphire_eq = _sapphire_eq
 
   -- UTF-8 code-point utilities (Lua 5.1/LuaJIT safe)
+  local function _is_ascii(s)
+    for i = 1, #s do
+      if _str_byte(s, i) >= 128 then
+        return false
+      end
+    end
+    return true
+  end
+
   local function _utf8_offsets(s)
     local offsets = {}
+    local n = 0
     local i = 1
     local len = #s
     while i <= len do
-      offsets[#offsets + 1] = i
-      local b = string.byte(s, i)
+      n = n + 1
+      offsets[n] = i
+      local b = _str_byte(s, i)
       if b < 128 then
         i = i + 1
       elseif b >= 240 then
@@ -518,13 +561,31 @@ do
         i = i + 1
       end
     end
-    offsets[#offsets + 1] = len + 1
-    return offsets
+    n = n + 1
+    offsets[n] = len + 1
+    return offsets, n - 1
+  end
+
+  local function _byte_to_cp(offsets, cp_len, b_idx)
+    local lo, hi = 1, cp_len
+    while lo <= hi do
+      local mid = _math_floor((lo + hi) * 0.5)
+      local ov = offsets[mid]
+      if ov == b_idx then return mid - 1 end
+      if ov < b_idx then lo = mid + 1 else hi = mid - 1 end
+    end
+    return lo - 2
   end
 
   _SP_RT._sapphire_string_size = function(s)
     if s == nil then return 0 end
-    local _, count = string.gsub(s, "[^\\128-\\191]", "")
+    local count = 0
+    for i = 1, #s do
+      local b = _str_byte(s, i)
+      if b < 128 or b >= 192 then
+        count = count + 1
+      end
+    end
     return count
   end
 
@@ -543,8 +604,24 @@ do
 
   _SP_RT._sapphire_string_slice = function(s, start_idx, end_idx)
     if s == nil then return "" end
-    local offsets = _utf8_offsets(s)
-    local len = #offsets - 1
+    if _is_ascii(s) then
+      local len = #s
+      local i = start_idx or 0
+      if i < 0 then i = len + i end
+      if i < 0 then i = 0 end
+      if i > len then return "" end
+      local j = end_idx
+      if j == nil then
+        j = len
+      else
+        if j < 0 then j = len + j end
+        if j < 0 then j = 0 end
+        if j > len then j = len end
+      end
+      if j <= i then return "" end
+      return _str_sub(s, i + 1, j)
+    end
+    local offsets, len = _utf8_offsets(s)
     local i = start_idx or 0
     if i < 0 then i = len + i end
     if i < 0 then i = 0 end
@@ -558,33 +635,43 @@ do
       if j > len then j = len end
     end
     if j <= i then return "" end
-    return s:sub(offsets[i + 1], offsets[j + 1] - 1)
+    return _str_sub(s, offsets[i + 1], offsets[j + 1] - 1)
   end
 
   _SP_RT._sapphire_string_split = function(s, sep)
     if s == nil then return {} end
     local res = {}
+    local n = 0
     if sep == "" then
-      local offsets = _utf8_offsets(s)
-      for i = 1, #offsets - 1 do
-        res[i] = s:sub(offsets[i], offsets[i + 1] - 1)
+      if _is_ascii(s) then
+        for i = 1, #s do
+          res[i] = _str_sub(s, i, i)
+        end
+        return res
+      end
+      local offsets, len = _utf8_offsets(s)
+      for i = 1, len do
+        res[i] = _str_sub(s, offsets[i], offsets[i + 1] - 1)
       end
       return res
     end
     if sep == nil then
       for w in s:gmatch("%S+") do
-        table.insert(res, w)
+        n = n + 1
+        res[n] = w
       end
       return res
     end
     local start = 1
     while true do
-      local p_start, p_end = s:find(sep, start, true)
+      local p_start, p_end = _str_find(s, sep, start, true)
       if not p_start then
-        table.insert(res, s:sub(start))
+        n = n + 1
+        res[n] = _str_sub(s, start)
         break
       end
-      table.insert(res, s:sub(start, p_start - 1))
+      n = n + 1
+      res[n] = _str_sub(s, start, p_start - 1)
       start = p_end + 1
     end
     return res
@@ -592,8 +679,37 @@ do
 
   _SP_RT._sapphire_string_find = function(s, sub, start_idx, reverse)
     if s == nil or sub == nil then return nil end
-    local offsets = _utf8_offsets(s)
-    local cp_len = #offsets - 1
+    if _is_ascii(s) then
+      local cp_len = #s
+      local start_0 = start_idx or 0
+      if start_0 < 0 then start_0 = cp_len + start_0 end
+      if start_0 < 0 then start_0 = 0 end
+      if sub == "" then
+        if start_0 > cp_len then return nil end
+        if reverse then return cp_len end
+        return start_0
+      end
+      if start_0 >= cp_len then return nil end
+      local start_byte = start_0 + 1
+      if reverse then
+        local last_byte = nil
+        local curr = start_byte
+        while curr <= cp_len do
+          local p_start = _str_find(s, sub, curr, true)
+          if not p_start then break end
+          last_byte = p_start
+          curr = p_start + 1
+        end
+        if last_byte == nil then return nil end
+        return last_byte - 1
+      end
+      local p_start = _str_find(s, sub, start_byte, true)
+      if p_start then
+        return p_start - 1
+      end
+      return nil
+    end
+    local offsets, cp_len = _utf8_offsets(s)
     local start_0 = start_idx or 0
     if start_0 < 0 then start_0 = cp_len + start_0 end
     if start_0 < 0 then start_0 = 0 end
@@ -604,61 +720,52 @@ do
     end
     if start_0 >= cp_len then return nil end
     local start_byte = offsets[start_0 + 1]
-    local function byte_to_cp(b_idx)
-      local lo, hi = 1, cp_len
-      while lo <= hi do
-        local mid = math.floor((lo + hi) / 2)
-        if offsets[mid] == b_idx then return mid - 1 end
-        if offsets[mid] < b_idx then lo = mid + 1 else hi = mid - 1 end
-      end
-      return lo - 2
-    end
     if reverse then
       local last_byte = nil
       local curr = start_byte
       local s_len = #s
       while curr <= s_len do
-        local p_start = s:find(sub, curr, true)
+        local p_start = _str_find(s, sub, curr, true)
         if not p_start then break end
         last_byte = p_start
         curr = p_start + 1
       end
       if last_byte == nil then return nil end
-      return byte_to_cp(last_byte)
+      return _byte_to_cp(offsets, cp_len, last_byte)
     else
-      local p_start = s:find(sub, start_byte, true)
+      local p_start = _str_find(s, sub, start_byte, true)
       if p_start then
-        return byte_to_cp(p_start)
+        return _byte_to_cp(offsets, cp_len, p_start)
       end
       return nil
     end
   end
 
   _SP_RT._sapphire_string_to_int = function(s, radix)
-    if type(s) ~= "string" then return nil end
+    if _type(s) ~= "string" then return nil end
     local r = radix or 10
     if r < 2 or r > 36 then return nil end
     local clean = s:match("^%s*(.-)%s*$")
     if clean == "" then return nil end
     local sign = 1
     local body = clean
-    local first = body:sub(1, 1)
+    local first = _str_sub(body, 1, 1)
     if first == "-" then
       sign = -1
-      body = body:sub(2)
+      body = _str_sub(body, 2)
     elseif first == "+" then
-      body = body:sub(2)
+      body = _str_sub(body, 2)
     end
     if r == 16 and body:match("^0[xX]") then
-      body = body:sub(3)
+      body = _str_sub(body, 3)
     elseif r == 2 and body:match("^0[bB]") then
-      body = body:sub(3)
+      body = _str_sub(body, 3)
     elseif r == 8 and body:match("^0[oO]") then
-      body = body:sub(3)
+      body = _str_sub(body, 3)
     end
     if body == "" or not body:match("^[0-9a-zA-Z]+$") then return nil end
     for i = 1, #body do
-      local c = string.byte(body, i)
+      local c = _str_byte(body, i)
       local d
       if c >= 48 and c <= 57 then d = c - 48
       elseif c >= 65 and c <= 90 then d = c - 55
@@ -666,21 +773,21 @@ do
       else return nil end
       if d >= r then return nil end
     end
-    local num = tonumber(body, r)
+    local num = _tonumber(body, r)
     if num == nil then return nil end
     return sign * num
   end
 
   _SP_RT._sapphire_string_to_float = function(s)
-    if type(s) ~= "string" then return nil end
+    if _type(s) ~= "string" then return nil end
     local clean = s:match("^%s*(.-)%s*$")
     if clean == "" then return nil end
     if clean:match("^[+-]?0[xX]") then return nil end
-    return tonumber(clean)
+    return _tonumber(clean)
   end
 
   _SP_RT._sapphire_string_to_bool = function(s)
-    if type(s) ~= "string" then return nil end
+    if _type(s) ~= "string" then return nil end
     local clean = s:match("^%s*(.-)%s*$"):lower()
     if clean == "true" then return true end
     if clean == "false" then return false end
@@ -688,15 +795,15 @@ do
   end
 
   _SP_RT._sapphire_cast_int = function(v)
-    if type(v) == "boolean" then return v and 1 or 0 end
-    local n = tonumber(v)
+    if _type(v) == "boolean" then return v and 1 or 0 end
+    local n = _tonumber(v)
     if not n then return 0 end
-    if n >= 0 then return math.floor(n) else return math.ceil(n) end
+    if n >= 0 then return _math_floor(n) else return _math_ceil(n) end
   end
 
   _SP_RT._sapphire_cast_float = function(v)
-    if type(v) == "boolean" then return v and 1.0 or 0.0 end
-    return tonumber(v) or 0.0
+    if _type(v) == "boolean" then return v and 1.0 or 0.0 end
+    return _tonumber(v) or 0.0
   end
 
   _SP_RT._sapphire_cast_bool = function(v)
@@ -704,9 +811,9 @@ do
   end
 
   _SP_RT._sapphire_div = function(a, b)
-    if b == 0 then error("division by zero") end
+    if b == 0 then _error("division by zero") end
     local q = a / b
-    if q >= 0 then return math.floor(q) else return math.ceil(q) end
+    if q >= 0 then return _math_floor(q) else return _math_ceil(q) end
   end
 
   _SP_RT._sapphire_enum_from = function(enum_tbl, val)
@@ -739,7 +846,7 @@ do
     local len = #arr
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 < 1 or idx_1 > len then
-      error("Array index out of bounds: " .. tostring(index) .. " (size " .. tostring(len) .. ")")
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
     end
     return _unwrap_opt(arr[idx_1])
   end
@@ -749,7 +856,7 @@ do
     local len = #arr
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 < 1 or idx_1 > len then
-      error("Array index out of bounds: " .. tostring(index) .. " (size " .. tostring(len) .. ")")
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
     end
     arr[idx_1] = _wrap_opt(val)
     return val
@@ -757,14 +864,15 @@ do
 
   _SP_RT._sapphire_array_map = function(arr, fn, in_place)
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
+    local len = #arr
     if in_place then
-      for i = 1, #arr do
+      for i = 1, len do
         arr[i] = _wrap_opt(fn(_unwrap_opt(arr[i])))
       end
       return arr
     end
     local res = {}
-    for i = 1, #arr do
+    for i = 1, len do
       res[i] = _wrap_opt(fn(_unwrap_opt(arr[i])))
     end
     return res
@@ -772,25 +880,28 @@ do
 
   _SP_RT._sapphire_array_filter = function(arr, fn, in_place)
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
+    local len = #arr
     if in_place then
-      local res = {}
-      for i = 1, #arr do
-        if fn(_unwrap_opt(arr[i])) then
-          res[#res + 1] = arr[i]
+      local w = 0
+      for i = 1, len do
+        local raw = arr[i]
+        if fn(_unwrap_opt(raw)) then
+          w = w + 1
+          arr[w] = raw
         end
       end
-      for i = #arr, 1, -1 do
+      for i = w + 1, len do
         arr[i] = nil
-      end
-      for i = 1, #res do
-        arr[i] = res[i]
       end
       return arr
     end
     local res = {}
-    for i = 1, #arr do
-      if fn(_unwrap_opt(arr[i])) then
-        res[#res + 1] = arr[i]
+    local n = 0
+    for i = 1, len do
+      local raw = arr[i]
+      if fn(_unwrap_opt(raw)) then
+        n = n + 1
+        res[n] = raw
       end
     end
     return res
@@ -826,7 +937,7 @@ do
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
     local len = #arr
     if in_place then
-      for i = 1, math.floor(len / 2) do
+      for i = 1, _math_floor(len * 0.5) do
         local tmp = arr[i]
         arr[i] = arr[len - i + 1]
         arr[len - i + 1] = tmp
@@ -840,6 +951,10 @@ do
     return res
   end
 
+  local function _sort_desc(a, b)
+    return _unwrap_opt(a) > _unwrap_opt(b)
+  end
+
   _SP_RT._sapphire_array_sort = function(arr, by, reverse, in_place)
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
     local target = arr
@@ -849,23 +964,21 @@ do
         target[i] = arr[i]
       end
     end
-    table.sort(target, function(a, b)
-      local ua, ub = _unwrap_opt(a), _unwrap_opt(b)
-      if by then
-        local cmp = by(ua, ub)
-        if reverse then
-          return cmp > 0
-        else
-          return cmp < 0
-        end
+    if by == nil then
+      if reverse then
+        _tbl_sort(target, _sort_desc)
       else
-        if reverse then
-          return ua > ub
-        else
-          return ua < ub
-        end
+        _tbl_sort(target)
       end
-    end)
+    elseif reverse then
+      _tbl_sort(target, function(a, b)
+        return by(_unwrap_opt(a), _unwrap_opt(b)) > 0
+      end)
+    else
+      _tbl_sort(target, function(a, b)
+        return by(_unwrap_opt(a), _unwrap_opt(b)) < 0
+      end)
+    end
     return target
   end
 
@@ -875,9 +988,10 @@ do
     if delimiter == nil then delimiter = ", " end
     local str_arr = {}
     for i = 1, #arr do
-      str_arr[i] = tostring(_unwrap_opt(arr[i]))
+      local v = _unwrap_opt(arr[i])
+      str_arr[i] = _type(v) == "string" and v or _tostring(v)
     end
-    return table.concat(str_arr, delimiter)
+    return _tbl_concat(str_arr, delimiter)
   end
 
   _SP_RT._sapphire_array_push = function(arr, element)
@@ -888,8 +1002,11 @@ do
 
   _SP_RT._sapphire_array_pop = function(arr)
     arr = _unwrap_write(arr)
-    if #arr == 0 then return nil end
-    return _unwrap_opt(table.remove(arr))
+    local len = #arr
+    if len == 0 then return nil end
+    local v = arr[len]
+    arr[len] = nil
+    return _unwrap_opt(v)
   end
 
   _SP_RT._sapphire_array_insert = function(arr, index, element)
@@ -898,7 +1015,7 @@ do
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 < 1 then idx_1 = 1 end
     if idx_1 > len + 1 then idx_1 = len + 1 end
-    table.insert(arr, idx_1, _wrap_opt(element))
+    _tbl_insert(arr, idx_1, _wrap_opt(element))
     return element
   end
 
@@ -907,7 +1024,7 @@ do
     local len = #arr
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 >= 1 and idx_1 <= len then
-      return _unwrap_opt(table.remove(arr, idx_1))
+      return _unwrap_opt(_tbl_remove(arr, idx_1))
     end
     return nil
   end
@@ -942,18 +1059,10 @@ do
     return nil
   end
 
-  _SP_RT._sapphire_array_idx = function(arr, index)
-    arr = _unwrap_read(arr)
-    if index < 0 then
-      return #arr + index + 1
-    end
-    return index + 1
-  end
-
   _SP_RT._sapphire_map_size = function(m)
     m = _unwrap_read(m)
     local count = 0
-    for _ in pairs(m) do
+    for _ in _pairs(m) do
       count = count + 1
     end
     return count
@@ -961,7 +1070,7 @@ do
 
   _SP_RT._sapphire_map_empty = function(m)
     m = _unwrap_read(m)
-    return next(m) == nil
+    return _next(m) == nil
   end
 
   _SP_RT._sapphire_map_contains = function(m, k)
@@ -973,7 +1082,7 @@ do
     m = _unwrap_read(m)
     local v = m[k]
     if v == nil then
-      error("KeyError: key '" .. tostring(k) .. "' not found in map")
+      _error("KeyError: key '" .. _tostring(k) .. "' not found in map")
     end
     return _unwrap_opt(v)
   end
@@ -993,8 +1102,10 @@ do
   _SP_RT._sapphire_map_keys = function(m)
     m = _unwrap_read(m)
     local res = {}
-    for k in pairs(m) do
-      res[#res + 1] = k
+    local n = 0
+    for k in _pairs(m) do
+      n = n + 1
+      res[n] = k
     end
     return res
   end
@@ -1002,8 +1113,10 @@ do
   _SP_RT._sapphire_map_values = function(m)
     m = _unwrap_read(m)
     local res = {}
-    for _, v in pairs(m) do
-      res[#res + 1] = v
+    local n = 0
+    for _, v in _pairs(m) do
+      n = n + 1
+      res[n] = v
     end
     return res
   end
@@ -1023,7 +1136,7 @@ do
 
   _SP_RT._sapphire_map_clear = function(m)
     m = _unwrap_write(m)
-    for k in pairs(m) do
+    for k in _pairs(m) do
       m[k] = nil
     end
   end
@@ -1041,19 +1154,19 @@ do
 
   _SP_RT._sapphire_iter_array = function(arr)
     arr = _unwrap_read(arr)
-    if type(arr) ~= "table" then return _iter_array_next, _EMPTY_TBL, 0 end
+    if _type(arr) ~= "table" then return _iter_array_next, _EMPTY_TBL, 0 end
     return _iter_array_next, arr, 0
   end
 
   local function _iter_map_next(m, k)
-    local nk, v = next(m, k)
+    local nk, v = _next(m, k)
     if nk == nil then return nil end
     return nk, _unwrap_opt(v)
   end
 
   _SP_RT._sapphire_iter_map = function(m)
     m = _unwrap_read(m)
-    if type(m) ~= "table" then return _iter_map_next, _EMPTY_TBL, nil end
+    if _type(m) ~= "table" then return _iter_map_next, _EMPTY_TBL, nil end
     return _iter_map_next, m, nil
   end
 

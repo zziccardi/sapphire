@@ -31,13 +31,13 @@ import types
 from enum import Enum, IntEnum
 
 _SP_UNSET = object()
+_cmp_to_key = None
 
 def _sapphire_div(a, b):
-  if isinstance(a, int) and isinstance(b, int):
-    q, r = divmod(a, b)
-    if r != 0 and (a < 0) != (b < 0):
-      q += 1
-    return q
+  if type(a) is int and type(b) is int:
+    if (a < 0) != (b < 0):
+      return -(-a // b) if a < 0 else -(a // -b)
+    return a // b
   return int(a / b)
 
 def _sapphire_assert(cond, msg="assertion failed"):
@@ -48,6 +48,8 @@ def _sapphire_string_contains(s, sub):
   return sub in s
 
 class _SapphireCoroutine:
+  __slots__ = ('_fn', '_args', '_kwargs', '_gen', '_done')
+
   def __init__(self, fn, *args, **kwargs):
     self._fn = fn
     self._args = args
@@ -73,43 +75,71 @@ class _SapphireCoroutine:
     self._done = False
 
 class Arena:
+  __slots__ = ('_objects', '_sapphire_disposed_')
+
   def __init__(self):
-    self.objects = []
+    self._objects = {}
+    self._sapphire_disposed_ = False
+
+  @property
+  def objects(self):
+    return list(self._objects.values())
+
   def register(self, obj):
-    if hasattr(obj, '__arena__') and obj.__arena__ is not None:
-      if obj.__arena__ is not self:
-        try:
-          obj.__arena__.objects.remove(obj)
-        except ValueError:
-          pass
-    if obj not in self.objects:
-      self.objects.append(obj)
-    if hasattr(obj, '__setattr__'):
+    oid = id(obj)
+    obj_dict = getattr(obj, '__dict__', None)
+    prev = obj_dict.get('__arena__') if obj_dict is not None else getattr(obj, '__arena__', None)
+    if prev is not None and prev is not self:
+      prev._objects.pop(oid, None)
+    if oid not in self._objects:
+      self._objects[oid] = obj
+    if obj_dict is not None:
+      obj_dict['__arena__'] = self
+    else:
       try:
         object.__setattr__(obj, '__arena__', self)
       except AttributeError:
         pass
     return obj
+
   def destroy(self):
-    if getattr(self, '__dict__', {}).get('_sapphire_disposed_', False):
+    if self._sapphire_disposed_:
       return
-    for obj in reversed(self.objects):
+    self._sapphire_disposed_ = True
+    objs = list(self._objects.values())
+    self._objects.clear()
+    for obj in reversed(objs):
       _sapphire_del(obj)
-      if hasattr(obj, '__shadow__'):
-        obj.__shadow__.clear()
-    self.objects.clear()
-    object.__setattr__(self, '_sapphire_disposed_', True)
+      obj_dict = getattr(obj, '__dict__', None)
+      if obj_dict is not None:
+        shadow = obj_dict.get('__shadow__')
+        if shadow is not None:
+          shadow.clear()
+
   def __del__(self):
     self.destroy()
+
   def __enter__(self):
     return self
+
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.destroy()
 
 def _sapphire_del(obj):
-  if obj is not None and not getattr(obj, '__dict__', {}).get('_sapphire_disposed_', False):
-    if hasattr(obj, '__del__') and callable(obj.__del__):
-      obj.__del__()
+  if obj is None:
+    return
+  if type(obj) is Arena:
+    obj.destroy()
+    return
+  d = getattr(obj, '__dict__', None)
+  if d is not None:
+    if d.get('_sapphire_disposed_', False):
+      return
+  elif getattr(obj, '_sapphire_disposed_', False):
+    return
+  del_fn = getattr(obj, '__del__', None)
+  if del_fn is not None:
+    del_fn()
 
 def _sapphire_cow_copy(target, _seen=None):
   if isinstance(target, _LazyCoWProxy):
@@ -145,44 +175,47 @@ def _sapphire_cow_copy(target, _seen=None):
   return copy.copy(target)
 
 class _LazyCoWProxy:
+  __slots__ = ('_parent', '_name', '_target')
+
   def __init__(self, parent, name, target):
     if isinstance(target, _LazyCoWProxy):
       target = target._get_active()
-    super().__setattr__('_parent', parent)
-    super().__setattr__('_name', name)
-    super().__setattr__('_target', target)
+    object.__setattr__(self, '_parent', parent)
+    object.__setattr__(self, '_name', name)
+    object.__setattr__(self, '_target', target)
 
   def _get_parent_obj(self):
-    p = super().__getattribute__('_parent')
+    p = object.__getattribute__(self, '_parent')
     if isinstance(p, _LazyCoWProxy):
       return p._get_active()
     return p
 
   def _get_active(self):
     parent = self._get_parent_obj()
-    name = super().__getattribute__('_name')
-    if isinstance(parent, dict):
-      return parent[name] if name in parent else super().__getattribute__('_target')
-    if isinstance(parent, list):
-      return parent[name] if 0 <= name < len(parent) else super().__getattribute__('_target')
-    if hasattr(parent, '__shadow__'):
-      if name in parent.__shadow__:
-        return parent.__shadow__[name]
-      return super().__getattribute__('_target')
-    if isinstance(name, str):
-      p_dict = getattr(parent, '__dict__', None)
-      if p_dict is not None and name in p_dict:
+    name = object.__getattribute__(self, '_name')
+    if type(parent) is dict:
+      return parent[name] if name in parent else object.__getattribute__(self, '_target')
+    if type(parent) is list:
+      return parent[name] if 0 <= name < len(parent) else object.__getattribute__(self, '_target')
+    p_dict = getattr(parent, '__dict__', None)
+    if p_dict is not None:
+      shadow = p_dict.get('__shadow__')
+      if shadow is not None:
+        if name in shadow:
+          return shadow[name]
+        return object.__getattribute__(self, '_target')
+      if isinstance(name, str) and name in p_dict:
         return p_dict[name]
-      if hasattr(parent, name):
-        val = getattr(parent, name)
-        if val is not None:
-          return val
-    return super().__getattribute__('_target')
+    if isinstance(name, str) and hasattr(parent, name):
+      val = getattr(parent, name)
+      if val is not None:
+        return val
+    return object.__getattribute__(self, '_target')
 
   def _ensure_cow(self):
-    p = super().__getattribute__('_parent')
-    attr_name = super().__getattribute__('_name')
-    target = super().__getattribute__('_target')
+    p = object.__getattribute__(self, '_parent')
+    attr_name = object.__getattribute__(self, '_name')
+    target = object.__getattribute__(self, '_target')
     if isinstance(target, _LazyCoWProxy):
       target = target._get_active()
 
@@ -220,8 +253,6 @@ class _LazyCoWProxy:
     return curr
 
   def __getattr__(self, name):
-    if name in ('_parent', '_name', '_target'):
-      return super().__getattribute__(name)
     active = self._get_active()
     val = getattr(active, name)
     if hasattr(val, '__self__') and hasattr(val, '__func__') and val.__self__ is active:
@@ -234,7 +265,7 @@ class _LazyCoWProxy:
 
   def __setattr__(self, name, value):
     if name in ('_parent', '_name', '_target'):
-      super().__setattr__(name, value)
+      object.__setattr__(self, name, value)
       return
     target_obj = self._ensure_cow()
     setattr(target_obj, name, value)
@@ -350,24 +381,25 @@ class _LazyCoWProxy:
 
 class SapphireObject:
   def __init__(self, proto=None):
-    super().__setattr__('__proto__', proto)
-    super().__setattr__('__shadow__', {})
+    object.__setattr__(self, '__proto__', proto)
+    object.__setattr__(self, '__shadow__', {})
 
-  def clone(self):
+  def clone(self, _arena=_SP_UNSET):
     clone_obj = self.__class__(proto=self)
-    if hasattr(self, '__arena__') and self.__arena__ is not None:
-      self.__arena__.register(clone_obj)
+    arena = self.__dict__.get('__arena__') if _arena is _SP_UNSET else _arena
+    if arena is not None:
+      arena.register(clone_obj)
     return clone_obj
 
   def __getattr__(self, name):
     if name.startswith('__') and name.endswith('__'):
-      if name == '__proto__':
-        return self.__proto__
       raise AttributeError(f"Attribute '{name}' not found on {self.__class__.__name__}")
-    if name in self.__shadow__:
-      return self.__shadow__[name]
-    if self.__proto__ is not None:
-      val = getattr(self.__proto__, name)
+    shadow = self.__shadow__
+    if name in shadow:
+      return shadow[name]
+    proto = self.__proto__
+    if proto is not None:
+      val = getattr(proto, name)
       if callable(val) and not isinstance(val, type):
         return val
       if not isinstance(val, (int, float, bool, str, type(None), Enum)):
@@ -377,23 +409,30 @@ class SapphireObject:
 
   def __setattr__(self, name, value):
     if name in ('__proto__', '__shadow__'):
-      super().__setattr__(name, value)
+      object.__setattr__(self, name, value)
     elif self.__proto__ is not None:
       self.__shadow__[name] = value
     else:
-      super().__setattr__(name, value)
+      object.__setattr__(self, name, value)
 
 def _clone_helper(obj, init_fn=None, arena=None):
-  if arena is None and hasattr(obj, '__arena__'):
-    arena = getattr(obj, '__arena__', None)
-  clone_obj = obj.clone()
-  if arena is not None:
-    arena.register(clone_obj)
+  if isinstance(obj, SapphireObject):
+    target_arena = arena if arena is not None else obj.__dict__.get('__arena__')
+    clone_obj = obj.clone(_arena=target_arena)
+  else:
+    if arena is None and hasattr(obj, '__arena__'):
+      arena = getattr(obj, '__arena__', None)
+    clone_obj = obj.clone()
+    if arena is not None:
+      arena.register(clone_obj)
   if init_fn:
     init_fn(clone_obj)
   return clone_obj
 
 def _sapphire_unwrap_read(obj):
+  t = type(obj)
+  if t is list or t is dict:
+    return obj
   while True:
     if isinstance(obj, _LazyCoWProxy):
       obj = obj._get_active()
@@ -405,6 +444,9 @@ def _sapphire_unwrap_read(obj):
       return obj
 
 def _sapphire_unwrap_write(obj):
+  t = type(obj)
+  if t is list or t is dict:
+    return obj
   while True:
     if isinstance(obj, _LazyCoWProxy):
       obj = obj._ensure_cow()
@@ -550,21 +592,24 @@ def _sapphire_array_reverse(arr, in_place=False):
 
 def _sapphire_array_sort(arr, by=None, reverse=False, in_place=False):
   arr = _sapphire_unwrap_write(arr) if in_place else _sapphire_unwrap_read(arr)
-  if in_place:
-    if by is None:
-      arr.sort(reverse=reverse)
-    else:
-      import functools
-      arr.sort(key=functools.cmp_to_key(by), reverse=reverse)
-    return arr
   if by is None:
+    if in_place:
+      arr.sort(reverse=reverse)
+      return arr
     return sorted(arr, reverse=reverse)
-  import functools
-  return sorted(arr, key=functools.cmp_to_key(by), reverse=reverse)
+  global _cmp_to_key
+  if _cmp_to_key is None:
+    from functools import cmp_to_key as _ctk
+    _cmp_to_key = _ctk
+  key_fn = _cmp_to_key(by)
+  if in_place:
+    arr.sort(key=key_fn, reverse=reverse)
+    return arr
+  return sorted(arr, key=key_fn, reverse=reverse)
 
 def _sapphire_array_join(arr, sep=", "):
   arr = _sapphire_unwrap_read(arr)
-  return sep.join(_sapphire_string_from(x) for x in arr)
+  return sep.join([x if type(x) is str else _sapphire_string_from(x) for x in arr])
 
 def _sapphire_array_push(arr, element):
   arr = _sapphire_unwrap_write(arr)
@@ -639,8 +684,9 @@ def _sapphire_array_get(arr, index):
   arr = _sapphire_unwrap_read(arr)
   if arr is None:
     return None
-  idx = len(arr) + index if index < 0 else index
-  if 0 <= idx < len(arr):
+  n = len(arr)
+  idx = n + index if index < 0 else index
+  if 0 <= idx < n:
     return arr[idx]
   return None
 
@@ -658,57 +704,70 @@ def _sapphire_map_clear(m):
     m.clear()
 
 class _SapphireRef:
+  __slots__ = ('_value', '_sapphire_disposed_')
+
   def __init__(self, value):
-    super().__setattr__('_value', value)
+    object.__setattr__(self, '_value', value)
+    object.__setattr__(self, '_sapphire_disposed_', False)
+
   def __getattr__(self, name):
-    if name in ('_value', '_sapphire_disposed_'):
-      return super().__getattribute__(name)
     return getattr(self._value, name)
+
   def __setattr__(self, name, val):
     if name in ('_value', '_sapphire_disposed_'):
-      super().__setattr__(name, val)
+      object.__setattr__(self, name, val)
     else:
       setattr(self._value, name, val)
+
   def __len__(self):
     return len(self._value)
+
   def __getitem__(self, key):
     return self._value[key]
+
   def __setitem__(self, key, val):
     self._value[key] = val
+
   def __iter__(self):
     return iter(self._value)
+
   def __contains__(self, item):
     return item in self._value
+
   def __del__(self):
-    d = object.__getattribute__(self, '__dict__')
-    if d.get('_sapphire_disposed_', False):
+    if object.__getattribute__(self, '_sapphire_disposed_'):
       return
-    d['_sapphire_disposed_'] = True
-    val = d.get('_value', None)
-    d['_value'] = None
+    object.__setattr__(self, '_sapphire_disposed_', True)
+    val = object.__getattribute__(self, '_value')
+    object.__setattr__(self, '_value', None)
     if _sapphire_del is not None:
       _sapphire_del(val)
+
   def __repr__(self):
     return f"Ref({self._value!r})"
 
 class _SapphireSharedControlBlock:
+  __slots__ = ('value', 'strong_count', 'weak_count')
+
   def __init__(self, value):
     self.value = value
     self.strong_count = 1
     self.weak_count = 0
 
 class _SapphireSharedRef:
+  __slots__ = ('_cb', '_sapphire_disposed_')
+
   def __init__(self, target):
+    object.__setattr__(self, '_sapphire_disposed_', False)
     if isinstance(target, _SapphireRef):
-      td = object.__getattribute__(target, '__dict__')
-      val = td.get('_value', None)
-      td['_sapphire_disposed_'] = True
-      td['_value'] = None
-      super().__setattr__('_cb', _SapphireSharedControlBlock(val))
+      val = object.__getattribute__(target, '_value')
+      object.__setattr__(target, '_sapphire_disposed_', True)
+      object.__setattr__(target, '_value', None)
+      object.__setattr__(self, '_cb', _SapphireSharedControlBlock(val))
     elif isinstance(target, _SapphireSharedControlBlock):
-      super().__setattr__('_cb', target)
+      object.__setattr__(self, '_cb', target)
     else:
-      super().__setattr__('_cb', _SapphireSharedControlBlock(target))
+      object.__setattr__(self, '_cb', _SapphireSharedControlBlock(target))
 
   def share(self):
     self._cb.strong_count += 1
@@ -719,13 +778,11 @@ class _SapphireSharedRef:
     return _SapphireWeakRef(self._cb)
 
   def __getattr__(self, name):
-    if name in ('_cb', 'share', 'downgrade', '_sapphire_disposed_'):
-      return super().__getattribute__(name)
     return getattr(self._cb.value, name)
 
   def __setattr__(self, name, val):
     if name in ('_cb', '_sapphire_disposed_'):
-      super().__setattr__(name, val)
+      object.__setattr__(self, name, val)
     else:
       setattr(self._cb.value, name, val)
 
@@ -745,11 +802,10 @@ class _SapphireSharedRef:
     return item in self._cb.value
 
   def __del__(self):
-    d = object.__getattribute__(self, '__dict__')
-    if d.get('_sapphire_disposed_', False):
+    if object.__getattribute__(self, '_sapphire_disposed_'):
       return
-    d['_sapphire_disposed_'] = True
-    cb = d.get('_cb', None)
+    object.__setattr__(self, '_sapphire_disposed_', True)
+    cb = object.__getattribute__(self, '_cb')
     if cb is not None:
       cb.strong_count -= 1
       if cb.strong_count == 0:
@@ -762,6 +818,8 @@ class _SapphireSharedRef:
     return f"SharedRef({self._cb.value!r})"
 
 class _SapphireWeakRef:
+  __slots__ = ('_cb',)
+
   def __init__(self, cb):
     self._cb = cb
 

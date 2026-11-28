@@ -1,6 +1,11 @@
 -- Standard library math module for Sapphire (Lua target)
 
 local math_mod = {}
+local _math_sqrt = math.sqrt
+local _math_floor = math.floor
+local _math_ceil = math.ceil
+local _math_log = math.log
+local _math_type = math.type
 
 function math_mod.abs(x)
   if x < 0 then
@@ -13,7 +18,7 @@ function math_mod.sqrt(x)
   if x < 0 then
     return nil
   end
-  return math.sqrt(x)
+  return _math_sqrt(x)
 end
 
 function math_mod.min(a, b)
@@ -36,9 +41,9 @@ function math_mod.safe_div__int(a, b)
   end
   local q = a / b
   if q >= 0 then
-    return math.floor(q)
+    return _math_floor(q)
   end
-  return math.ceil(q)
+  return _math_ceil(q)
 end
 
 function math_mod.safe_div__float(a, b)
@@ -52,7 +57,7 @@ function math_mod.safe_div(a, b)
   if b == 0 then
     return nil
   end
-  if math.type and math.type(a) == "integer" and math.type(b) == "integer" then
+  if _math_type and _math_type(a) == "integer" and _math_type(b) == "integer" then
     return math_mod.safe_div__int(a, b)
   end
   return a / b
@@ -66,22 +71,17 @@ function math_mod.log(x, base)
     if base <= 0 or base == 1 then
       return nil
     end
-    return math.log(x) / math.log(base)
+    return _math_log(x) / _math_log(base)
   end
-  return math.log(x)
+  return _math_log(x)
 end
 
 function math_mod.pow(base, exp)
   return base ^ exp
 end
 
-function math_mod.ceil(x)
-  return math.ceil(x)
-end
-
-function math_mod.floor(x)
-  return math.floor(x)
-end
+math_mod.ceil = _math_ceil
+math_mod.floor = _math_floor
 
 -- Generic monomorphization aliases
 math_mod.abs__int = math_mod.abs
