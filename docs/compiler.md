@@ -220,3 +220,64 @@ When targeting Lua/Love2D, Sapphire generates v3 source maps (`.lua.map`) and em
 - **Inline Line Mapping Table**: Transpiled Lua code includes a compact `_SP_LINE_MAP` lookup table mapping generated Lua line numbers to original `.sp` files, line numbers, and source line snippets.
 - **Love2D Crash Overlay Hook**: Overrides `love.errorhandler` and intercepts stack trace strings. When a runtime crash occurs in Love2D (e.g. missing asset, out-of-bounds index, or failed unwrap), both the terminal logs and Love2D's graphical error screen display demangled Sapphire `.sp` filenames, line numbers, and source code line snippets.
 - **CLI Options**: Enabled by default for Lua transpilation. Can be disabled for production release builds using the `--no_sourcemap` CLI flag.
+
+## Backend performance characteristics & benchmarking
+
+Although the Python and Lua 5.1 backends implement identical Sapphire semantics,
+their runtime performance profiles differ sharply because of the underlying VMs.
+
+### Why LuaJIT outperforms CPython on compute and allocation loops
+
+- **Register-based vs. stack-based bytecode**: Lua 5.1 / LuaJIT is a
+  register-based VM (a single `ADD a, b, c` instruction operates directly on
+  frame slots, backed by LuaJIT's hand-tuned `DynASM` assembly interpreter),
+  whereas CPython is a stack-based VM (`LOAD_FAST`, `BINARY_OP`, `STORE_FAST`).
+  Even on interpreter fallback paths (such as `coroutine.resume`), LuaJIT
+  typically holds a 2x–5x advantage.
+- **Tracing JIT & allocation sinking**: LuaJIT records hot loops into SSA IR,
+  inlines fixed-arity constructors (`Struct._new`), and applies escape analysis
+  with allocation sinking and load/store forwarding. Short-lived struct tables
+  in hot loops can be eliminated completely into native register arithmetic.
+  CPython (including 3.14's specializing adaptive interpreter) does not sink
+  heap allocations across Python calls, so each iteration still allocates,
+  populates `__slots__`, and reference-counts the object.
+- **Unboxed NaN-tagged values vs. heap `PyObject`s**: LuaJIT stores every value
+  in a 64-bit NaN-boxed word with unboxed IEEE-754 doubles (narrowed to 32-bit
+  machine integers in hot traces) and zero per-value reference counting.
+  CPython boxes every scalar (`int`, `float`, `bool`) as a heap `PyObject`
+  pointer with `Py_INCREF`/`Py_DECREF` traffic.
+- **Minimal object model vs. descriptor dispatch**: Lua's uniform
+  table + metatable model lets LuaJIT specialize lookups against shared
+  metatables (`_PROTO_MT`, `_COW_MT`). Python layers descriptors,
+  `__getattr__`, MRO searches, bound methods, and cyclic GC tracking on top of
+  attribute access.
+- **Trace-abort sensitivity**: LuaJIT's advantage depends on avoiding NYI
+  bytecodes (`FNEW` closures, `UCLO` upvalue closes, `VARG` varargs, and inner
+  loops in root traces). Eliminating statement-level IIFEs, per-instance
+  metatables, and varargs in `LuaTranspiler` is what unlocks full trace
+  compilation and allocation sinking.
+
+### Where CPython matches or beats LuaJIT
+
+- **C-backed bulk operations**: When a Sapphire operation lowers directly to a
+  CPython C primitive (such as `list.copy()` using `memcpy` on the backing
+  pointer array, or C-implemented `str` operations), CPython can match or beat
+  LuaJIT's element-by-element Lua loops because Lua 5.1 has no built-in C
+  table-copy primitive.
+
+### Running the transpiler benchmark harness
+
+Use [bench_transpilers.py](../testing/perf/bench_transpilers.py) to measure
+Python and LuaJIT execution times, generated code size, cross-backend checksum
+parity, and `luajit -jv` trace-abort counts before and after codegen changes:
+
+```bash
+# Save a baseline before making codegen changes
+pipenv run python testing/perf/bench_transpilers.py --runs 5 \
+  --save-baseline /tmp/perf_base.json
+
+# Compare against the saved baseline after changes
+pipenv run python testing/perf/bench_transpilers.py --runs 5 \
+  --compare /tmp/perf_base.json
+```
+
