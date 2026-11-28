@@ -847,7 +847,7 @@ class TestPythonTranspiler(unittest.TestCase):
     }
     """
     py_code = self._transpile(code)
-    self.assertIn("__import__('builtins').engine = Engine(speed=42)", py_code)
+    self.assertIn("_sp_builtins.engine = Engine(42)", py_code)
 
     env = {}
     try:
@@ -3489,6 +3489,142 @@ class TestPhase5PythonFixes(unittest.TestCase):
     ns: dict = {}
     exec(py_code, ns)
     self.assertEqual(ns["run"](), 124)
+
+  def _transpile_source(self, source: str) -> str:
+    stream = CommonTokenStream(SapphireLexer(InputStream(source)))
+    tree = SapphireParser(stream).program()
+    ast = ASTBuilder().visit(tree)
+    checker = TypeChecker()
+    checker.check(ast)
+    self.assertEqual(checker.errors, [])
+    return PythonTranspiler(semantic_context=checker.context).transpile(ast)
+
+  def test_python_sapphire_destroy_and_diamond_elision(self):
+    """Verifies user structs emit _sapphire_destroy (no __del__) and elide
+    diamond guards when non-diamond.
+    """
+    source = """
+    var total: int = 0;
+    struct Resource { var val: int; }
+    impl Resource {
+      func __del__() { total += self.val; }
+    }
+    func run(): int {
+      {
+        let r = Resource { val = 7 };
+      }
+      return total;
+    }
+    """
+    py_code = self._transpile_source(source)
+    self.assertIn("def _sapphire_destroy(self):", py_code)
+    cls_section = py_code[py_code.index("class Resource(") :]
+    self.assertNotIn("def __del__(", cls_section)
+    self.assertNotIn("_sapphire_destroyed_classes_", cls_section)
+    self.assertNotIn("_SP_LINE_MAP", py_code)
+    ns: dict = {}
+    exec(py_code, ns)
+    self.assertEqual(ns["run"](), 7)
+
+  def test_python_hoisted_coroutines_and_no_dummy_yield(self):
+    """Verifies top-level and struct coroutines hoist _sp_gen_* and omit
+    dead `if False: yield` when the body already yields.
+    """
+    source = """
+    func gen_nums(n: int): Coroutine<int> {
+      for i in range(n) {
+        yield i;
+      }
+    }
+    struct Stepper { var base: int; }
+    impl Stepper {
+      func stream(k: int): Coroutine<int> {
+        for i in range(k) {
+          yield self.base + i;
+        }
+      }
+    }
+    func run(): int {
+      var sum = 0;
+      var c = gen_nums(4);
+      while !c.is_done() {
+        if let v ?= c.step() { sum += v; }
+      }
+      let s = Stepper { base = 10 };
+      var c2 = s.stream(3);
+      while !c2.is_done() {
+        if let v ?= c2.step() { sum += v; }
+      }
+      return sum;
+    }
+    """
+    py_code = self._transpile_source(source)
+    self.assertIn("def _sp_gen_gen_nums(", py_code)
+    self.assertIn("def _sp_gen_stream(", py_code)
+    self.assertNotIn("if False: yield", py_code)
+    ns: dict = {}
+    exec(py_code, ns)
+    # 0+1+2+3 (6) + 10+11+12 (33) = 39
+    self.assertEqual(ns["run"](), 39)
+
+  def test_python_match_in_tuple_and_multi_guard_dedup(self):
+    """Verifies multi-literal match uses `in (...)`, multi-binding if omits
+    `_if_ok` without else, and multi-clause guard emits else_block once.
+    """
+    source = """
+    func check_all(a: int?, b: int?, code: int): int {
+      guard let x ?= a; let y ?= b; x + y > 0 else {
+        return -999;
+      }
+      var bonus = 0;
+      if let p ?= a; let q ?= b {
+        bonus = p + q;
+      }
+      let tag = match code {
+        1, 2, 3 -> 10,
+        ... -> 20
+      };
+      return x + y + bonus + tag;
+    }
+    """
+    py_code = self._transpile_source(source)
+    self.assertIn("in (1, 2, 3):", py_code)
+    self.assertNotIn("_if_ok", py_code)
+    self.assertEqual(py_code.count("999"), 1)
+    ns: dict = {}
+    exec(py_code, ns)
+    self.assertEqual(ns["check_all"](2, 3, 2), 20)
+    self.assertEqual(ns["check_all"](None, 3, 2), -999)
+    self.assertEqual(ns["check_all"](-5, 1, 9), -999)
+
+  def test_multi_file_auto_runtime_module(self):
+    """Verifies transpile_file auto-enables shared runtime on multi-file builds."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      helper_sp = os.path.join(tmpdir, "helper_mod.sp")
+      main_sp = os.path.join(tmpdir, "entry_mod.sp")
+      with open(helper_sp, "w", encoding="utf-8") as f:
+        f.write(
+          "export { add_one }\n"
+          "func add_one(x: int): int { return x + 1; }\n"
+        )
+      with open(main_sp, "w", encoding="utf-8") as f:
+        f.write(
+          "import helper_mod;\n"
+          "func run(): int { return helper_mod.add_one(41); }\n"
+        )
+      out_py = os.path.join(tmpdir, "entry_mod.py")
+      transpile_file(main_sp, out_py, target="python", quiet=True)
+      rt_py = os.path.join(tmpdir, "_sapphire_runtime.py")
+      self.assertTrue(os.path.exists(rt_py))
+      with open(out_py, encoding="utf-8") as f:
+        self.assertIn("from _sapphire_runtime import *", f.read())
+
+      out_lua = os.path.join(tmpdir, "entry_mod.lua")
+      transpile_file(main_sp, out_lua, target="lua", quiet=True)
+      rt_lua = os.path.join(tmpdir, "_sapphire_runtime.lua")
+      self.assertTrue(os.path.exists(rt_lua))
+      with open(out_lua, encoding="utf-8") as f:
+        self.assertIn("_sp_load_runtime", f.read())
 
 
 if __name__ == "__main__":

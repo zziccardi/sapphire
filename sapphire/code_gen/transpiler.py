@@ -341,6 +341,22 @@ def _instantiate_transpiler(
   return inst
 
 
+def _has_local_sp_imports(
+  ast: Any, input_file: str, ext: str, isolated_root: str | None
+) -> bool:
+  """Returns True if *ast* imports at least one non-stdlib local `.sp` file."""
+  from sapphire.semantics.module_resolver import resolve_module_path
+
+  for imp in getattr(ast, "imports", []):
+    sub_source = resolve_module_path(imp.path, source_file_path=input_file)
+    if is_stdlib_stub(imp.path, sub_source) or not sub_source:
+      continue
+    if isolated_root is not None and _is_prebuilt_lib_module(sub_source, ext):
+      continue
+    return True
+  return False
+
+
 def transpile_file(
   input_file: str,
   output_file: str | None = None,
@@ -351,7 +367,7 @@ def transpile_file(
   dev_mode: bool = False,
   quiet: bool = False,
   raise_on_error: bool = True,
-  use_runtime_module: bool = False,
+  use_runtime_module: bool | None = None,
   _output_root: str | None = None,
   verbose: bool = False,
 ) -> str:
@@ -382,6 +398,14 @@ def transpile_file(
   ast, src_content, semantic_context = _parse_and_check(
     input_file, quiet, raise_on_error, verbose=verbose
   )
+  resolved_use_rt = (
+    use_runtime_module
+    if use_runtime_module is not None
+    else (
+      target_info.name in ("python", "lua", "love2d", "love")
+      and _has_local_sp_imports(ast, input_file, ext, isolated_root)
+    )
+  )
   _transpile_imports(
     ast,
     input_file,
@@ -394,7 +418,7 @@ def transpile_file(
     dev_mode,
     quiet,
     raise_on_error,
-    use_runtime_module,
+    resolved_use_rt,
     verbose=verbose,
   )
 
@@ -408,7 +432,7 @@ def transpile_file(
     sm_builder,
     test_mode,
     dev_mode,
-    use_runtime_module,
+    resolved_use_rt,
     semantic_context=semantic_context,
   )
 
@@ -418,7 +442,7 @@ def transpile_file(
   target_name = target_info.display_name
 
   try:
-    if use_runtime_module and target_info.name in (
+    if resolved_use_rt and target_info.name in (
       "python",
       "lua",
       "love2d",

@@ -77,7 +77,7 @@ class TestGenerics(unittest.TestCase):
     ast = self._check(code)
     py_code = PythonTranspiler().transpile(ast)
     self.assertIn("def identity__int", py_code)
-    self.assertIn("def identity__float", py_code)
+    self.assertIn("identity__float = identity__int", py_code)
     lua_code = LuaTranspiler().transpile(ast)
     self.assertIn("function identity__int", lua_code)
     self.assertIn("function identity__float", lua_code)

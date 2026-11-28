@@ -123,6 +123,17 @@ class LuaExprMixin(_LuaTranspilerBase):
     else:
       self.emit(str(node.value))
 
+  def _is_non_opt_string_expr(self, expr: ASTNode) -> bool:
+    """Returns True if *expr* is statically a non-optional String."""
+    from sapphire.semantics.types import PrimitiveType
+
+    if isinstance(expr, InterpolatedStringNode):
+      return True
+    if isinstance(expr, LiteralNode) and expr.lit_type == "string":
+      return True
+    t = self.get_inferred_type(expr)
+    return isinstance(t, PrimitiveType) and t.name == "String"
+
   def visit_InterpolatedStringNode(self, node: InterpolatedStringNode) -> None:
     if not node.parts:
       self.emit('""')
@@ -138,6 +149,8 @@ class LuaExprMixin(_LuaTranspilerBase):
           .replace("\n", "\\n")
         )
         self.emit(f'"{escaped_val}"')
+      elif self._is_non_opt_string_expr(part):
+        self.visit(part)
       else:
         self.emit("tostring(")
         self.visit(part)
@@ -156,6 +169,8 @@ class LuaExprMixin(_LuaTranspilerBase):
           .replace("\n", "\\n")
         )
         self.emit(f'"{escaped_val}"')
+      elif self._is_non_opt_string_expr(part):
+        self.visit(part)
       else:
         self.emit("tostring(")
         self.visit(part)
@@ -209,14 +224,19 @@ class LuaExprMixin(_LuaTranspilerBase):
       if isinstance(lt, (ArrayType, MapType)) or isinstance(
         rt, (ArrayType, MapType)
       ):
+        eq_fn = (
+          "_SP_RT._sapphire_array_eq"
+          if isinstance(lt, ArrayType) and isinstance(rt, ArrayType)
+          else "_SP_RT._sapphire_eq"
+        )
         if node.op == "!=":
-          self.emit("(not _SP_RT._sapphire_eq(")
+          self.emit(f"(not {eq_fn}(")
           self.visit(node.left)
           self.emit(", ")
           self.visit(node.right)
           self.emit("))")
         else:
-          self.emit("_SP_RT._sapphire_eq(")
+          self.emit(f"{eq_fn}(")
           self.visit(node.left)
           self.emit(", ")
           self.visit(node.right)
@@ -227,17 +247,16 @@ class LuaExprMixin(_LuaTranspilerBase):
     op = op_map.get(node.op, node.op)
 
     if op == "+":
-      if (
-        getattr(node, "is_string_concat", False)
-        or (
-          isinstance(node.left, LiteralNode) and node.left.lit_type == "string"
-        )
-        or (
-          isinstance(node.right, LiteralNode)
-          and node.right.lit_type == "string"
-        )
-      ):
-        op = ".."
+      if self._is_string_concat_binop(node):
+        parts: list[ASTNode] = []
+        self._collect_string_concat_parts(node, parts)
+        self.emit("(")
+        for idx, part in enumerate(parts):
+          if idx > 0:
+            self.emit(" .. ")
+          self._visit_concat_operand(part, is_string_concat=True)
+        self.emit(")")
+        return
 
     self.emit("(")
     self._visit_concat_operand(node.left, is_string_concat=(op == ".."))
@@ -245,13 +264,35 @@ class LuaExprMixin(_LuaTranspilerBase):
     self._visit_concat_operand(node.right, is_string_concat=(op == ".."))
     self.emit(")")
 
+  def _is_string_concat_binop(self, node: BinaryOpNode) -> bool:
+    """Returns True if *node* is a string concatenation `+` BinaryOpNode."""
+    return node.op == "+" and (
+      getattr(node, "is_string_concat", False)
+      or (isinstance(node.left, LiteralNode) and node.left.lit_type == "string")
+      or (
+        isinstance(node.right, LiteralNode) and node.right.lit_type == "string"
+      )
+    )
+
+  def _collect_string_concat_parts(
+    self, expr: ASTNode, out: list[ASTNode]
+  ) -> None:
+    """Flattens associative string `+` chains into a single operand list."""
+    if isinstance(expr, BinaryOpNode) and self._is_string_concat_binop(expr):
+      self._collect_string_concat_parts(expr.left, out)
+      self._collect_string_concat_parts(expr.right, out)
+    else:
+      out.append(expr)
+
   def _visit_concat_operand(
     self, expr: ASTNode, is_string_concat: bool
   ) -> None:
     if not is_string_concat:
       self.visit(expr)
       return
-    if isinstance(expr, LiteralNode) and expr.lit_type in (
+    if self._is_non_opt_string_expr(expr):
+      self.visit(expr)
+    elif isinstance(expr, LiteralNode) and expr.lit_type in (
       "string",
       "int",
       "float",
@@ -295,6 +336,8 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit(")")
 
   def visit_CastExprNode(self, node: CastExprNode) -> None:
+    from sapphire.semantics.types import OptionalType, PrimitiveType
+
     lifted = getattr(self, "_lifted_short_circuits", None)
     if lifted and id(node) in lifted:
       self.emit(lifted[id(node)])
@@ -306,6 +349,38 @@ class LuaExprMixin(_LuaTranspilerBase):
       is_opt_target = False
       inner_type = node.target_type
     target = getattr(inner_type, "name", str(inner_type))
+    src_t = self.get_inferred_type(node.expr)
+    if not is_opt_target and isinstance(src_t, PrimitiveType):
+      if src_t.name == target or (src_t.name == "int" and target == "float"):
+        self.visit(node.expr)
+        return
+      if src_t.name == "float" and target == "int":
+        self.emit("_SP_RT._sapphire_trunc(")
+        self.visit(node.expr)
+        self.emit(")")
+        return
+    src_base = src_t.base_type if isinstance(src_t, OptionalType) else src_t
+    if (
+      is_opt_target
+      and isinstance(src_base, PrimitiveType)
+      and (
+        src_base.name == target
+        or (src_base.name == "int" and target == "float")
+      )
+    ):
+      self.visit(node.expr)
+      return
+    if (
+      not is_opt_target
+      and target == "bool"
+      and isinstance(node.expr, (IdentifierNode, LiteralNode))
+    ):
+      expr_code = self.capture_expr(node.expr)
+      self.emit(
+        f"({expr_code} ~= false and {expr_code} ~= nil and {expr_code} ~= 0)"
+      )
+      return
+
     cast_fn_map = {
       "float": "_SP_RT._sapphire_cast_float",
       "int": "_SP_RT._sapphire_cast_int",
@@ -317,6 +392,13 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.visit(node.expr)
       return
     if is_opt_target:
+      if (
+        target == "int"
+        and isinstance(src_t, OptionalType)
+        and isinstance(src_t.base_type, PrimitiveType)
+        and src_t.base_type.name == "float"
+      ):
+        cast_fn = "_SP_RT._sapphire_trunc"
       c_tmp = self._next_temp_name("_c")
       self.emit(
         f"((function({c_tmp}) if {c_tmp} ~= nil then "
@@ -329,42 +411,77 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.visit(node.expr)
     self.emit(")")
 
-  def _is_optional_param_slot(self, node: CallNode, slot_idx: int) -> bool:
-    """Returns True if *slot_idx* on *node*'s callee is an OptionalType
-    parameter.
-    """
-    from sapphire.semantics.types import FunctionType, OptionalType
+  def _get_callee_opt_default_slots(self, node: CallNode | None) -> set[int]:
+    """Returns parameter indices that are optional with a non-`none` default."""
+    from sapphire.semantics.types import FunctionType, OptionalType, StructType
 
+    if node is None:
+      return set()
     callee_t = self.get_inferred_type(node.callee)
-    if (
-      isinstance(callee_t, FunctionType)
-      and slot_idx < len(callee_t.param_types)
-      and isinstance(callee_t.param_types[slot_idx], OptionalType)
-    ):
-      return True
-    return False
+    p_types: list[Any] = []
+    p_defaults: list[Any] = []
+    if isinstance(callee_t, FunctionType):
+      if getattr(callee_t, "extern_name", None):
+        return set()
+      p_types = callee_t.param_types
+      p_defaults = getattr(callee_t, "param_defaults", None) or []
+    elif isinstance(callee_t, StructType):
+      init_m = callee_t.methods.get("__init__")
+      if init_m is not None:
+        sig = init_m.method_type
+        if getattr(sig, "extern_name", None):
+          return set()
+        if sig.has_self and sig.param_names and sig.param_names[0] == "self":
+          p_types = sig.param_types[1:]
+          p_defaults = (getattr(sig, "param_defaults", None) or [])[1:]
+        else:
+          p_types = sig.param_types
+          p_defaults = getattr(sig, "param_defaults", None) or []
+    slots: set[int] = set()
+    for idx, p_t in enumerate(p_types):
+      if not isinstance(p_t, OptionalType):
+        continue
+      d_expr = p_defaults[idx] if idx < len(p_defaults) else None
+      if d_expr is None:
+        continue
+      if isinstance(d_expr, LiteralNode) and d_expr.lit_type == "none":
+        continue
+      slots.add(idx)
+    return slots
+
+  def _is_optional_param_slot(self, node: CallNode, slot_idx: int) -> bool:
+    """Returns True if *slot_idx* on *node*'s callee is an optional non-none
+    default parameter.
+    """
+    return slot_idx in self._get_callee_opt_default_slots(node)
 
   def _emit_lua_call_args_list(
     self, exprs: list[ASTNode], node: CallNode | None = None
   ) -> None:
     """Emits comma-separated Lua argument expressions, preserving omitted
-    optional
-    slots.
+    optional non-none default slots (including trailing omitted slots).
     """
     omitted_slots = (
       getattr(node, "_omitted_arg_slots", set()) if node else set()
     )
-    for idx, expr in enumerate(exprs):
+    opt_def_slots = self._get_callee_opt_default_slots(node)
+    total_slots = len(exprs)
+    if opt_def_slots:
+      max_opt = max(opt_def_slots)
+      if max_opt + 1 > total_slots:
+        total_slots = max_opt + 1
+    for idx in range(total_slots):
       if idx > 0:
         self.emit(", ")
-      if (
-        idx in omitted_slots
-        and node is not None
-        and self._is_optional_param_slot(node, idx)
-      ):
+      if idx < len(exprs):
+        if idx in omitted_slots and idx in opt_def_slots:
+          self.emit("_SP_RT._SP_UNSET")
+        else:
+          self.visit(exprs[idx])
+      elif idx in opt_def_slots:
         self.emit("_SP_RT._SP_UNSET")
       else:
-        self.visit(expr)
+        self.emit("nil")
 
   def _format_reordered_slot_temps(
     self, node: CallNode, total_slots: int
@@ -378,11 +495,16 @@ class LuaExprMixin(_LuaTranspilerBase):
       slot: f"_a{arg_idx}"
       for arg_idx, slot in enumerate(getattr(node, "_eval_order_slots", []))
     }
+    opt_def_slots = self._get_callee_opt_default_slots(node)
+    if opt_def_slots:
+      max_opt = max(opt_def_slots)
+      if max_opt + 1 > total_slots:
+        total_slots = max_opt + 1
     res: list[str] = []
     for i in range(total_slots):
       if i in slot_to_temp:
         res.append(slot_to_temp[i])
-      elif self._is_optional_param_slot(node, i):
+      elif i in opt_def_slots:
         res.append("_SP_RT._SP_UNSET")
       else:
         res.append("nil")
@@ -406,17 +528,34 @@ class LuaExprMixin(_LuaTranspilerBase):
       if node.arena_expr:
         self.visit(node.arena_expr)
         self.emit(":register(")
-      self.visit(node.callee)
-      self.emit(".init({")
-      for idx, arg in enumerate(node.arguments):
-        if idx > 0:
-          self.emit(", ")
-        if arg.name:
-          self.emit(f"{self._mangle_name(arg.name)} = ")
+      resolved_exprs = getattr(node, "_resolved_arguments", None)
+      if resolved_exprs is not None:
+        needs_temps = bool(getattr(node, "_requires_eval_order_temps", False))
+        if needs_temps:
+          self.emit("(function() ")
+          temp_args = self._format_reordered_slot_temps(
+            node, len(resolved_exprs)
+          )
+          self.emit("return ")
+          self.visit(node.callee)
+          self.emit(f"._new({', '.join(temp_args)}) end)()")
         else:
-          self.emit(f"[{idx + 1}] = ")
-        self._emit_opt_wrapped(arg.expr)
-      self.emit("})")
+          self.visit(node.callee)
+          self.emit("._new(")
+          self._emit_lua_call_args_list(resolved_exprs, node)
+          self.emit(")")
+      else:
+        self.visit(node.callee)
+        self.emit(".init({")
+        for idx, arg in enumerate(node.arguments):
+          if idx > 0:
+            self.emit(", ")
+          if arg.name:
+            self.emit(f"{self._mangle_name(arg.name)} = ")
+          else:
+            self.emit(f"[{idx + 1}] = ")
+          self._emit_opt_wrapped(arg.expr)
+        self.emit("})")
       if node.arena_expr:
         self.emit(")")
       return
@@ -454,16 +593,20 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.emit(":register(")
 
     if isinstance(node.callee, MemberAccessNode):
-      from sapphire.semantics.types import FunctionType
+      from sapphire.semantics.types import (
+        FunctionType,
+        OptionalType,
+        RefType,
+        SharedRefType,
+      )
 
       member_name = getattr(
         node.callee, "target_name", None
       ) or self._mangle_name(node.callee.member)
       receiver_name = getattr(node.callee.receiver, "name", None)
       mangled_recv = self._mangle_name(receiver_name) if receiver_name else None
-      if getattr(
-        node.callee, "is_instance_method", False
-      ) or self._is_runtime_method_call(node.callee):
+      is_rt_method = self._is_runtime_method_call(node.callee)
+      if getattr(node.callee, "is_instance_method", False) or is_rt_method:
         use_colon = True
       elif getattr(node.callee, "is_static_method", False):
         use_colon = False
@@ -481,11 +624,24 @@ class LuaExprMixin(_LuaTranspilerBase):
           )
           or isinstance(node.callee.receiver, MemberAccessNode)
         )
+      recv_t = self.get_inferred_type(node.callee.receiver)
+      if isinstance(recv_t, OptionalType):
+        recv_t = recv_t.base_type
+      unwrap_smart_ref = (
+        use_colon
+        and not is_rt_method
+        and isinstance(recv_t, (RefType, SharedRefType))
+      )
       if needs_temps:
         self.emit("(function() ")
         if use_colon:
           self.emit("local _r = ")
-          self.visit(node.callee.receiver)
+          if unwrap_smart_ref:
+            self.emit("_SP_RT._unwrap_read(")
+            self.visit(node.callee.receiver)
+            self.emit(")")
+          else:
+            self.visit(node.callee.receiver)
           self.emit("; ")
           temp_args = self._format_reordered_slot_temps(
             node, len(resolved_exprs)
@@ -503,7 +659,12 @@ class LuaExprMixin(_LuaTranspilerBase):
           self.emit(")")
         return
       sep = ":" if use_colon else "."
-      self.visit(node.callee.receiver)
+      if unwrap_smart_ref:
+        self.emit("_SP_RT._unwrap_read(")
+        self.visit(node.callee.receiver)
+        self.emit(")")
+      else:
+        self.visit(node.callee.receiver)
       self.emit(f"{sep}{member_name}(")
     elif needs_temps:
       self.emit("(function() local _f = ")
@@ -559,6 +720,7 @@ class LuaExprMixin(_LuaTranspilerBase):
       "_match_loop_depth": self._match_loop_depth,
       "_unwrap_writebacks": self._unwrap_writebacks,
       "_loop_stack": self._loop_stack,
+      "_plain_local_containers": self._plain_local_containers,
     }
     self.destructor_stack = []
     self.loop_destructor_depth = []
@@ -572,6 +734,7 @@ class LuaExprMixin(_LuaTranspilerBase):
     self._match_loop_depth = 0
     self._unwrap_writebacks = {}
     self._loop_stack = []
+    self._plain_local_containers = set()
     return saved
 
   def _restore_nested_fn_state(self, saved: dict[str, Any]) -> None:
@@ -582,6 +745,10 @@ class LuaExprMixin(_LuaTranspilerBase):
       setattr(self, k, v)
 
   def visit_CloneNode(self, node: CloneNode) -> None:
+    lifted = getattr(self, "_lifted_short_circuits", None)
+    if lifted and id(node) in lifted:
+      self.emit(lifted[id(node)])
+      return
     self.emit("_SP_RT._clone_helper(")
     self.visit(node.expr)
 
@@ -616,6 +783,12 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit(f"(function({', '.join(params)})")
     self.indent()
     saved = self._save_nested_fn_state()
+    prev_id_map = (
+      self._identifier_map.copy() if self._module_ns_names else None
+    )
+    if prev_id_map is not None:
+      for p in node.parameters:
+        self._identifier_map.pop(p.name, None)
     try:
       if isinstance(node.body, BlockNode):
         self.visit(node.body)
@@ -626,6 +799,8 @@ class LuaExprMixin(_LuaTranspilerBase):
         self.emit("return ")
         self.visit(node.body)
     finally:
+      if prev_id_map is not None:
+        self._identifier_map = prev_id_map
       self._restore_nested_fn_state(saved)
     self.dedent()
     self.newline()
@@ -663,6 +838,8 @@ class LuaExprMixin(_LuaTranspilerBase):
     self.emit("}")
 
   def visit_IndexExprNode(self, node: IndexExprNode) -> None:
+    from sapphire.semantics.types import OptionalType
+
     recv_t = _unwrap_ref_opt_type(self.get_inferred_type(node.array))
     if isinstance(recv_t, MapType):
       self.emit("_SP_RT._sapphire_map_at(")
@@ -672,7 +849,13 @@ class LuaExprMixin(_LuaTranspilerBase):
       self.emit(")")
       return
 
-    self.emit("_SP_RT._sapphire_array_at(")
+    at_fn = (
+      "_SP_RT._sapphire_array_at_val"
+      if isinstance(recv_t, ArrayType)
+      and not isinstance(recv_t.element_type, OptionalType)
+      else "_SP_RT._sapphire_array_at"
+    )
+    self.emit(f"{at_fn}(")
     self.visit(node.array)
     self.emit(", ")
     self.visit(node.index)
@@ -682,15 +865,61 @@ class LuaExprMixin(_LuaTranspilerBase):
     if node.arena_expr:
       self.visit(node.arena_expr)
       self.emit(":register(")
-    self.emit(f"{self._mangle_dotted(node.struct_name)}.init({{")
-    for idx, arg in enumerate(node.fields):
-      if idx > 0:
-        self.emit(", ")
-      if arg.name:
-        self.emit(f"{self._mangle_name(arg.name)} = ")
+
+    mangled_struct = self._mangle_dotted(node.struct_name)
+    resolved_exprs = getattr(node, "_resolved_field_exprs", None)
+    if resolved_exprs is not None:
+      opt_explicit_defaults = getattr(
+        node, "_optional_explicit_default_slots", set()
+      )
+      last_needed = -1
+      for idx, expr in enumerate(resolved_exprs):
+        if expr is not None or idx in opt_explicit_defaults:
+          last_needed = idx
+
+      if getattr(node, "_requires_eval_order_temps", False):
+        self.emit("(function() ")
+        for f_idx, f_arg in enumerate(node.fields):
+          self.emit(f"local _a{f_idx} = ")
+          self.visit(f_arg.expr)
+          self.emit("; ")
+        slot_to_temp = {
+          slot: f"_a{f_idx}"
+          for f_idx, slot in enumerate(getattr(node, "_eval_order_slots", []))
+        }
+        args_out: list[str] = []
+        for idx in range(last_needed + 1):
+          if idx in slot_to_temp:
+            args_out.append(slot_to_temp[idx])
+          elif idx in opt_explicit_defaults:
+            args_out.append("_SP_RT._SP_UNSET")
+          else:
+            args_out.append("nil")
+        self.emit(f"return {mangled_struct}._new({', '.join(args_out)}) end)()")
       else:
-        self.emit(f"[{idx + 1}] = ")
-      self._emit_opt_wrapped(arg.expr)
-    self.emit("})")
+        self.emit(f"{mangled_struct}._new(")
+        for idx in range(last_needed + 1):
+          if idx > 0:
+            self.emit(", ")
+          expr = resolved_exprs[idx]
+          if expr is not None:
+            self.visit(expr)
+          elif idx in opt_explicit_defaults:
+            self.emit("_SP_RT._SP_UNSET")
+          else:
+            self.emit("nil")
+        self.emit(")")
+    else:
+      self.emit(f"{mangled_struct}.init({{")
+      for idx, arg in enumerate(node.fields):
+        if idx > 0:
+          self.emit(", ")
+        if arg.name:
+          self.emit(f"{self._mangle_name(arg.name)} = ")
+        else:
+          self.emit(f"[{idx + 1}] = ")
+        self._emit_opt_wrapped(arg.expr)
+      self.emit("})")
+
     if node.arena_expr:
       self.emit(")")

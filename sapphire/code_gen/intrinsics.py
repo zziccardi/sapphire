@@ -181,15 +181,22 @@ class IntrinsicRegistry:
           next_tmp = getattr(transpiler, "_next_temp_name", None)
           tmp_name = next_tmp("_opt") if next_tmp else "_opt_recv"
           orig_recv = node.callee.receiver
-          node.callee.receiver = IdentifierNode(tmp_name)
           try:
             if target == "python":
-              transpiler.emit(f"((lambda {tmp_name}: ")
-              handler(transpiler, node)
-              transpiler.emit(f" if {tmp_name} is not None else None)(")
-              transpiler.visit(orig_recv)
-              transpiler.emit("))")
+              if isinstance(orig_recv, IdentifierNode):
+                recv_code = transpiler._resolve_var_name(orig_recv.name)
+                transpiler.emit("(")
+                handler(transpiler, node)
+                transpiler.emit(f" if {recv_code} is not None else None)")
+              else:
+                node.callee.receiver = IdentifierNode(tmp_name)
+                transpiler.emit("(")
+                handler(transpiler, node)
+                transpiler.emit(f" if ({tmp_name} := ")
+                transpiler.visit(orig_recv)
+                transpiler.emit(") is not None else None)")
             elif target == "lua":
+              node.callee.receiver = IdentifierNode(tmp_name)
               transpiler.emit(
                 f"(function({tmp_name}) if {tmp_name} ~= nil then return "
               )
@@ -493,6 +500,17 @@ def _emit_str_slice_lua(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "split", "python")
 def _emit_str_split_py(transpiler: Any, node: CallNode) -> None:
+  if (
+    node.arguments
+    and isinstance(node.arguments[0].expr, LiteralNode)
+    and node.arguments[0].expr.lit_type == "string"
+    and node.arguments[0].expr.value != ""
+  ):
+    transpiler.visit(node.callee.receiver)
+    transpiler.emit(".split(")
+    transpiler.visit(node.arguments[0].expr)
+    transpiler.emit(")")
+    return
   transpiler.emit("_sapphire_string_split(")
   transpiler.visit(node.callee.receiver)
   if node.arguments:
@@ -513,10 +531,21 @@ def _emit_str_split_lua(transpiler: Any, node: CallNode) -> None:
 
 @IntrinsicRegistry.register("String", "contains", "python")
 def _emit_str_contains_py(transpiler: Any, node: CallNode) -> None:
+  recv = node.callee.receiver
+  arg_expr = node.arguments[0].expr
+  if isinstance(recv, IdentifierNode) or isinstance(
+    arg_expr, (IdentifierNode, LiteralNode)
+  ):
+    transpiler.emit("(")
+    transpiler.visit(arg_expr)
+    transpiler.emit(" in ")
+    transpiler.visit(recv)
+    transpiler.emit(")")
+    return
   transpiler.emit("_sapphire_string_contains(")
-  transpiler.visit(node.callee.receiver)
+  transpiler.visit(recv)
   transpiler.emit(", ")
-  transpiler.visit(node.arguments[0].expr)
+  transpiler.visit(arg_expr)
   transpiler.emit(")")
 
 

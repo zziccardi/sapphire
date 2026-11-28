@@ -176,6 +176,46 @@ class BaseTranspiler(ABC):
     )
     self.semantic_context: Any = semantic_context
     self._buffers: list[OutputBuffer] = [OutputBuffer()]
+    self._struct_decl_map: dict[str, StructDeclNode] = {}
+    self._local_parent_names: set[str] = set()
+    self._multi_parent_bases: set[str] = set()
+    self._exported_symbols: set[str] = set()
+    self._has_export_stmt: bool = False
+    self._known_enums: set[str] = set()
+    self._flat_value_structs: set[str] = set()
+    self._diamond_destructible_structs: set[str] = set()
+    self._plain_local_containers: set[str] = set()
+
+  def _is_plain_local_var(self, expr: Any) -> bool:
+    """Returns True if *expr* is a local container guaranteed not to be a proxy
+    or smart-ref wrapper.
+    """
+    if not isinstance(expr, IdentifierNode):
+      return False
+    if expr.name not in self._plain_local_containers:
+      return False
+    if expr.name in getattr(self, "extern_vars", ()):
+      return False
+    id_map = getattr(self, "_identifier_map", {})
+    m_name = id_map.get(expr.name, expr.name)
+    wb = getattr(self, "_unwrap_writebacks", {})
+    return m_name not in wb and expr.name not in wb
+
+  def _is_fresh_plain_container_expr(self, expr: Any) -> bool:
+    """Returns True if *expr* evaluates to a fresh plain list/dict/flat struct
+    (guaranteed never to be a CoW proxy or smart-ref wrapper).
+    """
+    from sapphire.semantics.types import StructType
+
+    if expr is None:
+      return False
+    if isinstance(expr, (ArrayLiteralNode, MapLiteralNode)):
+      return True
+    if isinstance(expr, StructInitializerNode):
+      t = self.get_inferred_type(expr)
+      return isinstance(t, StructType) and t.name in self._flat_value_structs
+    kind, _ = self._classify_value_copy(expr)
+    return kind != "NONE"
 
   def get_inferred_type(self, node: Any) -> Any:
     """Returns the resolved semantic Type for *node* from SemanticContext or
@@ -868,12 +908,54 @@ class BaseTranspiler(ABC):
     self.struct_destructible_fields: dict[str, list[str]] = {}
     self.struct_parent_names: dict[str, list[str]] = {}
     self.structs_with_destructor = {"Arena", "Ref", "SharedRef"}
+    self._struct_decl_map: dict[str, StructDeclNode] = {}
+    self._local_parent_names: set[str] = set()
+    self._multi_parent_bases: set[str] = set()
+    self._exported_symbols: set[str] = set()
+    self._has_export_stmt: bool = False
+    self._known_enums: set[str] = set()
+    self._flat_value_structs: set[str] = set()
+    self._diamond_destructible_structs: set[str] = set()
+
+    export_block = getattr(program, "export_block", None)
+    if export_block is not None:
+      self._has_export_stmt = True
+      for spec in export_block.specifiers:
+        self._exported_symbols.add(spec.symbol)
 
     for decl in program.declarations:
-      if isinstance(decl, StructDeclNode):
+      if isinstance(decl, ExportStmtNode):
+        self._has_export_stmt = True
+        for spec in decl.specifiers:
+          self._exported_symbols.add(spec.symbol)
+      elif isinstance(decl, EnumDeclNode):
+        self._known_enums.add(decl.name)
+      elif isinstance(decl, StructDeclNode) and not getattr(
+        decl, "type_params", None
+      ):
         if decl.is_prototype:
           self.proto_structs.add(decl.name)
-        self.struct_parent_names[decl.name] = list(decl.parent_names or [])
+        p_names = list(decl.parent_names or [])
+        self.struct_parent_names[decl.name] = p_names
+        self._struct_decl_map[decl.name] = decl
+        for p in p_names:
+          self._local_parent_names.add(p)
+
+    def _mark_multi_ancestors(name: str) -> None:
+      if name in self._multi_parent_bases:
+        return
+      self._multi_parent_bases.add(name)
+      for gp in self.struct_parent_names.get(name, []):
+        _mark_multi_ancestors(gp)
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and not getattr(
+        decl, "type_params", None
+      ):
+        p_names = decl.parent_names or []
+        if len(p_names) > 1:
+          for p in p_names:
+            _mark_multi_ancestors(p)
 
     for s_name, members in self.struct_methods.items():
       if s_name in self.proto_structs:
@@ -904,6 +986,208 @@ class BaseTranspiler(ABC):
           ):
             self.structs_with_destructor.add(decl.name)
             changed = True
+
+    def _mark_diamond_ancestors(name: str) -> None:
+      if name in self._diamond_destructible_structs:
+        return
+      if name in self.structs_with_destructor:
+        self._diamond_destructible_structs.add(name)
+      for gp in self.struct_parent_names.get(name, []):
+        _mark_diamond_ancestors(gp)
+
+    for decl in program.declarations:
+      if isinstance(decl, StructDeclNode) and not getattr(
+        decl, "type_params", None
+      ):
+        if decl.name not in self.structs_with_destructor:
+          continue
+        p_names = decl.parent_names or []
+        has_ext_parent = any(p not in self._struct_decl_map for p in p_names)
+        if (
+          len(p_names) > 1
+          or decl.name in self._multi_parent_bases
+          or has_ext_parent
+          or decl.name in self._exported_symbols
+        ):
+          _mark_diamond_ancestors(decl.name)
+
+    imm_type_names = (
+      {"int", "float", "bool", "String", "Arena", "Ref", "SharedRef", "WeakRef"}
+      | self._known_enums
+      | self.proto_structs
+      | self.structs_with_destructor
+    )
+
+    def _is_flat_field_type_node(t_node: Any) -> bool:
+      if isinstance(t_node, OptionalTypeNode):
+        return _is_flat_field_type_node(t_node.base_type)
+      if isinstance(t_node, BasicTypeNode):
+        return t_node.name in imm_type_names
+      return False
+
+    for decl in program.declarations:
+      if (
+        isinstance(decl, StructDeclNode)
+        and not getattr(decl, "type_params", None)
+        and not decl.is_prototype
+        and decl.name not in self.structs_with_destructor
+      ):
+        flat_fields, all_local = self._get_flattened_struct_fields(decl)
+        if all_local and all(
+          _is_flat_field_type_node(f.field_type) for f in flat_fields
+        ):
+          self._flat_value_structs.add(decl.name)
+
+  def _is_immutable_value_type(self, typ: Any) -> bool:
+    """Returns True if values of semantic type *typ* need no deep copy."""
+    from sapphire.semantics.types import (
+      ArenaType,
+      CoroutineType,
+      EnumType,
+      FunctionType,
+      NoneType,
+      OptionalType,
+      PrimitiveType,
+      RangeType,
+      RefType,
+      SharedRefType,
+      StructType,
+      WeakRefType,
+    )
+
+    if typ is None:
+      return False
+    if isinstance(typ, OptionalType):
+      typ = typ.base_type
+    if isinstance(
+      typ,
+      (
+        PrimitiveType,
+        NoneType,
+        EnumType,
+        FunctionType,
+        ArenaType,
+        RefType,
+        SharedRefType,
+        WeakRefType,
+        CoroutineType,
+        RangeType,
+      ),
+    ):
+      return True
+    if isinstance(typ, StructType):
+      if typ.is_prototype:
+        return True
+      needs_dtor = getattr(self, "_type_needs_destructor", None)
+      if needs_dtor is not None and needs_dtor(typ):
+        return True
+    return False
+
+  def _classify_value_copy(self, expr: Any) -> tuple[str, Any]:
+    """Classifies the value-copy strategy for *expr*.
+
+    Returns `(kind, unwrapped_type)` where `kind` is one of:
+    `"NONE"`, `"SHALLOW_ARRAY"`, `"SHALLOW_MAP"`, `"FLAT_STRUCT"`, `"DEEP"`.
+    """
+    from sapphire.semantics.types import (
+      ArrayType,
+      MapType,
+      OptionalType,
+      StructType,
+    )
+
+    if expr is None:
+      return "NONE", None
+    if isinstance(
+      expr,
+      (
+        LiteralNode,
+        InterpolatedStringNode,
+        ArrayLiteralNode,
+        MapLiteralNode,
+        StructInitializerNode,
+        MoveNode,
+        CloneNode,
+        LambdaNode,
+        BinaryOpNode,
+        UnaryOpNode,
+        CastExprNode,
+      ),
+    ):
+      return "NONE", None
+    if isinstance(expr, CallNode):
+      if not (
+        isinstance(expr.callee, MemberAccessNode)
+        and expr.callee.member == "get"
+        and (
+          getattr(expr.callee, "is_array_method", False)
+          or getattr(expr.callee, "is_map_method", False)
+        )
+      ):
+        return "NONE", None
+    inferred = self.get_inferred_type(expr)
+    if inferred is None:
+      return "NONE", None
+    is_opt = isinstance(inferred, OptionalType)
+    t = inferred.base_type if is_opt else inferred
+    if isinstance(t, ArrayType):
+      if self._is_immutable_value_type(t.element_type):
+        return ("DEEP" if is_opt else "SHALLOW_ARRAY"), t
+      return "DEEP", t
+    if isinstance(t, MapType):
+      if self._is_immutable_value_type(t.value_type):
+        return ("DEEP" if is_opt else "SHALLOW_MAP"), t
+      return "DEEP", t
+    if isinstance(t, StructType):
+      if isinstance(expr, IdentifierNode) and (
+        expr.name in self._struct_decl_map
+        or expr.name in getattr(self, "known_structs", ())
+      ):
+        return "NONE", t
+      if t.is_prototype:
+        return "NONE", t
+      needs_dtor = getattr(self, "_type_needs_destructor", None)
+      if needs_dtor is not None and needs_dtor(t):
+        return "NONE", t
+      if not is_opt and t.name in self._flat_value_structs:
+        return "FLAT_STRUCT", t
+      return "DEEP", t
+    return "NONE", None
+
+  def _get_flattened_struct_fields(
+    self, node: StructDeclNode
+  ) -> tuple[list[StructFieldNode], bool]:
+    """Returns `(fields, all_parents_local)` in StructLayoutPass order.
+
+    Parent fields are collected recursively in declaration order before own
+    non-static fields. `all_parents_local` is False if any ancestor struct is
+    imported from an external module (absent from `_struct_decl_map`).
+    """
+    result: list[StructFieldNode] = []
+    seen: set[str] = set()
+    all_local = True
+    visited_structs: set[str] = set()
+
+    def _collect(s_node: StructDeclNode) -> None:
+      nonlocal all_local
+      if s_node.name in visited_structs:
+        return
+      visited_structs.add(s_node.name)
+      for p_name in s_node.parent_names or []:
+        p_decl = self._struct_decl_map.get(p_name)
+        if p_decl is None:
+          all_local = False
+        else:
+          _collect(p_decl)
+      for f in s_node.fields:
+        if getattr(f, "is_static", False):
+          continue
+        if f.name not in seen:
+          seen.add(f.name)
+          result.append(f)
+
+    _collect(node)
+    return result, all_local
 
   # ------------------------------------------------------------------
   # Declaration visitors

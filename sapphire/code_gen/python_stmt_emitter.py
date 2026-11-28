@@ -7,14 +7,12 @@ from sapphire.code_gen.base_transpiler import (
   get_default_value_for_type_node,
 )
 from sapphire.parser.ast import (
-  ArrayLiteralNode,
   AssignmentNode,
   ASTNode,
   BinaryOpNode,
   BlockNode,
   BreakNode,
   CallNode,
-  CastExprNode,
   CloneNode,
   ContinueNode,
   EllipsisPatternNode,
@@ -26,17 +24,13 @@ from sapphire.parser.ast import (
   IdentifierNode,
   IfNode,
   IndexExprNode,
-  InterpolatedStringNode,
   LambdaNode,
   LiteralNode,
-  MapLiteralNode,
   MatchExprNode,
   MemberAccessNode,
   MoveNode,
   ReturnNode,
-  StructInitializerNode,
   TernaryExprNode,
-  UnaryOpNode,
   VarDeclNode,
   WhileNode,
   YieldNode,
@@ -53,70 +47,33 @@ else:
 class PythonStmtMixin(_PythonTranspilerBase):
   """Provides statement and control-flow AST emission for Python."""
 
-  def _needs_value_copy(self, expr: Any) -> bool:
-    """Returns True if *expr* may alias a value-type struct/array/map and needs
-    shallow copy.
-    """
-    if expr is None:
-      return False
-    if isinstance(
-      expr,
-      (
-        LiteralNode,
-        InterpolatedStringNode,
-        ArrayLiteralNode,
-        MapLiteralNode,
-        StructInitializerNode,
-        MoveNode,
-        CloneNode,
-        LambdaNode,
-        BinaryOpNode,
-        UnaryOpNode,
-        CastExprNode,
-      ),
-    ):
-      return False
-    if isinstance(expr, CallNode):
-      if not (
-        isinstance(expr.callee, MemberAccessNode)
-        and expr.callee.member == "get"
-        and (
-          getattr(expr.callee, "is_array_method", False)
-          or getattr(expr.callee, "is_map_method", False)
-        )
-      ):
-        return False
-    inferred = self.get_inferred_type(expr)
-    if inferred is None:
-      return False
-    from sapphire.semantics.types import (
-      ArrayType,
-      MapType,
-      OptionalType,
-      StructType,
-    )
-
-    t = inferred.base_type if isinstance(inferred, OptionalType) else inferred
-    if isinstance(t, (ArrayType, MapType)):
-      return True
-    if isinstance(t, StructType):
-      if t.is_prototype:
-        return False
-      if self._type_needs_destructor(t):
-        return False
-      return True
-    return False
-
   def _emit_value_expr(self, expr: Any) -> None:
-    """Emits *expr*, wrapping in `_sapphire_copy(...)` when value semantics
-    apply.
-    """
-    if self._needs_value_copy(expr):
+    """Emits *expr*, choosing the fastest type-directed value copy."""
+    kind, unwrapped_t = self._classify_value_copy(expr)
+    if kind == "NONE":
+      self.visit(expr)
+    elif kind in ("SHALLOW_ARRAY", "SHALLOW_MAP"):
+      if self._is_plain_local_var(expr):
+        self.visit(expr)
+        self.emit(".copy()")
+      else:
+        self.emit("_sapphire_unwrap_read(")
+        self.visit(expr)
+        self.emit(").copy()")
+    elif kind == "FLAT_STRUCT" and unwrapped_t is not None:
+      cls_name = self._mangle_dotted(unwrapped_t.name)
+      if self._is_plain_local_var(expr):
+        self.emit(f"{cls_name}._sp_copy(")
+        self.visit(expr)
+        self.emit(")")
+      else:
+        self.emit(f"{cls_name}._sp_copy(_sapphire_unwrap_read(")
+        self.visit(expr)
+        self.emit("))")
+    else:
       self.emit("_sapphire_copy(")
       self.visit(expr)
       self.emit(")")
-    else:
-      self.visit(expr)
 
   def _contains_liftable_expr(
     self, node: Any, include_moves: bool = False
@@ -519,87 +476,6 @@ class PythonStmtMixin(_PythonTranspilerBase):
 
     return fn_name
 
-  def _emit_lifted_clone_init(self, node: CloneNode) -> str:
-    """Emits a helper function `def _clone_init_N(self):` for a CloneNode
-    initializer block.
-    """
-    fn_name = self._next_temp_name("_clone_init")
-    init_block = BlockNode(node.initializer_block)
-    param_raw_names = {"self"}
-    assigned_nonlocals = self._find_assigned_nonlocals(
-      init_block, param_raw_names
-    )
-    assigned_globals = self._find_assigned_globals(
-      init_block, local_params={"self"}
-    )
-    assigned_globals = assigned_globals - assigned_nonlocals
-
-    saved_state = (
-      self.destructor_stack,
-      self.loop_destructor_depth,
-      self.moved_vars,
-      self._var_branch_depth,
-      self._pending_null_vars,
-      self._pending_unconditional_null_vars,
-      self._branch_depth,
-      self._current_match_target,
-      self._current_match_done_flag,
-      self._match_loop_depth,
-      self._unwrap_writebacks,
-      self._current_func_globals,
-      self._loop_vars_stack,
-    )
-    prev_id_map = self._identifier_map.copy()
-    self._identifier_map.pop("self", None)
-    self._lexical_scopes.append({"self"})
-
-    self.destructor_stack = []
-    self.loop_destructor_depth = []
-    self.moved_vars = set()
-    self._var_branch_depth = {}
-    self._pending_null_vars = []
-    self._pending_unconditional_null_vars = []
-    self._branch_depth = 0
-    self._current_match_target = None
-    self._current_match_done_flag = None
-    self._match_loop_depth = 0
-    self._unwrap_writebacks = {}
-    self._current_func_globals = set(assigned_globals)
-    self._loop_vars_stack = []
-
-    try:
-      self.newline()
-      self.emit(f"def {fn_name}(self):")
-      self.indent()
-      if assigned_nonlocals:
-        self.newline()
-        self.emit(f"nonlocal {', '.join(sorted(assigned_nonlocals))}")
-      if assigned_globals:
-        self.newline()
-        self.emit(f"global {', '.join(sorted(assigned_globals))}")
-      self._visit_block(init_block)
-      self.dedent()
-    finally:
-      self._lexical_scopes.pop()
-      self._identifier_map = prev_id_map
-      (
-        self.destructor_stack,
-        self.loop_destructor_depth,
-        self.moved_vars,
-        self._var_branch_depth,
-        self._pending_null_vars,
-        self._pending_unconditional_null_vars,
-        self._branch_depth,
-        self._current_match_target,
-        self._current_match_done_flag,
-        self._match_loop_depth,
-        self._unwrap_writebacks,
-        self._current_func_globals,
-        self._loop_vars_stack,
-      ) = saved_state
-
-    return fn_name
-
   def _lift_match_expressions(self, node: Any) -> None:
     """Lifts MatchExprNode, block/complex LambdaNode, CloneNode init, and
     short-circuiting exprs.
@@ -738,8 +614,27 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self._lift_match_expressions(node.expr)
       if node.arena_expr:
         self._lift_match_expressions(node.arena_expr)
-      if node.initializer_block and id(node) not in self._lifted_clones:
-        self._lifted_clones[id(node)] = self._emit_lifted_clone_init(node)
+      if (
+        node.initializer_block
+        and id(node) not in self._lifted_short_circuits
+      ):
+        clone_var = self._next_temp_name("_clone")
+        self.newline()
+        self.emit(f"{clone_var} = _clone_helper(")
+        self.visit(node.expr)
+        if node.arena_expr:
+          self.emit(", None, arena=")
+          self.visit(node.arena_expr)
+        self.emit(")")
+        prev_id_map = self._identifier_map.copy()
+        self._lexical_scopes.append({"self"})
+        self._identifier_map["self"] = clone_var
+        try:
+          self._visit_block(BlockNode(node.initializer_block))
+        finally:
+          self._lexical_scopes.pop()
+          self._identifier_map = prev_id_map
+        self._lifted_short_circuits[id(node)] = clone_var
       return
 
     if isinstance(node, MatchExprNode):
@@ -952,6 +847,15 @@ class PythonStmtMixin(_PythonTranspilerBase):
         if self.destructor_stack:
           self.destructor_stack[-1].append(py_name)
           self._var_branch_depth[py_name] = self._branch_depth
+      if (
+        self._lexical_scopes
+        and node.exprs
+        and len(node.exprs) == len(node.names)
+        and self._is_fresh_plain_container_expr(node.exprs[idx])
+      ):
+        self._plain_local_containers.add(name)
+      else:
+        self._plain_local_containers.discard(name)
 
   def _is_int_div_assign(self, node: AssignmentNode) -> bool:
     """Returns True if `node` is an integer `/=` compound assignment."""
@@ -1008,6 +912,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
         for idx, target in enumerate(node.targets):
           if isinstance(target, IdentifierNode):
             self.moved_vars.discard(self._resolve_var_name(target.name))
+            self._plain_local_containers.discard(target.name)
           if idx > 0:
             self.emit(", ")
           if (
@@ -1015,7 +920,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
             and target.name in self.extern_vars
           ):
             ext_name = self.extern_vars[target.name]
-            self.emit(f"__import__('builtins').{ext_name}")
+            self.emit(f"_sp_builtins.{ext_name}")
           else:
             self.visit(target)
         self.emit(" = " + ", ".join(tmp_names))
@@ -1027,13 +932,18 @@ class PythonStmtMixin(_PythonTranspilerBase):
       for idx, target in enumerate(node.targets):
         if isinstance(target, IdentifierNode):
           self.moved_vars.discard(self._resolve_var_name(target.name))
+          if not (
+            len(node.exprs) == len(node.targets)
+            and self._is_fresh_plain_container_expr(node.exprs[idx])
+          ):
+            self._plain_local_containers.discard(target.name)
         if idx > 0:
           self.emit(", ")
         if (
           isinstance(target, IdentifierNode) and target.name in self.extern_vars
         ):
           ext_name = self.extern_vars[target.name]
-          self.emit(f"__import__('builtins').{ext_name}")
+          self.emit(f"_sp_builtins.{ext_name}")
         else:
           self.visit(target)
       self.emit(" = ")
@@ -1053,7 +963,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
         self.moved_vars.discard(py_t)
         if node.target.name in self.extern_vars:
           ext_lhs = (
-            f"__import__('builtins').{self.extern_vars[node.target.name]}"
+            f"_sp_builtins.{self.extern_vars[node.target.name]}"
           )
           self.emit(f"{ext_lhs} = _sapphire_div({ext_lhs}, ")
           self.visit(node.expr)
@@ -1105,7 +1015,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self.moved_vars.discard(self._resolve_var_name(node.target.name))
       if node.target.name in self.extern_vars:
         ext_name = self.extern_vars[node.target.name]
-        self.emit(f"__import__('builtins').{ext_name}")
+        self.emit(f"_sp_builtins.{ext_name}")
       else:
         self.visit(node.target)
     else:
@@ -1114,14 +1024,93 @@ class PythonStmtMixin(_PythonTranspilerBase):
     self.visit(node.expr)
     self._emit_writebacks([node.target])
 
+  def _try_emit_plain_container_stmt(self, expr: ASTNode) -> bool:
+    """Inlines statement-position push/clear/insert on plain local vars."""
+    if not isinstance(expr, CallNode):
+      return False
+    callee = expr.callee
+    if not isinstance(callee, MemberAccessNode) or callee.is_optional:
+      return False
+    if not self._is_plain_local_var(callee.receiver):
+      return False
+    is_arr = getattr(callee, "is_array_method", False)
+    is_map = getattr(callee, "is_map_method", False)
+    if is_arr and callee.member == "push" and len(expr.arguments) == 1:
+      self.visit(callee.receiver)
+      self.emit(".append(")
+      self.visit(expr.arguments[0].expr)
+      self.emit(")")
+      return True
+    if (is_arr or is_map) and callee.member == "clear" and not expr.arguments:
+      self.visit(callee.receiver)
+      self.emit(".clear()")
+      return True
+    if (
+      is_map
+      and callee.member == "insert"
+      and len(expr.arguments) == 2
+      and not getattr(expr, "_requires_eval_order_temps", False)
+    ):
+      key_expr = None
+      val_expr = None
+      for idx, arg in enumerate(expr.arguments):
+        if arg.name == "key" or (idx == 0 and not arg.name):
+          key_expr = arg.expr
+        elif arg.name == "value" or (idx == 1 and not arg.name):
+          val_expr = arg.expr
+      if key_expr is not None and val_expr is not None:
+        self.visit(callee.receiver)
+        self.emit("[")
+        self.visit(key_expr)
+        self.emit("] = ")
+        self.visit(val_expr)
+        return True
+    return False
+
+  def _try_emit_lazy_assert_stmt(self, expr: ASTNode) -> bool:
+    """Emits statement-position `assert(cond, msg)` with lazy `msg` eval."""
+    if not (
+      isinstance(expr, CallNode)
+      and isinstance(expr.callee, IdentifierNode)
+      and expr.callee.name == "assert"
+      and not getattr(expr, "_requires_eval_order_temps", False)
+    ):
+      return False
+    from sapphire.code_gen.intrinsics import _resolve_assert_args
+
+    cond_expr, msg_expr = _resolve_assert_args(expr)
+    if cond_expr is None:
+      return False
+    self._lift_match_expressions(cond_expr)
+    self.newline()
+    self.record_line(getattr(expr, "start_line", None))
+    self.emit("if not (")
+    self.visit(cond_expr)
+    self.emit("):")
+    self.indent()
+    if msg_expr is not None:
+      self._lift_match_expressions(msg_expr)
+      self.newline()
+      self.emit("raise AssertionError(")
+      self.visit(msg_expr)
+      self.emit(")")
+    else:
+      self.newline()
+      self.emit('raise AssertionError("assertion failed")')
+    self.dedent()
+    return True
+
   def visit_ExprStmtNode(self, node: ExprStmtNode) -> None:
     if isinstance(node.expr, MatchExprNode):
       self._emit_match_statement(node.expr, target_var=None)
       return
+    if self._try_emit_lazy_assert_stmt(node.expr):
+      return
     self._lift_match_expressions(node.expr)
     self.newline()
     self.record_line(getattr(node, "start_line", None))
-    self.visit(node.expr)
+    if not self._try_emit_plain_container_stmt(node.expr):
+      self.visit(node.expr)
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     self._lift_match_expressions(node.expressions)
@@ -1201,21 +1190,40 @@ class PythonStmtMixin(_PythonTranspilerBase):
   ) -> str:
     self._lift_match_expressions(node.subject)
 
-    if target_var == "":
+    done_flag: str | None = None
+    needs_target = target_var == ""
+    if needs_target:
       target_var = self._next_temp_name("_match_res")
-      self.newline()
-      self.emit(f"{target_var} = None")
+    if target_var and any(
+      self._arm_needs_done_flag(c.body) for c in node.cases
+    ):
+      done_flag = self._next_temp_name("_match_done")
+
+    if needs_target:
+      has_final_catchall = bool(
+        node.cases
+        and any(
+          isinstance(p, EllipsisPatternNode) for p in node.cases[-1].patterns
+        )
+      )
+      all_arms_assign = has_final_catchall and not done_flag and all(
+        (not isinstance(c.body, BlockNode))
+        or (
+          bool(c.body.statements)
+          and isinstance(c.body.statements[-1], (YieldNode, ReturnNode))
+        )
+        for c in node.cases
+      )
+      if not all_arms_assign:
+        self.newline()
+        self.emit(f"{target_var} = None")
 
     subj_var = self._next_temp_name("_match_subj")
     self.newline()
     self.emit(f"{subj_var} = ")
     self.visit(node.subject)
 
-    done_flag: str | None = None
-    if target_var and any(
-      self._arm_needs_done_flag(c.body) for c in node.cases
-    ):
-      done_flag = self._next_temp_name("_match_done")
+    if done_flag:
       self.newline()
       self.emit(f"{done_flag} = False")
 
@@ -1241,17 +1249,28 @@ class PythonStmtMixin(_PythonTranspilerBase):
             self.emit("elif True:")
         else:
           kw = "if" if c_idx == 0 else "elif"
-          self.emit(f"{kw} ")
-          for p_idx, pat in enumerate(case.patterns):
-            if p_idx > 0:
-              self.emit(" or ")
-            if isinstance(pat, LiteralNode) and pat.lit_type == "none":
-              self.emit(f"({subj_var} is None)")
-            else:
-              self.emit(f"({subj_var} == ")
+          if len(case.patterns) > 1 and all(
+            isinstance(p, LiteralNode) and p.lit_type != "none"
+            for p in case.patterns
+          ):
+            self.emit(f"{kw} {subj_var} in (")
+            for p_idx, pat in enumerate(case.patterns):
+              if p_idx > 0:
+                self.emit(", ")
               self.visit(pat)
-              self.emit(")")
-          self.emit(":")
+            self.emit("):")
+          else:
+            self.emit(f"{kw} ")
+            for p_idx, pat in enumerate(case.patterns):
+              if p_idx > 0:
+                self.emit(" or ")
+              if isinstance(pat, LiteralNode) and pat.lit_type == "none":
+                self.emit(f"({subj_var} is None)")
+              else:
+                self.emit(f"({subj_var} == ")
+                self.visit(pat)
+                self.emit(")")
+            self.emit(":")
 
         self.indent()
         self._branch_depth += 1
@@ -1472,10 +1491,11 @@ class PythonStmtMixin(_PythonTranspilerBase):
     """Emits multi-binding `if` with sequential short-circuiting and LIFO
     cleanup.
     """
-    cond_flag = self._next_temp_name("_if_ok")
-
-    self.newline()
-    self.emit(f"{cond_flag} = False")
+    cond_flag: str | None = None
+    if node.else_block:
+      cond_flag = self._next_temp_name("_if_ok")
+      self.newline()
+      self.emit(f"{cond_flag} = False")
 
     def emit_binding_level(
       idx: int,
@@ -1575,8 +1595,9 @@ class PythonStmtMixin(_PythonTranspilerBase):
             self.visit(node.condition)
             self.emit(":")
             self.indent()
-            self.newline()
-            self.emit(f"{cond_flag} = True")
+            if cond_flag:
+              self.newline()
+              self.emit(f"{cond_flag} = True")
             self._branch_depth += 1
             try:
               self._visit_block(
@@ -1594,8 +1615,9 @@ class PythonStmtMixin(_PythonTranspilerBase):
                 self.emit(f"_sapphire_del({d_var})")
               self.dedent()
           else:
-            self.newline()
-            self.emit(f"{cond_flag} = True")
+            if cond_flag:
+              self.newline()
+              self.emit(f"{cond_flag} = True")
             self._branch_depth += 1
             try:
               self._visit_block(
@@ -1608,7 +1630,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
 
     emit_binding_level(0, [], {})
 
-    if node.else_block:
+    if node.else_block and cond_flag:
       self.newline()
       self.emit(f"if not {cond_flag}:")
       self.indent()
@@ -1776,6 +1798,83 @@ class PythonStmtMixin(_PythonTranspilerBase):
       self.visit(node.condition)
 
   def visit_GuardStmtNode(self, node: GuardStmtNode) -> None:
+    has_destructible_clause = any(
+      clause.binding is not None
+      and bool(self._expr_destructible_struct(clause.binding.expr))
+      and (
+        not clause.binding.is_unwrap
+        or self._is_owned_unwrap_expr(clause.binding.expr)
+      )
+      for clause in node.clauses
+    )
+    if len(node.clauses) > 1 and not has_destructible_clause:
+      guard_ok = self._next_temp_name("_guard_ok")
+      self.newline()
+      self.emit(f"{guard_ok} = True")
+      indent_depth = 0
+      for clause in node.clauses:
+        if clause.binding:
+          binding = clause.binding
+          self._lift_match_expressions(binding.expr)
+          let_names = getattr(binding, "let_names", [binding.let_name])
+          tmp_var = self._next_temp_name("_guard_val")
+          self.newline()
+          wb_entry = self._emit_binding_rhs_and_writeback(binding, tmp_var)
+          if binding.is_unwrap:
+            self.newline()
+            self.emit(f"if {tmp_var} is None:")
+            self.indent()
+            self.newline()
+            self.emit(f"{guard_ok} = False")
+            self.dedent()
+            self.newline()
+            self.emit("else:")
+            self.indent()
+            indent_depth += 1
+          self.newline()
+          py_let_names: list[str] = []
+          if len(let_names) > 1:
+            for idx, name in enumerate(let_names):
+              py_n = self._declare_local_var(name)
+              py_let_names.append(py_n)
+              self.emit(f"{py_n} = {tmp_var}[{idx}]")
+              if idx < len(let_names) - 1:
+                self.newline()
+          else:
+            py_n = self._declare_local_var(binding.let_name)
+            py_let_names.append(py_n)
+            self.emit(f"{py_n} = {tmp_var}")
+          if wb_entry and len(py_let_names) == 1:
+            self._unwrap_writebacks[py_let_names[0]] = wb_entry
+        elif clause.condition:
+          self._lift_match_expressions(clause.condition)
+          self.newline()
+          self.emit("if not (")
+          self.visit(clause.condition)
+          self.emit("):")
+          self.indent()
+          self.newline()
+          self.emit(f"{guard_ok} = False")
+          self.dedent()
+          self.newline()
+          self.emit("else:")
+          self.indent()
+          indent_depth += 1
+      if indent_depth > 0:
+        # Ensure the innermost `else:` block is non-empty when the last clause
+        # was a condition clause.
+        if node.clauses[-1].condition is not None:
+          self.newline()
+          self.emit("pass")
+        for _ in range(indent_depth):
+          self.dedent()
+      self.newline()
+      self.emit(f"if not {guard_ok}:")
+      self.indent()
+      self._visit_in_branch(node.else_block)
+      self.dedent()
+      return
+
     for clause in node.clauses:
       if clause.binding:
         binding = clause.binding
@@ -1794,7 +1893,7 @@ class PythonStmtMixin(_PythonTranspilerBase):
           self.dedent()
           self.newline()
 
-        py_let_names: list[str] = []
+        py_let_names = []
         if len(let_names) > 1:
           for idx, name in enumerate(let_names):
             py_n = self._declare_local_var(name)

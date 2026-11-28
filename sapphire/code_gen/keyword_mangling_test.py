@@ -59,7 +59,8 @@ class KeywordManglingTest(unittest.TestCase):
     py_code = self._compile_python(source)
 
     # Verify that 'def_', 'class_', and 'pass_' appear in the emitted Python code
-    self.assertIn("class_=42", py_code)
+    self.assertIn("self.class_ = class_", py_code)
+    self.assertIn("Config(42)", py_code)
     self.assertIn("def compute(def_):", py_code)
     self.assertIn("pass_ = (def_ + 1)", py_code)
     self.assertIn("return pass_", py_code)
@@ -91,7 +92,8 @@ class KeywordManglingTest(unittest.TestCase):
     lua_code = self._compile_lua(source)
 
     # Verify that 'end_', 'local_', and 'repeat_' appear in the emitted Lua code
-    self.assertIn("end_ = 10", lua_code)
+    self.assertIn("end_ = end_", lua_code)
+    self.assertIn("Worker._new(10)", lua_code)
     self.assertIn("function process(local_)", lua_code)
     self.assertIn("local repeat_ = (local_ * 2)", lua_code)
     self.assertIn("return repeat_", lua_code)

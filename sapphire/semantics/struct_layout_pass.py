@@ -201,6 +201,14 @@ class StructLayoutPass:
           has_explicit_default=f.default_expr is not None,
         )
 
+      node._canonical_fields = [
+        (
+          f_name,
+          isinstance(f_obj.field_type, OptionalType)
+          and f_obj.has_explicit_default,
+        )
+        for f_name, f_obj in struct_type.fields.items()
+      ]
       visiting.remove(node.name)
       processed.add(node.name)
 

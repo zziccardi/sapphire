@@ -8,7 +8,6 @@ from sapphire.code_gen.base_transpiler import (
 )
 from sapphire.code_gen.intrinsics import _resolve_range_args
 from sapphire.parser.ast import (
-  ArrayLiteralNode,
   AssignmentNode,
   ASTNode,
   BinaryOpNode,
@@ -30,13 +29,11 @@ from sapphire.parser.ast import (
   InterpolatedStringNode,
   LambdaNode,
   LiteralNode,
-  MapLiteralNode,
   MatchExprNode,
   MemberAccessNode,
   MoveNode,
   OptionalTypeNode,
   ReturnNode,
-  StructInitializerNode,
   TernaryExprNode,
   UnaryOpNode,
   VarDeclNode,
@@ -102,71 +99,43 @@ else:
 class LuaStmtMixin(_LuaTranspilerBase):
   """Provides statement and control-flow AST emission for Lua 5.1."""
 
-  def _needs_value_copy(self, expr: Any) -> bool:
-    """Returns True if *expr* may alias a value-type struct/array/map and needs
-    shallow copy.
-    """
-    if expr is None:
-      return False
-    if isinstance(
-      expr,
-      (
-        LiteralNode,
-        InterpolatedStringNode,
-        ArrayLiteralNode,
-        MapLiteralNode,
-        StructInitializerNode,
-        MoveNode,
-        CloneNode,
-        LambdaNode,
-        BinaryOpNode,
-        UnaryOpNode,
-        CastExprNode,
-      ),
-    ):
-      return False
-    if isinstance(expr, CallNode):
-      if not (
-        isinstance(expr.callee, MemberAccessNode)
-        and expr.callee.member == "get"
-        and (
-          getattr(expr.callee, "is_array_method", False)
-          or getattr(expr.callee, "is_map_method", False)
-        )
-      ):
-        return False
-    inferred = self.get_inferred_type(expr)
-    if inferred is None:
-      return False
+  def _is_non_opt_array_expr(self, expr: Any) -> bool:
+    """Returns True if *expr* evaluates to an Array of non-optional elements."""
     from sapphire.semantics.types import (
       ArrayType,
-      MapType,
       OptionalType,
-      StructType,
+      RefType,
+      SharedRefType,
     )
 
-    t = inferred.base_type if isinstance(inferred, OptionalType) else inferred
-    if isinstance(t, (ArrayType, MapType)):
-      return True
-    if isinstance(t, StructType):
-      if t.is_prototype:
-        return False
-      if self._type_needs_destructor(t):
-        return False
-      return True
-    return False
+    t = self.get_inferred_type(expr)
+    while isinstance(t, (OptionalType, RefType, SharedRefType)):
+      t = t.base_type if isinstance(t, OptionalType) else t.inner_type
+    return isinstance(t, ArrayType) and not isinstance(
+      t.element_type, OptionalType
+    )
 
   def _emit_value_expr(self, expr: Any) -> None:
-    """Emits *expr*, wrapping in `_SP_RT._sapphire_copy(...)` when value
-    semantics
-    apply.
-    """
-    if self._needs_value_copy(expr):
-      self.emit("_SP_RT._sapphire_copy(")
+    """Emits *expr*, choosing the fastest type-directed value copy helper."""
+    kind, unwrapped_t = self._classify_value_copy(expr)
+    if kind == "NONE":
+      self.visit(expr)
+    elif kind == "SHALLOW_ARRAY":
+      self.emit("_SP_RT._sapphire_copy_array_flat(")
+      self.visit(expr)
+      self.emit(")")
+    elif kind == "SHALLOW_MAP":
+      self.emit("_SP_RT._sapphire_copy_map_flat(")
+      self.visit(expr)
+      self.emit(")")
+    elif kind == "FLAT_STRUCT" and unwrapped_t is not None:
+      self.emit(f"{self._mangle_dotted(unwrapped_t.name)}._copy(")
       self.visit(expr)
       self.emit(")")
     else:
+      self.emit("_SP_RT._sapphire_copy(")
       self.visit(expr)
+      self.emit(")")
 
   def _is_map_expr(self, expr: Any) -> bool:
     """Returns True if *expr* evaluates to a Map (unwrapping
@@ -291,6 +260,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
     for d_var in extra_destructibles or []:
       self.destructor_stack[-1].append(d_var)
       self._var_branch_depth[d_var] = self._branch_depth
+    prev_id_map = self._identifier_map.copy() if self._module_ns_names else None
     if getattr(node, "_block_destructibles", None):
       for d_var in node._block_destructibles:
         if d_var not in self.destructor_stack[-1]:
@@ -336,6 +306,8 @@ class LuaStmtMixin(_LuaTranspilerBase):
     for var_name in current_destructors:
       self.moved_vars.discard(var_name)
       self._var_branch_depth.pop(var_name, None)
+    if prev_id_map is not None:
+      self._identifier_map = prev_id_map
     self._unwrap_writebacks = prev_wb
 
   def visit_BlockNode(self, node: BlockNode) -> None:
@@ -489,6 +461,25 @@ class LuaStmtMixin(_LuaTranspilerBase):
     if isinstance(node, CastExprNode):
       cast_fn = _get_optional_cast_fn(node)
       if cast_fn is not None:
+        from sapphire.semantics.types import OptionalType, PrimitiveType
+
+        src_t = self.get_inferred_type(node.expr)
+        src_base = src_t.base_type if isinstance(src_t, OptionalType) else src_t
+        inner = node.target_type.base_type
+        target = inner.name if hasattr(inner, "name") else str(inner)
+        if isinstance(src_base, PrimitiveType) and (
+          src_base.name == target
+          or (src_base.name == "int" and target == "float")
+        ):
+          self._lift_match_expressions(node.expr)
+          return
+        if (
+          target == "int"
+          and isinstance(src_t, OptionalType)
+          and isinstance(src_t.base_type, PrimitiveType)
+          and src_t.base_type.name == "float"
+        ):
+          cast_fn = "_SP_RT._sapphire_trunc"
         if id(node) not in self._lifted_short_circuits:
           self._lift_match_expressions(node.expr)
           res_var = self._next_temp_name("_sc")
@@ -513,6 +504,37 @@ class LuaStmtMixin(_LuaTranspilerBase):
       self._lift_match_expressions(node.expr)
       if node.arena_expr:
         self._lift_match_expressions(node.arena_expr)
+      if (
+        node.initializer_block
+        and id(node) not in self._lifted_short_circuits
+      ):
+        clone_var = self._next_temp_name("_clone")
+        self.newline()
+        self.emit(f"local {clone_var} = _SP_RT._clone_helper(")
+        self.visit(node.expr)
+        if node.arena_expr:
+          self.emit(", nil, ")
+          self.visit(node.arena_expr)
+        self.emit(")")
+        prev_id_map = self._identifier_map.copy()
+        self._identifier_map["self"] = clone_var
+        has_var_decl = any(
+          isinstance(s, VarDeclNode) for s in node.initializer_block
+        )
+        try:
+          if has_var_decl:
+            self.newline()
+            self.emit("do")
+            self.indent()
+            self.visit(BlockNode(node.initializer_block))
+            self.dedent()
+            self.newline()
+            self.emit("end")
+          else:
+            self.visit(BlockNode(node.initializer_block))
+        finally:
+          self._identifier_map = prev_id_map
+        self._lifted_short_circuits[id(node)] = clone_var
       return
 
     if isinstance(node, MatchExprNode):
@@ -550,7 +572,21 @@ class LuaStmtMixin(_LuaTranspilerBase):
       if not entry:
         continue
       kind = entry[0]
-      if kind == "arr_index":
+      if kind == "direct_arr_index":
+        _, wb_arr, wb_idx, is_opt_elem = entry
+        self.newline()
+        if is_opt_elem:
+          self.emit(f"{wb_arr}[{wb_idx}] = _SP_RT._wrap_opt({m_name})")
+        else:
+          self.emit(f"{wb_arr}[{wb_idx}] = {m_name}")
+      elif kind == "direct_map_index":
+        _, wb_map, wb_key, is_opt_val = entry
+        self.newline()
+        if is_opt_val:
+          self.emit(f"{wb_map}[{wb_key}] = _SP_RT._wrap_opt({m_name})")
+        else:
+          self.emit(f"{wb_map}[{wb_key}] = {m_name}")
+      elif kind == "arr_index":
         _, wb_recv, wb_key = entry
         self.newline()
         self.emit(f"_SP_RT._sapphire_array_set({wb_recv}, {wb_key}, {m_name})")
@@ -638,7 +674,15 @@ class LuaStmtMixin(_LuaTranspilerBase):
     self._lift_match_expressions(node.exprs)
 
     self.newline()
-    names_str = ", ".join([self._mangle_name(n) for n in node.names])
+    is_mod_ns_top = bool(
+      self._module_ns_names and self.indent_level == 0 and not self.dev_mode
+    )
+    if is_mod_ns_top:
+      names_str = ", ".join(
+        self._lua_mod_sym(n) for n in node.names
+      )
+    else:
+      names_str = ", ".join([self._mangle_name(n) for n in node.names])
     if (
       self.dev_mode
       and self.indent_level == 0
@@ -649,6 +693,23 @@ class LuaStmtMixin(_LuaTranspilerBase):
       self.emit(f"if {name} == nil then {name} = ")
       self._emit_value_expr(node.exprs[0])
       self.emit(" end")
+    elif is_mod_ns_top:
+      self.emit(f"{names_str} = ")
+      if node.exprs:
+        for idx, expr in enumerate(node.exprs):
+          if idx > 0:
+            self.emit(", ")
+          self._emit_value_expr(expr)
+      else:
+        defaults = []
+        for idx, _name in enumerate(node.names):
+          val_type = node.val_types[idx] if idx < len(node.val_types) else None
+          default_expr = get_default_value_for_type_node(val_type)
+          if default_expr:
+            defaults.append(self.capture_expr(default_expr))
+          else:
+            defaults.append("nil")
+        self.emit(", ".join(defaults))
     else:
       self.emit(f"local {names_str}")
       if node.exprs:
@@ -673,6 +734,8 @@ class LuaStmtMixin(_LuaTranspilerBase):
           self.emit(" = " + ", ".join(defaults))
 
     for idx, name in enumerate(node.names):
+      if self._module_ns_names and self.indent_level > 0:
+        self._identifier_map.pop(name, None)
       val_type = node.val_types[idx] if idx < len(node.val_types) else None
       type_name = extract_type_name(val_type) if val_type else None
       st_name = None
@@ -698,6 +761,15 @@ class LuaStmtMixin(_LuaTranspilerBase):
         if self.destructor_stack:
           self.destructor_stack[-1].append(m_name)
           self._var_branch_depth[m_name] = self._branch_depth
+      if (
+        self.indent_level > 0
+        and node.exprs
+        and len(node.exprs) == len(node.names)
+        and self._is_fresh_plain_container_expr(node.exprs[idx])
+      ):
+        self._plain_local_containers.add(name)
+      else:
+        self._plain_local_containers.discard(name)
 
   def _is_int_div_assign(self, node: AssignmentNode) -> bool:
     """Returns True if *node* is an integer `/=` compound assignment."""
@@ -808,11 +880,12 @@ class LuaStmtMixin(_LuaTranspilerBase):
 
       if has_index_target and len(node.targets) == 1:
         target = node.targets[0]
-        setter = (
-          "_SP_RT._sapphire_map_set"
-          if self._is_map_expr(target.array)
-          else "_SP_RT._sapphire_array_set"
-        )
+        if self._is_map_expr(target.array):
+          setter = "_SP_RT._sapphire_map_set"
+        elif self._is_non_opt_array_expr(target.array):
+          setter = "_SP_RT._sapphire_array_set_val"
+        else:
+          setter = "_SP_RT._sapphire_array_set"
         self.newline()
         self.emit(f"{setter}(")
         self.visit(target.array)
@@ -827,6 +900,12 @@ class LuaStmtMixin(_LuaTranspilerBase):
       for idx, target in enumerate(node.targets):
         if isinstance(target, IdentifierNode):
           self.moved_vars.discard(self._mangle_name(target.name))
+          if len(node.exprs) == len(node.targets) and (
+            self._is_fresh_plain_container_expr(node.exprs[idx])
+          ):
+            pass
+          else:
+            self._plain_local_containers.discard(target.name)
         if idx > 0:
           self.emit(", ")
         self.visit(target)
@@ -863,24 +942,27 @@ class LuaStmtMixin(_LuaTranspilerBase):
     elif isinstance(node.target, IndexExprNode):
       arr_tmp = self._next_temp_name("_carr")
       idx_tmp = self._next_temp_name("_cidx")
-      is_map = self._is_map_expr(node.target.array)
-      getter = (
-        "_SP_RT._sapphire_map_at" if is_map else "_SP_RT._sapphire_array_at"
-      )
-      setter = (
-        "_SP_RT._sapphire_map_set" if is_map else "_SP_RT._sapphire_array_set"
-      )
-      self.emit(f"local {arr_tmp} = ")
-      self.visit(node.target.array)
-      self.newline()
-      self.emit(f"local {idx_tmp} = ")
-      self.visit(node.target.index)
-      self.newline()
-      self.emit(f"{setter}({arr_tmp}, {idx_tmp}, ")
-      self._emit_compound_rhs(
-        f"{getter}({arr_tmp}, {idx_tmp})", node, is_int_div, is_str_concat
-      )
-      self.emit(")")
+      if self._is_map_expr(node.target.array):
+        val_tmp = self._next_temp_name("_cval")
+        self.emit(f"local {idx_tmp} = ")
+        self.visit(node.target.index)
+        self.newline()
+        self.emit(f"local {arr_tmp}, {val_tmp} = _SP_RT._sapphire_map_ref(")
+        self.visit(node.target.array)
+        self.emit(f", {idx_tmp})")
+        self.newline()
+        self.emit(f"{arr_tmp}[{idx_tmp}] = ")
+        self._emit_compound_rhs(val_tmp, node, is_int_div, is_str_concat)
+      else:
+        self.emit(f"local {arr_tmp}, {idx_tmp} = _SP_RT._sapphire_array_ref(")
+        self.visit(node.target.array)
+        self.emit(", ")
+        self.visit(node.target.index)
+        self.emit(")")
+        self.newline()
+        lhs_code = f"{arr_tmp}[{idx_tmp}]"
+        self.emit(f"{lhs_code} = ")
+        self._emit_compound_rhs(lhs_code, node, is_int_div, is_str_concat)
     else:
       lhs_code = self.capture_expr(node.target)
       self.emit(f"{lhs_code} = ")
@@ -899,12 +981,13 @@ class LuaStmtMixin(_LuaTranspilerBase):
     ):
       expr_out = self.capture_expr(node.expr)
       if expr_out.startswith("(") or not expr_out.endswith(")"):
-        self.emit(f"local _ = {expr_out}")
+        self.emit(f"do local _ = {expr_out} end")
       else:
         self.emit(expr_out)
     else:
-      self.emit("local _ = ")
+      self.emit("do local _ = ")
       self.visit(node.expr)
+      self.emit(" end")
 
   def visit_ReturnNode(self, node: ReturnNode) -> None:
     all_active_destructors = [
@@ -944,12 +1027,13 @@ class LuaStmtMixin(_LuaTranspilerBase):
       if len(node.expressions) == 1:
         inferred = self.get_inferred_type(node.expressions[0])
         if isinstance(inferred, MultiReturnType):
-          ret_tbl = self._next_temp_name("_ret_vals")
           arity = len(inferred.types)
+          ret_base = self._next_temp_name("_ret")
+          ret_vars = [f"{ret_base}_{i + 1}" for i in range(arity)]
+          ret_list = ", ".join(ret_vars)
           self.newline()
-          self.emit(f"local {ret_tbl} = {{ ")
+          self.emit(f"local {ret_list} = ")
           self.visit(node.expressions[0])
-          self.emit(" }")
           self._drain_pending_destroy_moved_vars()
           for var_name in destructors_to_run:
             if (
@@ -960,7 +1044,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
               self.newline()
               self._emit_destructor_call(var_name)
           self.newline()
-          self.emit(f"return (table.unpack or unpack)({ret_tbl}, 1, {arity})")
+          self.emit(f"return {ret_list}")
           self._pending_null_vars.clear()
           self._pending_unconditional_null_vars.clear()
           self._pending_destroy_moved_vars.clear()
@@ -1007,11 +1091,45 @@ class LuaStmtMixin(_LuaTranspilerBase):
         if idx > 0:
           self.emit(", ")
         self.visit(expr)
+    elif getattr(self, "_in_del_repeat", False):
+      self.emit("break")
     else:
       self.emit("return")
     self._pending_null_vars.clear()
     self._pending_unconditional_null_vars.clear()
     self._pending_destroy_moved_vars.clear()
+
+  def _scan_match_yield_arity(self, node: MatchExprNode) -> int:
+    """Returns the output arity (>= 1) of a MatchExprNode."""
+    from sapphire.semantics.types import MultiReturnType
+
+    inferred = self.get_inferred_type(node)
+    if isinstance(inferred, MultiReturnType):
+      return max(1, len(inferred.types))
+    max_arity = 1
+
+    def _walk(n: Any) -> None:
+      nonlocal max_arity
+      if n is None or isinstance(n, (MatchExprNode, LambdaNode, FuncDeclNode)):
+        return
+      if isinstance(n, YieldNode):
+        exprs = getattr(n, "expressions", None) or ([n.expr] if n.expr else [])
+        if len(exprs) > max_arity:
+          max_arity = len(exprs)
+        return
+      if isinstance(n, list):
+        for item in n:
+          _walk(item)
+        return
+      if isinstance(n, ASTNode):
+        for k, v in n.__dict__.items():
+          if not k.startswith("_") and isinstance(v, (ASTNode, list)):
+            _walk(v)
+
+    for case in node.cases:
+      if isinstance(case.body, BlockNode):
+        _walk(case.body)
+    return max_arity
 
   def _emit_match_statement(
     self, node: MatchExprNode, target_var: str | None = ""
@@ -1019,9 +1137,17 @@ class LuaStmtMixin(_LuaTranspilerBase):
     self._lift_match_expressions(node.subject)
 
     if target_var == "":
-      target_var = self._next_temp_name("_match_res")
-      self.newline()
-      self.emit(f"local {target_var} = nil")
+      arity = self._scan_match_yield_arity(node)
+      base_var = self._next_temp_name("_match_res")
+      if arity > 1:
+        vars_list = [f"{base_var}_{i + 1}" for i in range(arity)]
+        target_var = ", ".join(vars_list)
+        self.newline()
+        self.emit(f"local {target_var}")
+      else:
+        target_var = base_var
+        self.newline()
+        self.emit(f"local {target_var} = nil")
 
     subj_var = self._next_temp_name("_subj")
     self.newline()
@@ -1105,24 +1231,17 @@ class LuaStmtMixin(_LuaTranspilerBase):
     )
     self._lift_match_expressions(exprs)
     target = self._current_match_target
-    match_node = self._current_match_node
     done_flag = self._current_match_done_flag
     self.newline()
     if target:
       self.emit(f"{target} = ")
       if not exprs:
         self.emit("nil")
-      elif len(exprs) == 1:
-        self.visit(exprs[0])
       else:
-        if match_node is not None:
-          self._lifted_match_arity[id(match_node)] = len(exprs)
-        self.emit("{ ")
         for idx, expr in enumerate(exprs):
           if idx > 0:
             self.emit(", ")
           self.visit(expr)
-        self.emit(" }")
       if done_flag:
         self.newline()
         self.emit(f"{done_flag} = true")
@@ -1151,12 +1270,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
   def visit_MatchExprNode(self, node: MatchExprNode) -> None:
     if id(node) not in self._lifted_matches:
       self._lifted_matches[id(node)] = self._emit_match_statement(node)
-    lifted_var = self._lifted_matches[id(node)]
-    arity = self._lifted_match_arity.get(id(node))
-    if arity:
-      self.emit(f"(table.unpack or unpack)({lifted_var}, 1, {arity})")
-    else:
-      self.emit(lifted_var)
+    self.emit(self._lifted_matches[id(node)])
 
   def visit_EllipsisPatternNode(self, node: EllipsisPatternNode) -> None:
     pass
@@ -1497,13 +1611,20 @@ class LuaStmtMixin(_LuaTranspilerBase):
     self.loop_destructor_depth.append(len(self.destructor_stack))
     self._match_loop_depth = self._match_loop_depth + 1
     prev_wb = self._unwrap_writebacks.copy()
+    prev_plain = self._plain_local_containers.copy()
     try:
+      from sapphire.semantics.types import MapType, OptionalType
+
       self._lift_match_expressions(node.iterable)
       val_var = self._mangle_name(node.val_var)
       key_var = (
         self._mangle_name(node.key_var) if node.key_var is not None else None
       )
+      self._plain_local_containers.discard(node.val_var)
+      if node.key_var is not None:
+        self._plain_local_containers.discard(node.key_var)
       is_mut = getattr(node, "is_mutable", False)
+      is_non_opt_arr = self._is_non_opt_array_expr(node.iterable)
 
       close_guard_if = False
       array_elem_binding: str | None = None
@@ -1515,7 +1636,39 @@ class LuaStmtMixin(_LuaTranspilerBase):
       )
 
       if node.key_var is not None:
-        if is_mut:
+        iter_t = self.get_inferred_type(node.iterable)
+        while isinstance(iter_t, OptionalType) or hasattr(iter_t, "inner_type"):
+          iter_t = (
+            iter_t.base_type
+            if isinstance(iter_t, OptionalType)
+            else iter_t.inner_type
+          )
+        is_non_opt_map = isinstance(iter_t, MapType) and not isinstance(
+          iter_t.value_type, OptionalType
+        )
+        if is_non_opt_map:
+          map_tmp = self._next_temp_name("_for_map")
+          unwrap_fn = (
+            "_SP_RT._unwrap_write" if is_mut else "_SP_RT._unwrap_read"
+          )
+          self.newline()
+          self.emit(f"local {map_tmp} = {unwrap_fn}(")
+          self.visit(node.iterable)
+          self.emit(")")
+          self.newline()
+          self.emit(f'if type({map_tmp}) == "table" then')
+          self.indent()
+          self.newline()
+          self.emit(f"for {key_var}, {val_var} in pairs({map_tmp}) do")
+          if is_mut:
+            self._unwrap_writebacks[val_var] = (
+              "direct_map_index",
+              map_tmp,
+              key_var,
+              False,
+            )
+          close_guard_if = True
+        elif is_mut:
           iter_tmp = self._next_temp_name("_for_iter")
           self.newline()
           self.emit(f"local {iter_tmp} = ")
@@ -1596,28 +1749,30 @@ class LuaStmtMixin(_LuaTranspilerBase):
         self.visit(node.iterable)
         self.emit(" do")
       elif is_mut:
-        iter_tmp = self._next_temp_name("_for_iter")
         arr_tmp = self._next_temp_name("_for_arr")
         idx_tmp = self._next_temp_name("_for_idx")
         self.newline()
-        self.emit(f"local {iter_tmp} = ")
+        self.emit(f"local {arr_tmp} = _SP_RT._unwrap_write(")
         self.visit(node.iterable)
-        self.newline()
-        self.emit(f"local {arr_tmp} = _SP_RT._unwrap_read({iter_tmp})")
+        self.emit(")")
         self.newline()
         self.emit(f'if type({arr_tmp}) == "table" then')
         self.indent()
         self.newline()
         self.emit(f"for {idx_tmp} = 1, #{arr_tmp} do")
         self._unwrap_writebacks[val_var] = (
-          "arr_index",
-          iter_tmp,
-          f"({idx_tmp} - 1)",
+          "direct_arr_index",
+          arr_tmp,
+          idx_tmp,
+          not is_non_opt_arr,
         )
         close_guard_if = True
-        array_elem_binding = (
-          f"local {val_var} = _SP_RT._unwrap_opt({arr_tmp}[{idx_tmp}])"
-        )
+        if is_non_opt_arr:
+          array_elem_binding = f"local {val_var} = {arr_tmp}[{idx_tmp}]"
+        else:
+          array_elem_binding = (
+            f"local {val_var} = _SP_RT._unwrap_opt({arr_tmp}[{idx_tmp}])"
+          )
       else:
         arr_tmp = self._next_temp_name("_for_arr")
         idx_tmp = self._next_temp_name("_for_idx")
@@ -1631,9 +1786,12 @@ class LuaStmtMixin(_LuaTranspilerBase):
         self.newline()
         self.emit(f"for {idx_tmp} = 1, #{arr_tmp} do")
         close_guard_if = True
-        array_elem_binding = (
-          f"local {val_var} = _SP_RT._unwrap_opt({arr_tmp}[{idx_tmp}])"
-        )
+        if is_non_opt_arr:
+          array_elem_binding = f"local {val_var} = {arr_tmp}[{idx_tmp}]"
+        else:
+          array_elem_binding = (
+            f"local {val_var} = _SP_RT._unwrap_opt({arr_tmp}[{idx_tmp}])"
+          )
       self.indent()
       if array_elem_binding:
         self.newline()
@@ -1648,6 +1806,7 @@ class LuaStmtMixin(_LuaTranspilerBase):
         self.emit("end")
     finally:
       self._unwrap_writebacks = prev_wb
+      self._plain_local_containers = prev_plain
       self._match_loop_depth -= 1
       self.loop_destructor_depth.pop()
       self._loop_stack.pop()

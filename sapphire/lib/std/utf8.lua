@@ -119,7 +119,7 @@ local function _is_valid_utf8_lib(mod)
     and type(mod.offset) == "function"
 end
 
-local function _get_utf8()
+local function _resolve_utf8()
   if _is_valid_utf8_lib(_G.utf8) then
     return _G.utf8
   end
@@ -132,12 +132,21 @@ local function _get_utf8()
   return _pure_utf8
 end
 
-local function _safe_offset(u, s, n, i)
+local _utf8_impl = _resolve_utf8()
+local _is_pure_utf8 = (_utf8_impl == _pure_utf8)
+local _utf8_len = _utf8_impl.len
+local _utf8_offset = _utf8_impl.offset
+local _str_sub = string.sub
+
+local function _safe_offset(s, n, i)
+  if _is_pure_utf8 then
+    return _utf8_offset(s, n, i)
+  end
   local ok, res
   if i == nil then
-    ok, res = pcall(u.offset, s, n)
+    ok, res = pcall(_utf8_offset, s, n)
   else
-    ok, res = pcall(u.offset, s, n, i)
+    ok, res = pcall(_utf8_offset, s, n, i)
   end
   if not ok then
     return nil
@@ -146,44 +155,19 @@ local function _safe_offset(u, s, n, i)
 end
 
 function utf8_mod.size(s)
-  local u = _get_utf8()
-  if not u then
-    return #s
-  end
-  local len = u.len(s)
+  local len = _utf8_len(s)
   return len
 end
 
 function utf8_mod.offset(s, n, i)
-  local u = _get_utf8()
-  if not u then
-    return nil
-  end
-  return _safe_offset(u, s, n, i)
+  return _safe_offset(s, n, i)
 end
 
 function utf8_mod.sub(s, start_char, end_char)
   if s == nil or s == "" then
     return ""
   end
-  local u = _get_utf8()
-  if not u then
-    local len = #s
-    local i = start_char or 0
-    if i < 0 then i = len + i end
-    if i < 0 then i = 0 end
-    if i >= len then return "" end
-    local j = end_char
-    if j == nil then
-      j = len
-    else
-      if j < 0 then j = len + j end
-      if j > len then j = len end
-    end
-    if j <= i then return "" end
-    return s:sub(i + 1, j)
-  end
-  local len = u.len(s)
+  local len = _utf8_len(s)
   if not len then
     return ""
   end
@@ -199,11 +183,14 @@ function utf8_mod.sub(s, start_char, end_char)
     if j > len then j = len end
   end
   if j <= i then return "" end
-  local byte_start = _safe_offset(u, s, i + 1)
+  if len == #s then
+    return _str_sub(s, i + 1, j)
+  end
+  local byte_start = _safe_offset(s, i + 1)
   if not byte_start then return "" end
-  local byte_end_next = _safe_offset(u, s, j + 1)
+  local byte_end_next = _safe_offset(s, j + 1)
   local byte_end = byte_end_next and (byte_end_next - 1) or #s
-  return s:sub(byte_start, byte_end)
+  return _str_sub(s, byte_start, byte_end)
 end
 
 utf8_mod._pure_utf8 = _pure_utf8

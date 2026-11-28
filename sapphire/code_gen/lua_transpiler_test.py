@@ -274,11 +274,11 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua_code = self._transpile(code)
     self.assertIn("local numbers = {10, 20, 30}", lua_code)
-    self.assertIn("local first = _SP_RT._sapphire_array_at(numbers, 0)", lua_code)
-    self.assertIn("_SP_RT._sapphire_array_at(numbers, idx)", lua_code)
+    self.assertIn("local first = _SP_RT._sapphire_array_at_val(numbers, 0)", lua_code)
+    self.assertIn("_SP_RT._sapphire_array_at_val(numbers, idx)", lua_code)
     self.assertIn("local _for_arr_1 = _SP_RT._unwrap_read(numbers)", lua_code)
     self.assertIn("for _for_idx_1 = 1, #_for_arr_1 do", lua_code)
-    self.assertIn("local n = _SP_RT._unwrap_opt(_for_arr_1[_for_idx_1])", lua_code)
+    self.assertIn("local n = _for_arr_1[_for_idx_1]", lua_code)
 
   def test_fixed_size_array_and_negative_indexing(self):
     """Verifies Lua code generation for fixed-size arrays and negative indices."""
@@ -293,9 +293,9 @@ class TestLuaTranspiler(unittest.TestCase):
     """
     lua_code = self._transpile(code)
     self.assertIn("local scores = {10, 20, 30}", lua_code)
-    self.assertIn("local last = _SP_RT._sapphire_array_at(scores, (-1))", lua_code)
-    self.assertIn("local first = _SP_RT._sapphire_array_at(scores, (-3))", lua_code)
-    self.assertIn("_SP_RT._sapphire_array_at(scores, idx)", lua_code)
+    self.assertIn("local last = _SP_RT._sapphire_array_at_val(scores, (-1))", lua_code)
+    self.assertIn("local first = _SP_RT._sapphire_array_at_val(scores, (-3))", lua_code)
+    self.assertIn("_SP_RT._sapphire_array_at_val(scores, idx)", lua_code)
 
   def test_struct_declaration_and_impl(self):
     """Verifies struct constructor generation, field defaults, static methods, and traits."""
@@ -319,7 +319,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("Item = {}", lua_code)
     self.assertIn("function Item.init(...)", lua_code)
     self.assertIn("Item._init_sapphire", lua_code)
-    self.assertIn("Item.init({[1] = 100})", lua_code)
+    self.assertIn("Item._new(100)", lua_code)
 
   def test_constructor_chaining_lua(self):
     """Verifies that constructor chaining emits parent _init_sapphire calls in Lua."""
@@ -519,7 +519,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("Point.init({x = 10, y = 20})", lua_code)
+    self.assertIn("Point._new(10, 20)", lua_code)
     self.assertIn("(function(x)", lua_code)
     self.assertIn("return (x * 2)", lua_code)
 
@@ -1149,7 +1149,7 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_out = self._transpile(code)
     self.assertIn('{["alice"] = 100, ["bob"] = 95}', lua_out)
     self.assertIn('_SP_RT._sapphire_map_at(scores, "alice")', lua_out)
-    self.assertIn('_SP_RT._sapphire_array_at(arr, 0)', lua_out)
+    self.assertIn('_SP_RT._sapphire_array_at_val(arr, 0)', lua_out)
 
   def test_lua_while_loop(self):
     """Verifies that Lua transpilation emits while loops correctly."""
@@ -1165,7 +1165,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("while (count > 0) do", lua_out)
 
   def test_lua_map_for_loop(self):
-    """Verifies that Lua transpilation routes map for-loops through _SP_RT._sapphire_iter_map."""
+    """Verifies that Lua transpilation lowers non-optional map for-loops to unwrapped pairs()."""
     code = """
     func test_map_for() {
       let m = {"a": 1, "b": 2};
@@ -1175,7 +1175,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_out = self._transpile(code)
-    self.assertIn("for k, v in _SP_RT._sapphire_iter_map(m) do", lua_out)
+    self.assertIn("local _for_map_1 = _SP_RT._unwrap_read(m)", lua_out)
+    self.assertIn("for k, v in pairs(_for_map_1) do", lua_out)
 
 
   def test_lua_string_methods(self):
@@ -1269,9 +1270,9 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua = self._transpile(code)
-    self.assertIn("_SP_RT._sapphire_cast_float(10)", lua)
-    self.assertIn("_SP_RT._sapphire_cast_int(3.14)", lua)
-    self.assertIn("_SP_RT._sapphire_cast_bool(1)", lua)
+    self.assertIn("local f = 10", lua)
+    self.assertIn("_SP_RT._sapphire_trunc(3.14)", lua)
+    self.assertIn("(1 ~= false and 1 ~= nil and 1 ~= 0)", lua)
     self.assertIn("tostring(10)", lua)
     self.assertIn("tostring(42)", lua)
     self.assertIn("tostring(true)", lua)
@@ -1349,9 +1350,9 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua = self._transpile(code)
-    self.assertIn("_SP_RT._sapphire_array_size(nums)", lua)
-    self.assertIn("_SP_RT._sapphire_array_empty(nums)", lua)
-    self.assertIn("_SP_RT._sapphire_array_get(nums, 1)", lua)
+    self.assertIn("#nums", lua)
+    self.assertIn("(#nums == 0)", lua)
+    self.assertIn("_SP_RT._sapphire_array_get_val(nums, 1)", lua)
     self.assertIn("_SP_RT._sapphire_array_map(nums", lua)
     self.assertIn("_SP_RT._sapphire_array_filter(nums", lua)
     self.assertIn("_SP_RT._sapphire_array_reduce(nums, 0", lua)
@@ -1359,7 +1360,7 @@ class TestLuaTranspiler(unittest.TestCase):
     self.assertIn("_SP_RT._sapphire_array_reverse(nums)", lua)
     self.assertIn("_SP_RT._sapphire_array_sort(", lua)
     self.assertIn("_SP_RT._sapphire_array_join(", lua)
-    self.assertIn("_SP_RT._sapphire_array_push(mut_arr, 30)", lua)
+    self.assertIn("_SP_RT._sapphire_array_push_val(mut_arr, 30)", lua)
     self.assertIn("_SP_RT._sapphire_array_insert(mut_arr, 1, 15)", lua)
     self.assertIn("_SP_RT._sapphire_array_pop(mut_arr)", lua)
     self.assertIn("_SP_RT._sapphire_array_remove(mut_arr, 1)", lua)
@@ -1468,7 +1469,7 @@ class TestLuaTranspiler(unittest.TestCase):
     lua = self._transpile(code)
     self.assertIn("local _for_arr_1 = _SP_RT._unwrap_read(tags)", lua)
     self.assertIn("for _for_idx_1 = 1, #_for_arr_1 do", lua)
-    self.assertIn("local t = _SP_RT._unwrap_opt(_for_arr_1[_for_idx_1])", lua)
+    self.assertIn("local t = _for_arr_1[_for_idx_1]", lua)
 
   def test_lift_match_expressions_none_lua(self):
     """Verifies _lift_match_expressions handles None gracefully in Lua transpiler."""
@@ -1491,7 +1492,8 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua = self._transpile(code)
-    self.assertIn("table.unpack", lua)
+    self.assertIn("_match_res_2_1, _match_res_2_2", lua)
+    self.assertNotIn("(table.unpack or unpack)", lua)
     self.assertIn("nil", lua)
 
   def test_break_and_continue_lua(self):
@@ -1552,7 +1554,7 @@ class TestLuaTranspiler(unittest.TestCase):
     }
     """
     lua_code = self._transpile(code)
-    self.assertIn("setmetatable(Player, { __index = function(t, k) return Position[k] or Health[k] end })", lua_code)
+    self.assertIn("_SP_RT._inherit_multi(Player, Position, Health)", lua_code)
     self.assertIn("Position._init_fields(self)", lua_code)
     self.assertIn("Health._init_fields(self)", lua_code)
 
@@ -3015,6 +3017,79 @@ class TestLuaTranspiler(unittest.TestCase):
     lua_code = self._transpile(source)
     proc = self._run_lua_code(lua_code)
     self.assertEqual(proc.stdout.strip(), "124")
+
+  def test_lua_200_local_module_spillover(self):
+    """Verifies modules with >120 top-level decls spill into local _MOD = {}."""
+    funcs = "\n".join(
+      f"func f{i}(x: int): int {{ return x + {i}; }}" for i in range(210)
+    )
+    source = f"""
+    enum Tag {{ A = 1, B = 2 }}
+    let BASE: int = 10;
+    struct Box {{ var v: int; }}
+    {funcs}
+    func main() {{
+      let b = Box {{ v = BASE + (Tag.B as int) }};
+      let r = f0(b.v) + f209(1);
+      print(String.from(r));
+    }}
+    """
+    lua_code = self._transpile(source)
+    self.assertIn("local _MOD = {}", lua_code)
+    proc = self._run_lua_code(lua_code)
+    self.assertEqual(proc.stdout.strip(), "222")
+
+  def test_lua_unboxed_multi_return_fixed_arity_opt_defaults_and_raii(self):
+    """Verifies unboxed multi-return with RAII, fixed-arity opt defaults, and
+    elided diamond destructor guards on non-diamond structs.
+    """
+    source = """
+    var drops: int = 0;
+    struct Guard { var id: int; }
+    impl Guard {
+      func __del__() { drops += self.id; }
+    }
+    func pair(x: int): int, int { return x + 1, x + 2; }
+    func with_guard(x: int): int, int {
+      let g = Guard { id = x };
+      return pair(x);
+    }
+    func add_opt(a: int, b: int? = 42): int {
+      return a + (b ?? 0);
+    }
+    func main() {
+      let a, b = with_guard(10);
+      let c1 = add_opt(1);
+      let c2 = add_opt(1, none);
+      let c3 = add_opt(1, 5);
+      print(String.from(a + b + drops + c1 + c2 + c3));
+    }
+    """
+    lua_code = self._transpile(source)
+    self.assertNotIn("(table.unpack or unpack)", lua_code)
+    self.assertIn("function add_opt(a, b)", lua_code)
+    self.assertNotIn("_sapphire_destroyed_classes_", lua_code)
+    proc = self._run_lua_code(lua_code)
+    # a=11, b=12, drops=10, c1=43, c2=1, c3=6 -> 83
+    self.assertEqual(proc.stdout.strip(), "83")
+
+  def test_lua_sourcemap_demangler_installs_errorhandler_once(self):
+    """Verifies LUA_SOURCEMAP_DEMANGLER wraps love.errorhandler only once."""
+    from sapphire.code_gen.lua_runtime import LUA_SOURCEMAP_DEMANGLER
+
+    driver = (
+      "local calls = 0\n"
+      "love = { errorhandler = function(m) calls = calls + 1; return m end }\n"
+      'local _SP_LINE_MAP = { [1] = { file = "a.sp", line = 1, text = "" } }\n'
+      f"{LUA_SOURCEMAP_DEMANGLER}\n"
+      "local first_fn = love.errorhandler\n"
+      f"{LUA_SOURCEMAP_DEMANGLER}\n"
+      "assert(love.errorhandler == first_fn, 'wrapped twice')\n"
+      'love.errorhandler("boom")\n'
+      "print(calls)\n"
+    )
+    proc = self._run_lua_code(driver)
+    self.assertEqual(proc.stdout.strip().splitlines()[-1], "1")
 
 
 # ---------------------------------------------------------------------------

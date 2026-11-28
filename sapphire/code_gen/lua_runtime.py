@@ -72,10 +72,48 @@ do
   end
   _sp_install_loader()
 
+  local _type = type
+  local _getmetatable = getmetatable
+  local _setmetatable = setmetatable
+  local _rawget = rawget
+  local _rawset = rawset
+  local _pairs = pairs
+  local _next = next
+  local _select = select
+  local _tostring = tostring
+  local _tonumber = tonumber
+  local _error = error
+  local _math_floor = math.floor
+  local _math_ceil = math.ceil
+  local _str_byte = string.byte
+  local _str_find = string.find
+  local _str_sub = string.sub
+  local _tbl_concat = table.concat
+  local _tbl_sort = table.sort
+  local _tbl_remove = table.remove
+  local _tbl_insert = table.insert
+  local _unpack = table.unpack or unpack
+  local _co_create = coroutine.create
+  local _co_resume = coroutine.resume
+  local _co_status = coroutine.status
+  _SP_RT._unpack = _unpack
+
   _G._SP_NONE = _G._SP_NONE or {}
   _G._SP_UNSET = _G._SP_UNSET or {}
+  _G._SP_K_PROTO = _G._SP_K_PROTO or {}
+  _G._SP_K_SHADOW = _G._SP_K_SHADOW or {}
+  _G._SP_K_CLASS = _G._SP_K_CLASS or {}
+  _G._SP_K_PARENT = _G._SP_K_PARENT or {}
+  _G._SP_K_KEY = _G._SP_K_KEY or {}
+  _G._SP_K_TARGET = _G._SP_K_TARGET or {}
   local _SP_NONE = _G._SP_NONE
   local _SP_UNSET = _G._SP_UNSET
+  local _K_PROTO = _G._SP_K_PROTO
+  local _K_SHADOW = _G._SP_K_SHADOW
+  local _K_CLASS = _G._SP_K_CLASS
+  local _K_PARENT = _G._SP_K_PARENT
+  local _K_KEY = _G._SP_K_KEY
+  local _K_TARGET = _G._SP_K_TARGET
   _SP_RT._SP_NONE = _SP_NONE
   _SP_RT._SP_UNSET = _SP_UNSET
 
@@ -91,14 +129,14 @@ do
   _SP_RT._unwrap_opt = _unwrap_opt
 
   local function _unwrap_read_slow(obj)
-    while type(obj) == "table" do
-      local mt = getmetatable(obj)
+    while _type(obj) == "table" do
+      local mt = _getmetatable(obj)
       if mt and mt.__get_active then
-        obj = mt.__get_active()
+        obj = mt.__get_active(obj)
       elseif mt and mt.__is_ref then
-        obj = rawget(obj, "_val")
+        obj = _rawget(obj, "_val")
       elseif mt and mt.__is_shared_ref then
-        local cb = rawget(obj, "_cb")
+        local cb = _rawget(obj, "_cb")
         obj = cb and cb.val or nil
       else
         return obj
@@ -108,21 +146,21 @@ do
   end
 
   local function _unwrap_read(obj)
-    if type(obj) ~= "table" or getmetatable(obj) == nil then
+    if _type(obj) ~= "table" or _getmetatable(obj) == nil then
       return obj
     end
     return _unwrap_read_slow(obj)
   end
 
   local function _unwrap_write_slow(obj)
-    while type(obj) == "table" do
-      local mt = getmetatable(obj)
+    while _type(obj) == "table" do
+      local mt = _getmetatable(obj)
       if mt and mt.__ensure_cow then
-        obj = mt.__ensure_cow()
+        obj = mt.__ensure_cow(obj)
       elseif mt and mt.__is_ref then
-        obj = rawget(obj, "_val")
+        obj = _rawget(obj, "_val")
       elseif mt and mt.__is_shared_ref then
-        local cb = rawget(obj, "_cb")
+        local cb = _rawget(obj, "_cb")
         obj = cb and cb.val or nil
       else
         return obj
@@ -132,7 +170,7 @@ do
   end
 
   local function _unwrap_write(obj)
-    if type(obj) ~= "table" or getmetatable(obj) == nil then
+    if _type(obj) ~= "table" or _getmetatable(obj) == nil then
       return obj
     end
     return _unwrap_write_slow(obj)
@@ -145,8 +183,8 @@ do
 
   function _Coroutine.create(fn, ...)
     local args = { ... }
-    local n = select("#", ...)
-    local self = setmetatable({}, _Coroutine)
+    local n = _select("#", ...)
+    local self = _setmetatable({}, _Coroutine)
     self._fn = fn
     self._args = args
     self._n = n
@@ -156,23 +194,30 @@ do
   end
 
   function _Coroutine:step(...)
-    if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    if self._done then
+      return nil
+    end
+    local co = self._co
+    if not co or _co_status(co) == "dead" then
       self._done = true
       return nil
     end
-    local ok, val = coroutine.resume(self._co, ...)
+    local ok, val = _co_resume(co, ...)
     if not ok then
-      error(val)
+      _error(val)
     end
-    if coroutine.status(self._co) == "dead" then
+    if _co_status(co) == "dead" then
       self._done = true
-      return val
     end
     return val
   end
 
   function _Coroutine:is_done()
-    if self._done or (self._co and coroutine.status(self._co) == "dead") then
+    if self._done then
+      return true
+    end
+    local co = self._co
+    if co and _co_status(co) == "dead" then
       self._done = true
       return true
     end
@@ -183,41 +228,39 @@ do
     local fn = self._fn
     local args = self._args
     local n = self._n or #args
-    self._co = coroutine.create(function()
-      if table.unpack then
-        return fn(table.unpack(args, 1, n))
-      else
-        return fn(unpack(args, 1, n))
-      end
+    self._co = _co_create(function()
+      return fn(_unpack(args, 1, n))
     end)
     self._done = false
   end
   _SP_RT._Coroutine = _Coroutine
 
   local _sapphire_del
-  local _arena_owners = setmetatable({}, { __mode = "k" })
+  local _arena_owners = _setmetatable({}, { __mode = "k" })
   local Arena = { __is_arena = true }
   Arena.__index = Arena
 
   function Arena.init()
-    local self = setmetatable({}, Arena)
+    local self = _setmetatable({}, Arena)
     self.objects = {}
     return self
   end
 
   function Arena:register(obj)
-    if type(obj) == "table" then
+    if _type(obj) == "table" then
       local prev = _arena_owners[obj]
       if prev and prev ~= self then
-        for i, o in ipairs(prev.objects) do
-          if o == obj then
-            table.remove(prev.objects, i)
+        local prev_objs = prev.objects
+        for i = 1, #prev_objs do
+          if prev_objs[i] == obj then
+            _tbl_remove(prev_objs, i)
             break
           end
         end
       end
       if prev ~= self then
-        table.insert(self.objects, obj)
+        local objs = self.objects
+        objs[#objs + 1] = obj
         _arena_owners[obj] = self
       end
     end
@@ -225,18 +268,19 @@ do
   end
 
   function Arena:destroy()
-    if rawget(self, "_sapphire_disposed_") then
+    if _rawget(self, "_sapphire_disposed_") then
       return
     end
-    rawset(self, "_sapphire_disposed_", true)
-    for i = #self.objects, 1, -1 do
-      local obj = self.objects[i]
+    _rawset(self, "_sapphire_disposed_", true)
+    local objs = self.objects
+    for i = #objs, 1, -1 do
+      local obj = objs[i]
       _sapphire_del(obj)
       _arena_owners[obj] = nil
-      local meta = getmetatable(obj)
-      if meta and meta.__shadow then
-        for k in pairs(meta.__shadow) do
-          meta.__shadow[k] = nil
+      local shadow = _rawget(obj, _K_SHADOW)
+      if shadow then
+        for k in _pairs(shadow) do
+          shadow[k] = nil
         end
       end
     end
@@ -251,156 +295,222 @@ do
   local _clone_helper
   local _create_cow_proxy
 
-  _create_cow_proxy = function(parent_obj, key, target_tbl)
-    if type(target_tbl) == "table" then
-      local t_meta = getmetatable(target_tbl)
-      if t_meta and t_meta.__get_active then
-        target_tbl = t_meta.__get_active()
-      end
+  local function _cow_get_active(proxy)
+    local parent_obj = _rawget(proxy, _K_PARENT)
+    local key = _rawget(proxy, _K_KEY)
+    local target_tbl = _rawget(proxy, _K_TARGET)
+    local p_meta = _type(parent_obj) == "table" and _getmetatable(parent_obj) or nil
+    local parent_active
+    if p_meta and p_meta.__get_active then
+      parent_active = p_meta.__get_active(parent_obj)
+    else
+      parent_active = parent_obj
     end
-    local proxy_meta = {}
-
-    local function get_active()
-      local p_meta = type(parent_obj) == "table" and getmetatable(parent_obj) or nil
-      local parent_active
-      if p_meta and p_meta.__get_active then
-        parent_active = p_meta.__get_active()
+    if _type(parent_active) == "table" then
+      local shadow = _rawget(parent_active, _K_SHADOW)
+      if shadow then
+        local sv = shadow[key]
+        if sv ~= nil then
+          return _unwrap_opt(sv)
+        end
       else
-        parent_active = parent_obj
-      end
-      if type(parent_active) == "table" then
-        local pa_meta = getmetatable(parent_active)
-        if pa_meta and pa_meta.__shadow then
-          local sv = pa_meta.__shadow[key]
-          if sv ~= nil then
-            return _unwrap_opt(sv)
-          end
-        else
-          local v = rawget(parent_active, key)
-          if v ~= nil then
-            return _unwrap_opt(v)
-          end
+        local v = _rawget(parent_active, key)
+        if v ~= nil then
+          return _unwrap_opt(v)
         end
       end
-      return target_tbl
     end
+    return target_tbl
+  end
 
-    local function ensure_cow()
-      local p_meta = type(parent_obj) == "table" and getmetatable(parent_obj) or nil
-      local parent_mat
-      if p_meta and p_meta.__ensure_cow then
-        parent_mat = p_meta.__ensure_cow()
-      else
-        parent_mat = parent_obj
-      end
-      local pm_meta = type(parent_mat) == "table" and getmetatable(parent_mat) or nil
-      if pm_meta and pm_meta.__shadow then
-        if pm_meta.__shadow[key] == nil then
-          pm_meta.__shadow[key] = _clone_helper(target_tbl, nil, nil)
-        end
-        return _unwrap_opt(pm_meta.__shadow[key])
-      else
-        local curr = rawget(parent_mat, key)
-        if curr == nil or curr == target_tbl then
-          local cloned = _clone_helper(target_tbl, nil, nil)
-          rawset(parent_mat, key, cloned)
-          return cloned
-        end
-        return _unwrap_opt(curr)
-      end
+  local function _cow_ensure_cow(proxy)
+    local parent_obj = _rawget(proxy, _K_PARENT)
+    local key = _rawget(proxy, _K_KEY)
+    local target_tbl = _rawget(proxy, _K_TARGET)
+    local p_meta = _type(parent_obj) == "table" and _getmetatable(parent_obj) or nil
+    local parent_mat
+    if p_meta and p_meta.__ensure_cow then
+      parent_mat = p_meta.__ensure_cow(parent_obj)
+    else
+      parent_mat = parent_obj
     end
+    local shadow = _type(parent_mat) == "table" and _rawget(parent_mat, _K_SHADOW) or nil
+    if shadow then
+      if shadow[key] == nil then
+        shadow[key] = _clone_helper(target_tbl, nil, nil)
+      end
+      return _unwrap_opt(shadow[key])
+    else
+      local curr = _rawget(parent_mat, key)
+      if curr == nil or curr == target_tbl then
+        local cloned = _clone_helper(target_tbl, nil, nil)
+        _rawset(parent_mat, key, cloned)
+        return cloned
+      end
+      return _unwrap_opt(curr)
+    end
+  end
 
-    proxy_meta.__get_active = get_active
-    proxy_meta.__ensure_cow = ensure_cow
-    proxy_meta.__index = function(tbl, sub_key)
-      local active = get_active()
+  local _COW_MT = {
+    __is_cow = true,
+    __get_active = _cow_get_active,
+    __ensure_cow = _cow_ensure_cow,
+    __index = function(tbl, sub_key)
+      local active = _cow_get_active(tbl)
       if active ~= nil then
         local val = active[sub_key]
         if val == _SP_NONE then return nil end
-        if type(val) == "table" then
+        if _type(val) == "table" then
           return _create_cow_proxy(tbl, sub_key, val)
         end
         return val
       end
       return nil
-    end
-    proxy_meta.__newindex = function(tbl, sub_key, value)
-      local mat = ensure_cow()
+    end,
+    __newindex = function(tbl, sub_key, value)
+      local mat = _cow_ensure_cow(tbl)
       mat[sub_key] = value
+    end,
+  }
+
+  _create_cow_proxy = function(parent_obj, key, target_tbl)
+    if _type(target_tbl) == "table" then
+      local t_meta = _getmetatable(target_tbl)
+      if t_meta and t_meta.__get_active then
+        target_tbl = t_meta.__get_active(target_tbl)
+      end
     end
-    return setmetatable({}, proxy_meta)
+    return _setmetatable({
+      [_K_PARENT] = parent_obj,
+      [_K_KEY] = key,
+      [_K_TARGET] = target_tbl,
+    }, _COW_MT)
   end
   _SP_RT._create_cow_proxy = _create_cow_proxy
 
-  local function _create_proto_object(proto, class_tbl)
-    local shadow = {}
-    local meta = {}
-    local obj = {}
-    meta.__shadow = shadow
-    meta.__proto = proto
-    meta.__class = class_tbl
-    meta.__index = function(tbl, key)
-      if key == "__proto__" then return meta.__proto end
-      if key == "__shadow__" then return meta.__shadow end
-      local sv = shadow[key]
-      if sv ~= nil then
-        if sv == _SP_NONE then return nil end
-        return sv
+  local _PROTO_MT = {
+    __is_proto = true,
+    __index = function(tbl, key)
+      if key == "__proto__" then return _rawget(tbl, _K_PROTO) end
+      if key == "__shadow__" then
+        local sh = _rawget(tbl, _K_SHADOW)
+        if not sh then
+          sh = {}
+          _rawset(tbl, _K_SHADOW, sh)
+        end
+        return sh
       end
+      local shadow = _rawget(tbl, _K_SHADOW)
+      if shadow then
+        local sv = shadow[key]
+        if sv ~= nil then
+          if sv == _SP_NONE then return nil end
+          return sv
+        end
+      end
+      local proto = _rawget(tbl, _K_PROTO)
       if proto ~= nil then
         local val = proto[key]
         if val ~= nil then
           if val == _SP_NONE then return nil end
-          if type(val) == "table" then
-            return _create_cow_proxy(obj, key, val)
+          if _type(val) == "table" then
+            return _create_cow_proxy(tbl, key, val)
           end
           return val
         end
       end
+      local class_tbl = _rawget(tbl, _K_CLASS)
       if class_tbl and class_tbl[key] ~= nil then
         return class_tbl[key]
       end
       return nil
-    end
-    meta.__newindex = function(tbl, key, val)
+    end,
+    __newindex = function(tbl, key, val)
       if key == "__proto__" or key == "__shadow__" then return end
-      if proto ~= nil then
+      if _rawget(tbl, _K_PROTO) ~= nil then
+        local shadow = _rawget(tbl, _K_SHADOW)
+        if not shadow then
+          shadow = {}
+          _rawset(tbl, _K_SHADOW, shadow)
+        end
         shadow[key] = (val == nil) and _SP_NONE or val
       else
-        rawset(tbl, key, val)
+        _rawset(tbl, key, val)
       end
+    end,
+  }
+
+  local function _create_proto_object(proto, class_tbl, fields)
+    if proto ~= nil then
+      return _setmetatable({
+        [_K_PROTO] = proto,
+        [_K_SHADOW] = {},
+        [_K_CLASS] = class_tbl,
+      }, _PROTO_MT)
     end
-    return setmetatable(obj, meta)
+    if fields ~= nil then
+      fields[_K_CLASS] = class_tbl
+      return _setmetatable(fields, _PROTO_MT)
+    end
+    return _setmetatable({
+      [_K_CLASS] = class_tbl,
+    }, _PROTO_MT)
   end
   _SP_RT._create_proto_object = _create_proto_object
 
+  local _INHERIT_SKIP = {
+    __index = true,
+    init = true,
+    _new = true,
+    _init_fields = true,
+    _init_sapphire = true,
+  }
+  _SP_RT._inherit_multi = function(cls, ...)
+    local n = _select("#", ...)
+    for i = 1, n do
+      local cur = _select(i, ...)
+      while _type(cur) == "table" do
+        for k, v in _pairs(cur) do
+          if not _INHERIT_SKIP[k] and _rawget(cls, k) == nil then
+            _rawset(cls, k, v)
+          end
+        end
+        local mt = _getmetatable(cur)
+        local idx = mt and mt.__index
+        if _type(idx) == "table" and idx ~= cur then
+          cur = idx
+        else
+          break
+        end
+      end
+    end
+  end
+
   local function _copy_plain_table(obj, seen)
-    if type(obj) ~= "table" then return obj end
-    local meta = getmetatable(obj)
+    if _type(obj) ~= "table" then return obj end
+    local meta = _getmetatable(obj)
     if meta and meta.__get_active then
-      obj = meta.__get_active()
-      meta = getmetatable(obj)
+      obj = meta.__get_active(obj)
+      meta = _getmetatable(obj)
     end
     if seen and seen[obj] then return seen[obj] end
-    if obj.clone and type(obj.clone) == "function" then
+    if obj.clone and _type(obj.clone) == "function" then
       return obj:clone()
-    elseif meta and meta.__class then
-      return _create_proto_object(obj, meta.__class)
-    elseif meta and meta.__proto ~= nil then
-      return _create_proto_object(obj, nil)
+    elseif meta and meta.__is_proto then
+      return _create_proto_object(obj, _rawget(obj, _K_CLASS))
     end
     seen = seen or {}
     local copy = {}
     seen[obj] = copy
-    for k, v in pairs(obj) do
-      if type(v) == "table" and v ~= _SP_NONE then
+    for k, v in _pairs(obj) do
+      if _type(v) == "table" and v ~= _SP_NONE then
         copy[k] = _copy_plain_table(v, seen)
       else
         copy[k] = v
       end
     end
     if meta then
-      setmetatable(copy, meta)
+      _setmetatable(copy, meta)
     end
     return copy
   end
@@ -408,28 +518,26 @@ do
   _clone_helper = function(obj, init_fn, arena)
     if obj == nil then return nil end
     local clone_obj
-    if type(obj) == "table" then
-      local meta = getmetatable(obj)
+    if _type(obj) == "table" then
+      local meta = _getmetatable(obj)
       if meta and meta.__get_active then
-        obj = meta.__get_active()
-        meta = getmetatable(obj)
+        obj = meta.__get_active(obj)
+        meta = _getmetatable(obj)
       end
-      if obj.clone and type(obj.clone) == "function" then
+      if obj.clone and _type(obj.clone) == "function" then
         clone_obj = obj:clone()
-      elseif meta and meta.__class then
-        clone_obj = _create_proto_object(obj, meta.__class)
-      elseif meta and meta.__proto ~= nil then
-        clone_obj = _create_proto_object(obj, nil)
+      elseif meta and meta.__is_proto then
+        clone_obj = _create_proto_object(obj, _rawget(obj, _K_CLASS))
       else
         clone_obj = _copy_plain_table(obj, nil)
       end
     else
       clone_obj = obj
     end
-    if arena == nil and type(obj) == "table" then
+    if arena == nil and _type(obj) == "table" then
       arena = _arena_owners[obj]
     end
-    if arena ~= nil and type(clone_obj) == "table" then
+    if arena ~= nil and _type(clone_obj) == "table" then
       arena:register(clone_obj)
     end
     if init_fn then
@@ -440,18 +548,18 @@ do
   _SP_RT._clone_helper = _clone_helper
 
   _SP_RT._sapphire_copy = function(val, seen)
-    if type(val) ~= "table" then return val end
+    if _type(val) ~= "table" then return val end
     if val == _SP_NONE or val == _SP_UNSET then return val end
-    local mt = getmetatable(val)
+    local mt = _getmetatable(val)
     if mt and mt.__get_active then
-      val = mt.__get_active()
-      if type(val) ~= "table" then return val end
-      mt = getmetatable(val)
+      val = mt.__get_active(val)
+      if _type(val) ~= "table" then return val end
+      mt = _getmetatable(val)
     end
-    if mt and (mt.__shadow or mt.__proto ~= nil or mt.__class or mt.__is_arena or mt.__is_ref or mt.__is_shared_ref or mt.__is_weak_ref or mt.__is_coroutine) then
+    if mt and (mt.__is_proto or mt.__is_arena or mt.__is_ref or mt.__is_shared_ref or mt.__is_weak_ref or mt.__is_coroutine) then
       return val
     end
-    if type(val.__del__) == "function" then
+    if _type(val.__del__) == "function" then
       return val
     end
     seen = seen or {}
@@ -460,52 +568,106 @@ do
     end
     local copy = {}
     seen[val] = copy
-    for k, v in pairs(val) do
+    for k, v in _pairs(val) do
       copy[k] = _SP_RT._sapphire_copy(v, seen)
     end
     if mt then
-      setmetatable(copy, mt)
+      _setmetatable(copy, mt)
     end
     return copy
   end
 
-  local function _sapphire_eq(a, b)
-    if type(a) == "table" then
-      local mta = getmetatable(a)
-      if mta and mta.__get_active then a = mta.__get_active() end
+  _SP_RT._sapphire_copy_array_flat = function(arr)
+    arr = _unwrap_read(arr)
+    if arr == nil then return nil end
+    local len = #arr
+    local res = {}
+    for i = 1, len do
+      res[i] = arr[i]
     end
-    if type(b) == "table" then
-      local mtb = getmetatable(b)
-      if mtb and mtb.__get_active then b = mtb.__get_active() end
+    return res
+  end
+
+  _SP_RT._sapphire_copy_map_flat = function(m)
+    m = _unwrap_read(m)
+    if m == nil then return nil end
+    local res = {}
+    for k, v in _pairs(m) do
+      res[k] = v
+    end
+    return res
+  end
+
+  local function _sapphire_eq(a, b)
+    if _type(a) == "table" then
+      local mta = _getmetatable(a)
+      if mta and mta.__get_active then a = mta.__get_active(a) end
+    end
+    if _type(b) == "table" then
+      local mtb = _getmetatable(b)
+      if mtb and mtb.__get_active then b = mtb.__get_active(b) end
     end
     if a == _SP_NONE then a = nil end
     if b == _SP_NONE then b = nil end
     if a == b then return true end
-    if type(a) ~= "table" or type(b) ~= "table" then return false end
-    if getmetatable(a) ~= nil or getmetatable(b) ~= nil then return false end
+    if _type(a) ~= "table" or _type(b) ~= "table" then return false end
+    if _getmetatable(a) ~= nil or _getmetatable(b) ~= nil then return false end
     local count_a = 0
-    for k, va in pairs(a) do
+    for k, va in _pairs(a) do
       count_a = count_a + 1
       local vb = b[k]
       if vb == nil then return false end
       if not _sapphire_eq(va, vb) then return false end
     end
     local count_b = 0
-    for _ in pairs(b) do
+    for _ in _pairs(b) do
       count_b = count_b + 1
     end
     return count_a == count_b
   end
   _SP_RT._sapphire_eq = _sapphire_eq
 
+  _SP_RT._sapphire_array_eq = function(a, b)
+    if _type(a) == "table" then
+      local mta = _getmetatable(a)
+      if mta and mta.__get_active then a = mta.__get_active(a) end
+    end
+    if _type(b) == "table" then
+      local mtb = _getmetatable(b)
+      if mtb and mtb.__get_active then b = mtb.__get_active(b) end
+    end
+    if a == b then return true end
+    if _type(a) ~= "table" or _type(b) ~= "table" then return false end
+    local len = #a
+    if len ~= #b then return false end
+    for i = 1, len do
+      local va, vb = a[i], b[i]
+      if va ~= vb and not _sapphire_eq(va, vb) then
+        return false
+      end
+    end
+    return true
+  end
+
   -- UTF-8 code-point utilities (Lua 5.1/LuaJIT safe)
+  local function _is_ascii(s)
+    for i = 1, #s do
+      if _str_byte(s, i) >= 128 then
+        return false
+      end
+    end
+    return true
+  end
+
   local function _utf8_offsets(s)
     local offsets = {}
+    local n = 0
     local i = 1
     local len = #s
     while i <= len do
-      offsets[#offsets + 1] = i
-      local b = string.byte(s, i)
+      n = n + 1
+      offsets[n] = i
+      local b = _str_byte(s, i)
       if b < 128 then
         i = i + 1
       elseif b >= 240 then
@@ -518,13 +680,31 @@ do
         i = i + 1
       end
     end
-    offsets[#offsets + 1] = len + 1
-    return offsets
+    n = n + 1
+    offsets[n] = len + 1
+    return offsets, n - 1
+  end
+
+  local function _byte_to_cp(offsets, cp_len, b_idx)
+    local lo, hi = 1, cp_len
+    while lo <= hi do
+      local mid = _math_floor((lo + hi) * 0.5)
+      local ov = offsets[mid]
+      if ov == b_idx then return mid - 1 end
+      if ov < b_idx then lo = mid + 1 else hi = mid - 1 end
+    end
+    return lo - 2
   end
 
   _SP_RT._sapphire_string_size = function(s)
     if s == nil then return 0 end
-    local _, count = string.gsub(s, "[^\\128-\\191]", "")
+    local count = 0
+    for i = 1, #s do
+      local b = _str_byte(s, i)
+      if b < 128 or b >= 192 then
+        count = count + 1
+      end
+    end
     return count
   end
 
@@ -543,8 +723,24 @@ do
 
   _SP_RT._sapphire_string_slice = function(s, start_idx, end_idx)
     if s == nil then return "" end
-    local offsets = _utf8_offsets(s)
-    local len = #offsets - 1
+    if _is_ascii(s) then
+      local len = #s
+      local i = start_idx or 0
+      if i < 0 then i = len + i end
+      if i < 0 then i = 0 end
+      if i > len then return "" end
+      local j = end_idx
+      if j == nil then
+        j = len
+      else
+        if j < 0 then j = len + j end
+        if j < 0 then j = 0 end
+        if j > len then j = len end
+      end
+      if j <= i then return "" end
+      return _str_sub(s, i + 1, j)
+    end
+    local offsets, len = _utf8_offsets(s)
     local i = start_idx or 0
     if i < 0 then i = len + i end
     if i < 0 then i = 0 end
@@ -558,33 +754,43 @@ do
       if j > len then j = len end
     end
     if j <= i then return "" end
-    return s:sub(offsets[i + 1], offsets[j + 1] - 1)
+    return _str_sub(s, offsets[i + 1], offsets[j + 1] - 1)
   end
 
   _SP_RT._sapphire_string_split = function(s, sep)
     if s == nil then return {} end
     local res = {}
+    local n = 0
     if sep == "" then
-      local offsets = _utf8_offsets(s)
-      for i = 1, #offsets - 1 do
-        res[i] = s:sub(offsets[i], offsets[i + 1] - 1)
+      if _is_ascii(s) then
+        for i = 1, #s do
+          res[i] = _str_sub(s, i, i)
+        end
+        return res
+      end
+      local offsets, len = _utf8_offsets(s)
+      for i = 1, len do
+        res[i] = _str_sub(s, offsets[i], offsets[i + 1] - 1)
       end
       return res
     end
     if sep == nil then
       for w in s:gmatch("%S+") do
-        table.insert(res, w)
+        n = n + 1
+        res[n] = w
       end
       return res
     end
     local start = 1
     while true do
-      local p_start, p_end = s:find(sep, start, true)
+      local p_start, p_end = _str_find(s, sep, start, true)
       if not p_start then
-        table.insert(res, s:sub(start))
+        n = n + 1
+        res[n] = _str_sub(s, start)
         break
       end
-      table.insert(res, s:sub(start, p_start - 1))
+      n = n + 1
+      res[n] = _str_sub(s, start, p_start - 1)
       start = p_end + 1
     end
     return res
@@ -592,8 +798,37 @@ do
 
   _SP_RT._sapphire_string_find = function(s, sub, start_idx, reverse)
     if s == nil or sub == nil then return nil end
-    local offsets = _utf8_offsets(s)
-    local cp_len = #offsets - 1
+    if _is_ascii(s) then
+      local cp_len = #s
+      local start_0 = start_idx or 0
+      if start_0 < 0 then start_0 = cp_len + start_0 end
+      if start_0 < 0 then start_0 = 0 end
+      if sub == "" then
+        if start_0 > cp_len then return nil end
+        if reverse then return cp_len end
+        return start_0
+      end
+      if start_0 >= cp_len then return nil end
+      local start_byte = start_0 + 1
+      if reverse then
+        local last_byte = nil
+        local curr = start_byte
+        while curr <= cp_len do
+          local p_start = _str_find(s, sub, curr, true)
+          if not p_start then break end
+          last_byte = p_start
+          curr = p_start + 1
+        end
+        if last_byte == nil then return nil end
+        return last_byte - 1
+      end
+      local p_start = _str_find(s, sub, start_byte, true)
+      if p_start then
+        return p_start - 1
+      end
+      return nil
+    end
+    local offsets, cp_len = _utf8_offsets(s)
     local start_0 = start_idx or 0
     if start_0 < 0 then start_0 = cp_len + start_0 end
     if start_0 < 0 then start_0 = 0 end
@@ -604,61 +839,52 @@ do
     end
     if start_0 >= cp_len then return nil end
     local start_byte = offsets[start_0 + 1]
-    local function byte_to_cp(b_idx)
-      local lo, hi = 1, cp_len
-      while lo <= hi do
-        local mid = math.floor((lo + hi) / 2)
-        if offsets[mid] == b_idx then return mid - 1 end
-        if offsets[mid] < b_idx then lo = mid + 1 else hi = mid - 1 end
-      end
-      return lo - 2
-    end
     if reverse then
       local last_byte = nil
       local curr = start_byte
       local s_len = #s
       while curr <= s_len do
-        local p_start = s:find(sub, curr, true)
+        local p_start = _str_find(s, sub, curr, true)
         if not p_start then break end
         last_byte = p_start
         curr = p_start + 1
       end
       if last_byte == nil then return nil end
-      return byte_to_cp(last_byte)
+      return _byte_to_cp(offsets, cp_len, last_byte)
     else
-      local p_start = s:find(sub, start_byte, true)
+      local p_start = _str_find(s, sub, start_byte, true)
       if p_start then
-        return byte_to_cp(p_start)
+        return _byte_to_cp(offsets, cp_len, p_start)
       end
       return nil
     end
   end
 
   _SP_RT._sapphire_string_to_int = function(s, radix)
-    if type(s) ~= "string" then return nil end
+    if _type(s) ~= "string" then return nil end
     local r = radix or 10
     if r < 2 or r > 36 then return nil end
     local clean = s:match("^%s*(.-)%s*$")
     if clean == "" then return nil end
     local sign = 1
     local body = clean
-    local first = body:sub(1, 1)
+    local first = _str_sub(body, 1, 1)
     if first == "-" then
       sign = -1
-      body = body:sub(2)
+      body = _str_sub(body, 2)
     elseif first == "+" then
-      body = body:sub(2)
+      body = _str_sub(body, 2)
     end
     if r == 16 and body:match("^0[xX]") then
-      body = body:sub(3)
+      body = _str_sub(body, 3)
     elseif r == 2 and body:match("^0[bB]") then
-      body = body:sub(3)
+      body = _str_sub(body, 3)
     elseif r == 8 and body:match("^0[oO]") then
-      body = body:sub(3)
+      body = _str_sub(body, 3)
     end
     if body == "" or not body:match("^[0-9a-zA-Z]+$") then return nil end
     for i = 1, #body do
-      local c = string.byte(body, i)
+      local c = _str_byte(body, i)
       local d
       if c >= 48 and c <= 57 then d = c - 48
       elseif c >= 65 and c <= 90 then d = c - 55
@@ -666,21 +892,21 @@ do
       else return nil end
       if d >= r then return nil end
     end
-    local num = tonumber(body, r)
+    local num = _tonumber(body, r)
     if num == nil then return nil end
     return sign * num
   end
 
   _SP_RT._sapphire_string_to_float = function(s)
-    if type(s) ~= "string" then return nil end
+    if _type(s) ~= "string" then return nil end
     local clean = s:match("^%s*(.-)%s*$")
     if clean == "" then return nil end
     if clean:match("^[+-]?0[xX]") then return nil end
-    return tonumber(clean)
+    return _tonumber(clean)
   end
 
   _SP_RT._sapphire_string_to_bool = function(s)
-    if type(s) ~= "string" then return nil end
+    if _type(s) ~= "string" then return nil end
     local clean = s:match("^%s*(.-)%s*$"):lower()
     if clean == "true" then return true end
     if clean == "false" then return false end
@@ -688,15 +914,19 @@ do
   end
 
   _SP_RT._sapphire_cast_int = function(v)
-    if type(v) == "boolean" then return v and 1 or 0 end
-    local n = tonumber(v)
+    if _type(v) == "boolean" then return v and 1 or 0 end
+    local n = _tonumber(v)
     if not n then return 0 end
-    if n >= 0 then return math.floor(n) else return math.ceil(n) end
+    if n >= 0 then return _math_floor(n) else return _math_ceil(n) end
+  end
+
+  _SP_RT._sapphire_trunc = function(n)
+    if n >= 0 then return _math_floor(n) else return _math_ceil(n) end
   end
 
   _SP_RT._sapphire_cast_float = function(v)
-    if type(v) == "boolean" then return v and 1.0 or 0.0 end
-    return tonumber(v) or 0.0
+    if _type(v) == "boolean" then return v and 1.0 or 0.0 end
+    return _tonumber(v) or 0.0
   end
 
   _SP_RT._sapphire_cast_bool = function(v)
@@ -704,19 +934,26 @@ do
   end
 
   _SP_RT._sapphire_div = function(a, b)
-    if b == 0 then error("division by zero") end
+    if b == 0 then _error("division by zero") end
     local q = a / b
-    if q >= 0 then return math.floor(q) else return math.ceil(q) end
+    if q >= 0 then return _math_floor(q) else return _math_ceil(q) end
   end
 
+  local _enum_rev_cache = _setmetatable({}, { __mode = "k" })
   _SP_RT._sapphire_enum_from = function(enum_tbl, val)
     if val == nil or enum_tbl == nil then return nil end
-    for _, value in pairs(enum_tbl) do
-      if value == val then
-        return value
+    local rev = _enum_rev_cache[enum_tbl]
+    if not rev then
+      rev = {}
+      for _, value in _pairs(enum_tbl) do
+        rev[value] = true
       end
+      _enum_rev_cache[enum_tbl] = rev
     end
-    if type(val) == "string" and enum_tbl[val] ~= nil then
+    if rev[val] then
+      return val
+    end
+    if _type(val) == "string" and enum_tbl[val] ~= nil then
       return enum_tbl[val]
     end
     return nil
@@ -739,9 +976,19 @@ do
     local len = #arr
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 < 1 or idx_1 > len then
-      error("Array index out of bounds: " .. tostring(index) .. " (size " .. tostring(len) .. ")")
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
     end
     return _unwrap_opt(arr[idx_1])
+  end
+
+  _SP_RT._sapphire_array_at_val = function(arr, index)
+    arr = _unwrap_read(arr)
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 < 1 or idx_1 > len then
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
+    end
+    return arr[idx_1]
   end
 
   _SP_RT._sapphire_array_set = function(arr, index, val)
@@ -749,22 +996,70 @@ do
     local len = #arr
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 < 1 or idx_1 > len then
-      error("Array index out of bounds: " .. tostring(index) .. " (size " .. tostring(len) .. ")")
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
     end
     arr[idx_1] = _wrap_opt(val)
     return val
   end
 
+  _SP_RT._sapphire_array_set_val = function(arr, index, val)
+    arr = _unwrap_write(arr)
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 < 1 or idx_1 > len then
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
+    end
+    arr[idx_1] = val
+    return val
+  end
+
+  _SP_RT._sapphire_array_ref = function(arr, index)
+    arr = _unwrap_write(arr)
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 < 1 or idx_1 > len then
+      _error("Array index out of bounds: " .. _tostring(index) .. " (size " .. _tostring(len) .. ")")
+    end
+    return arr, idx_1
+  end
+
+  _SP_RT._sapphire_array_push_val = function(arr, element)
+    arr = _unwrap_write(arr)
+    arr[#arr + 1] = element
+    return element
+  end
+
+  _SP_RT._sapphire_array_get_val = function(arr, index)
+    arr = _unwrap_read(arr)
+    if arr == nil then return nil end
+    local len = #arr
+    local idx_1 = index < 0 and (len + index + 1) or (index + 1)
+    if idx_1 >= 1 and idx_1 <= len then
+      return arr[idx_1]
+    end
+    return nil
+  end
+
+  _SP_RT._sapphire_map_ref = function(m, k)
+    m = _unwrap_write(m)
+    local v = m[k]
+    if v == nil then
+      _error("KeyError: key '" .. _tostring(k) .. "' not found in map")
+    end
+    return m, _unwrap_opt(v)
+  end
+
   _SP_RT._sapphire_array_map = function(arr, fn, in_place)
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
+    local len = #arr
     if in_place then
-      for i = 1, #arr do
+      for i = 1, len do
         arr[i] = _wrap_opt(fn(_unwrap_opt(arr[i])))
       end
       return arr
     end
     local res = {}
-    for i = 1, #arr do
+    for i = 1, len do
       res[i] = _wrap_opt(fn(_unwrap_opt(arr[i])))
     end
     return res
@@ -772,25 +1067,28 @@ do
 
   _SP_RT._sapphire_array_filter = function(arr, fn, in_place)
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
+    local len = #arr
     if in_place then
-      local res = {}
-      for i = 1, #arr do
-        if fn(_unwrap_opt(arr[i])) then
-          res[#res + 1] = arr[i]
+      local w = 0
+      for i = 1, len do
+        local raw = arr[i]
+        if fn(_unwrap_opt(raw)) then
+          w = w + 1
+          arr[w] = raw
         end
       end
-      for i = #arr, 1, -1 do
+      for i = w + 1, len do
         arr[i] = nil
-      end
-      for i = 1, #res do
-        arr[i] = res[i]
       end
       return arr
     end
     local res = {}
-    for i = 1, #arr do
-      if fn(_unwrap_opt(arr[i])) then
-        res[#res + 1] = arr[i]
+    local n = 0
+    for i = 1, len do
+      local raw = arr[i]
+      if fn(_unwrap_opt(raw)) then
+        n = n + 1
+        res[n] = raw
       end
     end
     return res
@@ -826,7 +1124,7 @@ do
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
     local len = #arr
     if in_place then
-      for i = 1, math.floor(len / 2) do
+      for i = 1, _math_floor(len * 0.5) do
         local tmp = arr[i]
         arr[i] = arr[len - i + 1]
         arr[len - i + 1] = tmp
@@ -840,6 +1138,10 @@ do
     return res
   end
 
+  local function _sort_desc(a, b)
+    return _unwrap_opt(a) > _unwrap_opt(b)
+  end
+
   _SP_RT._sapphire_array_sort = function(arr, by, reverse, in_place)
     arr = in_place and _unwrap_write(arr) or _unwrap_read(arr)
     local target = arr
@@ -849,23 +1151,21 @@ do
         target[i] = arr[i]
       end
     end
-    table.sort(target, function(a, b)
-      local ua, ub = _unwrap_opt(a), _unwrap_opt(b)
-      if by then
-        local cmp = by(ua, ub)
-        if reverse then
-          return cmp > 0
-        else
-          return cmp < 0
-        end
+    if by == nil then
+      if reverse then
+        _tbl_sort(target, _sort_desc)
       else
-        if reverse then
-          return ua > ub
-        else
-          return ua < ub
-        end
+        _tbl_sort(target)
       end
-    end)
+    elseif reverse then
+      _tbl_sort(target, function(a, b)
+        return by(_unwrap_opt(a), _unwrap_opt(b)) > 0
+      end)
+    else
+      _tbl_sort(target, function(a, b)
+        return by(_unwrap_opt(a), _unwrap_opt(b)) < 0
+      end)
+    end
     return target
   end
 
@@ -875,9 +1175,10 @@ do
     if delimiter == nil then delimiter = ", " end
     local str_arr = {}
     for i = 1, #arr do
-      str_arr[i] = tostring(_unwrap_opt(arr[i]))
+      local v = _unwrap_opt(arr[i])
+      str_arr[i] = _type(v) == "string" and v or _tostring(v)
     end
-    return table.concat(str_arr, delimiter)
+    return _tbl_concat(str_arr, delimiter)
   end
 
   _SP_RT._sapphire_array_push = function(arr, element)
@@ -888,8 +1189,11 @@ do
 
   _SP_RT._sapphire_array_pop = function(arr)
     arr = _unwrap_write(arr)
-    if #arr == 0 then return nil end
-    return _unwrap_opt(table.remove(arr))
+    local len = #arr
+    if len == 0 then return nil end
+    local v = arr[len]
+    arr[len] = nil
+    return _unwrap_opt(v)
   end
 
   _SP_RT._sapphire_array_insert = function(arr, index, element)
@@ -898,7 +1202,7 @@ do
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 < 1 then idx_1 = 1 end
     if idx_1 > len + 1 then idx_1 = len + 1 end
-    table.insert(arr, idx_1, _wrap_opt(element))
+    _tbl_insert(arr, idx_1, _wrap_opt(element))
     return element
   end
 
@@ -907,7 +1211,7 @@ do
     local len = #arr
     local idx_1 = index < 0 and (len + index + 1) or (index + 1)
     if idx_1 >= 1 and idx_1 <= len then
-      return _unwrap_opt(table.remove(arr, idx_1))
+      return _unwrap_opt(_tbl_remove(arr, idx_1))
     end
     return nil
   end
@@ -942,18 +1246,10 @@ do
     return nil
   end
 
-  _SP_RT._sapphire_array_idx = function(arr, index)
-    arr = _unwrap_read(arr)
-    if index < 0 then
-      return #arr + index + 1
-    end
-    return index + 1
-  end
-
   _SP_RT._sapphire_map_size = function(m)
     m = _unwrap_read(m)
     local count = 0
-    for _ in pairs(m) do
+    for _ in _pairs(m) do
       count = count + 1
     end
     return count
@@ -961,7 +1257,7 @@ do
 
   _SP_RT._sapphire_map_empty = function(m)
     m = _unwrap_read(m)
-    return next(m) == nil
+    return _next(m) == nil
   end
 
   _SP_RT._sapphire_map_contains = function(m, k)
@@ -973,7 +1269,7 @@ do
     m = _unwrap_read(m)
     local v = m[k]
     if v == nil then
-      error("KeyError: key '" .. tostring(k) .. "' not found in map")
+      _error("KeyError: key '" .. _tostring(k) .. "' not found in map")
     end
     return _unwrap_opt(v)
   end
@@ -993,8 +1289,10 @@ do
   _SP_RT._sapphire_map_keys = function(m)
     m = _unwrap_read(m)
     local res = {}
-    for k in pairs(m) do
-      res[#res + 1] = k
+    local n = 0
+    for k in _pairs(m) do
+      n = n + 1
+      res[n] = k
     end
     return res
   end
@@ -1002,8 +1300,10 @@ do
   _SP_RT._sapphire_map_values = function(m)
     m = _unwrap_read(m)
     local res = {}
-    for _, v in pairs(m) do
-      res[#res + 1] = v
+    local n = 0
+    for _, v in _pairs(m) do
+      n = n + 1
+      res[n] = v
     end
     return res
   end
@@ -1023,7 +1323,7 @@ do
 
   _SP_RT._sapphire_map_clear = function(m)
     m = _unwrap_write(m)
-    for k in pairs(m) do
+    for k in _pairs(m) do
       m[k] = nil
     end
   end
@@ -1041,19 +1341,19 @@ do
 
   _SP_RT._sapphire_iter_array = function(arr)
     arr = _unwrap_read(arr)
-    if type(arr) ~= "table" then return _iter_array_next, _EMPTY_TBL, 0 end
+    if _type(arr) ~= "table" then return _iter_array_next, _EMPTY_TBL, 0 end
     return _iter_array_next, arr, 0
   end
 
   local function _iter_map_next(m, k)
-    local nk, v = next(m, k)
+    local nk, v = _next(m, k)
     if nk == nil then return nil end
     return nk, _unwrap_opt(v)
   end
 
   _SP_RT._sapphire_iter_map = function(m)
     m = _unwrap_read(m)
-    if type(m) ~= "table" then return _iter_map_next, _EMPTY_TBL, nil end
+    if _type(m) ~= "table" then return _iter_map_next, _EMPTY_TBL, nil end
     return _iter_map_next, m, nil
   end
 
@@ -1084,20 +1384,21 @@ do
 
   _sapphire_del = function(obj)
     if obj == nil then return end
-    if type(obj) == "table" then
-      local mt = getmetatable(obj)
+    local t = _type(obj)
+    if t == "table" then
+      local mt = _getmetatable(obj)
       if mt == Arena then
         obj:destroy()
       elseif mt and mt.__is_ref then
-        if rawget(obj, "_sapphire_disposed_") then return end
-        rawset(obj, "_sapphire_disposed_", true)
-        local val = rawget(obj, "_val")
-        rawset(obj, "_val", nil)
+        if _rawget(obj, "_sapphire_disposed_") then return end
+        _rawset(obj, "_sapphire_disposed_", true)
+        local val = _rawget(obj, "_val")
+        _rawset(obj, "_val", nil)
         _sapphire_del(val)
       elseif mt and mt.__is_shared_ref then
-        if rawget(obj, "_sapphire_disposed_") then return end
-        rawset(obj, "_sapphire_disposed_", true)
-        local cb = rawget(obj, "_cb")
+        if _rawget(obj, "_sapphire_disposed_") then return end
+        _rawset(obj, "_sapphire_disposed_", true)
+        local cb = _rawget(obj, "_cb")
         if cb ~= nil then
           cb.strong = cb.strong - 1
           if cb.strong == 0 then
@@ -1106,50 +1407,49 @@ do
             _sapphire_del(val)
           end
         end
-      elseif type(obj.__del__) == "function" then
-        if rawget(obj, "_sapphire_disposed_") then return end
-        rawset(obj, "_sapphire_disposed_", true)
+      elseif _type(obj.__del__) == "function" then
+        if _rawget(obj, "_sapphire_disposed_") then return end
+        _rawset(obj, "_sapphire_disposed_", true)
         obj:__del__()
       end
-    elseif type(obj) == "userdata" then
-      local meta = getmetatable(obj)
-      if meta and type(meta.__del__) == "function" then
+    elseif t == "userdata" then
+      local meta = _getmetatable(obj)
+      if meta and _type(meta.__del__) == "function" then
         obj:__del__()
       end
     end
   end
   _SP_RT._sapphire_del = _sapphire_del
 
+  local _REF_MT = {
+    __is_ref = true,
+    __index = function(t, k)
+      local inner = _rawget(t, "_val")
+      if _type(inner) == "table" then
+        local v = inner[k]
+        if _type(v) == "function" then
+          return function(recv, ...)
+            if recv == t then
+              return v(inner, ...)
+            end
+            return v(recv, ...)
+          end
+        end
+        return v
+      end
+      return nil
+    end,
+    __newindex = function(t, k, v)
+      local inner = _rawget(t, "_val")
+      if _type(inner) == "table" then
+        inner[k] = v
+      end
+    end,
+  }
+
   local _Ref = {}
   function _Ref.create(val)
-    local self = { _val = val }
-    local mt = {
-      __is_ref = true,
-      __index = function(t, k)
-        local inner = rawget(self, "_val")
-        if type(inner) == "table" then
-          local v = inner[k]
-          if type(v) == "function" then
-            return function(recv, ...)
-              if recv == self then
-                return v(inner, ...)
-              else
-                return v(recv, ...)
-              end
-            end
-          end
-          return v
-        end
-        return nil
-      end,
-      __newindex = function(t, k, v)
-        local inner = rawget(self, "_val")
-        if type(inner) == "table" then
-          inner[k] = v
-        end
-      end
-    }
-    return setmetatable(self, mt)
+    return _setmetatable({ _val = val }, _REF_MT)
   end
   _SP_RT._Ref = _Ref
   _SP_RT.Ref = _Ref.create
@@ -1157,70 +1457,83 @@ do
   local _SharedRef = {}
   local _WeakRef = {}
 
+  local function _weak_ref_upgrade(self)
+    local cb = _rawget(self, "_cb")
+    if cb and cb.strong > 0 then
+      cb.strong = cb.strong + 1
+      return _SharedRef.create(cb)
+    end
+    return nil
+  end
+
+  local _WEAK_REF_MT = {
+    __is_weak_ref = true,
+    __index = { upgrade = _weak_ref_upgrade },
+  }
+
   function _WeakRef.create(cb)
-    local self = { _cb = cb }
-    function self:upgrade()
-      if self._cb and self._cb.strong > 0 then
-        self._cb.strong = self._cb.strong + 1
-        return _SharedRef.create(self._cb)
+    return _setmetatable({ _cb = cb }, _WEAK_REF_MT)
+  end
+
+  local function _shared_ref_share(self)
+    local cb = _rawget(self, "_cb")
+    cb.strong = cb.strong + 1
+    return _SharedRef.create(cb)
+  end
+
+  local function _shared_ref_downgrade(self)
+    local cb = _rawget(self, "_cb")
+    cb.weak = cb.weak + 1
+    return _WeakRef.create(cb)
+  end
+
+  local _SHARED_REF_MT = {
+    __is_shared_ref = true,
+    __index = function(t, k)
+      if k == "share" then return _shared_ref_share end
+      if k == "downgrade" then return _shared_ref_downgrade end
+      local cb = _rawget(t, "_cb")
+      local inner = cb and cb.val or nil
+      if _type(inner) == "table" then
+        local v = inner[k]
+        if _type(v) == "function" then
+          return function(recv, ...)
+            if recv == t then
+              return v(inner, ...)
+            end
+            return v(recv, ...)
+          end
+        end
+        return v
       end
       return nil
-    end
-    return setmetatable(self, { __is_weak_ref = true })
-  end
+    end,
+    __newindex = function(t, k, v)
+      local cb = _rawget(t, "_cb")
+      local inner = cb and cb.val or nil
+      if _type(inner) == "table" then
+        inner[k] = v
+      end
+    end,
+  }
 
   function _SharedRef.create(target)
     local cb
-    local t_mt = type(target) == "table" and getmetatable(target) or nil
+    local is_tbl = _type(target) == "table"
+    local t_mt = is_tbl and _getmetatable(target) or nil
     if t_mt and t_mt.__is_shared_ref then
-      cb = rawget(target, "_cb")
-    elseif type(target) == "table" and rawget(target, "strong") ~= nil and rawget(target, "weak") ~= nil then
+      cb = _rawget(target, "_cb")
+    elseif is_tbl and _rawget(target, "strong") ~= nil and _rawget(target, "weak") ~= nil then
       cb = target
     elseif t_mt and t_mt.__is_ref then
-      local val = rawget(target, "_val")
-      rawset(target, "_sapphire_disposed_", true)
-      rawset(target, "_val", nil)
+      local val = _rawget(target, "_val")
+      _rawset(target, "_sapphire_disposed_", true)
+      _rawset(target, "_val", nil)
       cb = { val = val, strong = 1, weak = 0 }
     else
       cb = { val = target, strong = 1, weak = 0 }
     end
-    local self = { _cb = cb }
-    function self:share()
-      self._cb.strong = self._cb.strong + 1
-      return _SharedRef.create(self._cb)
-    end
-    function self:downgrade()
-      self._cb.weak = self._cb.weak + 1
-      return _WeakRef.create(self._cb)
-    end
-    local mt = {
-      __is_shared_ref = true,
-      __index = function(t, k)
-        if k == "share" then return function(recv) return self:share() end end
-        if k == "downgrade" then return function(recv) return self:downgrade() end end
-        local inner = self._cb.val
-        if type(inner) == "table" then
-          local v = inner[k]
-          if type(v) == "function" then
-            return function(recv, ...)
-              if recv == self then
-                return v(inner, ...)
-              else
-                return v(recv, ...)
-              end
-            end
-          end
-          return v
-        end
-        return nil
-      end,
-      __newindex = function(t, k, v)
-        if type(self._cb.val) == "table" then
-          self._cb.val[k] = v
-        end
-      end
-    }
-    return setmetatable(self, mt)
+    return _setmetatable({ _cb = cb }, _SHARED_REF_MT)
   end
   _SP_RT._SharedRef = _SharedRef
   _SP_RT._WeakRef = _WeakRef
@@ -1232,6 +1545,18 @@ local Arena, Ref, SharedRef, WeakRef = _SP_RT.Arena, _SP_RT.Ref, _SP_RT.SharedRe
 
 
 LUA_SOURCEMAP_DEMANGLER = """-- Sapphire Lua Runtime Source Map Demangler & Love2D Error Handler Hook
+local _sp_maps = _G._SP_LINE_MAPS
+if not _sp_maps then
+  _sp_maps = {}
+  _G._SP_LINE_MAPS = _sp_maps
+end
+if _SP_LINE_MAP then
+  local _info = debug and debug.getinfo and debug.getinfo(1, "S")
+  local _src = _info and _info.source and _info.source:match("([^/\\\\]+%.lua)$")
+  if _src then
+    _sp_maps[_src] = _SP_LINE_MAP
+  end
+end
 local function _sapphire_demangle_traceback(msg)
   local err_msg = tostring(msg or "Runtime Error")
   local traceback = debug.traceback("", 2)
@@ -1246,8 +1571,10 @@ local function _sapphire_demangle_traceback(msg)
     end
     if line_num then
       local n = tonumber(line_num)
-      if _SP_LINE_MAP and _SP_LINE_MAP[n] then
-        local info = _SP_LINE_MAP[n]
+      local base_file = lua_file and lua_file:match("([^/\\\\]+%.lua)$") or lua_file
+      local lmap = (base_file and _sp_maps[base_file]) or _SP_LINE_MAP
+      if lmap and lmap[n] then
+        local info = lmap[n]
         local sp_info = string.format("%s:%d: (at %s:%d)", info.file, info.line, lua_file or "lua", n)
         if info.text and info.text ~= "" then
           sp_info = sp_info .. " -> `" .. info.text .. "`"
@@ -1261,7 +1588,8 @@ local function _sapphire_demangle_traceback(msg)
   return table.concat(demangled_lines, "\\n")
 end
 
-if love and love.errorhandler then
+if love and love.errorhandler and not _G._SP_ERRORHANDLER_INSTALLED then
+  _G._SP_ERRORHANDLER_INSTALLED = true
   local original_errorhandler = love.errorhandler
   love.errorhandler = function(msg)
     local demangled = _sapphire_demangle_traceback(msg)

@@ -14,6 +14,7 @@ function testing.TestContext.init(name)
   self.failures = {}
   return self
 end
+testing.TestContext._new = testing.TestContext.init
 
 function testing.TestContext:record_failure(message, fatal, kind, expected, actual)
   local level = 3
@@ -73,6 +74,7 @@ testing.TestCase.__index = testing.TestCase
 function testing.TestCase.init()
   return setmetatable({}, testing.TestCase)
 end
+testing.TestCase._new = testing.TestCase.init
 
 function testing.TestCase:set_up() end
 function testing.TestCase:tear_down() end
