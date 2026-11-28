@@ -457,8 +457,8 @@ impl testing.TestCase for MathTestSuite {
 ## 8. Performance & Writing Efficient Sapphire Code
 
 - **In-place nested container mutation (`if var`)**: Assigning a local map,
-  array, or struct back into a container (`grid[y] = row`) triggers
-  `_sapphire_copy` to preserve value semantics. Inside a loop over columns,
+  array, or struct back into a container (`grid[y] = row`) triggers a value
+  copy to preserve value semantics. Inside a loop over columns,
   copy-out/write-back (`var row = grid.get(y) ?? {}; row[x] = true;
   grid[y] = row;`) turns row population into O(W^2) table copying. Mutate
   existing inner containers in place via `if var`:
@@ -471,6 +471,16 @@ impl testing.TestCase for MathTestSuite {
     }
   }
   ```
+- **Prefer non-optional containers in hot loops**: Use `[T]` and `[K: V]`
+  rather than `[T?]` or `[K: V?]` whenever elements are always present.
+  Non-optional collections hit unwrapped Lua fast paths (no `none` sentinel
+  wrapping/unwrapping on indexing or iteration) and use shallow copy fast paths
+  when element types are immutable.
+- **Keep hot data records as plain non-`proto` structs**: Non-`proto`,
+  single-inheritance value structs with flat fields compile to Python
+  `__slots__` classes, presized Lua table constructors, and direct field-copy
+  helpers. Reserve `proto`/`clone` in an `Arena` for genuine archetype
+  delegation and CoW sharing.
 - **Hoist outer container lookups & accumulators out of inner loops**: Unwrap
   outer rows once before iterating columns (`if let row ?= data.get(y)` before
   `for x in range(width)`), and accumulate per-pass counts in a local `var`

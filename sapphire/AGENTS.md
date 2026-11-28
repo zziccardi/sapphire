@@ -107,11 +107,31 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
   `_diamond_destructible_structs`.
 * **Fixed-arity constructors, optional defaults & unboxed multi-return**: Emit
   fixed-arity `Struct._new(...)` and non-`@export` optional-default functions in
-  Lua (padding omitted optional non-`none` defaults with `_SP_RT._SP_UNSET`),
-  unbox multi-return `ReturnNode` and multi-yield `MatchExprNode` into multiple
-  locals, spill Lua modules exceeding 120 top-level declarations into
-  `local _MOD = {}`, and hoist Python coroutine generators (`_sp_gen_*`) to
-  module/class scope.
+  Lua (padding omitted optional non-`none` defaults with `_SP_RT._SP_UNSET`,
+  never sending `_SP_UNSET` to `@extern` or `= none` params, while keeping
+  `_SP_UNSET` checks in `Struct._new` for all optional fields with explicit
+  defaults including `= none`), unbox multi-return `ReturnNode` and multi-yield
+  `MatchExprNode` into multiple locals, spill Lua modules exceeding 120
+  top-level declarations into `local _MOD = {}`, and hoist Python coroutine
+  generators (`_sp_gen_*`) to module/class scope.
+* **Codegen metadata & edge-case pitfalls**:
+  * `ExportStmtNode` lives on `program.export_block` (not
+    `program.declarations`); inspect `program.export_block` whenever collecting
+    exported symbols for constructor inlining or diamond destructor guards.
+  * Initialize transpiler metadata collections in `BaseTranspiler.__init__` and
+    attach layout/call metadata (`_canonical_fields`, `_resolved_field_exprs`,
+    `_optional_explicit_default_slots`) on AST nodes so harnesses that omit
+    `semantic_context` or call `visit_*` directly still work.
+  * Struct class aliases (`let Alias = MyStruct;`) infer `StructType` on the
+    identifier; guard fast-path struct copy helpers (`_sp_copy` / `_copy`)
+    against class objects (`v is Cls` / `v == Cls`) and skip known struct class
+    identifiers in `_classify_value_copy`.
+  * Only fold multi-clause Python `guard` `else` blocks via `_guard_ok` when no
+    clause binds an owned destructible struct (to prevent `UnboundLocalError`
+    when teardown runs after an earlier clause fails).
+  * Remove superseded emitter helpers and unused imports immediately when
+    refactoring codegen paths so uncovered legacy branches do not trip the 93%
+    Python statement+branch coverage gate.
 * **Loop-free runtime fast-paths**: Keep hot runtime helpers (`_unwrap_read`,
   `_unwrap_write`) loop-free on the common fast-path
   (`type(obj) ~= "table" or getmetatable(obj) == nil`) and isolate `while` loops
@@ -125,4 +145,5 @@ These rules supplement the root `AGENTS.md` when working on the Sapphire compile
 * **Benchmarking**: Run `pipenv run python testing/perf/bench_transpilers.py`
   (`--compare` / `--save-baseline`) to measure Python and LuaJIT runtime and
   `luajit -jv` trace-abort regressions.
+
 
